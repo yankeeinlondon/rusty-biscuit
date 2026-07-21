@@ -159,9 +159,9 @@ pub fn run_clean(input: Option<&PathBuf>, options: &CleanOptions) -> Result<()> 
 /// The block is copied verbatim out of `source` rather than reserialized from
 /// the parsed frontmatter, which is what makes repairs format-preserving and
 /// makes `md clean` a fixed point: re-cleaning this output reproduces it byte
-/// for byte. The assembled shape (`---\n{yaml}---\n{body}`) matches
-/// `Markdown::as_string`, so documents needing no frontmatter repair are
-/// unaffected.
+/// for byte. Authored delimiter whitespace and line terminators remain part of
+/// that preserved block; only accepted YAML edits and ordinary body cleanup
+/// can change the assembled document.
 fn assemble(source: &str, cleaned: &Markdown) -> String {
     match extract_frontmatter_block(source) {
         Ok(Some(extraction)) if !extraction.yaml.trim().is_empty() => {

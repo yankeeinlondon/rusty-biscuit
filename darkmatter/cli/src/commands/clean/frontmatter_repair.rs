@@ -49,15 +49,9 @@ pub struct CleanSchemaFlags {
 
 /// Which analysis tier produced a diagnostic.
 ///
-/// The two tiers run against different text, so this is what tells a consumer
-/// which string a diagnostic's `span` indexes: `syntax` spans index the
-/// frontmatter YAML as authored, `schema` spans index that YAML after the
-/// syntax tier's repairs were applied.
-///
-/// The syntax tier can run a second pass once its own repairs restore
-/// parseability. A finding that pass already reported is dropped as a
-/// restatement, so the only `syntax` spans carrying post-repair coordinates
-/// belong to findings the first pass could not see at all.
+/// This identifies the diagnostic's owner, not its coordinate space. All
+/// diagnostics are projected into authored YAML coordinates before they are
+/// retained, including findings unlocked by a syntax repair or schema pass.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CleanStage {
@@ -70,7 +64,7 @@ pub enum CleanStage {
 /// A `biscuit-file` diagnostic tagged with the tier that produced it.
 #[derive(Debug, Clone, Serialize)]
 pub struct CleanDiagnostic {
-    /// Which text `diagnostic.span` indexes. See [`CleanStage`].
+    /// The analysis tier that owns this authored-coordinate diagnostic.
     pub stage: CleanStage,
     #[serde(flatten)]
     pub diagnostic: YamlDiagnostic,
@@ -158,6 +152,131 @@ pub struct FrontmatterRepair {
 struct AppliedRepair {
     repair: YamlRepair,
     document_relative: bool,
+}
+
+/// Maps offsets from each repaired YAML revision back to the authored YAML.
+///
+/// A pass records only accepted edits. Unchanged regions map exactly after
+/// accounting for their cumulative length delta. A later span inside synthetic
+/// replacement text maps conservatively to the authored range that replacement
+/// superseded, because no more precise authored range exists.
+#[derive(Default)]
+struct AuthoredCoordinateMap {
+    passes: Vec<EditProjectionPass>,
+}
+
+struct EditProjectionPass {
+    edits: Vec<ProjectedEdit>,
+}
+
+struct ProjectedEdit {
+    input: SourceSpan,
+    output: SourceSpan,
+    delta_before: isize,
+}
+
+#[derive(Clone, Copy)]
+enum OffsetBias {
+    Start,
+    End,
+}
+
+impl AuthoredCoordinateMap {
+    fn project_span(&self, span: SourceSpan) -> SourceSpan {
+        let mut start = span.start;
+        let mut end = span.end;
+        for pass in self.passes.iter().rev() {
+            start = pass.project_offset(start, OffsetBias::Start);
+            end = pass.project_offset(end, OffsetBias::End);
+        }
+        start..end
+    }
+
+    fn project_repair(&self, repair: &YamlRepair) -> YamlRepair {
+        let mut repair = repair.clone();
+        repair.span = self.project_span(repair.span);
+        repair
+    }
+
+    fn project_diagnostic(&self, diagnostic: YamlDiagnostic) -> YamlDiagnostic {
+        let mut diagnostic = diagnostic;
+        diagnostic.span = self.project_span(diagnostic.span);
+        diagnostic.repairs = diagnostic
+            .repairs
+            .iter()
+            .map(|repair| self.project_repair(repair))
+            .collect();
+        diagnostic
+    }
+
+    fn record(&mut self, repairs: &[YamlRepair]) {
+        if !repairs.is_empty() {
+            self.passes.push(EditProjectionPass::new(repairs));
+        }
+    }
+}
+
+impl EditProjectionPass {
+    fn new(repairs: &[YamlRepair]) -> Self {
+        let mut delta = 0_isize;
+        let edits = repairs
+            .iter()
+            .map(|repair| {
+                let output_start = repair
+                    .span
+                    .start
+                    .checked_add_signed(delta)
+                    .expect("accepted edit deltas must remain within the YAML source");
+                let output_end = output_start + repair.replacement.len();
+                let edit = ProjectedEdit {
+                    input: repair.span.clone(),
+                    output: output_start..output_end,
+                    delta_before: delta,
+                };
+                delta += repair.replacement.len() as isize
+                    - (repair.span.end - repair.span.start) as isize;
+                edit
+            })
+            .collect();
+        Self { edits }
+    }
+
+    fn project_offset(&self, offset: usize, bias: OffsetBias) -> usize {
+        for edit in &self.edits {
+            if offset < edit.output.start {
+                return offset
+                    .checked_add_signed(-edit.delta_before)
+                    .expect("projected offset must remain within the prior YAML revision");
+            }
+            if offset <= edit.output.end {
+                if offset == edit.output.start {
+                    return match bias {
+                        OffsetBias::Start if edit.output.is_empty() => edit.input.end,
+                        OffsetBias::Start => edit.input.start,
+                        OffsetBias::End if edit.output.is_empty() => edit.input.end,
+                        OffsetBias::End => edit.input.start,
+                    };
+                }
+                if offset == edit.output.end {
+                    return edit.input.end;
+                }
+                return match bias {
+                    OffsetBias::Start => edit.input.start,
+                    OffsetBias::End => edit.input.end,
+                };
+            }
+        }
+
+        let delta = self
+            .edits
+            .last()
+            .map_or(0, |edit| {
+                edit.delta_before + edit.output.len() as isize - edit.input.len() as isize
+            });
+        offset
+            .checked_add_signed(-delta)
+            .expect("projected offset must remain within the prior YAML revision")
+    }
 }
 
 impl FrontmatterRepair {
@@ -322,6 +441,7 @@ pub fn repair_frontmatter(
     }
 
     let authored = extraction.yaml.to_string();
+    let mut coordinate_map = AuthoredCoordinateMap::default();
 
     // One analysis serves both the diagnostic and the repair view; calling
     // `diagnose()` and `repair_candidates()` separately would rescan the
@@ -331,13 +451,15 @@ pub fn repair_frontmatter(
     let analysis = analyze_yaml(&authored);
     let mut diagnostics: Vec<CleanDiagnostic> = syntax_diagnostics(&analysis);
     let outcome = analysis.apply();
+    let first_pass_repairs = outcome.audit.applied;
     let mut applied: Vec<AppliedRepair> = bom_repair
         .into_iter()
-        .chain(outcome.audit.applied.into_iter().map(|repair| AppliedRepair {
-            repair,
+        .chain(first_pass_repairs.iter().map(|repair| AppliedRepair {
+            repair: coordinate_map.project_repair(repair),
             document_relative: false,
         }))
         .collect();
+    coordinate_map.record(&first_pass_repairs);
     let mut yaml = outcome.source;
 
     // Parse-equivalence-gated repairs (whitespace, normalization) cannot be
@@ -354,12 +476,21 @@ pub fn repair_frontmatter(
         // print every report-only suggestion twice and leave a consumer unable
         // to tell which of two `syntax` spans is in authored coordinates. Only
         // findings the rescan genuinely unlocked are kept.
-        diagnostics.extend(new_findings(&rescan, &diagnostics));
+        diagnostics.extend(
+            new_findings(&rescan, &diagnostics)
+                .into_iter()
+                .map(|mut entry| {
+                    entry.diagnostic = coordinate_map.project_diagnostic(entry.diagnostic);
+                    entry
+                }),
+        );
         let outcome = rescan.apply();
-        applied.extend(outcome.audit.applied.into_iter().map(|repair| AppliedRepair {
-            repair,
+        let rescan_repairs = outcome.audit.applied;
+        applied.extend(rescan_repairs.iter().map(|repair| AppliedRepair {
+            repair: coordinate_map.project_repair(repair),
             document_relative: false,
         }));
+        coordinate_map.record(&rescan_repairs);
         yaml = outcome.source;
     }
 
@@ -379,22 +510,23 @@ pub fn repair_frontmatter(
                 .flat_map(|diagnostic| diagnostic.repairs.iter().cloned())
                 .collect();
 
-            diagnostics.extend(schema_analysis.into_diagnostics().into_iter().map(
-                |diagnostic| CleanDiagnostic {
+            diagnostics.extend(schema_analysis.into_diagnostics().into_iter().map(|diagnostic| {
+                CleanDiagnostic {
                     stage: CleanStage::Schema,
-                    diagnostic,
-                },
-            ));
+                    diagnostic: coordinate_map.project_diagnostic(diagnostic),
+                }
+            }));
 
             if !auto_apply.is_empty() {
                 let outcome = apply_edit_set(&yaml, &auto_apply);
                 if outcome.changed() {
-                    applied.extend(outcome.audit.applied.iter().cloned().map(|repair| {
+                    applied.extend(outcome.audit.applied.iter().map(|repair| {
                         AppliedRepair {
-                            repair,
+                            repair: coordinate_map.project_repair(repair),
                             document_relative: false,
                         }
                     }));
+                    coordinate_map.record(&outcome.audit.applied);
                     yaml = outcome.source;
                 }
             }
@@ -485,9 +617,9 @@ fn splice_frontmatter(
     yaml: &str,
 ) -> String {
     let mut out = String::with_capacity(source.len());
-    out.push_str("---\n");
+    out.push_str(&source[..extraction.yaml_span.start]);
     out.push_str(yaml);
-    out.push_str("---\n");
+    out.push_str(&source[extraction.yaml_span.end..extraction.body_span.start]);
     out.push_str(&source[extraction.body_span.clone()]);
     out
 }

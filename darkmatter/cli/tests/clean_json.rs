@@ -39,6 +39,19 @@ fn envelope(path: &Path, extra: &[&str]) -> Value {
         .unwrap_or_else(|e| panic!("stdout was not a JSON envelope ({e}):\n{stdout}"))
 }
 
+fn stdin_envelope(source: &str) -> Value {
+    let assert = md_cmd()
+        .args(["clean", "-", "--json"])
+        .write_stdin(source)
+        .assert()
+        .success();
+    assert!(
+        assert.get_output().stderr.is_empty(),
+        "JSON mode must not emit human diagnostics on stderr"
+    );
+    serde_json::from_slice(&assert.get_output().stdout).unwrap()
+}
+
 /// Golden contract for the flagship repair, including every v1 field.
 #[test]
 fn test_json_envelope_has_exactly_the_documented_top_level_fields() {
@@ -174,6 +187,114 @@ fn test_json_spans_are_projected_into_document_coordinates() {
         json!({ "start": 11, "end": 24 })
     );
     assert_eq!(report["applied"][0]["span"], json!({ "start": 11, "end": 24 }));
+}
+
+#[test]
+fn test_json_delimiter_bytes_are_untouched_and_line_ending_repairs_are_audited() {
+    for (name, ending) in [("lf", "\n"), ("crlf", "\r\n"), ("cr", "\r")] {
+        let source = format!("  ---  {ending}title: ok{ending} --- {ending}# Body\n");
+        let report = stdin_envelope(&source);
+        let yaml_start = "  ---  ".len() + ending.len();
+        let yaml_ending = yaml_start + "title: ok".len();
+        let closing_start = yaml_ending + ending.len();
+        let opening_ending = "  ---  ".len()..yaml_start;
+        let closing_ending =
+            closing_start + " --- ".len()..closing_start + " --- ".len() + ending.len();
+
+        let applied = report["applied"].as_array().unwrap();
+        assert_eq!(report["changed"], ending != "\n", "wrong changed flag for {name}");
+        assert_eq!(applied.len(), usize::from(ending != "\n"), "wrong audit for {name}");
+
+        for repair in applied {
+            let start = repair["span"]["start"].as_u64().unwrap() as usize;
+            let end = repair["span"]["end"].as_u64().unwrap() as usize;
+            assert_eq!(start..end, yaml_ending..yaml_ending + ending.len());
+            assert_eq!(repair["replacement"], "\n");
+            assert!(!(start < opening_ending.end && end > opening_ending.start));
+            assert!(!(start < closing_ending.end && end > closing_ending.start));
+        }
+    }
+}
+
+/// Every pass-local artifact maps back through earlier length-changing edits.
+#[test]
+fn test_json_stacked_syntax_and_schema_spans_index_authored_lexemes() {
+    let source = "---\n$schema:\n  title: string\n  release: string\ntitle: @daily-report\nrelease: 1.20\n---\n";
+    let report = stdin_envelope(source);
+
+    let diagnostics = report["diagnostics"].as_array().unwrap();
+    for code in ["yaml.ambiguous-scalar", "schema.type-mismatch"] {
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic["code"] == code)
+            .unwrap_or_else(|| panic!("missing {code} diagnostic: {report}"));
+        let start = diagnostic["span"]["start"].as_u64().unwrap() as usize;
+        let end = diagnostic["span"]["end"].as_u64().unwrap() as usize;
+        assert_eq!(&source[start..end], "1.20", "wrong span for {code}");
+        for repair in diagnostic["repairs"].as_array().unwrap() {
+            let start = repair["span"]["start"].as_u64().unwrap() as usize;
+            let end = repair["span"]["end"].as_u64().unwrap() as usize;
+            assert_eq!(&source[start..end], "1.20", "wrong repair for {code}");
+        }
+    }
+
+    let applied = report["applied"].as_array().unwrap();
+    assert_eq!(applied.len(), 2);
+    for repair in applied {
+        let start = repair["span"]["start"].as_u64().unwrap() as usize;
+        let end = repair["span"]["end"].as_u64().unwrap() as usize;
+        let authored = &source[start..end];
+        assert!(
+            matches!(authored, "@daily-report" | "1.20"),
+            "applied span indexed {authored:?}: {repair}"
+        );
+    }
+}
+
+#[test]
+fn test_json_schema_span_uses_authored_crlf_coordinates() {
+    assert_schema_span_for_line_endings("\r\n", 3);
+}
+
+#[test]
+fn test_json_schema_span_uses_authored_lone_cr_coordinates() {
+    assert_schema_span_for_line_endings("\r", 3);
+}
+
+fn assert_schema_span_for_line_endings(line_ending: &str, expected_line: usize) {
+    let source = [
+        "---",
+        "$schema: { release: string }",
+        "release: 1.20",
+        "---",
+        "",
+    ]
+    .join(line_ending);
+    let report = stdin_envelope(&source);
+    let diagnostic = report["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|diagnostic| diagnostic["code"] == "schema.type-mismatch")
+        .unwrap_or_else(|| panic!("missing schema diagnostic: {report}"));
+    let start = diagnostic["span"]["start"].as_u64().unwrap() as usize;
+    let end = diagnostic["span"]["end"].as_u64().unwrap() as usize;
+
+    assert_eq!(&source[start..end], "1.20");
+    assert_eq!(diagnostic["span"]["start_line"], json!(expected_line));
+    assert_eq!(diagnostic["span"]["start_column"], json!(10));
+    assert_eq!(diagnostic["span"]["end_line"], json!(expected_line));
+    assert_eq!(diagnostic["span"]["end_column"], json!(14));
+
+    let applied = report["applied"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|repair| repair["replacement"] == "\"1.20\"")
+        .unwrap_or_else(|| panic!("missing schema repair: {report}"));
+    let start = applied["span"]["start"].as_u64().unwrap() as usize;
+    let end = applied["span"]["end"].as_u64().unwrap() as usize;
+    assert_eq!(&source[start..end], "1.20");
 }
 
 /// A stream BOM participates in the applied audit with document coordinates.

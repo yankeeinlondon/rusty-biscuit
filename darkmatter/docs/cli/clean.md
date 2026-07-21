@@ -3,8 +3,10 @@
 The `clean` command repairs deterministic YAML problems in a document's
 frontmatter and normalizes Markdown formatting. Frontmatter repair is enabled
 by default; there is no opt-in or opt-out flag. Only the YAML between the
-opening and closing frontmatter delimiters is analyzed. YAML fenced code blocks
-in the Markdown body are never inspected or changed by the YAML analyzer.
+opening and closing frontmatter delimiters is analyzed. The delimiter lines,
+including their surrounding whitespace and line terminators, are preserved
+byte-for-byte. YAML fenced code blocks in the Markdown body are never inspected
+or changed by the YAML analyzer.
 
 Without `--save`, repairs are applied to the document written to stdout; the
 input file is not modified. With `--save`, the resulting document is written

@@ -54,14 +54,35 @@ fn clean_to_string(path: &std::path::Path) -> String {
     String::from_utf8(assert.get_output().stdout.clone()).unwrap()
 }
 
-fn assert_normalized_reserved_indicator_document(output: &str) {
+fn delimiter_cases() -> [(&'static str, &'static str, &'static str); 3] {
+    [
+        (
+            "lf",
+            "  ---  \ntitle: ok\n --- \n# Body\n",
+            "  ---  \ntitle: ok\n --- \n# Body\n",
+        ),
+        (
+            "crlf",
+            "  ---  \r\ntitle: ok\r\n --- \r\n# Body\n",
+            "  ---  \r\ntitle: ok\n --- \r\n# Body\n",
+        ),
+        (
+            "cr",
+            "  ---  \rtitle: ok\r --- \r# Body\n",
+            "  ---  \rtitle: ok\n --- \r# Body\n",
+        ),
+    ]
+}
+
+fn assert_repaired_reserved_indicator_document(output: &str, delimiter_ending: &str) {
     assert!(
-        output.starts_with("---\n"),
-        "expected canonical opening delimiter: {output:?}"
+        output.starts_with(&format!("---{delimiter_ending}")),
+        "expected preserved opening delimiter terminator: {output:?}"
     );
-    assert!(output.contains("title: \"@daily-report\"\n---\n"));
+    assert!(output.contains(&format!(
+        "title: \"@daily-report\"\n---{delimiter_ending}"
+    )));
     assert!(!output.contains('\u{feff}'), "UTF-8 BOM must be removed");
-    assert!(!output.contains('\r'), "frontmatter must use LF line endings");
 }
 
 /// D-1: the flagship case — an unquoted scalar opening with a reserved
@@ -105,10 +126,48 @@ fn test_clean_stdin_repairs_reserved_indicator_scalar() {
 }
 
 #[test]
+fn test_clean_file_preserves_trimmed_delimiters_and_their_line_endings() {
+    for (name, source, expected) in delimiter_cases() {
+        let (_dir, path) = doc(source);
+        assert_eq!(clean_to_string(&path), expected, "failed {name} case");
+    }
+}
+
+#[test]
+fn test_clean_stdin_preserves_trimmed_delimiters_and_their_line_endings() {
+    for (name, source, expected) in delimiter_cases() {
+        let assert = md_cmd()
+            .args(["clean", "-"])
+            .write_stdin(source)
+            .assert()
+            .success();
+        assert_eq!(
+            String::from_utf8(assert.get_output().stdout.clone()).unwrap(),
+            expected,
+            "failed {name} case"
+        );
+    }
+}
+
+#[test]
+fn test_clean_save_preserves_trimmed_delimiters_and_their_line_endings() {
+    for (name, source, expected) in delimiter_cases() {
+        let (_dir, path) = doc(source);
+        md_cmd()
+            .arg("clean")
+            .arg(&path)
+            .arg("--save")
+            .assert()
+            .success();
+        assert_eq!(fs::read_to_string(path).unwrap(), expected, "failed {name} case");
+    }
+}
+
+#[test]
 fn test_clean_file_repairs_bom_frontmatter() {
     let (_dir, path) = doc("\u{feff}---\ntitle: @daily-report\n---\n\n# Daily Report\n");
 
-    assert_normalized_reserved_indicator_document(&clean_to_string(&path));
+    assert_repaired_reserved_indicator_document(&clean_to_string(&path), "\n");
 }
 
 #[test]
@@ -120,7 +179,7 @@ fn test_clean_stdin_repairs_bom_frontmatter() {
         .success();
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
 
-    assert_normalized_reserved_indicator_document(&stdout);
+    assert_repaired_reserved_indicator_document(&stdout, "\n");
 }
 
 #[test]
@@ -134,14 +193,14 @@ fn test_clean_save_repairs_bom_frontmatter() {
         .assert()
         .success();
 
-    assert_normalized_reserved_indicator_document(&fs::read_to_string(path).unwrap());
+    assert_repaired_reserved_indicator_document(&fs::read_to_string(path).unwrap(), "\n");
 }
 
 #[test]
 fn test_clean_file_repairs_lone_cr_frontmatter() {
     let (_dir, path) = doc("---\rtitle: @daily-report\r---\r\r# Daily Report\r");
 
-    assert_normalized_reserved_indicator_document(&clean_to_string(&path));
+    assert_repaired_reserved_indicator_document(&clean_to_string(&path), "\r");
 }
 
 #[test]
@@ -153,7 +212,7 @@ fn test_clean_stdin_repairs_lone_cr_frontmatter() {
         .success();
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
 
-    assert_normalized_reserved_indicator_document(&stdout);
+    assert_repaired_reserved_indicator_document(&stdout, "\r");
 }
 
 #[test]
@@ -167,7 +226,7 @@ fn test_clean_save_repairs_lone_cr_frontmatter() {
         .assert()
         .success();
 
-    assert_normalized_reserved_indicator_document(&fs::read_to_string(path).unwrap());
+    assert_repaired_reserved_indicator_document(&fs::read_to_string(path).unwrap(), "\r");
 }
 
 /// D-9: `md clean`'s output is a fixed point — re-cleaning reproduces it byte
