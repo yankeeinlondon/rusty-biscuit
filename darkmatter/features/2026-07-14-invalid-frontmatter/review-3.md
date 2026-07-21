@@ -10,6 +10,7 @@ implemented_by: codex/default
 description: "A **feature** review of `2026-07-14-invalid-frontmatter/spec.md`"
 feature: 2026-07-14-invalid-frontmatter/review-3.md
 previous: 2026-07-14-invalid-frontmatter/review-2.md
+next: 2026-07-14-invalid-frontmatter/review-4.md
 ---
 
 # Review 3 — Invalid Frontmatter
