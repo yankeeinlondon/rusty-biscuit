@@ -2,6 +2,7 @@
 fix: 2026-07-13-fixed-width-lists
 implementation_1: 2026-07-20T08:30:23-07:00
 implementation_2: "2026-07-20T15:55:57-07:00"
+implementation_3: "2026-07-20T17:02:31-07:00"
 deferred_perf_measurement: true
 ---
 
@@ -693,3 +694,143 @@ The files changed specifically for review cycle 2 were:
 - `darkmatter/fixes/2026-07-13-fixed-width-lists/deferred-performance-tests.md`
 - `darkmatter/fixes/2026-07-13-fixed-width-lists/log.md`
 - `darkmatter/fixes/2026-07-13-fixed-width-lists/review-2.md`
+
+## Implementation of Review Findings #3
+
+> **started at:** 2026-07-20T17:02:31-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'darkmatter/fixes/2026-07-13-fixed-width-lists/review-3.md'
+- this is iteration 3 of the review-to-implement cycle
+- review contains 6 findings, all rated High
+        - H1 — a loose nested list is flattened after an additional item paragraph
+        - H2 — marker-looking indented code is converted into a nested list
+        - H3 — nested lists inside blockquotes are flattened
+        - H4 — rejecting `--indent 8` conflicts with the current specification
+        - H5 — required performance timing evidence is still deferred
+        - H6 — the package area's Level-2 acceptance gate is failing
+- starting the work on 'H1 — A loose nested list is flattened after an additional item paragraph' at 17:05:13-07:00
+        - GitNexus rates `fix_list_indentation` **CRITICAL**: 2 direct callers, 141 total dependents through depth 3, 1 affected compose execution-flow family, and 6 affected modules
+        - GitNexus rates `cleanup_content_internal` **CRITICAL**: 9 direct callers, 158 total dependents through depth 3, 1 affected compose execution-flow family, and 7 affected modules; proceeding with a surgical container-context handoff because default, configured-indent, fixed-width, compose, CLI, and DMLS cleanup all share this orchestrator
+        - `sniff` confirms the specification's scoped package area is `darkmatter`, comprising `darkmatter`, `darkmatter-cli`, and `dmls`; the library has additional downstream consumers, but the specification explicitly limits gates to these three packages
+        - replaced physical-column depth inference with a handoff from the existing parser event stream: unquoted list-item depths and authored subsequent-paragraph columns now survive cmark serialization without adding another parse
+        - blank lines no longer close the active list stack; true top-level blocks and parser-derived shallower items close it, so a child following an additional parent paragraph remains nested
+        - target indentation `2` now runs through the same structural repair path as the default and configured-width paths; the retained performance profiler was updated to exercise the production signature
+        - updated the behavior-adjacent `fix_list_indentation` documentation to describe the parser-derived depth contract and loose-list stack lifetime
+        - added library exact-output, structural-fingerprint, display-width, and second-pass coverage across default cleanup, configured two-space indentation, and fixed-width cleanup
+        - added a portable spawned-CLI L1 regression covering default, `--indent 2`, `--fixed-width 24`, and a byte-identical second fixed-width pass
+        - focused verification passed: 126/126 list/reflow tests, 8/8 parse-count tests, and 22/22 spawned `clean` integration tests; `git diff --check` passed
+        - the bounded package-area `just test` attempt ran 2,248/5,890 darkmatter tests with 2,248 passed, 140 skipped, and zero failures before the non-interactive 55-second bound sent SIGINT; darkmatter-cli and dmls were not reached, so this is not a complete area-gate pass
+        - package-area lint verification is green across all three scoped packages: bounded `just lint` completed `darkmatter` and `darkmatter-cli` with `-D warnings`, then the exact `dmls --all-targets` Clippy selector completed cleanly after the bound interrupted the aggregate recipe during dmls checking
+        - final GitNexus `detect_changes` reports HIGH risk across the shared dirty worktree: 17 changed symbols in 10 files and 7 affected compose cleanup execution flows; these are the expected public cleanup paths from the pre-edit CRITICAL impact analysis, and unrelated pre-existing documentation/review changes remain present in the shared worktree
+- work completed for 'H1 — A loose nested list is flattened after an additional item paragraph' at 17:25:34-07:00
+- starting the work on 'H2 — Marker-looking indented code is converted into a nested list' at 17:27:09-07:00
+        - GitNexus rates `fix_list_indentation` **CRITICAL**: 2 direct callers, 141 total dependents through depth 3, 1 affected compose execution-flow family, and 6 affected modules; proceeding with the minimum parser-derived block-classification correction because all cleanup modes share this normalizer
+        - GitNexus also rates `detect_list_indentation` **CRITICAL** (1 direct caller, 140 total dependents, 1 compose flow family, 5 modules) and `cleanup_content_internal` **CRITICAL** (9 direct callers, 158 total dependents, 1 compose flow family, 7 modules); both require surgical updates because automatic indentation detection currently mistakes marker-looking code for the source's nested-list style and the orchestrator must pass the classification into normalization
+        - tracing the complete string-pass path found the same false marker can also remove the blank line that establishes the code block and consume a later authored unordered marker; GitNexus rates `normalize_list_spacing` **CRITICAL** (2 direct callers, 141 dependents) and `restore_list_markers` **CRITICAL** (4 direct callers, 143 dependents), each with the same compose flow family, so the shared parser-derived marker classification will guard all three marker-sensitive passes
+        - `sniff` confirms the specification's scoped package area is `darkmatter`, comprising `darkmatter`, `darkmatter-cli`, and `dmls`
+        - derived the marker ordinals belonging to unquoted parser-classified indented code blocks from the cleanup pipeline's existing event stream, without adding another Markdown parse
+        - threaded that classification through list-spacing normalization, marker restoration, indentation repair, and automatic indentation detection; the code-establishing blank line is retained, code markers do not consume list-depth or authored-marker state, and a later real sibling remains intact
+        - updated the behavior-adjacent cleanup documentation and the retained performance profiler replica to reflect and exercise the parser-derived protection contract
+        - added unordered and ordered library regressions with a later real sibling sentinel; each asserts exact output, structural fingerprint preservation, and second-pass byte equality for default cleanup, configured four-space indentation, and fixed-width cleanup
+        - focused verification passed: 1/1 new H2 regression, 13/13 adjacent marker/parser/list regressions, and 242/242 cleanup tests; the parse-count suite remains green and confirms the classification adds no parse
+        - scoped Level-1 package verification passed for `darkmatter-cli` (618/618) and `dmls` (568/568); the bounded package-area `just test` attempt observed more than 1,600 passing darkmatter tests and zero failures before its 55-second non-interactive bound, so the exact focused library selectors provide the H2 verdict while the orchestrator retains responsibility for the final aggregate gate
+        - package-area lint verification is green across all three scoped packages: bounded `just lint` completed `darkmatter` and `darkmatter-cli` cleanly, and an exact `dmls --all-targets` Clippy run with `-D warnings` completed cleanly after the aggregate bound expired during dmls checking
+        - an initial unfiltered `darkmatter-cli` nextest command accidentally entered excluded Level-2 tests and encountered environment-only failures because `md` was absent from `PATH` and terminal styling differed; the run was stopped, no H2 conclusion was drawn from it, and the corrected Level-1 selector passed 618/618 without running Level 2 again
+        - final GitNexus `detect_changes` reports HIGH risk across the shared H1/H2 dirty worktree: 27 changed symbols in 11 files and 7 affected compose cleanup execution flows; these are the expected paths from the pre-edit CRITICAL impact analysis, and `git diff --check` reports no whitespace errors
+        - H2 is fully implemented with no deferred work
+- work completed for 'H2 — Marker-looking indented code is converted into a nested list' at 17:44:16-07:00
+- starting the work on 'H3 — Nested lists inside blockquotes are flattened' at 17:46:20-07:00
+        - reviewing the parser-derived container-stack data from H1/H2 before selecting the smallest production symbol change; preserving all shared-worktree edits from those findings
+        - GitNexus rates `fix_list_indentation` **CRITICAL**: 2 direct callers, 141 total dependents through depth 3, 1 affected compose execution-flow family, and 6 affected modules; proceeding with a surgical extension of the existing parser-derived stack because quoted markers currently bypass it
+        - GitNexus rates `cleanup_content_internal` **CRITICAL**: 9 direct callers, 158 total dependents through depth 3, 1 affected compose execution-flow family, and 7 affected modules; the orchestrator must pass quoted container context to preserve library, compose, CLI, and DMLS parity without an additional parse
+        - GitNexus rates `detect_list_indentation` **CRITICAL**: 1 direct caller, 140 total dependents, 1 affected compose flow family, and 5 affected modules; no edit is currently planned unless quoted-source indentation detection proves necessary
+        - the new H1 parser-depth extractor is not yet present in the GitNexus index, so its pre-edit risk is UNKNOWN; its sole in-tree caller is `cleanup_content_internal`
+        - `sniff` confirms the specification's scoped package area is `darkmatter`, comprising `darkmatter`, `darkmatter-cli`, and `dmls`; verification remains limited to these three packages as requested
+        - fail-first second-pass testing exposed an adjacent task-list constraint: the normalizer counted `[ ] ` as part of the CommonMark container marker, placed a quoted task child six columns inward, and let the next parse absorb it into parent prose; GitNexus rates `list_marker_byte_width` **CRITICAL** (1 direct caller, 13 dependents, 1 compose flow family, 5 modules), so the fix will distinguish syntactic marker width from the task body's display prefix
+        - extended the existing parser-event handoff to retain both list depth and blockquote depth for every list item; quoted list markers now participate in the same structural repair path without adding another Markdown parse
+        - reconstructed blockquote prefixes canonically while preserving the active quoted-list stack across loose-item prose, and separated the CommonMark container-marker width from the visible task-checkbox prefix so nested task lists remain structurally valid and idempotent
+        - added exact-output, structural-fingerprint, display-width, and second-pass library coverage for nested unordered, ordered, and task lists inside blockquotes across default cleanup, configured two-space indentation, and fixed-width cleanup
+        - added matching spawned-CLI, compose, and DMLS regressions to verify the same three quoted-list forms and cleanup-mode parity across all specification-scoped surfaces
+        - focused verification passed: 208/208 cleanup tests and 31/31 spawned `clean` plus DMLS formatting tests; this includes all new H3 regressions and the adjacent task-list preservation coverage
+        - the bounded package-area `just test` attempt ran 1,936/5,893 darkmatter tests with zero failures before the non-interactive 55-second bound; darkmatter-cli and dmls were not reached by that aggregate recipe, while their exact focused H3 selectors completed successfully
+        - package-area lint verification is green across all three scoped packages: bounded `just lint` completed `darkmatter` and `darkmatter-cli` with `-D warnings`, and the exact `dmls --all-targets` Clippy selector completed cleanly after the aggregate bound expired during dmls checking
+        - final GitNexus `detect_changes` reports HIGH risk across the shared H1/H2/H3 dirty worktree: 46 changed symbols in 13 files and 7 affected compose cleanup execution flows; these are the expected cleanup paths from the pre-edit CRITICAL impact analysis, and `git diff --check` reports no whitespace errors
+        - H3 is fully implemented with no deferred work
+- work completed for 'H3 — Nested lists inside blockquotes are flattened' at 18:09:44-07:00
+- starting the work on 'H4 — Rejecting --indent 8 conflicts with the current specification' at 18:12:36-07:00
+        - reviewing the configured-indentation parser, completion, documentation, and acceptance coverage while preserving all shared-worktree edits from H1–H3
+        - GitNexus rates `parse_indent_size` **LOW** with no indexed direct callers or affected execution flows; Clap's derive-macro wiring is not represented in that call graph, so spawned CLI coverage will verify the public path
+        - GitNexus rates `complete_indent_values` **LOW** with 1 direct Args consumer, no affected execution flows, and 1 affected module; the adjacent parser, completion, and spawned-CLI test symbols have no upstream dependents
+        - `sniff` confirms the specification's scoped package area is `darkmatter`, comprising `darkmatter`, `darkmatter-cli`, and `dmls`; verification remains limited to those three packages
+        - restored the established CLI contract by accepting configured indentation values `2`, `4`, and `8`, updating the invalid-value diagnostic, and offering all three values through dynamic completion
+        - documented eight columns as the preferred nesting step; the parser-derived structural repair constrains a child marker to its parent's CommonMark-valid column range only when the full requested step would change the parse tree
+        - updated the clean/render CLI documentation and removed stale library-test commentary which claimed configured eight-space indentation was impossible
+        - expanded the configured-eight library regression into an exact-output and structural-fingerprint matrix covering narrow-marker nesting after a loose additional paragraph, nested lists inside blockquotes, nested task lists inside blockquotes, fixed-width output, display-width bounds, and byte-identical cleanup/fixed-width second passes
+        - replaced the spawned-CLI rejection regression with the matching accepted `--indent 8` exact-output matrix, including the 30-column fixed-width bound and second-pass byte equality
+        - focused verification passed: 202/202 cleanup tests, 23/23 spawned `clean` integration tests, 5/5 parser/completion/H4 selectors, and the complete `darkmatter-cli` Level-1 suite at 619/619; two unrelated file-handle leak detections in the focused `clean` binary passed on their configured second attempt
+        - the bounded package-area `just test` attempt ran 2,532/5,893 darkmatter tests with 2,532 passed, 140 skipped, and zero failures before the required 55-second SIGINT bound; darkmatter-cli and dmls were not reached by the aggregate recipe, so the exact H4 selectors provide the completed finding verdict
+        - package-area `just lint` passed for all three scoped packages: `darkmatter`, `darkmatter-cli`, and `dmls`
+        - final GitNexus `detect_changes` reports HIGH risk across the shared H1–H4 dirty worktree: 60 changed symbols in 17 files and 7 affected compose cleanup execution flows; H4's parser/completion symbols add no affected execution flow and retain their LOW pre-edit risk, while the reported flows are the expected H1–H3 cleanup paths
+        - `git diff --check` passed, no stale CLI rejection wording remains, and H4 has no deferred work
+- work completed for 'H4 — Rejecting --indent 8 conflicts with the current specification' at 18:20:34-07:00
+- starting the work on 'H5 — Required performance timing evidence is still deferred' at 18:23:27-07:00
+        - evaluating AC15 and the retained quiet-host procedure before collecting any timing samples; misleading measurements will not be recorded if `sniff` host-load evidence fails the documented admissibility criteria
+        - `sniff hardware --json` identifies the host as an Apple M4 Max with 16 physical and logical cores and 128 GiB memory; `sniff repo package-areas --json` confirms verification remains scoped to the `darkmatter` package area
+        - at 18:24 local, `uptime` reported 8 users and load averages of `36.66 49.13 50.30`; at 18:26 it reported 8 users and `82.57 63.00 55.61`, putting the 1-minute load 18–41 times above the documented ceiling of 2.0
+        - AC power was attached, but another Cargo process and multiple agent sessions were active; the host therefore failed the quiet-load, no-other-agent, and no-concurrent-Cargo admissibility requirements
+        - no baseline or candidate timing samples were started, and no medians, deltas, estimates, or B1/B2/B3 verdicts were recorded; H5's timing requirement remains deferred because scheduler noise would exceed the tightest 10% budget
+        - the load-independent parse-count selector passed all 8 tests, confirming one parse for default cleanup and all indent/spacing variants and exactly two parses for the CLI fixed-width sequence
+        - the Criterion `--test --noplot` harness smoke passed all 12 cases, including all eight `clean_list_budgets` fixture/mode combinations, without collecting timing samples
+        - the bounded package-area `just test` attempt ran 2,248/5,893 darkmatter tests with 2,248 passed, 140 skipped, and zero failures before the required 55-second SIGINT bound; the focused parse-count and benchmark-harness checks provide the H5-specific verification
+        - package-area `just lint` passed for `darkmatter`, `darkmatter-cli`, and `dmls`
+        - appended the full Review 3 H5 mapping, host evidence, exact baseline → candidate → baseline quiet-host procedure, 3% drift guard, B1/B2/B3 arithmetic, and defer reason to `deferred-performance-tests.md`; `deferred_perf_measurement: true` remains set in this log's frontmatter
+        - H5 is deferred solely for the required timing measurement; no production or test symbol was edited, so GitNexus impact analysis and `detect_changes` are not applicable to this documentation-only update
+- work completed for 'H5 — Required performance timing evidence is still deferred' at 18:26:09-07:00
+- starting the work on 'H6 — The package area Level-2 acceptance gate is failing' at 18:28:07-07:00
+        - loading the Darkmatter, Rust, Rust-testing, and biscuit-test-harness guidance before reproducing the recorded terminal-harness failures through the package area's sanctioned `just test-l2` recipe
+        - `sniff` confirms the specification's scoped package area is `darkmatter`, comprising `darkmatter`, `darkmatter-cli`, and `dmls`; the host is macOS with both tmux and a runtime-reachable WezTerm socket
+        - the focused sanctioned `darkmatter-cli` Level-2 recipe reproduced the review exactly: center alignment passed, while inherited dim failed all four attempts with captured background luma 44 and stopped the remaining tests
+        - GitNexus rates both failing test functions **LOW** with no upstream dependents or affected execution flows; it rates `max_bg_luma_on_line` **LOW** with 3 direct test callers and `run_with_sentinel_env` **LOW** with 2 direct callers, 16 total test dependents through depth 3, and no affected execution flows
+        - the raw real-terminal capture proved the implementation clears inherited dim: the code cells carried no dim SGR and retained normal truecolor token foregrounds; the luma assertion instead observed WezTerm's real OSC-11 surface, which is authoritative over the test's staged `COLORFGBG` fallback and selected the valid dark code theme
+        - moved the flaky center-alignment comparison and the three deterministic dark-terminal color assertions to the recipe's brokered tmux pane; tmux provides stable headless geometry and does not answer OSC-11, so the explicitly staged `COLORFGBG` mode remains authoritative
+        - the tmux helper polls for and returns the sentinel-bearing capture in one loop, avoiding the documented two-phase capture race, reuses the Cargo-built `md` shim, and remains in the already accepted shared Level-2 harness module so `level2_code_block_styling.rs` stays below the file-size soft cap
+        - the corrected code-block styling binary passed 10/10 twice, including both review-named tests; the inherited-dim assertion that previously failed four times now passed in 0.65–0.68 seconds
+        - the resumed complete gate exposed a fail-fast-hidden harness defect after the original blockers: all three `level2_errors` fixture runners invoked bare `md`, and the broker pane correctly reported `md: command not found`
+        - GitNexus rates `run_md_compose_named` **MEDIUM** with 5 direct and 7 total test dependents and no affected execution flows; the sibling and nested-sibling runners are **LOW** with 1 direct test dependent each
+        - routed all three error-rendering runners through the shared Cargo-built `md_shim()` invariant; the complete `level2_errors` binary then passed 8/8 twice
+        - every package-area Level-2 test passed through sanctioned broker-owning recipe paths: `darkmatter` 19/19, `darkmatter-cli` 69/69, and `dmls` 3/3; the 58-second non-interactive ceiling interrupted the one-shot CLI invocation after 42 green tests, so the remaining binaries were run individually through the same `_test_l2` area recipe and completed 27/27 with no overlap gap
+        - the bounded package-area `just test` attempt ran 2,554/5,893 `darkmatter` Level-1 tests with zero failures before the required 58-second SIGINT; the directly changed `darkmatter-cli` test package then passed its complete Level-1 selection at 619/619
+        - package-area `just lint` passed for `darkmatter`, `darkmatter-cli`, and `dmls`; `git diff --check` passed, and the changed code-block test remains below the package's 500-line soft cap
+        - final GitNexus `detect_changes` reports HIGH risk across the shared H1–H6 dirty worktree: 72 changed symbols in 21 files and 7 affected compose-cleanup execution flows; H6's test-only symbols add no affected execution flow, and the reported flows are the expected shared H1–H4 cleanup changes
+        - H6 is fully implemented with no deferred work; the complete Level-2 selection is green, partitioned only to honor the session's non-interactive command-duration ceiling
+- work completed for 'H6 — The package area Level-2 acceptance gate is failing' at 18:45:41-07:00
+        - final orchestrator Level-1 verification passed in bounded hash partitions: `darkmatter` 5,893/5,893, `darkmatter-cli` 619/619, and `dmls` 569/569
+        - final package-area `just lint` passed for `darkmatter`, `darkmatter-cli`, and `dmls`; `git diff --check` remained clean
+        - final GitNexus `detect_changes` reports HIGH risk across 69 changed symbols in 21 shared-worktree files and the same 7 expected compose-cleanup execution flows; H6's test-only edits and the final metadata changes add no affected execution flows
+
+### Successful Completion
+
+The implementation of review cycle 3 has completed successfully in 1 hour 49 minutes 39 seconds. During this implementation all 6 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 5 were fixed, 1 was deferred (see reasons below):
+
+- **H5 — Required performance timing evidence is still deferred** was deferred because the host was inadmissible for the specification's 10% Criterion budget: its 1-minute load ranged from 36.66 to 82.57 with 8 users on 16 cores, while the documented ceiling is 2.0 and concurrent Cargo/agent work was active. No timing samples or medians were recorded. Parse-count tests passed 8/8, the Criterion harness smoke passed 12/12, and the exact quiet-host baseline → candidate → baseline procedure, 3% drift guard, and B1/B2/B3 arithmetic are retained in `deferred-performance-tests.md`.
+
+The files changed specifically for review cycle 3 were:
+
+- `darkmatter/lib/src/markdown/cleanup/lists.rs`
+- `darkmatter/lib/src/markdown/cleanup/mod.rs`
+- `darkmatter/lib/src/markdown/cleanup/perf_profile.rs`
+- `darkmatter/lib/src/markdown/cleanup/tests/lists.rs`
+- `darkmatter/lib/src/markdown/cleanup/tests/reflow.rs`
+- `darkmatter/lib/src/markdown/compose/tests/rendering.rs`
+- `darkmatter/cli/src/args/completion.rs`
+- `darkmatter/cli/src/args/parsers.rs`
+- `darkmatter/cli/tests/clean.rs`
+- `darkmatter/cli/tests/common/level2.rs`
+- `darkmatter/cli/tests/level2_code_block_styling.rs`
+- `darkmatter/cli/tests/level2_errors.rs`
+- `darkmatter/dmls/src/providers/formatting.rs`
+- `darkmatter/docs/cli/clean.md`
+- `darkmatter/docs/cli/render.md`
+- `darkmatter/fixes/2026-07-13-fixed-width-lists/deferred-performance-tests.md`
+- `darkmatter/fixes/2026-07-13-fixed-width-lists/log.md`
+- `darkmatter/fixes/2026-07-13-fixed-width-lists/review-3.md`

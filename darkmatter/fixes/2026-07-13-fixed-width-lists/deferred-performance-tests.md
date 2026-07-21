@@ -223,3 +223,80 @@ Record every per-fixture Criterion median and calculate each verdict independent
 
 All drift checks and all B1, B2, and B3 cases must pass. Do not aggregate fixtures, substitute
 means for Criterion medians, or accept a partial vector as the AC 15 verdict.
+
+## Review 3 — H5 re-evaluation
+
+### What this maps back to
+
+- **Finding:** "High — Required performance timing evidence is still deferred" in
+  [`review-3.md`](review-3.md).
+- **Exact implementation-log title:**
+  `H5 — Required performance timing evidence is still deferred`.
+- **Specification:** [`spec.md`](spec.md) → Test Plan → "Performance regression" and Acceptance
+  Criterion 15.
+- **Implementation log:** [`log.md`](log.md) → "Implementation of Review Findings #3" → H5.
+
+### Review 3 status and host evidence
+
+The Review 3 suggestion was evaluated on 2026-07-20. The load-independent parse-count selector
+passed all 8 tests, proving that default cleanup and every indent/spacing variant use one parse,
+standalone reflow uses one parse, and the CLI fixed-width sequence uses exactly two parses. The
+Criterion harness smoke command also passed all 12 cases (the four general cleanup cases and all
+eight `clean_list_budgets` fixture/mode cases):
+
+```bash
+cargo nextest run -p darkmatter -E 'test(/parse_count/)' --no-tests=fail --color=never
+cargo bench -p darkmatter --bench clean_hot_paths -- --test --noplot
+```
+
+The normative timing measurement remains deferred. `sniff hardware --json` identified the host as
+an Apple M4 Max with 16 physical and logical cores and 128 GiB memory. At 18:24 local, `uptime`
+reported 8 users and load averages of `36.66 49.13 50.30`; at 18:26 it reported 8 users and
+`82.57 63.00 55.61`. The 1-minute load was therefore 18-41 times the documented ceiling of 2.0.
+AC power was attached, but another Cargo process was also active. These conditions violate three
+admissibility requirements: quiet load, no other agent sessions, and no concurrent Cargo work.
+
+The 10% B1 budget is smaller than the scheduler noise reasonably expected under this level of
+contention. No baseline or candidate timing samples were started, and no medians, estimates,
+deltas, or B1/B2/B3 verdicts were recorded. The shared worktree and existing Criterion baseline
+data were left untouched.
+
+### Exact quiet-host Review 3 procedure
+
+Use the pre-fix baseline ref and workarounds documented above. Before starting, require a 1-minute
+load average at or below 2.0, no other agent sessions, no concurrent Cargo builds, AC power, and
+Criterion's default sampling. Use one new absolute `CARGO_TARGET_DIR` shared only by the prepared
+baseline worktree and candidate worktree for this bracket:
+
+```bash
+# Baseline 1, from the prepared 96c6616e9 baseline worktree.
+uptime
+CARGO_TARGET_DIR=<new-shared-absolute-target> cargo bench -p darkmatter --bench clean_hot_paths -- --save-baseline fwl-review3-baseline-1
+uptime
+
+# Candidate, from the Review 3 fix worktree on the same host and in the same session.
+uptime
+CARGO_TARGET_DIR=<new-shared-absolute-target> cargo bench -p darkmatter --bench clean_hot_paths -- --baseline fwl-review3-baseline-1
+uptime
+
+# Baseline 2, back in the prepared pre-fix worktree.
+uptime
+CARGO_TARGET_DIR=<new-shared-absolute-target> cargo bench -p darkmatter --bench clean_hot_paths -- --baseline fwl-review3-baseline-1
+uptime
+```
+
+Record the Criterion median for every case in every run, then apply these independent verdicts:
+
+- **Baseline drift:** for all eight cases,
+  `abs(median_baseline_2 - median_baseline_1) / median_baseline_1 <= 0.03`; otherwise void the
+  complete bracket.
+- **B1:** for each of `prose`, `flat_list`, `nested_list`, and `blockquoted_tasks`,
+  `median_candidate_default <= 1.10 * median_baseline_1_default`.
+- **B2:** for each list-heavy fixture (`flat_list`, `nested_list`, and `blockquoted_tasks`),
+  `median_candidate_fixed_width <= 1.15 * median_baseline_1_fixed_width`.
+- **B3:** for each of the four candidate fixtures,
+  `median_candidate_fixed_width < 2.00 * median_candidate_default`.
+
+All eight drift checks, all four B1 cases, all three B2 cases, and all four B3 cases must pass.
+Do not aggregate fixtures, substitute means for Criterion medians, or accept a partial vector as
+the AC 15 verdict.
