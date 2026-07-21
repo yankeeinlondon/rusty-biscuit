@@ -7,6 +7,7 @@ implementation_21: "2026-07-20T22:31:43-07:00"
 implementation_22: "2026-07-21T08:34:57-07:00"
 implementation_23: "2026-07-21T09:24:12-07:00"
 implementation_24: "2026-07-21T10:40:11-07:00"
+implementation_25: "2026-07-21T12:13:10-07:00"
 deferred_perf_measurement: false
 ---
 
@@ -1325,3 +1326,63 @@ The implementation of review cycle 24 has completed successfully in 45 minutes. 
 - no findings were deferred; `deferred_perf_measurement` remains `false`
 
 The files changed specifically for review cycle 24 are `.claude/skills/sniff/SKILL.md`, `sniff/lib/README.md`, `sniff/lib/src/credentials.rs`, `sniff/lib/src/filesystem/git/remote_observation.rs`, `sniff/lib/src/remote/focused.rs`, `sniff/lib/tests/focused_provider.rs`, `sniff/lib/tests/remote_observation.rs`, `darkmatter/features/2026-07-13-more-is-more/review-24.md`, and this log file.
+
+## Implementation of Review Findings #25
+
+> **started at:** 2026-07-21T12:13:10-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'darkmatter/features/2026-07-13-more-is-more/review-25.md'
+- this is iteration 25 of the review-to-implement cycle
+- review 25 contains two High findings:
+        - authenticated ambiguous-host discovery cannot use a host-bound credential when the anonymous authentication challenge is unsigned
+        - the canonical Sniff Level-1 acceptance gate remains incomplete because of host-contaminated linked-worktree registrations
+- impacted package areas named by the specification and review are `sniff` and `darkmatter` (library, CLI, and DMLS consumers)
+- starting the work on 'unsigned-authenticated-ambiguous-host-discovery' at 12:14:18-07:00
+        - required `darkmatter`, `rust`, `rust-testing`, `sniff`, and GitNexus impact-analysis skills were read before implementation; the regression matrix is hermetic Level 1 with Wiremock
+        - `sniff repo packages`, `sniff repo package-areas`, and `sniff repo package-dependencies` identify `sniff` as the implementation package area and `darkmatter` as the direct expression consumer named by the specification
+        - pre-edit GitNexus impact analysis reports **HIGH** risk for `probe_self_hosted_provider`: nine affected symbols, two direct callers (`remote_vendor_at` and `FocusedProviderClient::discover`), three modules, and no indexed execution flows
+                - this is authentication-boundary code, so the finding is treated as security-critical despite the bounded indexed call graph; implementation is proceeding under the explicit review assignment
+        - pre-edit GitNexus impact analysis reports **HIGH** risk for `host_bound_provider_token`: 39 affected symbols, two direct callers, four modules, and no indexed execution flows
+                - the existing credential accessor will remain unchanged; candidate selection will call it only for exact host/provider pairs and will never consult global provider tokens
+        - code inspection found no explicit provider-selection input on the ambiguous `remote_vendor_at` / `FocusedProviderClient::discover` path, so the minimum supported identity signal is exactly one configured host-bound provider credential
+        - unsigned `401`/`403` challenges are now retained until all anonymous provider probes complete; only when no response signature identified a provider may exactly one configured exact-host/provider credential select one challenged endpoint for authentication
+                - the GitHub, GitLab, Gitea, Forgejo, Bitbucket Data Center, and Azure DevOps credential identities map only to their corresponding probe route; Gitea and Forgejo remain distinct credential candidates on their shared version endpoint
+                - multiple configured candidates fail as an ambiguous provider-discovery error before any authenticated retry, while no configured candidate remains an unidentified-provider result; global provider tokens are never read by this fallback
+                - an authenticated success retains any returned provider signature/version, rejects a signature that conflicts with the credential-selected provider, and otherwise retains the selected provider with no invented version
+        - added one serial, hermetic Wiremock Level-1 matrix covering unsigned-challenge success, missing host credential, invalid credential, forbidden credential, multiple candidates, global-token non-disclosure, single-route retry, and request/error secret redaction
+        - updated the Sniff library README and authoritative Sniff skill to document unsigned-challenge selection and ambiguity behavior; refreshed the skill's Markdown-aware Darkmatter hash with `md hash --save`
+        - focused verification passed the new unsigned-challenge test (one of one), the full remote-observation integration binary (13 of 13), and the focused-provider integration binary (50 of 50)
+        - canonical `cd sniff && just test` reproduced only review finding 25's independent host-state gap
+                - 1,313 tests passed, including the new regression and all affected remote paths; one handle-leak retry recovered, two cwd-dependent tests failed on gix `NotARepository(MissingHead)` for the existing corrupt `/private/tmp/dmbench/after` registration, three were skipped, and 317 were not run after fail-fast
+                - no host Git metadata or registered worktree was changed and the corrupt-worktree error contract was not weakened; the separate canonical-gate finding owns clean-environment verification
+        - `cd sniff && just lint` passed for `sniff`, `sniff-cli`, and its checked dependencies
+        - the downstream `cd darkmatter && just test` gate was terminated after exceeding the non-interactive session's approximately 60-second command budget
+                - 2,232 of 5,937 Darkmatter library tests passed with no failure before interruption; 140 configured tests were skipped and 3,705 were not run
+                - `cd darkmatter && just lint` was likewise terminated at the time budget: the Darkmatter library lint completed, Darkmatter CLI checking reached completion output, and DMLS had not run
+        - post-change GitNexus `detect_changes(scope: unstaged)` reports LOW aggregate risk, 12 changed symbols across six shared-worktree files, and no affected execution flows; the report includes pre-existing `CLAUDE.md` and preceding review-cycle edits
+        - `git diff --check` passed and `md hash --diff .claude/skills/sniff/SKILL.md` reported no semantic changes; no formatting command was run
+        - files touched specifically for this finding are `.claude/skills/sniff/SKILL.md`, `sniff/lib/README.md`, `sniff/lib/src/filesystem/git/remote_observation.rs`, `sniff/lib/tests/remote_observation.rs`, and this log file
+- work completed for 'unsigned-authenticated-ambiguous-host-discovery' at 12:22:41-07:00
+- starting the work on 'canonical-sniff-level-1-clean-environment-gate' at 12:24:02-07:00
+        - scope discovery used `sniff repo packages`, `sniff repo package-areas`, and `sniff repo package-dependencies`; the canonical Level-1 gate is owned by the `sniff` package area, while Darkmatter, unchained-ai, and worktree are downstream consumers
+        - created a disposable local clone with independent Git metadata at HEAD `95f44000a591dfb6ea7054a1728b71d5916bba99`, then overlaid the current working tree while excluding the root linked-worktree `.git` file and root `target`
+                - verification showed exactly one registered worktree in the clone, an independent `.git` directory, the six expected review-25 tracked modifications, no untracked files, and no copied host worktree registrations
+                - `/private/tmp/dmbench`, the host repository metadata, and host worktree registrations were never mutated; corrupt-worktree failures remain errors
+        - used APFS copy-on-write clones of `target` and the Cargo registry/Git cache inside the disposable environment, so Cargo and tests had writable private artifacts without mutating shared cache state
+        - two bounded warm-up invocations were stopped with exit 130 before the approximately 60-second non-interactive ceiling
+                - each completed all 1,632 Sniff library tests successfully before the Sniff CLI build completed; this warmed only disposable build artifacts
+        - the final canonical `cd sniff && just test` invocation completed with exit 0 inside the strict ceiling
+                - `sniff`: 1,632 tests run, 1,632 passed, zero failed, three configured tests skipped; summary duration 14.699 seconds
+                - `sniff-cli`: 769 tests run, 769 passed, zero failed, three configured tests skipped; summary duration 18.996 seconds
+                - the previously host-contaminated `test_detect_with_base_dir` and `test_skip_os_with_filesystem_only` tests passed in the independent clone, closing the review's AC29 macOS Level-1 evidence gap
+        - no product source or test changed for this finding, so no additional lint was needed beyond the passing `cd sniff && just lint` result recorded for the preceding finding
+        - moved the entire disposable environment to macOS Trash after verification, providing recoverable cleanup; no disposable path remains under `/private/tmp`
+- work completed for 'canonical-sniff-level-1-clean-environment-gate' at 12:32:10-07:00
+
+### Successful Completion
+
+The implementation of review cycle 25 has completed successfully in 19 minutes. During this implementation all 2 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 2 were fixed, 0 were deferred (see reasons below):
+
+- no findings were deferred; `deferred_perf_measurement` remains `false`
+
+The files changed specifically for review cycle 25 are `.claude/skills/sniff/SKILL.md`, `sniff/lib/README.md`, `sniff/lib/src/filesystem/git/remote_observation.rs`, `sniff/lib/tests/remote_observation.rs`, `darkmatter/features/2026-07-13-more-is-more/review-25.md`, and this log file.
