@@ -1,5 +1,5 @@
 ---
-review_iterations: 11
+review_iterations: 12
 reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-07-12
