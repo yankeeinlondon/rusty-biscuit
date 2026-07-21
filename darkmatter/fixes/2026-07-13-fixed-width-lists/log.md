@@ -3,6 +3,7 @@ fix: 2026-07-13-fixed-width-lists
 implementation_1: 2026-07-20T08:30:23-07:00
 implementation_2: "2026-07-20T15:55:57-07:00"
 implementation_3: "2026-07-20T17:02:31-07:00"
+implementation_4: "2026-07-20T19:40:56-07:00"
 deferred_perf_measurement: true
 ---
 
@@ -834,3 +835,170 @@ The files changed specifically for review cycle 3 were:
 - `darkmatter/fixes/2026-07-13-fixed-width-lists/deferred-performance-tests.md`
 - `darkmatter/fixes/2026-07-13-fixed-width-lists/log.md`
 - `darkmatter/fixes/2026-07-13-fixed-width-lists/review-3.md`
+
+## Implementation of Review Findings #4
+
+> **started at:** 2026-07-20T19:40:56-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'darkmatter/fixes/2026-07-13-fixed-width-lists/review-4.md'
+- this is iteration 4 of the review-to-implement cycle
+- review 4 contains 6 findings: 5 High and 1 Medium
+        - High — blockquoted indented code is converted into a list
+        - High — additional paragraphs inside blockquoted items escape the list
+        - High — full cleanup rewrites list-looking content inside raw HTML
+        - High — `--indent 8` is accepted but its specified behavior is still not implemented
+        - High — required performance timing evidence remains deferred
+        - Medium — ten-digit numeric prose still participates in list-spacing normalization
+- starting the work on 'High — Blockquoted indented code is converted into a list' at 19:43:15-07:00
+        - used the `darkmatter`, `rust`, and `rust-testing` skills; classified the finding as pure, cross-platform Level-1 cleanup behavior
+        - `sniff` confirmed the specification-owned package area is `darkmatter`, with verification limited to `darkmatter`, `darkmatter-cli`, and `dmls`
+        - reproduced the finding for unordered and ordered marker-looking indented code at blockquote depth one and for unordered code at depth two
+        - root cause confirmed: the parser side channel records only unquoted indented-code markers, while the serialized line passes still interpret quoted marker-looking code as a possible pending list item
+        - GitNexus impact analysis rated the affected cleanup helpers CRITICAL: 145–162 upstream symbols, one compose-cleanup execution-flow family, and direct callers limited to `cleanup_content_internal` plus its profiling replica
+        - implementation scope is intentionally narrow: replace the unquoted ordinal list with parser-derived protected marker records that retain blockquote depth, thread the records through existing string passes without another parse, and add Level-1 parity fixtures
+        - implementation completed: `ProtectedMarker` records retain serialized marker ordinal plus blockquote depth and now protect parser-classified indented code during list spacing, blockquote prefix normalization, authored marker restoration, and indentation normalization
+        - corrected stale behavior documentation by replacing the unquoted-only helper documentation; blockquoted indented code is no longer claimed to be handled by an unrelated container path
+        - no public API, dependency, parser count, platform-specific branch, or output line-ending behavior changed
+        - added unordered and ordered fixtures at blockquote depths one and two with exact output, structural fingerprints, configured indentation, fixed-width cleanup, and idempotent second passes
+        - added spawned CLI, compose, and DMLS parity coverage for all four depth/marker fixtures; the initial focused Nextest run passed 4/4 tests
+        - related blockquote and marker-looking-code regression selection passed 58/58 Level-1 tests
+        - the combined package-area `just test --partition hash:1/4` invocation exceeded the non-interactive 60-second ceiling during its library slice and was terminated without failures; exhaustive verification resumed with exact per-package selectors and smaller deterministic partitions
+        - exhaustive Level-1 gates passed: `darkmatter` 5,895/5,895 across 16 hash partitions, `darkmatter-cli` 620/620 across 4 hash partitions, and `dmls` 570/570 across 4 hash partitions
+        - package-area `just lint` passed for `darkmatter`, `darkmatter-cli`, and `dmls` with no warnings; no write-mode formatting command was run
+        - GitNexus `detect_changes` reported MEDIUM aggregate dirty-worktree risk and only the expected cleanup/compose execution-flow family for this production change; unrelated pre-existing worktree edits remain untouched
+        - `git diff --check` passed
+- work completed for 'High — Blockquoted indented code is converted into a list' at 20:08:23-07:00
+- starting the work on 'High — Additional paragraphs inside blockquoted items escape the list' at 20:09:16-07:00
+        - used the `darkmatter`, `rust`, and `rust-testing` skills; classified the finding as pure, cross-platform Level-1 cleanup behavior
+        - `sniff` confirmed the specification-owned package area is `darkmatter`, containing `darkmatter`, `darkmatter-cli`, and `dmls`; verification remains limited to those packages
+        - root cause confirmed: parser-derived subsequent-paragraph records exclude every paragraph at nonzero blockquote depth, and serialized blank quote lines do not set the indentation normalizer's paragraph-continuation state
+        - GitNexus impact analysis rated the paragraph extractor, `fix_list_indentation`, `cleanup_content_internal`, and the private context record CRITICAL: 13–162 upstream symbols, one compose-cleanup execution-flow family, and direct callers limited to the cleanup orchestrator plus its profiling replica
+        - implementation scope is intentionally private and parse-neutral: carry parser-derived quote depth, item depth, and source body column for each subsequent item paragraph, then consume those records against the already serialized quote/list containers
+        - implementation completed: `AdditionalParagraphContext` retains parser-derived list depth, blockquote depth, source paragraph column, and owning item content column for every subsequent item paragraph
+        - the indentation normalizer now recognizes serialized quoted blank lines, restores canonical quote prefixes, and translates authored continuation offsets onto the rescaled owning item column without an additional parse
+        - a nested-child guard exposed that retaining the raw source column could reparent a second child paragraph after configured indentation changed; translating the paragraph's offset relative to its owning item keeps both parent and nested-child paragraphs at their parser-derived depth
+        - no public API, dependency, parser count, platform-specific branch, or output line-ending behavior changed
+        - added exact-output Level-1 coverage for unordered, ordered, and task-list parents; blockquote depths one and two; normal, compact, and loose spacing; configured indentation of two and four; Unicode display width; fixed width 24; structural preservation; and idempotent cleanup-plus-reflow second passes
+        - added spawned CLI, compose, and DMLS parity coverage for the quoted additional-paragraph matrix; focused Nextest runs passed 4/4 tests
+        - exhaustive package-area Level-1 verification passed all 16 `just test --partition hash:N/16` partitions for `darkmatter`, `darkmatter-cli`, and `dmls`; two pre-existing load-sensitive tests passed on their automatic retry, and the affected tests had no failures
+        - package-area `just lint` passed for `darkmatter`, `darkmatter-cli`, and `dmls` with no warnings; no write-mode formatting command was run
+        - GitNexus `detect_changes` reported MEDIUM aggregate dirty-worktree risk across five expected cleanup/compose execution flows; the report also included the preceding serialized finding and unrelated pre-existing worktree edits, which remain untouched
+        - `git diff --check` passed
+        - no Level-2 or performance measurement was required for this pure cleanup finding, and nothing was deferred
+- work completed for 'High — Additional paragraphs inside blockquoted items escape the list' at 20:33:35-07:00
+- starting the work on 'High — Full cleanup rewrites list-looking content inside raw HTML' at 20:34:12-07:00
+        - used the `darkmatter`, `rust`, and `rust-testing` skills; classified the finding as pure, cross-platform Level-1 cleanup behavior
+        - `sniff` confirmed the specification-owned package area is `darkmatter`, containing `darkmatter`, `darkmatter-cli`, and `dmls`; verification remains limited to those packages
+        - reproduced the authored-marker theft for raw HTML followed by a differently marked real unordered item; fenced and indented code already have partial protection, while the review requires one strategic rule across HTML, code, tables, and opaque `::shell-block` bodies
+        - root cause confirmed: `restore_list_markers` advances its authored-marker cursor on physical serialized `* ` lines rather than only parser-confirmed unordered item starts
+        - GitNexus rated `restore_list_markers`, `extract_list_markers`, and `extract_list_item_contexts` CRITICAL: 145–147 upstream symbols, at most four direct callers, and one compose inline-post execution-flow family
+        - implementation scope is intentionally private and parse-neutral: retain parser-confirmed serialized item ownership (with Darkmatter opaque-body overrides) through the existing event-stream pass, without a second parse or a public API change
+        - implementation completed: raw HTML and parser-classified indented-code marker lines now contribute protected serialized-marker records, while item events inside opaque `::shell-block` bodies are excluded from authored-marker and list-item context streams
+        - the existing single cleanup parse is reused; Darkmatter opaque-body line ranges are a source overlay, and no public API, dependency, platform branch, parser count, or line-ending policy changed
+        - added a library matrix covering raw HTML, fenced code, indented code, GFM tables, and opaque shell bodies followed by differently marked real items; every fixture asserts exact output, structural fingerprint, configured cleanup, fixed width, and stable second passes
+        - added representative spawned CLI, compose, and DMLS fixed-width parity and second-pass coverage without repeating the full protected-family matrix on every surface
+        - focused tests passed for spawned CLI, compose, DMLS, and the five-family library matrix; the first library run exposed only a test-fingerprint mismatch caused by cleanup's established empty-fence language normalization, resolved by authoring that fixture with the already canonical `text` language
+        - no protected-body implementation case is failing; opaque shell bodies retain the pre-existing full-cleanup canonical layout, but their literal marker, later authored item marker, structural fingerprint, and second-pass bytes are stable
+        - exhaustive Level-1 verification passed all 16 `just test --partition hash:N/16` partitions for `darkmatter`, `darkmatter-cli`, and `dmls`; one unrelated load-sensitive handle-leak check passed on automatic retry, and no affected test failed or retried
+        - package-area `just lint` passed for `darkmatter`, `darkmatter-cli`, and `dmls` with no warnings; no write-mode formatting command was run
+        - `git diff --check` passed
+        - GitNexus `detect_changes` reported MEDIUM aggregate dirty-worktree risk across the expected cleanup/compose execution-flow family; the report includes the preceding findings and unrelated pre-existing worktree edits, which remain untouched
+        - no Level-2 or performance measurement was required for this Level-1 cleanup finding, and nothing was deferred
+- work completed for 'High — Full cleanup rewrites list-looking content inside raw HTML' at 20:50:04-07:00
+- starting the work on 'High — `--indent 8` is accepted but its specified behavior is still not implemented' at 20:52:33-07:00
+        - used the `darkmatter`, `rust`, `rust-testing`, `sniff`, and GitNexus impact-analysis skills; classified the finding as pure, cross-platform Level-1 parser/serialization behavior
+        - `sniff` confirmed the specification-owned package area is `darkmatter`, containing `darkmatter`, `darkmatter-cli`, and `dmls`; verification remains limited to those packages
+        - investigated parser-backed serialization alternatives before editing: a narrow parent with ordinary one-space marker padding cannot own a child at column 8, and blank-line/continuation variants parse that line as prose or indented code; widening the parent marker would change unordered/ordered list semantics, while tabs would violate exact byte-column and ASCII-space requirements
+        - found a CommonMark-preserving exact strategy: the grammar permits one through four spaces after a list marker, so an item that owns a child can use the maximum four-space marker padding; this moves a narrow unordered parent's content column to 5 and makes child columns 5 through 8 valid without changing the parsed tree
+        - parser evidence confirmed exact column-8 children for unordered (`-    Parent`), ordered (`1.    Parent`), task (`-    [ ] Parent`), blockquoted, and three-level lists; JSON AST output retained list kind, start ordinal, task state, item order, quote depth, and nesting depth in every case
+        - GitNexus rates `fix_list_indentation` and `extract_list_item_contexts` CRITICAL with 145 upstream symbols, two direct callers, one compose-cleanup execution-flow family, and six affected modules; `ListItemContext` itself has 13 upstream symbols and the same CRITICAL rating
+        - proceeding with a surgical private-context extension and exact parser-fingerprint tests because the parser proof satisfies the normative contract without a public API change, a second parse, or marker-kind substitution
+        - implementation completed: when configured indentation is 8, each parser-confirmed item that directly owns a nested list uses CommonMark's legal four-space marker padding; its child marker can then be emitted at the exact `8 × depth` byte column without changing list kind, ordinal, task state, item order, quote depth, or nesting depth
+        - both marker-width consumers now model CommonMark padding consistently: source-context extraction measures one through four authored padding spaces (and the grammar's five-or-more fallback), while fixed-width reflow retains the same padding in first-line and hanging prefixes
+        - the source-context correction keeps loose additional paragraphs at their owning item's rescaled content column, and the reflow correction keeps the padded parent valid through fixed-width output; these close the two idempotence failures exposed by the first implementation pass
+        - reconciled public language without changing the normative specification: library and CLI documentation now describe `--indent` as enforced, explain the CommonMark-valid parent-padding strategy for 8, and contain no contradictory "preferred" or "nearest valid" language; parser acceptance and dynamic completion remain exactly `2`, `4`, and `8`
+        - added exact byte-output and structural-fingerprint coverage for narrow unordered markers, one-/two-/three-digit ordered markers, checked/unchecked task items, blockquotes, loose parent paragraphs, and three nesting levels; every case also asserts fixed-width stability and a byte-identical cleanup-plus-reflow second pass
+        - updated the spawned CLI matrix to pin exact configured and fixed-width output, display-column bounds, and idempotence; added a configured-indent-8 compose parity test against direct library cleanup and reflow
+        - DMLS formatting has no configured-indentation setting, so indent 8 is not a DMLS surface; its default-indent fixed-width parity tests remained in the broader regression selection and passed
+        - focused Level-1 tests passed 5/5 across direct library, spawned CLI, and compose; the broad indentation/reflow/list-marker selection passed 218/218 across `darkmatter`, `darkmatter-cli`, and `dmls`
+        - the broad regex selector unintentionally matched unrelated `level2_*` names and ran them directly; they passed, but this is not counted as a valid Level-2 gate and no Level-2 behavior is needed for this deterministic source transformation
+        - package-area `just lint` passed for `darkmatter`, `darkmatter-cli`, and `dmls` with no warnings; no write-mode formatting command was run
+        - exhaustive Level-1 verification passed all 16 `just test --partition hash:N/16` partitions for `darkmatter`, `darkmatter-cli`, and `dmls`; no test failed or retried
+        - the final package-area `just lint` rerun passed for `darkmatter`, `darkmatter-cli`, and `dmls` with no warnings; no write-mode formatting command was run
+        - final GitNexus `detect_changes` reported MEDIUM aggregate dirty-worktree risk across five expected cleanup/compose execution flows; the report includes the preceding findings and unrelated pre-existing worktree edits, which remain untouched
+        - `git diff --check` passed
+        - no public API, dependency, parser count, platform-specific branch, or output line-ending behavior changed
+        - this finding is fully implemented with no deferred work
+        - files changed specifically for this finding:
+                - `darkmatter/lib/src/markdown/cleanup/lists.rs`
+                - `darkmatter/lib/src/markdown/cleanup/reflow.rs`
+                - `darkmatter/lib/src/markdown/cleanup/mod.rs`
+                - `darkmatter/lib/src/markdown/cleanup/tests/reflow.rs`
+                - `darkmatter/lib/src/markdown/compose/tests/rendering.rs`
+                - `darkmatter/cli/src/args/parsers.rs`
+                - `darkmatter/cli/tests/clean.rs`
+                - `darkmatter/docs/cli/clean.md`
+                - `darkmatter/docs/cli/render.md`
+                - `darkmatter/fixes/2026-07-13-fixed-width-lists/log.md`
+- work completed for 'High — `--indent 8` is accepted but its specified behavior is still not implemented' at 21:16:32-07:00
+- starting the work on 'High — Required performance timing evidence remains deferred' at 21:16:43-07:00
+        - used the `darkmatter`, `rust`, `rust-testing`, and `sniff` skills, including the performance-testing and Criterion guidance; evaluated the documented host-admissibility gate before running any timing command
+        - `sniff hardware --json` identifies the host as an Apple M4 Max with 16 physical and logical cores and 128 GiB memory; `sniff repo package-areas --json` confirms verification remains scoped to the `darkmatter` package area (`darkmatter`, `darkmatter-cli`, and `dmls`)
+        - at 21:18 local, `uptime` reported 9 users and load averages of `86.31 84.66 65.35`; the 1-minute load was 43 times the documented ceiling of 2.0
+        - AC power was attached and no concurrent Cargo or Rust compiler process was visible, but another agent session was active; the host therefore failed the quiet-load, single-agent, and logged-in-session admissibility requirements
+        - no baseline or candidate timing samples were started, and no medians, estimates, deltas, or B1/B2/B3 verdicts were recorded; the required measurement remains deferred because scheduler noise would overwhelm the tightest 10% budget
+        - the load-independent parse-count selector passed all 8 tests, confirming one parse for default cleanup and all indent/spacing variants and exactly two parses for the CLI fixed-width sequence
+        - the Criterion `--test --noplot` harness smoke passed all 12 cases, including all eight `clean_list_budgets` fixture/mode combinations; this mode executes each case once and collects no timing samples
+        - bounded package-area `just test` partitions 1/16 and 3/16 passed for all three scoped packages; partition 2/16 passed 336/337 library tests before one compose test hit its 30-second timeout and the retry was interrupted at the command-duration ceiling, after which that exact test passed independently in 16.60 seconds
+        - the immediately preceding finding's exhaustive Level-1 gate remains applicable because this finding changed only Markdown documentation: all 16 hash partitions had passed for `darkmatter`, `darkmatter-cli`, and `dmls` before the host-admissibility evaluation began
+        - package-area `just lint` passed for `darkmatter`, `darkmatter-cli`, and `dmls`; no write-mode formatting command was run
+        - appended the full Review 4 finding mapping, host evidence, exact baseline → candidate → baseline quiet-host procedure, 3% drift guard, and per-case B1/B2/B3 arithmetic to `deferred-performance-tests.md`; `deferred_perf_measurement: true` remains set in this log's frontmatter
+        - `git diff --check` passed for the two documentation artifacts; no production or test symbol was edited, so GitNexus impact analysis and change detection are not applicable to this finding
+        - this finding is deferred solely for the required timing measurement; the deterministic parse-count requirement and Criterion harness are green, but AC 15 cannot receive a timing verdict on the current host
+- work completed for 'High — Required performance timing evidence remains deferred' at 21:25:48-07:00
+- starting the work on 'Medium — Ten-digit numeric prose still participates in list-spacing normalization' at 21:26:39-07:00
+        - used the `darkmatter`, `rust`, `rust-testing`, `sniff`, and GitNexus impact-analysis skills; classified the finding as pure, cross-platform Level-1 cleanup behavior
+        - `sniff` confirmed the specification-owned package area is `darkmatter`, containing `darkmatter`, `darkmatter-cli`, and `dmls`; verification remains limited to those packages
+        - root cause confirmed: reflow and incidental-newline stripping use a CommonMark-aware one-to-nine-digit marker parser, while list-spacing normalization uses a separate uncapped `is_list_item_start` grammar
+        - an existing private list marker-width helper already enforces one-to-nine ordered digits, both `.` and `)` delimiters, one-to-four-space CommonMark padding, unordered markers, and task suffixes; reusing it avoids a new abstraction and divergent grammars
+        - GitNexus rated the shared list marker helper and spacing predicate CRITICAL with 15–17 upstream symbols, three direct callers each, and one compose-cleanup execution-flow family; the duplicate reflow-local parser is MEDIUM with two direct callers
+        - implementation scope is intentionally private and parse-neutral: make the existing list helper the shared recognizer for reflow, strip, marker protection, and spacing normalization, then add boundary and parity fixtures without changing a public API
+        - implementation completed: `list_marker_byte_width` is now the single private marker recognizer used by list spacing, marker protection/restoration, indentation normalization, incidental-newline boundaries, and fixed-width reflow; the duplicate reflow grammar and digit-limit constant were removed
+        - the shared helper preserves unordered markers, GFM task suffixes, both ordered delimiters, CommonMark one-to-four-space padding, and the one-to-nine-digit ordinal limit; ten-digit numeric prose no longer enters spacing normalization
+        - added a library boundary matrix for normal, compact, and loose cleanup with both `.` and `)` delimiters; every nine- and ten-digit fixture is adjacent to real ordered and unordered lists and asserts exact output, structural fingerprints, byte-identical second passes, and CRLF parity
+        - added non-redundant representative spawned CLI compact, compose normal, and DMLS loose parity/idempotence fixtures; focused Nextest passed 4/4 tests
+        - the broad marker/list-spacing/strip/reflow regression selection passed 163/163 Level-1 tests, including parse-count guards and the prior Review 4 findings
+        - exhaustive Level-1 verification passed all 16 `just test --partition hash:N/16` partitions for `darkmatter`, `darkmatter-cli`, and `dmls`; no test failed or retried
+        - the first package-area lint run found only a test-fixture tuple type-complexity warning; replacing that tuple with a small test-local named record resolved the lint without changing production behavior, and the focused boundary test passed again
+        - the final package-area `just lint` passed for `darkmatter`, `darkmatter-cli`, and `dmls`; no write-mode formatting command was run
+        - `git diff --check` passed, and a final source scan confirmed there is one ordered-marker digit limit and no duplicate reflow marker parser
+        - GitNexus `detect_changes` reported MEDIUM aggregate dirty-worktree risk across the five expected cleanup/compose execution flows; the report includes the preceding findings and unrelated pre-existing worktree edits, which remain untouched
+        - no public API, dependency, cleanup parse count, platform-specific branch, or output line-ending policy changed
+        - no Level-2 or performance measurement was required for this deterministic Level-1 cleanup finding, and nothing was deferred
+- work completed for 'Medium — Ten-digit numeric prose still participates in list-spacing normalization' at 21:41:47-07:00
+        - final cumulative GitNexus `detect_changes` reported MEDIUM risk across 75 changed symbols and five affected execution flows, all in the expected compose inline-post cleanup family; unrelated pre-existing dirty-worktree files remain untouched
+        - cumulative `git diff --check` passed, and the final finding's exhaustive 16-partition Level-1 gate plus package-area lint covered the complete serialized Review 4 implementation
+
+### Successful Completion
+
+The implementation of review cycle 4 has completed successfully in 2 hours 2 minutes 16 seconds. During this implementation all 6 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 5 were fixed, 1 was deferred (see reasons below):
+
+- **High — Required performance timing evidence remains deferred** was deferred because the host was inadmissible for the specification's 10% Criterion budget: it had 9 logged-in users, another active agent, and load averages of `86.31 84.66 65.35` on 16 cores, while the documented one-minute ceiling is 2.0. No timing samples, medians, estimates, deltas, or B1/B2/B3 verdicts were recorded. Parse-count tests passed 8/8, the non-sampling Criterion harness smoke passed 12/12, and the exact quiet-host baseline → candidate → baseline procedure, 3% drift guard, and B1/B2/B3 arithmetic are retained in `deferred-performance-tests.md`.
+
+The files changed specifically for review cycle 4 were:
+
+- `darkmatter/lib/src/markdown/cleanup/blockquote.rs`
+- `darkmatter/lib/src/markdown/cleanup/lists.rs`
+- `darkmatter/lib/src/markdown/cleanup/mod.rs`
+- `darkmatter/lib/src/markdown/cleanup/perf_profile.rs`
+- `darkmatter/lib/src/markdown/cleanup/reflow.rs`
+- `darkmatter/lib/src/markdown/cleanup/tests/reflow.rs`
+- `darkmatter/lib/src/markdown/compose/tests/rendering.rs`
+- `darkmatter/cli/src/args/parsers.rs`
+- `darkmatter/cli/tests/clean.rs`
+- `darkmatter/dmls/src/providers/formatting.rs`
+- `darkmatter/docs/cli/clean.md`
+- `darkmatter/docs/cli/render.md`
+- `darkmatter/fixes/2026-07-13-fixed-width-lists/deferred-performance-tests.md`
+- `darkmatter/fixes/2026-07-13-fixed-width-lists/log.md`
+- `darkmatter/fixes/2026-07-13-fixed-width-lists/review-4.md`

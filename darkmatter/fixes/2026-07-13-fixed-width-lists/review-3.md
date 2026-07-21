@@ -10,6 +10,7 @@ implemented_by: codex/default
 description: "A **fix** review of `2026-07-13-fixed-width-lists/spec.md`"
 fix: 2026-07-13-fixed-width-lists/review-3.md
 previous: 2026-07-13-fixed-width-lists/review-2.md
+next: 2026-07-13-fixed-width-lists/review-4.md
 ---
 
 # Review 3 — Fixed-Width Lists
