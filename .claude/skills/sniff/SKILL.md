@@ -1,8 +1,8 @@
 ---
 name: sniff
 description: Expert knowledge for sniff-lib and sniff-cli, a cross-platform system detection library and CLI for Rust. Use when detecting OS/hardware/network/filesystem info, program detection, service detection, adding new detection capabilities, or optimizing detection performance.
-hash: 3cd50ffff2b8b5db-948dab0cf0fecaef
-last_updated: 2026-07-20
+hash: 3cd50ffff2b8b5db-4046c57a47c4c558
+last_updated: 2026-07-21
 ---
 
 # sniff
@@ -155,10 +155,17 @@ Use `FocusedProviderClient` for bounded pull-request and CI/CD-job queries. It
 retains provider/repository/native identity, follows provider pagination within
 hard parent/page/item bounds, rejects unsupported canonical filters, disables
 redirects, and checks host policy before client construction, credential reads,
-or network I/O. Its production discovery path retains the self-hosted server's
-reported version for capability selection, derives a policy-checked HTTPS origin
-from the resolved host for neutral SSH/SCP remotes, and never treats an SSH port
-as an HTTP port. Gitea CI/CD job operations require stable 1.25.0 or newer;
+or network I/O. Its production discovery path retains a self-hosted server's
+reported version when its documented identity response supplies one, derives
+version-sensitive capabilities conservatively when it does not, probes every
+ambiguous-host candidate anonymously, and retries authentication only after a
+response signature identifies the provider. Such retries use only
+`SNIFF_{PROVIDER}_{ENCODED_HOST}_TOKEN`; they
+never send global provider tokens to an unidentified self-hosted server. Discovery
+also retains this host-bound credential scope for the resulting client's provider
+queries. It derives a policy-checked HTTPS origin from the resolved host for neutral
+SSH/SCP remotes and never treats an SSH port as an HTTP port. Gitea CI/CD job
+operations require stable 1.25.0 or newer;
 Forgejo releases through 14.0 lack the required exact/list job endpoints. These
 unsupported operations fail before provider I/O with the provider, flavor, and
 version preserved in the error. Do not collapse focused malformed, missing,

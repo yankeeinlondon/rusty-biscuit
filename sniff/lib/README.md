@@ -493,11 +493,24 @@ and Bitbucket while preserving repository/provider identity and focused policy,
 credential, authorization, rate-limit, malformed-response, and transport
 errors. `FocusedProviderClient::discover` is the production constructor for
 ordinary self-managed servers: a neutral-hostname remote is identified through
-the same allowlisted, bounded version-endpoint probe `remote_vendor_at` uses
-(GitLab/Gitea/Forgejo, exact-host consent before any request) and then queried
-against the endpoint origin its remote URL was configured with. The client
-retains the reported server version and derives operation capabilities from the
-concrete flavor/version pair. Gitea job lookup and listing require stable 1.25.0
+the same allowlisted, bounded identity probe `remote_vendor_at` uses
+(GitHub Enterprise, GitLab, Gitea/Forgejo, Bitbucket Data Center, and Azure
+DevOps Server; exact-host consent before any request). Flavors supported by the
+focused query model are then queried against the endpoint origin their remote
+URL was configured with; recognized but unsupported flavors return a capability
+error. Candidate signature
+requests are anonymous, so global provider tokens are never disclosed to an
+unidentified host. When an anonymous response establishes provider identity but
+requires authentication, discovery retries only that route and reads only the
+exact-host credential `SNIFF_{PROVIDER}_{ENCODED_HOST}_TOKEN`. The host encoding
+uppercases ASCII letters and renders every non-alphanumeric byte as `_XX_`
+(for example, `git.example` becomes `GIT_2E_EXAMPLE`). A client produced by
+ambiguous-host discovery retains that exact-host credential scope for subsequent
+provider queries; explicit known-provider clients keep the ordinary global-token
+contract. The client retains a reported server version when the provider's
+documented identity response supplies one and derives operation capabilities
+conservatively from the concrete flavor/version pair. Gitea job lookup and
+listing require stable 1.25.0
 or newer; Forgejo releases through 14.0 do not expose the required job endpoint
 pair. Unsupported job operations fail before provider I/O with the provider,
 flavor, and detected version in the error. SSH and SCP remotes derive a
