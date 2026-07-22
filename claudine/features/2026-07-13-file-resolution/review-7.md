@@ -5,6 +5,7 @@ agent: codex/default
 created: 2026-07-21T15:11:50-07:00
 spec: 2026-07-13-file-resolution/spec.md
 implemented: true
+next: 2026-07-13-file-resolution/review-8.md
 description: A **feature** review of `2026-07-13-file-resolution/spec.md`
 feature: 2026-07-13-file-resolution/review-7.md
 previous: 2026-07-13-file-resolution/review-6.md
