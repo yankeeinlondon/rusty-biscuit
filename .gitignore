@@ -81,3 +81,5 @@ trace/*
 .claudine/tmp/
 **/tmp-stream*
 /.gitnexus/
+
+/.claude/settings.local.json
