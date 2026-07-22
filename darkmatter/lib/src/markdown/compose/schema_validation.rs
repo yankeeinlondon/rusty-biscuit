@@ -27,7 +27,7 @@
 //! `$(...)` shell expression or an unresolved `{{ ... }}` template — are left
 //! untouched here; their real type is resolved at post-shell re-validation.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::markdown::Markdown;
 use crate::markdown::compose::ComposeOptions;
@@ -36,12 +36,17 @@ use crate::markdown::schemas::DarkmatterSchemas;
 use crate::markdown::schemas::coerce::coerce_frontmatter_with_pending;
 use crate::markdown::types::{MarkdownError, MarkdownResult};
 
-/// Single-pass convenience wrapper around [`run_with_registry`] used by the
-/// module's own tests. Production passes a shared registry slot so the two
-/// compose passes reuse one scan.
+/// Single-pass convenience wrapper used by this module's tests.
 #[cfg(test)]
 pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> MarkdownResult<()> {
     run_with_registry(markdown, options, &mut None)
+}
+
+fn trigger_discovery_boundary(options: &ComposeOptions, document_path: &Path) -> Option<PathBuf> {
+    match options.file_resolution_context.as_ref() {
+        Some(context) => context.repository_root().map(Path::to_path_buf),
+        None => crate::markdown::compose::find_git_root_from(document_path),
+    }
 }
 
 /// Runs schema validation against the document's effective frontmatter,
@@ -99,25 +104,23 @@ pub(crate) fn run_with_registry(
         if let Some(fallback) = options.file_ref_fallback_dir.clone() {
             builder = builder.with_file_ref_fallback_dir(fallback);
         }
-        if let Some(baseline) = &options.baseline_schema {
-            // The Darkmatter default baseline shares the process-cached compiled
-            // JSON Schema (F9); a caller-supplied baseline still converts here.
-            let built = if options.baseline_is_darkmatter_default {
-                builder.with_darkmatter_baseline_json_schema()
-            } else {
-                builder.with_baseline(baseline.clone())
-            };
-            builder = built.map_err(|err| MarkdownError::SchemaValidationFailed {
-                path: path.clone(),
-                problems: Vec::new(),
-                summary: format!("schema could not be prepared: {err}"),
-                description: description.clone(),
-                source: Some(Box::new(err)),
+        if let Some(context) = options.file_resolution_context.clone() {
+            builder = builder.with_file_resolution_context(context);
+        }
+        if let Some(baseline) = options.baseline_schema.clone() {
+            builder = builder.with_baseline(baseline).map_err(|err| {
+                MarkdownError::SchemaValidationFailed {
+                    path: path.clone(),
+                    problems: Vec::new(),
+                    summary: format!("schema could not be prepared: {err}"),
+                    description: description.clone(),
+                    source: Some(Box::new(err)),
+                }
             })?;
         }
         if options.trigger_schemas
             && let Some(ComposeSource::File(document_path)) = markdown.source()
-            && let Some(boundary) = crate::markdown::compose::find_git_root_from(document_path)
+            && let Some(boundary) = trigger_discovery_boundary(options, document_path)
         {
             builder = if let Some(registry) = trigger_registry.take() {
                 builder.with_trigger_registry(registry)
@@ -145,15 +148,33 @@ pub(crate) fn run_with_registry(
     // eager-`file` rewrite pass after validation accepts the instance.
     // `effective_for` returns an owned schema (no borrow of `markdown`), so it
     // can outlive the frontmatter mutations below.
-    let effective = schemas.effective_for(markdown).map_err(|err| {
-        MarkdownError::SchemaValidationFailed {
-            path: path.clone(),
-            problems: Vec::new(),
-            summary: format!("schema could not be prepared: {err}"),
-            description: description.clone(),
-            source: Some(Box::new(err)),
+    let effective = match schemas.effective_for(markdown) {
+        Ok(effective) => effective,
+        // A schema that cannot even be prepared is still not this pass's verdict
+        // to report when the caller deferred it; coercion simply has nothing to
+        // work from.
+        Err(_) if options.defer_schema_verdict => return Ok(()),
+        Err(err) => {
+            return Err(MarkdownError::SchemaValidationFailed {
+                path: path.clone(),
+                problems: Vec::new(),
+                summary: format!("schema could not be prepared: {err}"),
+                description: description.clone(),
+                source: Some(Box::new(err)),
+            });
         }
-    })?;
+    };
+
+    let caller_file_overrides = effective
+        .as_ref()
+        .map(|effective| resolve_eager_caller_file_overrides(effective, options))
+        .unwrap_or_default();
+    if !caller_file_overrides.is_empty() {
+        let fm_map = markdown.frontmatter_mut().as_map_mut();
+        for (key, value) in &caller_file_overrides {
+            fm_map.insert(key.clone(), value.clone());
+        }
+    }
 
     if let Some(effective) = effective.as_ref() {
         // Coerce schema-recognized scalars to their declared types and write the
@@ -179,43 +200,22 @@ pub(crate) fn run_with_registry(
         }
     }
 
-    // Validate through the effective schema already resolved above instead of
-    // re-running `effective_for` inside `schemas.validate` (F5) — but only when
-    // no trigger registry is active. `effective_for`'s result depends on
-    // frontmatter values solely through trigger matching; the coercion
-    // write-back above can change a value a trigger matches on, so with active
-    // triggers the effective schema must be re-resolved on the coerced
-    // frontmatter to stay byte-identical with the prior behavior. Without
-    // triggers the effective schema is a pure function of `$schema` + baseline
-    // (both stable across coercion), so reusing the held instance is exact and
-    // skips one full resolution pass.
-    let triggers_active = schemas
-        .trigger_registry()
-        .is_some_and(|registry| !registry.is_empty());
-    let report = if triggers_active {
-        schemas.validate(markdown).map_err(|err| {
-            MarkdownError::SchemaValidationFailed {
-                path: path.clone(),
-                problems: Vec::new(),
-                summary: format!("schema could not be prepared: {err}"),
-                description: description.clone(),
-                source: Some(Box::new(err)),
-            }
-        })?
-    } else {
-        match effective.as_ref() {
-            Some(effective) => {
-                let frontmatter_value = crate::markdown::schemas::frontmatter_as_json(markdown);
-                let positions = crate::markdown::schemas::positions_for(markdown);
-                effective.validate_with_positions(&frontmatter_value, &positions)
-            }
-            None => crate::markdown::schemas::ValidationReport {
-                valid: true,
-                problems: Vec::new(),
-                pending: Vec::new(),
-            },
+    // Coercion above is unconditional; the verdict is not. A pass that does not
+    // own the verdict stops here, before a validator is even built: a schema
+    // that cannot be *prepared* is likewise not this pass's failure to report.
+    if options.defer_schema_verdict {
+        return Ok(());
+    }
+
+    let report = schemas.validate(markdown).map_err(|err| {
+        MarkdownError::SchemaValidationFailed {
+            path: path.clone(),
+            problems: Vec::new(),
+            summary: format!("schema could not be prepared: {err}"),
+            description: description.clone(),
+            source: Some(Box::new(err)),
         }
-    };
+    })?;
 
     // Defer problems whose value will be re-resolved later in composition. The
     // compose-time validator runs after template interpolation but BEFORE shell
@@ -247,6 +247,19 @@ pub(crate) fn run_with_registry(
             // user-schema violations — the caller owns those keys' validation.
             if let Some(name) = top_level_pointer_segment(&p.path)
                 && options.exclude_keys.contains(&name)
+            {
+                return false;
+            }
+            // Caller-originated eager files were resolved against their
+            // invocation-fixed launch context above. A target document may
+            // live across a repository boundary, where rechecking that
+            // absolute value as document-authored can only produce a
+            // contradictory provenance failure.
+            if matches!(
+                p.code,
+                crate::markdown::schemas::ValidationProblemCode::InvalidFileReference
+            ) && top_level_pointer_segment(&p.path)
+                .is_some_and(|name| caller_file_overrides.contains_key(&name))
             {
                 return false;
             }
@@ -291,12 +304,124 @@ pub(crate) fn run_with_registry(
                 if composition_pending.contains(&key) {
                     continue;
                 }
+                let value = caller_file_overrides.get(&key).cloned().unwrap_or(value);
                 fm_map.insert(key, value);
             }
         }
     }
 
     Ok(())
+}
+
+/// Resolve eager-file values supplied through `set_overrides` against the
+/// caller's launch-area context before document schema validation.
+///
+/// A value authored in the document resolves from the document. A value passed
+/// by a caller is a different provenance class: it resolves from the caller's
+/// captured base and remains absolute in the effective frontmatter so later
+/// consumers do not reinterpret it as document-authored. The schema tells us
+/// which override strings are file references; ordinary string overrides are
+/// never probed.
+fn resolve_eager_caller_file_overrides(
+    effective: &crate::markdown::schemas::EffectiveSchema,
+    options: &ComposeOptions,
+) -> serde_json::Map<String, serde_json::Value> {
+    let Some(fallback) = options.file_ref_fallback_dir.as_ref() else {
+        return serde_json::Map::new();
+    };
+    let Some(overrides) = options.set_overrides.as_ref().and_then(serde_json::Value::as_object)
+    else {
+        return serde_json::Map::new();
+    };
+    let context = options
+        .file_resolution_context
+        .as_ref()
+        // The launch area is invocation state already accepted by the caller,
+        // and may be outside a proxied target's repository. The target's own
+        // references keep its normal authoring context; only caller-originated
+        // overrides cross back to this captured boundary.
+        .map(|context| context.for_trusted_external_base(fallback))
+        .unwrap_or_else(|| biscuit_file::FileResolutionContext::new(fallback));
+    let mut resolved = serde_json::Map::new();
+    for (key, value) in overrides {
+        let mut fragments = Vec::new();
+        collect_property_schema_fragments(&effective.json_schema, key, &mut fragments);
+        if let Some(value) = fragments
+            .into_iter()
+            .find_map(|fragment| resolve_eager_caller_value(value, fragment, &context))
+        {
+            resolved.insert(key.clone(), value);
+        }
+    }
+    resolved
+}
+
+fn collect_property_schema_fragments<'a>(
+    schema: &'a serde_json::Value,
+    key: &str,
+    fragments: &mut Vec<&'a serde_json::Value>,
+) {
+    if let Some(fragment) = schema
+        .get("properties")
+        .and_then(serde_json::Value::as_object)
+        .and_then(|properties| properties.get(key))
+    {
+        fragments.push(fragment);
+    }
+    for combinator in ["allOf", "anyOf", "oneOf"] {
+        if let Some(arms) = schema.get(combinator).and_then(serde_json::Value::as_array) {
+            for arm in arms {
+                collect_property_schema_fragments(arm, key, fragments);
+            }
+        }
+    }
+}
+
+fn resolve_eager_caller_value(
+    value: &serde_json::Value,
+    schema: &serde_json::Value,
+    context: &biscuit_file::FileResolutionContext,
+) -> Option<serde_json::Value> {
+    if schema.get("format").and_then(serde_json::Value::as_str)
+        == Some(crate::markdown::schemas::format::DARKMATTER_FILE_FORMAT)
+    {
+        let raw = value.as_str()?;
+        let reference = biscuit_file::FileReference::new(raw).ok()?;
+        let resolved = reference.resolve_in_context(context).ok()??;
+        return Some(serde_json::Value::String(
+            resolved.to_string_lossy().into_owned(),
+        ));
+    }
+    if let Some(items) = schema.get("items")
+        && let Some(values) = value.as_array()
+    {
+        let mut changed = false;
+        let values = values
+            .iter()
+            .map(|value| {
+                resolve_eager_caller_value(value, items, context).map_or_else(
+                    || value.clone(),
+                    |resolved| {
+                        changed = true;
+                        resolved
+                    },
+                )
+            })
+            .collect();
+        if changed {
+            return Some(serde_json::Value::Array(values));
+        }
+    }
+    for combinator in ["allOf", "anyOf", "oneOf"] {
+        if let Some(arms) = schema.get(combinator).and_then(serde_json::Value::as_array) {
+            for arm in arms {
+                if let Some(resolved) = resolve_eager_caller_value(value, arm, context) {
+                    return Some(resolved);
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Returns `true` when `value` is still composition-pending — it holds a
@@ -440,35 +565,23 @@ mod tests {
     }
 
     #[test]
-    fn trigger_schemas_enabled_but_no_effective_schema_is_vacuously_valid() {
-        // `trigger_schemas` clears the early no-op return, but with no document
-        // `$schema`, no baseline, and (for a non-file source) no discovered
-        // triggers, `effective_for` yields `None`. The held-effective
-        // validation path (F5) must treat that as vacuously valid rather than
-        // panicking or re-resolving.
-        let mut md = md_with_schema("name: alice\n");
-        let options = ComposeOptions::new().with_trigger_schemas(true);
-        assert!(run(&mut md, &options).is_ok());
-        assert_eq!(
-            md.frontmatter().as_map().get("name"),
-            Some(&serde_json::json!("alice"))
-        );
-    }
+    fn trigger_discovery_reuses_request_repository_boundary() {
+        let request_repo = tempfile::tempdir().unwrap();
+        let nested_repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(request_repo.path().join(".git")).unwrap();
+        std::fs::create_dir_all(nested_repo.path().join(".git")).unwrap();
+        let document_path = nested_repo.path().join("prompt.md");
+        let snapshot = biscuit_file::FileResolutionContext::new(request_repo.path())
+            .with_repository_root(request_repo.path());
+        let options = ComposeOptions::new().with_file_resolution_context(snapshot);
 
-    #[test]
-    fn darkmatter_default_baseline_validates_through_cached_json() {
-        // The Darkmatter default baseline reuses the process-cached compiled
-        // JSON Schema (F9). A document carrying only Darkmatter-owned keys must
-        // still validate, and coercion driven by that baseline still runs — the
-        // string "true" against the baseline's boolean-typed `ctx.*`-adjacent
-        // shape is not asserted here; instead we assert the fast path is a
-        // functional no-op on a plain document.
-        let mut md = md_with_schema("title: Hello\n");
-        let options = ComposeOptions::new().with_darkmatter_baseline_schema();
-        assert!(run(&mut md, &options).is_ok());
         assert_eq!(
-            md.frontmatter().as_map().get("title"),
-            Some(&serde_json::json!("Hello"))
+            trigger_discovery_boundary(&options, &document_path).as_deref(),
+            Some(request_repo.path()),
+        );
+        assert_eq!(
+            trigger_discovery_boundary(&ComposeOptions::new(), &document_path).as_deref(),
+            Some(nested_repo.path()),
         );
     }
 
@@ -482,6 +595,30 @@ mod tests {
         assert_eq!(
             md.frontmatter().as_map().get("title"),
             Some(&serde_json::json!("Hello"))
+        );
+    }
+
+    // ── Deferred verdict ──────────────────────────────────────────────
+
+    #[test]
+    fn deferred_verdict_reports_no_problem() {
+        let mut md = md_with_schema("$schema:\n  title: 'string(required)'\nother: stuff\n");
+        let options = ComposeOptions::new().with_deferred_schema_verdict(true);
+        assert!(
+            run(&mut md, &options).is_ok(),
+            "a pass that does not own the verdict reports no violation"
+        );
+    }
+
+    #[test]
+    fn deferred_verdict_still_coerces() {
+        let mut md = md_with_schema("$schema:\n  enabled: boolean\nenabled: \"true\"\n");
+        let options = ComposeOptions::new().with_deferred_schema_verdict(true);
+        assert!(run(&mut md, &options).is_ok());
+        assert_eq!(
+            md.frontmatter().as_map().get("enabled"),
+            Some(&serde_json::json!(true)),
+            "coercion is unconditional; only the verdict is withheld"
         );
     }
 
@@ -1134,7 +1271,7 @@ mod tests {
         // path this run is about to create. With the review file present and
         // `plan` naming a not-yet-existing path, schema validation must pass —
         // lazy `file` never checks existence, while eager `review` resolves
-        // document-first to the present review file.
+        // explicitly source-relative to the present review file.
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("design-review.md"), b"# review\n").unwrap();
         let doc_path = dir.path().join("prompt.md");
@@ -1309,8 +1446,8 @@ mod tests {
 
     /// Idempotence at the compose level (Decision #6): running the stage on
     /// an already-rewritten value is a fixpoint — the stored value does not
-    /// drift across runs. The fallback (launch area) is the repo root, so the
-    /// git-root-relative rewritten value re-resolves on the second pass.
+    /// drift across runs. The request-scoped repository root lets the
+    /// git-root-relative rewritten value re-resolve on the second pass.
     #[test]
     fn eager_file_rewrite_is_idempotent_across_runs() {
         let repo = tempfile::tempdir().unwrap();
@@ -1383,15 +1520,124 @@ mod tests {
         );
     }
 
-    // ── Phase 4: CWD-independence of the eager-`file` rewrite ──────────
-    //
+    #[test]
+    fn eager_file_set_override_resolves_from_the_callers_launch_area() {
+        let dir = tempfile::tempdir().unwrap();
+        let document_dir = dir.path().join("document");
+        let launch_dir = dir.path().join("launch");
+        std::fs::create_dir_all(&document_dir).unwrap();
+        std::fs::create_dir_all(&launch_dir).unwrap();
+        let resolved = launch_dir.join("spec.md");
+        std::fs::write(&resolved, "# Spec\n").unwrap();
+        let doc_path = document_dir.join("prompt.md");
+        let md = md_with_schema_and_source(
+            "$schema:\n  spec: 'file(eager; required)'\nspec: authored.md\n",
+            &doc_path,
+        );
+        let options = ComposeOptions::new()
+            .with_source_file(&doc_path)
+            .with_file_ref_fallback_dir(&launch_dir)
+            .with_set_overrides(serde_json::json!({ "spec": "spec.md" }));
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        assert_eq!(
+            composed.frontmatter().as_map().get("spec"),
+            Some(&serde_json::json!(resolved.to_string_lossy())),
+        );
+    }
+
+    #[test]
+    fn eager_file_set_override_keeps_launch_area_across_target_repository_boundary() {
+        let dir = tempfile::tempdir().unwrap();
+        let launch_repo = dir.path().join("launch-repo");
+        let target_repo = dir.path().join("target-repo");
+        std::fs::create_dir_all(launch_repo.join(".git")).unwrap();
+        std::fs::create_dir_all(target_repo.join(".git")).unwrap();
+        let resolved = launch_repo.join("spec.md");
+        std::fs::write(&resolved, "# Spec\n").unwrap();
+        let doc_path = target_repo.join("prompt.md");
+
+        for schema in ["file(required;eager)", "'file(required;eager)'"] {
+            let md = md_with_schema_and_source(
+                &format!("$schema:\n  spec: {schema}\nspec: authored.md\n"),
+                &doc_path,
+            );
+            let target_context = biscuit_file::FileResolutionContext::new(&target_repo)
+                .with_repository_root(&target_repo)
+                .with_source_path(&doc_path);
+            let options = ComposeOptions::new()
+                .with_source_file(&doc_path)
+                .with_file_resolution_context(target_context)
+                .with_file_ref_fallback_dir(&launch_repo)
+                .with_set_overrides(serde_json::json!({ "spec": "spec.md" }));
+
+            let (composed, _) = md.compose_with(options).unwrap();
+            assert_eq!(
+                composed.frontmatter().as_map().get("spec"),
+                Some(&serde_json::json!(resolved.to_string_lossy())),
+                "caller-originated `spec.md` must stay anchored to the launch area for {schema}",
+            );
+        }
+    }
+
+    #[test]
+    fn eager_file_array_set_override_resolves_each_launch_area_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let document_dir = dir.path().join("document");
+        let launch_dir = dir.path().join("launch");
+        std::fs::create_dir_all(&document_dir).unwrap();
+        std::fs::create_dir_all(&launch_dir).unwrap();
+        let first = launch_dir.join("first.md");
+        let second = launch_dir.join("second.md");
+        std::fs::write(&first, "# First\n").unwrap();
+        std::fs::write(&second, "# Second\n").unwrap();
+        let doc_path = document_dir.join("prompt.md");
+        let md = md_with_schema_and_source(
+            "$schema:\n  specs: 'file(eager)[]'\nspecs: []\n",
+            &doc_path,
+        );
+        let options = ComposeOptions::new()
+            .with_source_file(&doc_path)
+            .with_file_ref_fallback_dir(&launch_dir)
+            .with_set_overrides(serde_json::json!({ "specs": ["first.md", "second.md"] }));
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        assert_eq!(
+            composed.frontmatter().as_map().get("specs"),
+            Some(&serde_json::json!([
+                first.to_string_lossy(),
+                second.to_string_lossy(),
+            ])),
+        );
+    }
+
+    #[test]
+    fn ordinary_string_set_override_is_not_treated_as_a_file_reference() {
+        let dir = tempfile::tempdir().unwrap();
+        let launch_dir = dir.path().join("launch");
+        std::fs::create_dir_all(&launch_dir).unwrap();
+        std::fs::write(launch_dir.join("spec.md"), "# Spec\n").unwrap();
+        let doc_path = dir.path().join("prompt.md");
+        let md = md_with_schema_and_source(
+            "$schema:\n  label: 'string(required)'\nlabel: authored\n",
+            &doc_path,
+        );
+        let options = ComposeOptions::new()
+            .with_source_file(&doc_path)
+            .with_file_ref_fallback_dir(&launch_dir)
+            .with_set_overrides(serde_json::json!({ "label": "spec.md" }));
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        assert_eq!(
+            composed.frontmatter().as_map().get("label"),
+            Some(&serde_json::json!("spec.md")),
+        );
+    }
+
     // The rewrite consumes the `ResolutionContext` carried by `EffectiveSchema`
-    // (base_dir + launch-area fallback) and must not introduce an ambient-CWD
-    // anchor (spec: "Implementation constraints"). With the process CWD
-    // mutated to an unrelated directory, compose must still produce the
-    // git-root-relative rewritten value. Mirrors the
-    // `#[serial_test::serial("darkmatter-file-cwd")]` convention already used
-    // in `schemas/format.rs` and `schemas/validate.rs`.
+    // and must not introduce an ambient-CWD anchor. With process CWD mutated to
+    // an unrelated directory, compose still produces the repository-relative
+    // value.
 
     /// RAII guard that restores the process CWD on drop, even on panic.
     struct CwdGuard {
@@ -1414,8 +1660,8 @@ mod tests {
 
     /// With the process CWD mutated to an unrelated directory, compose's
     /// eager-`file` rewrite still produces the git-root-relative value. The
-    /// rewrite resolves through `EffectiveSchema`'s anchors (prompt dir +
-    /// launch-area fallback), never the ambient CWD.
+    /// rewrite resolves through the document base directory (repository-first
+    /// then source), never the ambient CWD.
     #[test]
     #[serial_test::serial(darkmatter_file_cwd)]
     fn eager_file_rewrite_is_independent_of_process_cwd() {
@@ -1431,9 +1677,10 @@ mod tests {
             "$schema:\n  spec: 'file(eager; required)'\nspec: ./spec.md\n",
             &doc_path,
         );
-        // The launch-area fallback is the repo root, so the git-root-relative
-        // rewritten value (`area/spec.md`) re-resolves on a second pass —
-        // proving the rewrite does not depend on the ambient CWD.
+        // The rewritten value (`area/spec.md`) is an implicit reference that
+        // re-resolves repository-first on a second pass, proving the rewrite
+        // does not depend on the ambient CWD. The launch-area anchor is set but
+        // inert for resolution (D2).
         let options = ComposeOptions::new()
             .with_source_file(&doc_path)
             .with_file_ref_fallback_dir(repo.path().to_path_buf());

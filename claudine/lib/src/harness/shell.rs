@@ -18,7 +18,7 @@ use darkmatter::markdown::compose::shell_expansion::{
 
 use tracing::{debug, info_span};
 
-use crate::harness::error::HarnessError;
+use crate::harness::error::{HarnessError, ShellExecCause};
 use crate::harness::model::ApprovedRuntimeCommand;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -372,8 +372,11 @@ pub async fn execute_approved_command(
     .entered();
 
     let start = Instant::now();
-    let exe = which::which(&command.executable).map_err(|_| HarnessError::ShellCommandExecutionFailed {
-        detail: format!("executable '{}' not found in PATH", command.executable),
+    let exe = which::which(&command.executable).map_err(|error| {
+        HarnessError::ShellCommandExecutionFailed {
+            detail: format!("executable '{}' not found in PATH", command.executable),
+            source: ShellExecCause::Which(error),
+        }
     })?;
 
     let mut cmd = tokio::process::Command::new(&exe);
@@ -384,8 +387,9 @@ pub async fn execute_approved_command(
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
 
-    let mut child = cmd.spawn().map_err(|e| HarnessError::ShellCommandExecutionFailed {
-        detail: format!("failed to spawn '{}': {e}", command.executable),
+    let mut child = cmd.spawn().map_err(|error| HarnessError::ShellCommandExecutionFailed {
+        detail: format!("failed to spawn '{}': {error}", command.executable),
+        source: ShellExecCause::Spawn(error),
     })?;
 
     let stdout_pipe = child.stdout.take();
@@ -427,13 +431,14 @@ pub async fn execute_approved_command(
             );
             Ok((exit_code, stdout, stderr))
         }
-        Ok(Err(e)) => {
-            debug!(error = %e, "shell command wait failed");
+        Ok(Err(error)) => {
+            debug!(error = %error, "shell command wait failed");
             Err(HarnessError::ShellCommandExecutionFailed {
-                detail: format!("failed to wait for '{}': {e}", command.executable),
+                detail: format!("failed to wait for '{}': {error}", command.executable),
+                source: ShellExecCause::Wait(error),
             })
         }
-        Err(_) => {
+        Err(elapsed) => {
             let _ = child.kill().await;
             let _ = child.wait().await;
             debug!(timeout_secs = timeout.as_secs(), "shell command timed out");
@@ -443,6 +448,7 @@ pub async fn execute_approved_command(
                     command.raw,
                     timeout.as_secs()
                 ),
+                source: ShellExecCause::Timeout(elapsed),
             })
         }
     }

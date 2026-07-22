@@ -9,10 +9,10 @@ description: |-
     of that original review, or, if the review has been marked as "implemented" then we will move to the highest indexed review
     in the same directory and implement that (unless that too is marked as "implemented").
 
-target: "{{ !frontmatter(review, 'implemented') ? review : find_last_index(review) && !frontmatter(find_last_index(review), 'implemented') ? find_last_index(review) : null }}"
+target: "{{ review }}"
 iteration: {{ file_index(review) }}
 report: {{ dirname(review) + '/' + 'implementation-report-' + iteration + '.md' }}
-initial_review: {{ find_first_index(review) }}
+initial_review: {{ review }}
 
 initialize:
     stack:
@@ -36,7 +36,6 @@ initialize:
 ## Task
 
 > **Review:** {{target}}
-> **Implementation Report:** {{report}}
 
 Your task is to review the _findings_ in the review and then iterate over each as an orchestrator:
 

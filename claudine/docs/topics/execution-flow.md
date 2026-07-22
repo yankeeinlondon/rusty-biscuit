@@ -66,7 +66,8 @@ Dynamic completion fires at markdown-expecting argument positions on all
 three composition commands and on the `--append-system-prompt` /
 `--replace-system-prompt` flag values — both on compose/inline-compose/
 sequence themselves and on every wrapped provider subcommand (`claude`,
-`codex`, `gemini`, `goose`, `kimi`, `opencode`, `qwen`). All three
+`codex`, `gemini`, `goose`, `kimi`, `opencode`, `qwen`, `kilo`, `pi`,
+`antigravity`). All three
 composition commands share one markdown-only contract; there is no
 per-command frontmatter validation at completion time.
 
@@ -117,12 +118,14 @@ All three commands share the same bootstrap path before diverging:
 
 **Source:** `cli/src/argv.rs`
 
-Before clap parses anything, `argv::normalize()` applies four syntactic rewrite rules in fixed order:
+Before clap parses anything, `argv::normalize()` applies three syntactic rewrite rules in fixed order:
 
-1. **Rule 1** — Rewrites provider boolean flags (`--claude`, `--codex`, `--gemini`, `--goose`, `--kimi`, `--opencode`, `--qwen`) to `--provider <slug>` on composition subcommands only, so wrapper passthrough is preserved.
+1. **Rule 1** — Rewrites the catalog-derived provider boolean flags to `--provider <slug>` on composition subcommands only, so wrapper passthrough is preserved.
 2. **Rule 2** — Canonicalizes `--provider <value>` / `--provider=<value>` via `Provider::fuzzy_match_cli_name` (e.g. `cl` → `claude`).
 3. **Rule 4** — Hoists a trailing `--help` / `-h` to argv position 1 on composition subcommands so the root custom help handler fires.
-4. **Rule 3** — Inserts a single `--` separator before the first `key=value` setter that follows an interleaved flag after a previously seen positional, fixing ambiguous arg boundaries.
+
+The retired Rule 3 no longer inserts a synthetic `--`; the post-normalization
+composition-tail partition owns setter and provider-argument boundaries.
 
 The normalizer is a strict no-op under `COMPLETE` (shell completion), after the first literal `--`, on non-UTF-8 tokens, for argv with fewer than two elements, and on non-composition subcommands.
 
@@ -714,7 +717,7 @@ When stdout is a terminal and no explicit `--<provider>` flag is given:
 
 When stdout is not a terminal (e.g., CI, scripts), resolution follows a strict chain with no interactive fallback:
 
-1. **Explicit flag** (`--provider <slug>`, or the shorthand booleans `--claude`, `--codex`, `--gemini`, `--opencode`, `--qwen`, `--goose`, `--kimi`) — highest priority
+1. **Explicit flag** (`--provider <slug>`, or its catalog-derived `--<provider>` shorthand boolean) — highest priority
 2. **Singular frontmatter `agent`** — a single provider name in the effective (composed) frontmatter, fuzzy-matched against known providers
 3. **List-valued frontmatter `agent`** — an ordered list of provider names; the first installed provider in the list is chosen
 4. **Config favorite** — `favorite_agent` from `~/.claudine/config.json`
@@ -881,7 +884,7 @@ the provider or affects hard-timeout behavior.
 
 ### Recovery
 
-Recovery from a failed run is expressed through the `failure` and `blocked` lifecycle stacks. The available lifecycle recovery actions are `Retry`, `Resume`, `Proxy`, and `Requeue`. See [lifecycle.md](lifecycle.md) for the full reference and the [migration table](#migrating-from-the-retired-harness-dsl) for the mapping from the removed `handle_*` keys.
+Recovery is expressed through the lifecycle stacks — `failure` and `blocked` are its natural homes, but flow control is universal and every event may recover. The available lifecycle recovery actions are `retry`, `resume`, `proxy`, and `defer` (`defer` is parse-valid but not yet implemented). See [lifecycle.md](lifecycle.md) for the full reference and the [migration table](#migrating-from-the-retired-harness-dsl) for the mapping from the removed `handle_*` keys.
 
 ### Shell Policy
 

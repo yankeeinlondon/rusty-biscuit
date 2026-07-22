@@ -17,6 +17,7 @@ use darkmatter::markdown::reference::{
     DependencyMismatchKind, ReferenceError, ReferenceGraphMismatchKind,
 };
 use darkmatter::markdown::reference::validate::{ReferenceIssueCode, ReferenceValidationOptions};
+use biscuit_file::FileResolutionContext;
 use std::sync::Arc;
 use tempfile::TempDir;
 
@@ -37,8 +38,6 @@ fn load_md(dir: &TempDir, name: &str) -> Markdown {
     Markdown::try_from(path.as_path()).unwrap()
 }
 
-/// Unwraps the typed prebuilt-graph mismatch classification from a public
-/// `MarkdownError`, panicking if the error is any other shape.
 fn mismatch_kind(err: &MarkdownError) -> ReferenceGraphMismatchKind {
     match err {
         MarkdownError::Reference(inner) => match inner.as_ref() {
@@ -49,8 +48,6 @@ fn mismatch_kind(err: &MarkdownError) -> ReferenceGraphMismatchKind {
     }
 }
 
-/// Asserts a dependency-mismatch child source is the expected file, without
-/// pinning the temp-dir prefix.
 fn assert_child_source(source: &ComposeSource, file_name: &str) {
     match source {
         ComposeSource::File(path) => {
@@ -60,6 +57,133 @@ fn assert_child_source(source: &ComposeSource, file_name: &str) {
             );
         }
         other => panic!("expected a file child source, got: {other:?}"),
+    }
+}
+
+fn reference_options(repo_root: &std::path::Path) -> ComposeOptions {
+    let context = FileResolutionContext::from_snapshot(
+        repo_root,
+        None,
+        std::collections::HashMap::new(),
+    )
+    .with_repository_root(repo_root);
+    ComposeOptions::new().with_file_resolution_context(context)
+}
+
+struct CurrentDirGuard(std::path::PathBuf);
+
+impl CurrentDirGuard {
+    fn set(path: &std::path::Path) -> Self {
+        let previous = std::env::current_dir().unwrap();
+        std::env::set_current_dir(path).unwrap();
+        Self(previous)
+    }
+}
+
+impl Drop for CurrentDirGuard {
+    fn drop(&mut self) {
+        std::env::set_current_dir(&self.0).unwrap();
+    }
+}
+
+fn assert_file_reference_error(error: &darkmatter::markdown::MarkdownError) {
+    assert!(
+        matches!(
+            error,
+            darkmatter::markdown::MarkdownError::Reference(inner)
+                if matches!(inner.as_ref(), darkmatter::markdown::reference::ReferenceError::FileReference(_))
+        ),
+        "expected a typed file-reference error, got: {error:?}"
+    );
+}
+
+#[test]
+#[serial_test::serial]
+fn explicit_context_is_shared_by_enumeration_graph_and_validation() {
+    let repo = TempDir::new().unwrap();
+    let unrelated = TempDir::new().unwrap();
+    write_files(
+        &repo,
+        &[
+            ("docs/root.md", "::file shared.md\n"),
+            ("shared.md", "# Repository winner\n"),
+            ("docs/shared.md", "# Source loser\n"),
+        ],
+    );
+    let md = load_md(&repo, "docs/root.md");
+    let compose = reference_options(repo.path());
+    let graph_options = ReferenceGraphOptions::with_compose(compose.clone());
+
+    let _cwd = CurrentDirGuard::set(unrelated.path());
+
+    let refs = md.transclusions_with_options(&compose).unwrap();
+    assert_eq!(
+        refs[0].resolved_target.as_deref(),
+        Some(repo.path().join("shared.md").to_string_lossy().as_ref())
+    );
+
+    let graph = md.reference_graph(graph_options.clone()).unwrap();
+    assert_eq!(graph.node_count(), 2);
+    assert_eq!(
+        graph.nodes()[0].source,
+        ComposeSource::File(repo.path().join("shared.md"))
+    );
+
+    let report = md
+        .validate_references(ReferenceValidationOptions::with_graph(graph_options))
+        .unwrap();
+    assert!(report.is_valid(), "unexpected issues: {:?}", report.issues);
+}
+
+#[test]
+fn invalid_reference_propagates_across_all_reference_surfaces() {
+    let repo = TempDir::new().unwrap();
+    write_files(&repo, &[("root.md", "::file {{}}\n")]);
+    let md = load_md(&repo, "root.md");
+    let compose = reference_options(repo.path());
+    let graph_options = ReferenceGraphOptions::with_compose(compose.clone());
+
+    let enumeration = md.transclusions_with_options(&compose).unwrap_err();
+    let graph = md.reference_graph(graph_options.clone()).unwrap_err();
+    let validation = md
+        .validate_references(ReferenceValidationOptions::with_graph(graph_options))
+        .unwrap_err();
+
+    assert_file_reference_error(&enumeration);
+    assert_file_reference_error(&graph);
+    assert_file_reference_error(&validation);
+}
+
+#[cfg(unix)]
+#[test]
+fn permission_failure_propagates_across_all_reference_surfaces() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let repo = TempDir::new().unwrap();
+    write_files(
+        &repo,
+        &[
+            ("root.md", "::file locked/child.md\n"),
+            ("locked/child.md", "# Child\n"),
+        ],
+    );
+    let md = load_md(&repo, "root.md");
+    let compose = reference_options(repo.path());
+    let graph_options = ReferenceGraphOptions::with_compose(compose.clone());
+    let locked = repo.path().join("locked");
+    let original_mode = std::fs::metadata(&locked).unwrap().permissions().mode();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o0)).unwrap();
+
+    let enumeration = md.transclusions_with_options(&compose);
+    let graph = md.reference_graph(graph_options.clone());
+    let validation = md.validate_references(ReferenceValidationOptions::with_graph(graph_options));
+
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(original_mode)).unwrap();
+
+    let errors = [enumeration.unwrap_err(), graph.unwrap_err(), validation.unwrap_err()];
+    for error in &errors {
+        assert_file_reference_error(error);
+        assert!(error.to_string().contains("filesystem error"));
     }
 }
 

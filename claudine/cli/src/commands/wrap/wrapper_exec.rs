@@ -55,6 +55,8 @@ pub(crate) fn run_structured_stream_session(
         child_cwd,
         stream_verbosity,
         summary_details.clone(),
+        // A direct wrapper run is never a sequence task; nothing to attribute.
+        None,
     )
     .with_context_extra(dispatch_context.clone())
     .with_status_reporter(status_reporter);
@@ -158,6 +160,8 @@ pub(crate) fn run_structured_stream_session(
             Some(section_stream.tracker()),
             content_early_rx,
             signal_hub,
+            // Direct wrapper path: no sequence task owns this stream.
+            None,
         )?
     };
     let mut summary = stream_result.data;

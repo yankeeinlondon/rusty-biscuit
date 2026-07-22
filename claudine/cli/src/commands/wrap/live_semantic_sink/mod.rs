@@ -274,7 +274,7 @@ impl LiveSemanticSink {
             emit_output_text: None,
             emit_event_log: None,
             live_metrics: progress::new_live_metrics(),
-            stream_output: StreamOutput::new(),
+            stream_output: StreamOutput::shared(),
             thinking_stream: ThinkingStream::new(terminal.clone()),
             terminal,
             section_tracker: Arc::new(Mutex::new(SectionTracker::new())),
@@ -305,12 +305,18 @@ impl LiveSemanticSink {
     /// dispatch closure, an emit_stderr closure backed by
     /// [`StreamOutput::emit_stderr_line`], and a best-effort JSONL logger
     /// pointing at [`claudine::stream::reporting::write_summary_event`].
+    ///
+    /// `task_gutter` is a sequence task's rendered bar. When present every
+    /// status and reasoning line this sink emits carries it, because the sink's
+    /// coordinator — and therefore the section stream, the watchdog tickers, and
+    /// the timing monitor that are handed it — is the decorated handle.
     pub(crate) fn with_default_wiring(
         provider: Provider,
         env: EnvironmentContext,
         cwd: &Path,
         verbosity: Verbosity,
         summary_details: Arc<Mutex<StructuredSummaryDetails>>,
+        task_gutter: Option<String>,
     ) -> Self {
         let handle = tokio::runtime::Handle::try_current().ok();
         let runtime_context = match claudine::dispatch::DispatchRuntimeContext::load_for_env(&env) {
@@ -320,7 +326,10 @@ impl LiveSemanticSink {
                 claudine::dispatch::DispatchRuntimeContext::default()
             }
         };
-        let stream_output = StreamOutput::new();
+        let stream_output = match task_gutter {
+            Some(gutter) => StreamOutput::shared().decorated(gutter),
+            None => StreamOutput::shared(),
+        };
 
         let dispatch: SemanticDispatchFn = {
             let runtime_context = runtime_context;

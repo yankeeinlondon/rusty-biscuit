@@ -1,0 +1,26 @@
+diff --git a/CLAUDE.md b/CLAUDE.md
+index bf903f362..ca95eba47 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -123,7 +123,7 @@ Update alongside code changes:
+ <!-- gitnexus:start -->
+ # GitNexus — Code Intelligence
+ 
+-This project is indexed by GitNexus as **rusty-biscuit** (135459 symbols, 265948 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
++This project is indexed by GitNexus as **rusty-biscuit** (135464 symbols, 265953 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+ 
+ > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
+ 
+diff --git a/prompts/_implement/implement-plan.md b/prompts/_implement/implement-plan.md
+index 4acc746da..635073ab7 100644
+--- a/prompts/_implement/implement-plan.md
++++ b/prompts/_implement/implement-plan.md
+@@ -28,7 +28,7 @@ success:
+ 
+     stack:
+         - action:
+-            - shell: "git add ."
++            - shell: "git add .."
+             - shell: "just commit"
+ blocked:
+     message: "💥  phase **{{phase}}** (_of {{total_phases}}_) was **blocked** because it has shell commands which were not approved for execution!"

@@ -77,7 +77,7 @@ fn bench_stream_parser(c: &mut Criterion) {
             );
 
             for line in &lines {
-                parser.feed_line(black_box(line)).unwrap();
+                parser.feed_line(black_box(line));
             }
 
             let summary = parser.finish(0);

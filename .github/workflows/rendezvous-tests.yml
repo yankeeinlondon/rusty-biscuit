@@ -1,0 +1,143 @@
+name: rendezvous-tests
+
+# Native runtime gate for Rendezvous's local IPC control plane.
+#
+# This area does not use the shared `_area-ci.yml` building block, for two
+# reasons specific to what is under test here:
+#
+#   1. That block compile-checks macOS and runs the suite only on Linux and
+#      Windows. Rendezvous has three first-class local transports paths — macOS
+#      UDS, Linux UDS, Windows named pipes — and a compile check cannot observe
+#      socket modes, DACLs, stale-endpoint reclamation, or teardown. All three
+#      OSes run the suite.
+#   2. That block defaults Windows to `continue-on-error`. The named-pipe server
+#      is the half of this contract with no other coverage, so a soft-failing
+#      Windows leg would mean shipping it untested. This leg gates.
+#
+# Sniff's stable-user detector keeps its existing three-OS matrix in `test.yml`
+# (`sniff-cross-platform`); it is not duplicated here. What this workflow adds
+# for Sniff is the compile check, so a change to `sniff::os::user` that breaks a
+# Rendezvous consumer surfaces against Rendezvous.
+
+on:
+  push:
+    paths:
+      - "claudine/rendezvous/**"
+      - "claudine/cli/**"
+      - "sniff/lib/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "just/**"
+      - ".github/workflows/rendezvous-tests.yml"
+  pull_request:
+    paths:
+      - "claudine/rendezvous/**"
+      - "claudine/cli/**"
+      - "sniff/lib/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "just/**"
+      - ".github/workflows/rendezvous-tests.yml"
+  workflow_dispatch: {}
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: rendezvous-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: native (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      # Each OS proves a different half of the contract; one failing must not
+      # hide the others' results.
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # Backstop for the vendored protoc in rendezvous-core's build.rs.
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: rendezvous-tests-${{ matrix.os }}
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      # `--all-targets` builds the test targets too, so a `cfg(unix)`-only
+      # import in a test file fails here rather than silently shipping a suite
+      # that cannot compile on Windows.
+      - name: Compile-check every affected crate (all targets)
+        run: >
+          cargo check --color=never --all-targets
+          -p sniff
+          -p rendezvous-core
+          -p rendezvous-client
+          -p rendezvous-daemon
+          -p claudine-cli
+
+      - name: Rendezvous suite
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p ci-logs
+          (cd claudine/rendezvous && just test) 2>&1 \
+            | tee "ci-logs/rendezvous-${{ matrix.os }}.log"
+
+      # The local-control-plane call sites. They live in claudine-cli but are
+      # part of this contract: each resolves a `LocalEndpoint` and connects
+      # through the portable client, and a transport regression reaches users
+      # through them rather than through the daemon's own tests.
+      - name: Local control-plane call sites
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p ci-logs
+          cargo nextest run --color=never -p claudine-cli \
+            -E 'test(/dashboard/) + test(/session_report/) + test(/requeue/) + test(/commands::handle/)' \
+            2>&1 | tee "ci-logs/call-sites-${{ matrix.os }}.log"
+
+      # A failing endpoint, permission, retry, or teardown assertion is only
+      # diagnosable from the message that names the endpoint — which on Windows
+      # is a SID-qualified pipe. The account and issuing machine live in a user
+      # SID's trailing RIDs, so those are dropped while the prefix stays: a
+      # reader can still see that an identity was in the failure, without the
+      # artifact publishing which one.
+      - name: Redact user SIDs from logs
+        if: always()
+        shell: bash
+        run: |
+          shopt -s nullglob
+          for log in ci-logs/*.log; do
+            # -i.bak is the spelling both GNU and BSD sed accept.
+            sed -i.bak -E 's/(S-1-5-21)(-[0-9]+)+/\1-<redacted>/g' "$log"
+            rm -f "$log.bak"
+          done
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rendezvous-logs-${{ matrix.os }}
+          path: ci-logs/
+          if-no-files-found: ignore
+          retention-days: 14

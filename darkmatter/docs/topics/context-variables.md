@@ -65,8 +65,12 @@ failure message prints the up-to-date block to paste back.
 > former pre-rendered `_list` twin variables have been removed — replace
 > `{{ ctx.dirty_files_list }}` with `{{ as_unordered_list(ctx.dirty_files) }}`.
 
-> **Note:** the CWD in all file/git operations is the directory which _executed_ the `md compose` command **not** the directory where the composed document lives.
-> Most discovery in the Repository, File Changes, Languages, and Documents groups leverages the `sniff` library.
+> **Note:** the `ctx.*` Repository, File Changes, Languages, and Documents groups
+> derive from the directory that _executed_ the `md compose` command (most discovery
+> leverages the `sniff` library), **not** the directory where the composed document
+> lives. File *reference* resolution is separate: implicit references resolve
+> **repository-root first, then the source document's directory** — see
+> [magic paths](./magic-paths.md).
 
 <!-- BEGIN GENERATED: ctx catalog (source: md schema about / context_catalog_markdown) -->
 **Date and Time**

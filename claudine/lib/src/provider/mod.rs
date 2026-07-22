@@ -7,12 +7,31 @@
 //! traits ([`ProviderBehavior`], [`McpBehavior`], [`AdapterBehavior`],
 //! [`ConfiguratorBehavior`]).
 //!
-//! Phase 1 of the centralized providers refactor establishes this module
-//! as the home for `Provider` and the static-data scaffolding while leaving
-//! existing per-domain dispatch (events, agents, linking, stream, MCP,
-//! adapters, configurators) intact. Subsequent phases migrate per-domain
-//! data into [`ProviderInfo`] fields and dynamic dispatch through the
-//! behavior traits.
+//! ## Generated data, hand-written behavior
+//!
+//! Each `provider/<slug>/` module splits cleanly along a generated /
+//! hand-written seam:
+//!
+//! - `data.rs` — the `&'static ProviderInfo` constant, the named
+//!   `EventMappingTable` static, the shared memory-files const, and the
+//!   `LazyLock`-backed [`ProviderCapabilities`](crate::linking::capabilities::ProviderCapabilities)
+//!   builder. This file is
+//!   **generated** by `claudine-gen` from the field-source matrix (roster +
+//!   facts + sidecar-validated research + human overrides) and is **never**
+//!   hand-edited; drift is caught by the generator's `check` path (the
+//!   nextest drift test). Shape changes flow through `claudine-gen`'s emitter,
+//!   never this crate.
+//! - `behavior.rs` — the hand-written zero-sized struct implementing the four
+//!   behavior traits above (plus the parser/adapter/configurator/wrapper
+//!   wiring). This is the only per-provider file authored by hand.
+//!
+//! The per-domain migration that once lived across events, linking, stream,
+//! MCP, adapters, and configurators is complete: provider-varying *data* is a
+//! [`ProviderInfo`] field, provider-varying *behavior* is a trait method, and
+//! decentralized `match Provider` dispatch is held in check by the unified
+//! dispatch-inventory guard (`claudine-cli/tests/dispatch_inventory.rs`). See
+//! `docs/topics/provider-metadata.md` for the field-source matrix and the
+//! generation pipeline.
 
 mod acp;
 mod antigravity;

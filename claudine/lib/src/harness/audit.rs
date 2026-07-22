@@ -30,8 +30,9 @@ pub fn collect_auditable_commands(
         let directives = darkmatter::markdown::compose::shell_expansion::parse_directives(
             text, ctx, 0,
         )
-        .map_err(|e| HarnessError::ShellAuditParseError {
-            detail: e.to_string(),
+        .map_err(|error| HarnessError::ShellAuditParseError {
+            detail: error.to_string(),
+            source: Box::new(error),
         })?;
         for directive in directives {
             commands.push(AuditedCommand {

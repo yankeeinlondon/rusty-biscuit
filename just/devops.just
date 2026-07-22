@@ -310,7 +310,11 @@ _test_workspace *selectors="":
         echo
         echo "Testing ${package}..."
         set +e
-        just _test "${package}" "${package_args[@]}"
+        if (( ${#package_args[@]} > 0 )); then
+            just _test "${package}" "${package_args[@]}"
+        else
+            just _test "${package}"
+        fi
         exit_code=$?
         set -e
 
@@ -558,9 +562,41 @@ _test_l2 pkg *args="":
 
 # Level 3 tier: OS keyboard/mouse injection tests. Always opt-in via
 # RUN_LEVEL3=1; the recipe sets the variable so the gate trips cleanly.
+#
+# This tier TAKES OVER THE DESKTOP: it raises a GUI terminal to frontmost and
+# synthesizes real keyboard events, which land in whatever window owns focus.
+# Anything the operator types during the run interleaves with the injection.
+# The recipe therefore refuses to start unattended — an agent, hook, or CI job
+# that shells out to it gets a hard error instead of silently stealing focus
+# from whoever is at the keyboard. Set BISCUIT_L3_TAKE_FOCUS=1 to authorize a
+# non-interactive run (a human deciding the machine is free), or answer the
+# prompt when running from a terminal.
 _test_l3 pkg *args="":
     #!/usr/bin/env bash
     set -euo pipefail
+    if [ "${BISCUIT_L3_TAKE_FOCUS:-}" != "1" ]; then
+        if [ ! -t 0 ]; then
+            echo -e "⛔ {{ bold }}just test-l3 refuses to run unattended{{ reset }}" >&2
+            echo >&2
+            echo "   Level-3 tests raise a GUI terminal over every other window and" >&2
+            echo "   inject real OS keystrokes into whatever holds focus. Running this" >&2
+            echo "   without a human present hijacks an active desktop session." >&2
+            echo >&2
+            echo -e "   Run it from a terminal, or set {{ bold }}BISCUIT_L3_TAKE_FOCUS=1{{ reset }} to" >&2
+            echo "   confirm the machine is free." >&2
+            exit 1
+        fi
+        echo
+        echo -e "⚠️  {{ bold }}Level-3 tests will take over this desktop{{ reset }}"
+        echo -e "   {{ dim }}A terminal window is raised to frontmost and real keystrokes are{{ reset }}"
+        echo -e "   {{ dim }}injected into it. Do not type until the run finishes.{{ reset }}"
+        echo
+        read -r -p "   Proceed? [y/N] " reply
+        case "${reply}" in
+            [yY]) ;;
+            *) echo "   Aborted."; exit 1 ;;
+        esac
+    fi
     echo
     echo -e "🎹 Level-3 tests for {{ bold }}{{ pkg }}{{ reset }} {{ dim }}(RUN_LEVEL3=1){{ reset }}"
     echo

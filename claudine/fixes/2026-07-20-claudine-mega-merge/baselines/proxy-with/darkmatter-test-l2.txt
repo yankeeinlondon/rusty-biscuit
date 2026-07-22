@@ -1,0 +1,56 @@
+Revision: e348486c810969abe87a6b7209979034f5454b07
+Detached worktree: /tmp/claudine-mega-proxy.InQb45/tree
+Working directory: darkmatter
+Command: just test-l2
+Timeout policy: SIGINT at 60s; SIGKILL 5s later
+Exit status: 124
+Classification: timed-out
+Elapsed seconds: 60.212223042000005
+
+[[STDOUT]]
+
+Running [1mLevel-2[0m render-tree terminal tests
+[2m- export BISCUIT_TEST_LEVEL_REQUIRED=2 to hard-fail on missing harness[0m
+
+
+🖥  Level-2 tests for [1mdarkmatter[0m
+
+  [2mspawned wezterm pane 990[0m
+  [2mspawned tmux session biscuit_test_27491_0[0m
+  [2mspawned apple-terminal window 28850[0m
+[[STDERR]]
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling darkmatter v0.1.0 (/private/tmp/claudine-mega-proxy.InQb45/tree/darkmatter/lib)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 37.73s
+────────────
+ Nextest run ID cdb34a88-32ca-426b-ac49-df052b5c97c7 with nextest profile: default
+    Starting 19 tests across 48 binaries (5725 tests skipped)
+        PASS [   0.697s] ( 1/19) darkmatter::level2_render_tree_terminal basic_spans::level2_tree_dim_renders_dim_sgr_in_real_terminal
+        PASS [   0.666s] ( 2/19) darkmatter::level2_render_tree_terminal basic_spans::level2_tree_heading_text_survives_real_terminal
+        PASS [   0.654s] ( 3/19) darkmatter::level2_render_tree_terminal basic_spans::level2_tree_hr_attributes_render_styled_rule_in_real_terminal
+        PASS [   0.651s] ( 4/19) darkmatter::level2_render_tree_terminal basic_spans::level2_tree_inline_styles_render_with_ansi_in_real_terminal
+        PASS [   0.657s] ( 5/19) darkmatter::level2_render_tree_terminal basic_spans::level2_tree_mark_renders_reverse_video_in_real_terminal
+        PASS [   0.776s] ( 6/19) darkmatter::level2_render_tree_terminal code_panel::level2_page_code_panel_is_contiguous_inverted_rectangle
+        PASS [   0.761s] ( 7/19) darkmatter::level2_render_tree_terminal code_panel::level2_page_no_double_blank_rows_between_code_blocks
+        PASS [   0.682s] ( 8/19) darkmatter::level2_render_tree_terminal code_panel::level2_tree_rich_code_block_title_gutter_and_highlight_survive_real_terminal
+        PASS [   1.255s] ( 9/19) darkmatter::level2_render_tree_terminal file_links::level2_file_links_directive_renders_styled_tree_in_real_terminal
+        PASS [   0.641s] (10/19) darkmatter::level2_render_tree_terminal images::level2_tree_hr_vector_mode_renders_glyph_not_image
+        PASS [   0.655s] (11/19) darkmatter::level2_render_tree_terminal images::level2_tree_rich_image_node_emits_protocol_and_renders_in_real_terminal
+        PASS [   1.338s] (12/19) darkmatter::level2_render_tree_terminal images::level2_tree_rich_image_node_paints_distinctive_pixels
+  Cancelling due to interrupt: 1 test still running
+   TRY 1 INT [   1.234s] (─────) darkmatter::level2_render_tree_terminal layout_policy::level2_matched_layout_policy_matches_no_policy_capabilities_in_real_terminal
+  stdout ───
+
+    running 1 test
+
+    (test aborted with signal 2: SIGINT)
+
+────────────
+     Summary [  10.677s] 12/19 tests run: 12 passed, 5725 skipped
+warning: 7/19 tests were not run due to interrupt
+error: test run failed
+error: recipe `_test_l2` failed with exit code 100
+error: recipe `test-l2` failed on line 107 with exit code 100

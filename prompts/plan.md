@@ -7,24 +7,16 @@ $schema:
       plan: "file(required;match(**/*plan*.md)) -> The _plan file_ this prompt will create"
     
 description: "Creates a multi-phase, high confidence plan from a _feature_ or _fix_"
-root: "{{ctx.repo_root}}"
-area: "{{ctx.area }}"
-plan: "{{ dirname(spec) + '/plan.md' }}"
-# auto find design if possible when only spec is passed in
-design: >-
-    {{ 
-        file_exists(parent_dir(spec) + "/" + replace(spec, 'spec', 'design')) 
-            ? parent_dir(spec) + "/" + replace(spec, 'spec', 'design') 
-            : null 
-    }}
-
+underlying: {{ spec || review }}
+underlying_name: '{{ spec ? "spec" : "review" }}'
+plan: "{{ dirname(spec || review) + '/plan.md' }}"
 start:
-    message: "🖊️ creating a plan for the `{{spec}}` specification"
+    message: "🖊️ creating a plan for the `{{underlying}}` {{underlying_name}}"
 success:
-    stderr: "The <blue>{{link(plan)}}</blue> plan has been created"
-    message: "✅  the plan for the spec `{{parent_dir(spec)}}` _in_ **{{ctx.area}}** was created _at_ {{ctx.time}}"
+    stderr: "The `{{link(plan)}}` _plan_ has been created"
+    message: "✅  the _plan_ for the spec `{{parent_dir(plan)}}` was created _at_ {{ctx.time}}"
 failure:
-    message: "❌️  the plan for the spec `{{parent_dir(spec)}}` _in_ **{{ctx.area}}** failed to complete!"
+    message: "❌️  the _plan_ for the {{underlying_name}} `{{underlying}}` failed to complete!"
 ---
 
 You are a planning agent. Convert the following documents into a high confidence execution plan:
@@ -54,9 +46,8 @@ You are a planning agent. Convert the following documents into a high confidence
 
 - Save the plan as "{{plan}}"
 - Add frontmatter to the plan document and set:
-    - `agent` set this to "{{env.AGENT}}"
     - `total_phases` property to the number of phases defined in this plan
     - `created` add the date in YYYY-MM-DD format
     - `phase` set this to the starting phase number; usually 1 but may be 0 sometimes
-    - `agent` set this to "{{ env.AGENT }}/{{ env.MODEL || default }}"
+    - `agent` set this to "{{ ctx.agent }}/{{ ctx.model }}"
     - `yolo` set this to "{{ env.YOLO }}"

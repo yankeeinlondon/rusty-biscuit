@@ -8,13 +8,15 @@
 
 use std::time::Duration;
 
-use rendezvous_client::connect_uds;
+use rendezvous_client::connect;
 use rendezvous_core::{
     AppendEntryRequest, ChunkConfig, ListChunkEntriesRequest, ListSessionChunksRequest,
     QueryProjectionRequest,
 };
 use rendezvous_daemon::batcher::BatcherConfig;
-use rendezvous_daemon::server::{DaemonConfig, spawn_uds_server};
+use rendezvous_core::local_endpoint::test_support::private_endpoint;
+use rendezvous_daemon::local_transport::spawn_local_server;
+use rendezvous_daemon::server::DaemonConfig;
 use rendezvous_daemon::storage::Storage;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -30,27 +32,16 @@ fn fast_config(tmp: &TempDir, chunk_config: ChunkConfig) -> DaemonConfig {
     config
 }
 
-async fn wait_until_bound(path: &std::path::Path) {
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    while !path.exists() {
-        if std::time::Instant::now() >= deadline {
-            panic!("socket {} never appeared", path.display());
-        }
-        sleep(Duration::from_millis(10)).await;
-    }
-}
-
 #[tokio::test]
 async fn append_persists_to_redb_and_eventually_to_duckdb() {
     let tmp = TempDir::new().expect("tempdir");
-    let socket = tmp.path().join("daemon.sock");
+    let socket = private_endpoint(tmp.path(), "daemon");
     let config = fast_config(&tmp, ChunkConfig::default());
     let storage_path = config.storage_path.clone();
 
-    let handle = spawn_uds_server(socket.clone(), config).expect("spawn");
+    let handle = spawn_local_server(socket.clone(), config).expect("spawn");
     let node_id = handle.node_id();
-    wait_until_bound(&socket).await;
-    let mut client = connect_uds(socket.clone()).await.expect("connect");
+    let mut client = connect(&socket).await.expect("connect");
 
     for i in 0..5 {
         client
@@ -135,15 +126,14 @@ fn assert_redb_has_snapshots(path: &PathBuf) {
 #[tokio::test]
 async fn chunk_rotation_creates_new_chunk_at_threshold() {
     let tmp = TempDir::new().expect("tempdir");
-    let socket = tmp.path().join("daemon.sock");
+    let socket = private_endpoint(tmp.path(), "daemon");
     // Force rotation after every two appends so we deterministically
     // observe a chunk transition.
     let config = fast_config(&tmp, ChunkConfig::new(2, 16 * 1024));
 
-    let handle = spawn_uds_server(socket.clone(), config).expect("spawn");
+    let handle = spawn_local_server(socket.clone(), config).expect("spawn");
     let node_id = handle.node_id();
-    wait_until_bound(&socket).await;
-    let mut client = connect_uds(socket.clone()).await.expect("connect");
+    let mut client = connect(&socket).await.expect("connect");
 
     let mut rotated_seen = false;
     for i in 0..5 {

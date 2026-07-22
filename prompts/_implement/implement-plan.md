@@ -1,9 +1,10 @@
 ---
 $schema:
-    phase: number(required;default(1))
-    total_phases: number(required)
-    plan: file(eager; required; match(**/*plan*.md))
-    spec: file(eager; match(**/*spec*.md))
+    phase: number(required;default(1)) -> the phase of the plan to start with
+    total_phases: number(required) -> the total number of phases the plan has
+    plan: file(eager; required; match(**/*plan*.md)) -> the _plan file_ which is being implemented
+    spec: file(eager; match(**/*spec*.md)) -> the _specification file_ which the plan was based on
+    pass_icon: string
 description: |-
     Provide either a `plan` or `spec` filepath as a parameter and this
     prompt will detect the number of phases in the plan and then implement
@@ -12,19 +13,34 @@ plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
 phase: "{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || 1 : null }}"
 area: "{{ ctx.area }}"
 pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
-total_phases: "{{ file_exists(plan) ? frontmatter(plan, 'total_phases') || frontmatter(plan, 'phases') || 1 : 0 }}"
+total_phases: "{{ file_exists(plan) ? frontmatter(plan, 'total_phases') || frontmatter(plan, 'phases') || 0 : 0 }}"
 spec: "{{ file_exists(plan) ? file_exists(dirname(plan) + '/spec.md') ? dirname(plan) + '/spec.md'  :  null : null }}"
-# initialize:
-#     stack:
-#         - when: "phase >= total_phases"
-#           action: 
-#               - warn: "There was an attempt to implement a phase **<yellow>{{phase}}</yellow>** of the plan which is **too large**. This plan only has **<yellow>{{total_phases}}</yellow>** total phases!"
+initialize:
+    stack:
+        - when: "!total_phases || total_phases <= 0"
+          action:
+              - warn: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
+              - message: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
+              - error: "for a plan to be implemented using the **implement-plan** prompt, you need to ensure the plan ({{plan}}) has set either `total_phases` or `phases` Frontmatter property!"
 start:
     message: "🎬  starting the implementation of phase **#{{phase}}** of `{{parent_dir(plan)}}` (**area:** {{ctx.area}}, **agent:** {{ctx.agent}}/{{ctx.model}})"
 success: 
     say: "Phase {{phase}} of the plan in the {{area}} package area, was implemented successfully"
     message: "{{pass_icon}}  phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{parent_dir(plan)}}` successfully completed ({{ctx.area}}, {{ctx.agent}}/{{ctx.model}})"
-    success: "Completed the implementation of {{plan}}"
+    success: "Completed the implementation of <b>phase <yellow>{{iteration}}</yellow></b> of the {{link(plan)}} plan"
+    stack:
+        - when: "ctx.dirty_files"
+          action:
+            - message: |-
+                staging all files from phase {{iteration}} in preparation for git commit:
+
+                {{ as_unordered_list(ctx.dirty_files) }}
+            - shell: git add ..
+            - shell: just commit
+        - when: "!ctx.dirty_files"
+          action:
+              - message: phase {{iteration}} of the plan made no file changes!
+              - warn: phase {{iteration}} of the plan made no file changes!
 blocked:
     message: "💥  phase **{{phase}}** (_of {{total_phases}}_) was **blocked** because it has shell commands which were not approved for execution!"
 failure:

@@ -150,11 +150,26 @@ fn iter_action_expressions<'a>(
                     });
                 }
             }
-            LifecycleControlAction::Proxy { target } => surfaces.push(LifecycleExpressionSurface {
-                property: format!("{prefix}.target"),
-                signal,
-                expr: target,
-            }),
+            LifecycleControlAction::Proxy { target, with } => {
+                surfaces.push(LifecycleExpressionSurface {
+                    property: format!("{prefix}.target"),
+                    signal,
+                    expr: target,
+                });
+                // `with` values resolve at the source handoff against the same
+                // event-time surface as every other operand, so they are scoped
+                // by the same static scans — an `err` reference in a `with:`
+                // value on a no-error event is the same authoring fault as one
+                // in `target`.
+                for (key, value) in with.iter() {
+                    iter_with_value_expressions(
+                        value,
+                        &format!("{prefix}.with.{key}"),
+                        signal,
+                        surfaces,
+                    );
+                }
+            }
             LifecycleControlAction::Retry {
                 max_attempts,
                 delay,
@@ -252,6 +267,34 @@ fn iter_action_expressions<'a>(
                     signal,
                     expr: arg,
                 });
+            }
+        }
+    }
+}
+
+/// Append every expression leaf of one `proxy.with` value tree, naming each by
+/// its path below the overlay key (e.g. `…with.metadata.area`, `…with.files[0]`).
+fn iter_with_value_expressions<'a>(
+    value: &'a ProxyWithValue,
+    prefix: &str,
+    signal: LifecycleSignal,
+    surfaces: &mut Vec<LifecycleExpressionSurface<'a>>,
+) {
+    match value {
+        ProxyWithValue::Null => {}
+        ProxyWithValue::Scalar(expr) => surfaces.push(LifecycleExpressionSurface {
+            property: prefix.to_string(),
+            signal,
+            expr,
+        }),
+        ProxyWithValue::Array(items) => {
+            for (i, item) in items.iter().enumerate() {
+                iter_with_value_expressions(item, &format!("{prefix}[{i}]"), signal, surfaces);
+            }
+        }
+        ProxyWithValue::Object(map) => {
+            for (key, item) in map {
+                iter_with_value_expressions(item, &format!("{prefix}.{key}"), signal, surfaces);
             }
         }
     }
@@ -759,6 +802,28 @@ pub fn collect_lifecycle_shell_commands(
     commands
 }
 
+/// [`collect_lifecycle_shell_commands`], restricted to `signals`.
+///
+/// The property path a surface carries is rooted at its event
+/// (`initialize.stack[0].action[1].command`), so the event name is the filter.
+pub fn collect_lifecycle_shell_commands_for(
+    lifecycle: &LifecycleConfig,
+    signals: &[LifecycleSignal],
+) -> Vec<(String, String)> {
+    let prefixes: Vec<String> = signals
+        .iter()
+        .map(|signal| format!("{}.", signal.property_name()))
+        .collect();
+    collect_lifecycle_shell_commands(lifecycle)
+        .into_iter()
+        .filter(|(_, property)| {
+            prefixes
+                .iter()
+                .any(|prefix| property.starts_with(prefix.as_str()))
+        })
+        .collect()
+}
+
 /// Render an [`Expr`] to its literal string value when it is a string
 /// literal, a bare variable, or a number/bool literal. `None` otherwise
 /// (complex expressions are not collected — they depend on runtime state
@@ -775,3 +840,4 @@ fn expr_as_string_literal(expr: &Expr) -> Option<String> {
 
 /// Normalizes empty or whitespace-only strings to `None`.
 use super::*;
+use super::actions::ProxyWithValue;

@@ -1,0 +1,26 @@
+kind: schema
+name: Lifecycle Actions
+description: >-
+    defines all of the available _actions_ that are allowed in a Claudine lifecycle action and includes
+    both the _short form_ and the _long form_ shapes
+library:
+    - shell_command:
+          - short
+          - long
+    - safe_mutations:
+          - short
+          - long
+    - flow_control:
+          - short
+          - long
+$schema:
+    action:
+        - $description: |-
+              An action consists of three varieties:
+
+              1. a _safe mutation_ function that Claudine provides
+              2. a _shell function_ which must be added to the approved white list to be used
+              3. or a **flow control** directive
+        - shell_command @ this
+        - safe_mutations @ this
+        - flow_control @ this

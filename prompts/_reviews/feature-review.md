@@ -27,12 +27,6 @@ success:
               - warn: "{{feature_or_fix}} review {{iteration}} of `{{ parent_dir(spec) }}` in the {{ctx.area}} package area has completed successfully but <i><yellow>not</yellow></i> production ready: <blue>{{link(review)}}</blue>"
               - message: "⚠️  {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area completed but was deemed NOT production ready"
               - effect: sad-trombone
-        - when: "!file_exists(review)"
-          action:
-              - message: "💥 the agent 'successfully' completed the review but the review does not exist (at least in the location it was supposed to)!"
-              - warn: "the agent believes it successful completed the review but it does not exist (at least not in the location it was supposed to): {{review}} ... will try to resume and get the agent to correct this"
-              - effect: sneeze
-              - resume: "the review file was supposed to be saved to '{{review}}' but there is no file saved to that location!"
 failure:
     stderr: "{{feature_or_fix}} review {{iteration}} for `{{parent_dir(spec)}}` in the {{ctx.area}} package area failed to complete!"
     message: "💥 {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in **{{ ctx.area }}** failed to complete ({{err.msg}})!"

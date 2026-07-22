@@ -43,7 +43,7 @@ What's available inside a loop's `while:` / `until:` expression:
 - **Frontmatter properties** of the document (top-level keys and dotted nested paths like `state.phase`).
 - **Ambient loop variables** under the `_loop_` prefix — see [Ambient variables](<#Ambient Variables>) below.
 - **Environment variables** under `env.NAME`.
-- **Runtime context** under `ctx.*` (e.g. `ctx.current_package_area`). **Caveat:** the wrapper intentionally switches the parent process CWD to the child working directory before launching the agent (see [Execution Flow §6j](../execution-flow.md#6j-preflight-checks)) and never restores it. Because `ComposeContext::capture()` reads `std::env::current_dir()` per iteration, CWD-derived ctx values (`ctx.current_package_area`, `ctx.current_package`, etc.) can differ between iteration 1 and iteration 2+ — and the same drift affects `claudine sequence` between steps. The intended fix is a Claudine-owned launch-CWD scratchpad set once at process startup and threaded into every `ComposeContext::capture_for_dir(...)` call.
+- **Runtime context** under `ctx.*` (e.g. `ctx.current_package_area`). Canonical preparation stores the exact `ComposeContext` derived from the invocation's launch inputs and the active document's source. Loop iterations and sequence steps derive from that request snapshot rather than recapturing the wrapper's ambient CWD, so the child-working-directory switch cannot make CWD-derived values drift between iterations or steps.
 - **Literals** — strings (`'review'` / `"review"`), numbers, `true`, `false`, `null`.
 - **Comparisons** — `==`, `!=`, `>`, `>=`, `<`. `<=` 
 - **Boolean operators** — `&&`, `||`, unary `!`, with `&&` binding tighter than `||`.
@@ -181,6 +181,8 @@ After rendering, the result is **re-parsed as JSON** so that numeric, boolean, a
 Templates are also rendered inside arrays and objects — every string leaf is processed, non-string scalars pass through.
 
 The rule of thumb: **a value that is purely a single template span preserves its evaluated type; anything mixing template with literal text becomes a string.** This means `set(retries, {{_loop_count}})` lands as a JSON number you can safely compare arithmetically, while `set(label, "iter-{{_loop_count}}")` lands as the obvious string.
+
+> **Loop vs lifecycle interpolation.** The loop action renderer and the lifecycle event renderer share the same Darkmatter expression core but differ in three deliberate ways — the JSON re-parse above (loop only), loop-contextual error typing, and unknown-root leniency (loop) vs strict fail-closed (lifecycle). See [Composition — Loop vs lifecycle interpolation](../composition.md#loop-vs-lifecycle-interpolation); both engines are held to a [shared conformance matrix](../../../lib/src/composition/interpolation_conformance.rs).
 
 ## Ambient variables
 

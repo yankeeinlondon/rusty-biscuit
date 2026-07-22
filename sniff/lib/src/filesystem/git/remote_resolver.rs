@@ -118,14 +118,14 @@ pub(crate) fn resolve_remote(
         if !names.iter().any(|candidate| candidate == name) {
             return Err(SniffError::RemoteNotConfigured { name: name.to_string() });
         }
-        if configured_url(&repo, name).is_none() {
+        if configured_url(repo, name).is_none() {
             return Err(SniffError::RemoteUrlMissing { name: name.to_string() });
         }
         Some(name.to_string())
     } else {
         let usable = names
             .iter()
-            .filter(|name| configured_url(&repo, name).is_some())
+            .filter(|name| configured_url(repo, name).is_some())
             .map(String::as_str)
             .collect::<Vec<_>>();
         select_preferred_remote(usable).map(str::to_string)

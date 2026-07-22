@@ -141,7 +141,9 @@ pub fn handle_messenger_input_modal(app: &mut App, key: KeyEvent) {
                     claudine::messaging::test_webhook_connection(&route_config),
                 )
                 .await
-                .unwrap_or_else(|_| Err("Connection test timed out".to_string()));
+                .unwrap_or(Err(
+                    claudine::messaging::MessagingError::TestConnectionTimeout,
+                ));
                 let _ = tx.send(result);
             });
         }

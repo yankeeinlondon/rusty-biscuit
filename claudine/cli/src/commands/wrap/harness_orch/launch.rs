@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::time::Duration;
 
-use super::{AttemptLaunch, HarnessPromptState, MaterializedHarnessPrompt};
+use super::{AttemptLaunch, MaterializedHarnessPrompt};
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_harness_launch(
@@ -12,8 +12,19 @@ pub(crate) fn build_harness_launch(
     profile: &dyn super::super::profile::WrapperProfile,
     base_args: &[String],
     base_env: &HashMap<OsString, OsString>,
-    state: &mut HarnessPromptState,
+    // The live session to resume, or `None` for a fresh session. Read from the
+    // active-document state's provider-attempt slice by the caller — there is no
+    // separate resume directive on the prompt state to consume.
+    resume_session: Option<&str>,
     materialized: &MaterializedHarnessPrompt,
+    // R8 — the rebuilt plan's environment patch (MCP runtime injection, the
+    // OpenCode inline config, the permission mode, the interactivity markers,
+    // plus removals for whatever provider-shaped keys the refreshed document no
+    // longer wants). Applied beneath `materialized.env_overrides`, which stays
+    // authoritative for the `AGENT`/`MODEL`/`YOLO` triple the document resolved
+    // — so a `MODEL` this patch removes stays removed exactly when the document
+    // pins no model.
+    launch_env: &[crate::commands::wrap::launch_plan::EnvChange],
     effective_non_interactive: bool,
     cli_timeout: Option<String>,
     plan_timeout: Option<std::time::Duration>,
@@ -21,17 +32,16 @@ pub(crate) fn build_harness_launch(
     plan_step_timeout: Option<std::time::Duration>,
     cli_stall_timeout: Option<String>,
 ) -> Result<AttemptLaunch> {
-    let mut args = if let Some(session_id) = state.next_resume_session_id.take() {
+    let mut args = if let Some(session_id) = resume_session {
         let mut args = super::super::resume::normalize_resume_args(
             profile,
-            profile.build_resume_args(&session_id)?,
+            profile.build_resume_args(session_id)?,
         );
         super::super::resume::append_resume_passthrough_args(&mut args, base_args);
         args
     } else {
         base_args.to_vec()
     };
-    state.next_prompt_override = None;
 
     let prompt = super::super::inline::strip_prompt_tags_for_provider(provider, &materialized.prompt);
     let prompt_source = super::super::profile::PromptSource::Inline(prompt.clone());
@@ -45,6 +55,16 @@ pub(crate) fn build_harness_launch(
     )?;
 
     let mut env = base_env.clone();
+    for change in launch_env {
+        match change {
+            crate::commands::wrap::launch_plan::EnvChange::Set(key, value) => {
+                env.insert(key.clone(), value.clone());
+            }
+            crate::commands::wrap::launch_plan::EnvChange::Remove(key) => {
+                env.remove(key);
+            }
+        }
+    }
     for (key, value) in &materialized.env_overrides {
         env.insert(key.clone().into(), value.clone().into());
     }

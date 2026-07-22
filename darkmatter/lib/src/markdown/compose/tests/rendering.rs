@@ -1347,12 +1347,12 @@ fn apply_wrappers_normalizes_true_disclosure_summary_to_details() {
     );
 }
 
-/// A document-relative body transclusion (`::file _senior-reviewer.md`) still
-/// resolves next to the prompt document when a `file_ref_fallback_dir` is
-/// configured — the fallback change is scoped to caller-supplied file
-/// references in expression functions and the `darkmatter-file` schema
-/// validator, and must NOT leak into the transclusion resolver (which uses
-/// its own document-relative `resolve_path`). Verification goal #5.
+/// An explicit document-relative body transclusion (`::file
+/// ./_senior-reviewer.md`) resolves next to the prompt document even when a
+/// `file_ref_fallback_dir` is configured. Per D2 the launch-area fallback is not
+/// a resolution input for any document-authored reference, and the transclusion
+/// resolver anchors on the source document's directory through the shared
+/// resolution context. Verification goal #5.
 ///
 /// Layout: both the document dir and the fallback dir hold a same-named
 /// `_senior-reviewer.md`. The transcluded content must come from the document

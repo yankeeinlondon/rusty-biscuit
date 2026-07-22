@@ -33,10 +33,6 @@ impl SchemaReference {
     pub fn kind(&self) -> SchemaReferenceKind {
         self.kind
     }
-
-    pub(crate) fn into_file_reference(self) -> FileReference {
-        self.file_reference
-    }
 }
 
 // Identity is the canonical trimmed string plus the resolution policy; the

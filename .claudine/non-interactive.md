@@ -16,8 +16,6 @@ You are running in a non-interactive session — the user cannot answer prompts 
 - Never run `gpg`, `ssh`, `ssh-add`, `sudo`, `op signin`, `aws sso login`,
   `gh auth login`, `docker login`, `npm login`, or any credential helper that
   may prompt — even if stdin is closed, many of these open `/dev/tty` directly.
-- If a shell command does not complete within ~60s, treat it as stuck and
-  abandon that approach; do not wait longer and do not assume progress.
 
 ### Sub-agent propagation
 

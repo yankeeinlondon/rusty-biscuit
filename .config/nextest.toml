@@ -93,6 +93,21 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 filter = 'test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
+# These merge-regression tests intentionally perform several complete compose
+# or lifecycle passes. Each pass remains bounded, but their combined debug-build
+# runtime can exceed the shared 30s ceiling even when run in isolation.
+[[profile.default.overrides]]
+filter = 'test(=markdown::compose::tests::rendering::slow_compose_cleanup_preserves_quoted_marker_looking_indented_code)'
+slow-timeout = { period = "30s", terminate-after = 3 }
+
+[[profile.default.overrides]]
+filter = 'test(=exhausted_remediation_fails_finalize_and_preserves_findings)'
+slow-timeout = { period = "30s", terminate-after = 3 }
+
+[[profile.default.overrides]]
+filter = 'test(=context_reports_preserve_all_columns_at_minimum_supported_width)'
+slow-timeout = { period = "30s", terminate-after = 3 }
+
 # Browser-tier tests spawn real headless Chrome, whose multi-process teardown
 # (helper + crashpad processes that inherit the test's stdout) routinely takes
 # longer than the default 100ms leak window — producing spurious LEAK-FAILs even
@@ -149,8 +164,45 @@ leak-timeout = { period = "1s", result = "fail" }
 # LEAK-FAIL — same situation as the worktree / tts-audio groups above. Give a
 # 1s grace window; keep `result = "fail"` so a genuinely leaked child still
 # fails.
+#
+# slow-timeout: these tests own an internal ~40s wait-for-marker deadline (the
+# tmux spawn boots a login shell, then a real claudine run drives a fake
+# provider through the full lifecycle). The default 5s×6 = 30s termination
+# ceiling is *below* that internal deadline, so a healthy-but-heavily-contended
+# run gets killed by nextest at 30s before its own deadline can settle — which,
+# under `retries = 3`, surfaces as "timed out on all four attempts" even though
+# nothing is actually hung. Raise the termination ceiling to 30s×3 = 90s so a
+# contended run is governed by its own 40s deadline + assertion, while a
+# genuine deadlock still trips the longer window.
 [[profile.default.overrides]]
 filter = 'package(claudine-cli) & test(/level2_/)'
+leak-timeout = { period = "1s", result = "fail" }
+slow-timeout = { period = "30s", terminate-after = 3 }
+
+# The sequence idle-flush pane test is slow by construction, not by contention.
+# `spawn_flush_if_idle_ticker`'s silence window and cadence are both a
+# hardcoded 30s with no env override, and the stall must clear the ticker's
+# second tick to be reliable (the first only fires if the block was stamped as
+# the ticker started), so the run costs ~80s plus pane setup. The default 30s
+# termination window would kill it mid-stall.
+[[profile.default.overrides]]
+filter = 'test(=level2_prompt_idle_flush_keeps_the_task_bar_in_tmux)'
+slow-timeout = { period = "30s", terminate-after = 6 }
+
+# The error-propagation D10 characterization baseline
+# (`claudine/features/2026-07-13-error-propogation/`) spawns the real claudine
+# binary once per route, which in turn forks short-lived children (git
+# discovery, the provider shim, terminal capability probes). Under parallel
+# load their teardown lags nextest's 100ms post-test pipe-drain check and flags
+# a spurious LEAK-FAIL on whichever route finishes fastest — reliably
+# `characterize_unstructured_fallback`, which fails during argument parsing in
+# ~0.1s and so loses the race. Same situation as the worktree / tts-audio /
+# level2_ groups above; the test itself exits code 0 with every assertion
+# passing. Give a 1s grace window; keep `result = "fail"` so a genuinely leaked
+# child still fails. This baseline must be non-flaky by Checkpoint 1 — a flaky
+# baseline cannot prove the migration was behavior-neutral.
+[[profile.default.overrides]]
+filter = 'package(claudine-cli) & binary(characterization_error_routes)'
 leak-timeout = { period = "1s", result = "fail" }
 
 [profile.ci]
@@ -234,4 +286,18 @@ leak-timeout = { period = "1s", result = "fail" }
 # a genuine leak.
 [[profile.ci.overrides]]
 filter = 'package(claudine-cli) & test(/level2_/)'
+leak-timeout = { period = "1s", result = "fail" }
+
+# See the default-profile note: the idle-flush pane test stalls ~80s by
+# construction, well past CI's 30s termination ceiling.
+[[profile.ci.overrides]]
+filter = 'test(=level2_prompt_idle_flush_keeps_the_task_bar_in_tmux)'
+slow-timeout = { period = "30s", terminate-after = 6 }
+
+# See the default-profile note: the error-propagation characterization baseline
+# spawns the real claudine binary per route and draws spurious LEAK-FAILs from
+# child teardown lag under parallel load. CI hosts may be slower, so the same 1s
+# grace applies; `result = "fail"` still catches a genuine leak.
+[[profile.ci.overrides]]
+filter = 'package(claudine-cli) & binary(characterization_error_routes)'
 leak-timeout = { period = "1s", result = "fail" }

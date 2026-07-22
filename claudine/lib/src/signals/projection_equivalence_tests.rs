@@ -42,7 +42,7 @@ fn parser_rate_limit(fixture: &str) -> Option<RateLimitInfo> {
     let mut parser =
         create_semantic_parser(Provider::Claude, NullSemanticSink, ParserConfig::default());
     for line in fixture.lines().filter(|line| !line.trim().is_empty()) {
-        let _ = parser.feed_line(line);
+        parser.feed_line(line);
     }
     parser.finish(0).rate_limit
 }

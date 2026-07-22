@@ -295,6 +295,84 @@ detection:
     confidence: observed
     notes: "Negative observation on this host: ~/.cache/vllm was absent."
 
+identity_probes:
+  - rank: 1
+    request: GET /version
+    match_in: json_field
+    field: version
+    marker: '{"version":"0.x.x"}'
+    uniqueness: unique
+    zero_model_ok: true
+    auth_gated: false
+    confidence: source_code
+    notes: 'The /version path with a bare {"version": ...} object is vLLM-only — oMLX, SGLang, LocalAI, and Lemonade (the other FastAPI-family servers found on 8000) do not mount it. On this host localhost:8000/version returned 404, confirming the live port is oMLX, not vLLM.'
+  - rank: 2
+    request: GET /openapi.json
+    match_in: json_field
+    field: paths
+    marker: vLLM-only routes (/tokenize, /pooling, /rerank, /v1/load_lora_adapter, /score)
+    uniqueness: strong
+    zero_model_ok: true
+    auth_gated: false
+    confidence: source_code
+    notes: Path-set fingerprint; absent when the server is started with --disable-fastapi-docs, in which case fall through to rank 3.
+  - rank: 3
+    request: GET /metrics
+    match_in: body
+    field: ""
+    marker: "vllm:"
+    uniqueness: strong
+    zero_model_ok: true
+    auth_gated: false
+    confidence: documented
+    notes: Prometheus metric families are vllm:-prefixed (vllm:num_requests_running, vllm:gpu_cache_usage_perc). On by default in v1 but may be stripped behind a proxy.
+  - rank: 4
+    request: GET /health
+    match_in: status
+    field: ""
+    marker: "200 with empty body"
+    uniqueness: weak
+    zero_model_ok: true
+    auth_gated: false
+    confidence: source_code
+    notes: Liveness only — an empty 200 identifies nothing (oMLX's /health also returns 200, with a JSON body). A 200 with a JSON body on /health positively EXCLUDES vLLM.
+  - rank: 5
+    request: ANY /
+    match_in: header
+    field: server
+    marker: uvicorn
+    uniqueness: weak
+    zero_model_ok: true
+    auth_gated: false
+    confidence: source_code
+    notes: vLLM sends uvicorn defaults with no custom identifying header (X-Request-Id only with --enable-request-id-headers) — corroborating evidence at best.
+
+version_probe:
+  - os: linux
+    method: cli
+    command: "python3 -c \"import vllm; print(vllm.__version__)\""
+    pattern: "^(\\S+)$"
+    confidence: documented
+    notes: The reliable installed-version probe — works regardless of how the entry-point script is wrapped (uv, conda, containers). For the running server use `GET /version` (identity_probes rank 1).
+  - os: linux
+    method: package
+    command: "pip show vllm"
+    pattern: "^Version: (\\S+)"
+    confidence: documented
+    notes: Fallback when the python interpreter on PATH is not the one vLLM is installed into; use the environment's own pip.
+  - os: windows
+    method: cli
+    command: "python3 -c \"import vllm; print(vllm.__version__)\""
+    pattern: "^(\\S+)$"
+    confidence: documented
+    notes: Probe inside WSL — native Windows is not officially supported; a missing package is the expected negative.
+  - os: macos
+    method: cli
+    command: "python3 -c \"import vllm; print(vllm.__version__)\""
+    pattern: "^(\\S+)$"
+    confidence: observed
+    notes: "Negative observation on this host: vllm is not installed (`command -v vllm` failed). Native macOS requires the separate vLLM-Metal project."
+
 config_mechanism: mixed
 
 config_files:
@@ -610,6 +688,27 @@ Observed on this host on 2026-07-03:
 | `GET http://localhost:8000/metrics` | 404 |
 
 Port 8000 is therefore a negative vLLM observation on this host: it is occupied by `omlx-server`, so a detector must not infer vLLM from the port alone.
+
+### Port identity
+
+Port 8000 collides with oMLX (and both are FastAPI/uvicorn servers, so
+headers cannot separate them), so the ranked `identity_probes` frontmatter
+block is the canonical strategy for answering "which runner is listening on
+this port?":
+
+1. `GET /version` — the `/version` path returning a bare
+   `{"version":"0.x.x"}` object is vLLM-only; oMLX, SGLang, LocalAI, and
+   Lemonade do not mount it. Works with zero models loaded (it is the first
+   endpoint live once the app is up, though no endpoint answers during
+   engine init).
+2. `GET /openapi.json` — the path set is a fingerprint (`/tokenize`,
+   `/pooling`, `/rerank`, `/v1/load_lora_adapter`, `/score`); absent when
+   started with `--disable-fastapi-docs`.
+3. `GET /metrics` — Prometheus families are `vllm:`-prefixed; on by default
+   but may be stripped behind a proxy.
+4. `GET /health` — an empty 200 body is liveness only and identifies
+   nothing; a 200 with a JSON body on `/health` positively *excludes* vLLM
+   (that is the oMLX shape).
 
 ## Configuration
 

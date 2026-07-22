@@ -227,6 +227,7 @@ fn sequence_perf_accumulator_merges_composition() {
         wall_clock: Duration::from_millis(150),
         compose_perf: Some(compose1),
         agent_perf: None,
+        group_tasks: Vec::new(),
     });
     acc.add_step(SequenceStepPerf {
         step_index: 1,
@@ -234,6 +235,7 @@ fn sequence_perf_accumulator_merges_composition() {
         wall_clock: Duration::from_millis(250),
         compose_perf: Some(compose2),
         agent_perf: None,
+        group_tasks: Vec::new(),
     });
 
     let report = acc.into_report_with_elapsed(Duration::from_secs(1));
@@ -290,6 +292,7 @@ fn sequence_perf_accumulator_aggregates_agent_perf() {
             first_response_latency: Some(Duration::from_millis(500)),
             provider_api_duration: Some(Duration::from_millis(800)),
         }),
+        group_tasks: Vec::new(),
     });
     acc.add_step(SequenceStepPerf {
         step_index: 1,
@@ -302,6 +305,7 @@ fn sequence_perf_accumulator_aggregates_agent_perf() {
             first_response_latency: Some(Duration::from_millis(1000)),
             provider_api_duration: Some(Duration::from_millis(900)),
         }),
+        group_tasks: Vec::new(),
     });
 
     let report = acc.into_report_with_elapsed(Duration::from_secs(5));

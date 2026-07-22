@@ -19,10 +19,14 @@ use crate::commands::compose::SharedComposeArgs;
 use crate::log;
 
 mod iterate;
+mod jit;
 mod phase1c;
 mod report;
 mod resolve;
+mod task_frames;
+mod task_run;
 
+use jit::StepComposeContext;
 use phase1c::run_phase_1c_with_schema;
 use resolve::{apply_user_set_to_hints, dry_run_sequence_target, is_auto_selectable_state};
 #[cfg(test)]
@@ -31,6 +35,69 @@ use phase1c::find_first_unsupported;
 /// Exit code emitted when Ctrl+C is observed during a sequence run.
 /// Matches the standard `128 + SIGINT(2)` convention used by shells.
 pub(super) const SEQUENCE_INTERRUPT_EXIT_CODE: i32 = 130;
+
+/// Whether a finished provider run should be recorded as user-interrupted.
+///
+/// Exit code `130` is one witness, not the contract. It holds for a
+/// single-press, SIGINT-terminated child on Unix and nowhere else: the second
+/// press sends `SIGKILL` (`137`), a provider that traps `SIGINT` may exit `0`
+/// or `1`, and neither Windows rung yields `130` — `CTRL_BREAK_EVENT` gives
+/// `0xC000013A` and `TerminateJobObject` gives `1`. The sequence-scoped flag is
+/// the host-independent signal, with a SIGINT handler producing it on Unix and
+/// the console coordinator on Windows, so both the step path and the group-task
+/// path must consult it before calling a run merely failed.
+pub(super) fn run_was_interrupted(exit_code: i32, interrupted: &AtomicBool) -> bool {
+    exit_code == SEQUENCE_INTERRUPT_EXIT_CODE || interrupted.load(Ordering::SeqCst)
+}
+
+/// Approve every shell command the preflight graph can reach.
+///
+/// The graph's own commands arrive already resolved, so what the gate approves
+/// is byte-identical to what execution runs. Referenced prompt documents
+/// contribute their template `::shell` directives through the same pass, which
+/// is what makes "no approval prompts once the sequence starts" honest for work
+/// several hops from the sequence document.
+fn approve_preflight_graph(
+    graph: &composition::PreflightGraph,
+    source: &ResolvedCompositionSource,
+    source_repo_root: Option<&std::path::Path>,
+    approval_cache: composition::SharedApprovalCache,
+    shared: &SharedComposeArgs,
+    launch_area: Option<&std::path::Path>,
+) -> Result<HashSet<String>> {
+    if graph.shell_commands.is_empty() && graph.prompt_documents.is_empty() {
+        return Ok(HashSet::new());
+    }
+
+    let approval_options = super::apply_composition_shell_overrides(
+        super::build_harness_shell_options_with_cache(
+            &source.resolved_path,
+            source_repo_root,
+            Some(approval_cache),
+        ),
+        shared.dry_run,
+        shared.yolo,
+    );
+
+    let compose_options = |path: &std::path::Path| {
+        let mut opts = darkmatter::markdown::compose::ComposeOptions::new()
+            .with_source_file(path)
+            // Defer the lifecycle subtree exactly as the per-step template
+            // preflight does: this pass exists to discover `::shell`
+            // directives, and resolving a deferred `success:`/`failure:` read
+            // -side file reference here would trip on a file that event has
+            // not created yet.
+            .with_exclude_keys(claudine::composition::LIFECYCLE_EVENT_KEYS.iter().copied());
+        if let Some(area) = launch_area {
+            opts = opts.with_file_ref_fallback_dir(area.to_path_buf());
+        }
+        opts
+    };
+
+    let result =
+        composition::resolve_graph_shell_approvals(graph, &approval_options, &compose_options)?;
+    Ok(result.approved_commands)
+}
 
 /// Execute a full sequence: iterate steps, compose each, and report results.
 #[allow(deprecated)]
@@ -44,6 +111,7 @@ pub(crate) fn execute_sequence(
     verbose: u8,
     perf_enabled: bool,
     startup_timings: Option<crate::perf::StartupTimings>,
+    file_resolution_context: biscuit_file::FileResolutionContext,
 ) -> Result<i32> {
     let silent = shared.silent;
 
@@ -102,7 +170,10 @@ pub(crate) fn execute_sequence(
         log::message(&status.render(&term));
     }
 
-    // Persistent SIGINT tracker for the duration of the sequence run.
+    // Persistent interrupt tracker for the duration of the sequence run. Every
+    // step boundary and every running shell task polls this flag, so it needs a
+    // producer on both hosts: a SIGINT handler on Unix, and a registration with
+    // the process-scoped console coordinator on Windows.
     let interrupted = Arc::new(AtomicBool::new(false));
     let interrupted_handler = interrupted.clone();
     let _sigint_guard = {
@@ -117,8 +188,9 @@ pub(crate) fn execute_sequence(
         }
         #[cfg(not(unix))]
         {
-            let _ = interrupted_handler;
-            Option::<()>::None
+            Some(super::exec::termination::register_sequence_interrupt_flag(
+                &interrupted_handler,
+            ))
         }
     };
 
@@ -144,6 +216,33 @@ pub(crate) fn execute_sequence(
     )?;
     let snapshot = &prep_context.installed_snapshot;
     let source_repo_root = prep_context.source_repo_root.clone();
+
+    // ── Static preflight: the recursive task graph ──────────────────────
+    //
+    // Everything statically knowable is settled here, before a target is
+    // resolved or a provider is launched: every referenced task, group,
+    // catalog entry, and prompt document is loaded transitively; blocked
+    // constructs are rejected; and every reachable shell command — including
+    // ones behind `when:` guards that read false today — is resolved to bytes
+    // and approved. A failure at this point is abort-all regardless of
+    // `fail_fast`, and `--dry-run` performs this identical walk.
+    let graph = composition::build_preflight_graph_with_context_and_resolution(
+        &plan,
+        source,
+        darkmatter::markdown::compose::ComposeContext::capture_for_document(
+            prep_context.launch_workspace.launch_cwd.as_path(),
+            &source.markdown,
+        ),
+        Some(&file_resolution_context),
+    )?;
+    let preflight_approved = approve_preflight_graph(
+        &graph,
+        source,
+        source_repo_root.as_deref(),
+        Arc::clone(&shared_approval_cache),
+        shared,
+        Some(prep_context.launch_workspace.launch_cwd.as_path()),
+    )?;
     let catalog = match prep_context.selection_config.as_ref() {
         Some(cfg) => claudine::model_catalog::ModelCatalogService::with_overrides(
             cfg.model_overrides.clone(),
@@ -393,41 +492,9 @@ pub(crate) fn execute_sequence(
         live_targets.into_iter().map(Some).collect()
     };
 
-    // ── Phase 1c: per-step compose with resolved AGENT in env_overrides ─
-    //
-    // Phase 5 schema validation: each step is run through
-    // `prepare_direct_with_schema`, which surfaces `MissingProperties`
-    // when the prompt's `$schema` declares required fields that the
-    // (post-override) frontmatter does not satisfy. Missing-property
-    // failures are aggregated across all steps so the user can fix the
-    // full sequence in one edit. Invalid-required failures
-    // (`SchemaValidation`) abort the sequence before any provider
-    // session is launched.
-    let (step_contexts, _cumulative_approved) = run_phase_1c_with_schema(
-        source,
-        &plan,
-        &resolved_targets,
-        &user_set_overrides,
-        source_repo_root.as_deref(),
-        &prep_context.launch_workspace.child_cwd,
-        Some(prep_context.launch_workspace.launch_cwd.as_path()),
-        shared,
-        effective_fail_fast,
-        inline_mode,
-        Arc::clone(&shared_approval_cache),
-        HashSet::new(),
-        &interrupted,
-        silent,
-    )?;
-    if step_contexts.is_empty() && total_steps > 0 {
-        if let Some(mut acc) = perf_accumulator {
-            acc.mark_env_setup_complete();
-            acc.set_partial();
-            crate::perf::emit_report(&acc.into_report());
-        }
-        return Ok(SEQUENCE_INTERRUPT_EXIT_CODE);
-    }
-
+    // Announced *before* Phase 1c, not after it. Schema validation and shell
+    // approval can be slow or interactive, so this is the progress feedback the
+    // user waits behind — emitting it afterwards would describe finished work.
     if !silent {
         let term = log::terminal();
         let status = Status::from_prose("Starting pre-flight checks".to_string())
@@ -436,9 +503,45 @@ pub(crate) fn execute_sequence(
         log::message(&status.render(&term));
     }
 
-    // ── Phase 1d: shell pre-flight for finalized steps ─────────────────
+    // ── Phase 1c: sequence-wide validation and shell approval ──────────
+    //
+    // Every step is validated against its `$schema` and every reachable shell
+    // command is approved, before any provider session launches.
+    // Missing-property failures are aggregated across all steps so the user
+    // fixes the full sequence in one edit; invalid-required failures abort.
+    // No composition is *retained* here — execution re-composes each step at
+    // its turn, and this context is what makes the two passes identical.
+    let compose_ctx = StepComposeContext {
+        source_repo_root: source_repo_root.as_deref(),
+        child_cwd: &prep_context.launch_workspace.child_cwd,
+        launch_area: Some(prep_context.launch_workspace.launch_cwd.as_path()),
+        shared,
+        approval_cache: Arc::clone(&shared_approval_cache),
+        inline_mode,
+        file_resolution_context: &file_resolution_context,
+    };
+
+    let Some(validated) = run_phase_1c_with_schema(
+        source,
+        &plan,
+        &resolved_targets,
+        &user_set_overrides,
+        &compose_ctx,
+        effective_fail_fast,
+        preflight_approved,
+        &interrupted,
+        silent,
+    )?
+    else {
+        if let Some(mut acc) = perf_accumulator {
+            acc.mark_env_setup_complete();
+            acc.set_partial();
+            crate::perf::emit_report(&acc.into_report());
+        }
+        return Ok(SEQUENCE_INTERRUPT_EXIT_CODE);
+    };
+
     let _preflight_span = info_span!("sequence_preflight", total_steps).entered();
-    // (Shell approvals were already collected during Phase 1c)
 
     if let Some(ref mut acc) = perf_accumulator {
         acc.mark_env_setup_complete();
@@ -454,25 +557,27 @@ pub(crate) fn execute_sequence(
         log::message(&status.render(&log::terminal()));
     }
 
-    // ── Phase 2: execute each step ─────────────────────────────────────
+    // ── Phase 2: compose and execute each step, at its turn ────────────
     drop(_preflight_span);
 
-    let (summary, interrupt_observed) = iterate::run_sequence_steps(
-        &plan,
-        &step_contexts,
-        &resolved_targets,
+    let run_context = iterate::SequenceRunContext {
+        plan: &plan,
+        graph: &graph,
+        resolved_targets: &resolved_targets,
         source,
-        &prep_context,
+        prep_context: &prep_context,
         shared,
-        &shared_approval_cache,
-        &interrupted,
-        inline_mode,
+        compose: &compose_ctx,
+        approved: validated.approved_commands,
+        user_set_overrides: validated.resolved_overrides,
+        interrupted: &interrupted,
         effective_fail_fast,
         silent,
         verbose,
         perf_enabled,
-        &mut perf_accumulator,
-    )?;
+    };
+    let (summary, interrupt_observed) =
+        iterate::run_sequence_steps(&run_context, &mut perf_accumulator)?;
 
     report::emit_sequence_summary(
         &summary,

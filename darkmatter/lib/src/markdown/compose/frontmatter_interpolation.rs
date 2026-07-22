@@ -57,6 +57,7 @@ pub(crate) struct FrontmatterSeedState {
     data: HashMap<String, Value>,
     context: ComposeContext,
     resolution_context: Option<ResolutionContext>,
+    name_coercion_keys: Vec<String>,
 }
 
 impl FrontmatterSeedState {
@@ -65,6 +66,7 @@ impl FrontmatterSeedState {
             data,
             context,
             resolution_context: None,
+            name_coercion_keys: Vec::new(),
         }
     }
 
@@ -78,6 +80,15 @@ impl FrontmatterSeedState {
         resolution_context: Option<ResolutionContext>,
     ) -> Self {
         self.resolution_context = resolution_context;
+        self
+    }
+
+    /// Sets the frontmatter keys whose object values render their `name` field
+    /// when interpolated in inline string context. Empty by default; only the
+    /// inline `get_string` path consults it.
+    #[must_use]
+    pub(crate) fn with_name_coercion_keys(mut self, keys: Vec<String>) -> Self {
+        self.name_coercion_keys = keys;
         self
     }
 }
@@ -116,7 +127,17 @@ impl EvaluationLookup for FrontmatterSeedState {
     }
 
     fn get_string(&self, path: &str) -> String {
-        match self.get(path) {
+        let value = self.get(path);
+        if let Some(resolved) = &value
+            && let Some(name) = super::context::effective_state::coerce_named_object(
+                path,
+                resolved,
+                &self.name_coercion_keys,
+            )
+        {
+            return name;
+        }
+        match value {
             None | Some(Value::Null) => String::new(),
             Some(Value::String(s)) => s,
             Some(Value::Number(n)) => n.to_string(),
@@ -334,6 +355,7 @@ pub(crate) fn interpolate_frontmatter(
     defer_shell_pending: bool,
     resolution_context: Option<ResolutionContext>,
     exclude_keys: &HashSet<String>,
+    name_coercion_keys: &[String],
 ) -> Result<FrontmatterInterpolationReport, MarkdownError> {
     interpolate_frontmatter_impl(
         frontmatter,
@@ -343,6 +365,7 @@ pub(crate) fn interpolate_frontmatter(
         resolution_context,
         false,
         exclude_keys,
+        name_coercion_keys,
     )
 }
 
@@ -371,6 +394,7 @@ pub(crate) fn interpolate_frontmatter_best_effort(
     defer_shell_pending: bool,
     resolution_context: Option<ResolutionContext>,
     exclude_keys: &HashSet<String>,
+    name_coercion_keys: &[String],
 ) -> Result<FrontmatterInterpolationReport, MarkdownError> {
     interpolate_frontmatter_impl(
         frontmatter,
@@ -380,6 +404,7 @@ pub(crate) fn interpolate_frontmatter_best_effort(
         resolution_context,
         true,
         exclude_keys,
+        name_coercion_keys,
     )
 }
 
@@ -388,6 +413,7 @@ pub(crate) fn interpolate_frontmatter_best_effort(
 /// per-key rewrite error is skipped (the key is left unresolved) rather than
 /// propagated, so the remaining keys — including fallback-resolved shell-pending
 /// keys — still reach their final shape.
+#[allow(clippy::too_many_arguments)]
 fn interpolate_frontmatter_impl(
     frontmatter: &mut Frontmatter,
     context: &ComposeContext,
@@ -396,6 +422,7 @@ fn interpolate_frontmatter_impl(
     resolution_context: Option<ResolutionContext>,
     best_effort: bool,
     exclude_keys: &HashSet<String>,
+    name_coercion_keys: &[String],
 ) -> Result<FrontmatterInterpolationReport, MarkdownError> {
     let fm = frontmatter.as_map();
 
@@ -519,7 +546,8 @@ fn interpolate_frontmatter_impl(
     // and the `ResolutionContext` for every key on every sweep. The evaluator
     // borrows `&state` per key and is dropped before the next mutation.
     let mut state = FrontmatterSeedState::new(seed_map, context.clone())
-        .with_resolution_context(resolution_context);
+        .with_resolution_context(resolution_context)
+        .with_name_coercion_keys(name_coercion_keys.to_vec());
 
     // Decrements the dependency count of every key that referenced `key`.
     // Marks `key` resolved (used by the eligibility check above). Returns
@@ -580,9 +608,9 @@ fn interpolate_frontmatter_impl(
                 Ok(triple) => triple,
                 Err(_) if best_effort => {
                     // Record the failure and mark resolved so the fixpoint
-                    // makes progress and the fallback pass still runs for the
-                    // other keys; leave this key's original (unresolved) value
-                    // in place.
+                    // loop makes progress and the fallback pass still runs
+                    // for the other keys; leave this key's original
+                    // (unresolved) value in place.
                     errored.insert(key.clone());
                     mark_resolved(key, &mut resolved, &mut dep_count, &dependents);
                     made_progress = true;
@@ -1238,6 +1266,30 @@ mod tests {
             let state = FrontmatterSeedState::new(data, test_context());
             assert_eq!(state.get_string("count"), "42");
         }
+
+        #[test]
+        fn get_string_coerces_named_object_when_key_is_set() {
+            let mut data = HashMap::new();
+            data.insert("state".to_string(), json!({ "name": "alpha", "index": 1 }));
+            let state = FrontmatterSeedState::new(data, test_context())
+                .with_name_coercion_keys(vec!["state".to_string()]);
+            // Inline string context renders the `name` field.
+            assert_eq!(state.get_string("state"), "alpha");
+            // Typed lookup keeps the object.
+            assert_eq!(
+                state.get("state"),
+                Some(json!({ "name": "alpha", "index": 1 }))
+            );
+        }
+
+        #[test]
+        fn get_string_named_object_without_keys_renders_json() {
+            let value = json!({ "name": "alpha", "index": 1 });
+            let mut data = HashMap::new();
+            data.insert("state".to_string(), value.clone());
+            let state = FrontmatterSeedState::new(data, test_context());
+            assert_eq!(state.get_string("state"), value.to_string());
+        }
     }
 
     mod interpolate_frontmatter_tests {
@@ -1264,7 +1316,7 @@ mod tests {
                 "spec": "{{base}}/spec.md",
                 "plan": "{{base}}/plan.md"
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new()).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new(), &[]).unwrap();
             assert_eq!(report.replacements, 2);
             assert_eq!(
                 fm.as_map().get("spec"),
@@ -1303,7 +1355,7 @@ mod tests {
             // command collector relies on `dir` reaching its final shape so the
             // approval set matches what execution runs.
             let mut fm = review_feature_shape();
-            interpolate_frontmatter_best_effort(&mut fm, &test_context(), false, true, None, &HashSet::new())                .expect("best-effort tolerates the per-key error");
+            interpolate_frontmatter_best_effort(&mut fm, &test_context(), false, true, None, &HashSet::new(), &[])                .expect("best-effort tolerates the per-key error");
 
             // `dir`'s `{{ spec || design }}` is fully resolved — no template left.
             assert_eq!(
@@ -1337,7 +1389,7 @@ mod tests {
                 "exists": "{{ file_exists('existing.md') }}",
                 "cmd": "$(echo '{{ exists }}')",
             }));
-            interpolate_frontmatter_best_effort(&mut fm, &test_context(), false, true, None, &HashSet::new())                .expect("best-effort tolerates the per-key error");
+            interpolate_frontmatter_best_effort(&mut fm, &test_context(), false, true, None, &HashSet::new(), &[])                .expect("best-effort tolerates the per-key error");
 
             // The errored key is left untouched (its real error surfaces later
             // with a resolution context).
@@ -1366,7 +1418,7 @@ mod tests {
                 "mid": "{{ exists }}-suffix",
                 "cmd": "$(echo '{{ mid }}')",
             }));
-            interpolate_frontmatter_best_effort(&mut fm, &test_context(), false, true, None, &HashSet::new())                .expect("best-effort tolerates the per-key error");
+            interpolate_frontmatter_best_effort(&mut fm, &test_context(), false, true, None, &HashSet::new(), &[])                .expect("best-effort tolerates the per-key error");
 
             assert_eq!(
                 fm.as_map().get("mid"),
@@ -1386,7 +1438,7 @@ mod tests {
             // (so the execution pipeline surfaces it). This guards against the
             // best-effort behavior accidentally leaking into the default path.
             let mut fm = review_feature_shape();
-            let result = interpolate_frontmatter(&mut fm, &test_context(), false, true, None, &HashSet::new());
+            let result = interpolate_frontmatter(&mut fm, &test_context(), false, true, None, &HashSet::new(), &[]);
             let err = match result {
                 Ok(_) => panic!("plain variant must abort on the context-requiring key error"),
                 Err(e) => e,
@@ -1417,8 +1469,8 @@ mod tests {
             };
             let mut a = make();
             let mut b = make();
-            interpolate_frontmatter(&mut a, &test_context(), false, true, None, &HashSet::new()).unwrap();
-            interpolate_frontmatter_best_effort(&mut b, &test_context(), false, true, None, &HashSet::new()).unwrap();
+            interpolate_frontmatter(&mut a, &test_context(), false, true, None, &HashSet::new(), &[]).unwrap();
+            interpolate_frontmatter_best_effort(&mut b, &test_context(), false, true, None, &HashSet::new(), &[]).unwrap();
             assert_eq!(a.as_map().get("dir"), b.as_map().get("dir"));
             assert_eq!(
                 a.as_map().get("dir"),
@@ -1432,7 +1484,7 @@ mod tests {
                 "title": "Hello",
                 "count": 42
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new()).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new(), &[]).unwrap();
             assert_eq!(report.replacements, 0);
         }
 
@@ -1455,7 +1507,7 @@ mod tests {
             }
             let mut fm = fm_from_json(Value::Object(obj));
 
-            interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new())
+            interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new(), &[])
                 .unwrap();
 
             assert_eq!(fm.as_map().get("wide_00"), Some(&json!("/root/w00")));
@@ -1474,7 +1526,7 @@ mod tests {
         #[test]
         fn self_referential_key_terminates_and_resolves_empty() {
             let mut fm = fm_from_json(json!({ "a": "{{a}}/tail" }));
-            interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new())
+            interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new(), &[])
                 .unwrap();
             assert_eq!(fm.as_map().get("a"), Some(&json!("/tail")));
         }
@@ -1486,7 +1538,7 @@ mod tests {
         #[test]
         fn mutual_cycle_terminates_without_hang() {
             let mut fm = fm_from_json(json!({ "a": "A{{b}}", "b": "B{{a}}" }));
-            interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new())
+            interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new(), &[])
                 .unwrap();
             // Deterministic fallback order (map insertion): both resolve, no raw
             // template survives, and the run terminates.
@@ -1505,7 +1557,7 @@ mod tests {
                     "owner": "Alice"
                 }
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new()).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new(), &[]).unwrap();
             assert_eq!(report.replacements, 1);
             let meta = fm.as_map().get("metadata").unwrap();
             assert_eq!(meta.get("home"), Some(&json!("/docs/home")));
@@ -1518,7 +1570,7 @@ mod tests {
                 "base": "/root",
                 "paths": ["{{base}}/a", "{{base}}/b"]
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new()).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new(), &[]).unwrap();
             assert_eq!(report.replacements, 2);
             let paths = fm.as_map().get("paths").unwrap().as_array().unwrap();
             assert_eq!(paths[0], json!("/root/a"));
@@ -1530,7 +1582,7 @@ mod tests {
             let mut fm = fm_from_json(json!({
                 "spec": "{{missing}}/spec.md"
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new()).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new(), &[]).unwrap();
             assert_eq!(report.replacements, 1);
             assert_eq!(fm.as_map().get("spec"), Some(&json!("/spec.md")));
         }
@@ -1540,7 +1592,7 @@ mod tests {
             let mut fm = fm_from_json(json!({
                 "date": "{{ctx.today}}"
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new()).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new(), &[]).unwrap();
             assert_eq!(report.replacements, 1);
             assert_eq!(fm.as_map().get("date"), Some(&json!("2024-06-15")));
         }
@@ -1560,7 +1612,7 @@ mod tests {
                 "summary": "{{ctx.current_package_area}}"
             }));
             let report =
-                interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new()).unwrap();
+                interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new(), &[]).unwrap();
             assert!(
                 !report
                     .warnings
@@ -1579,7 +1631,7 @@ mod tests {
                 "review_file": "{{ctx.aera}}/review.md"
             }));
             let report =
-                interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new()).unwrap();
+                interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new(), &[]).unwrap();
             let warning = report
                 .warnings
                 .iter()
@@ -1605,7 +1657,7 @@ mod tests {
                 "spec": "{{base}}/spec.md",
                 "plan": "{{spec}}.plan.md"
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new()).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new(), &[]).unwrap();
             assert_eq!(fm.as_map().get("spec"), Some(&json!("/root/spec.md")));
             assert_eq!(
                 fm.as_map().get("plan"),
@@ -1624,7 +1676,7 @@ mod tests {
                 "review": "{{ unknown_fn(spec) + '/review.md' }}",
                 "review_path": "@area/{{review}}"
             }));
-            let result = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new());
+            let result = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new(), &[]);
             let Err(err) = result else {
                 panic!("unknown function must abort interpolation");
             };
@@ -1636,7 +1688,7 @@ mod tests {
             let mut fm = fm_from_json(json!({
                 "bad": "{{ > invalid }}"
             }));
-            let result = interpolate_frontmatter(&mut fm, &test_context(), true, false, None, &HashSet::new());
+            let result = interpolate_frontmatter(&mut fm, &test_context(), true, false, None, &HashSet::new(), &[]);
             assert!(result.is_err());
         }
 
@@ -1652,7 +1704,7 @@ mod tests {
             let mut fm = fm_from_json(json!({
                 "bad": "{{ > invalid }}"
             }));
-            let result = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new());
+            let result = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new(), &[]);
             let Err(err) = result else {
                 panic!("malformed whole-value interpolation must abort");
             };
@@ -1675,7 +1727,7 @@ mod tests {
                 "note": "prefix {{ > invalid }}"
             }));
             let report =
-                interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new()).unwrap();
+                interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new(), &[]).unwrap();
             assert!(!report.warnings.is_empty());
             assert_eq!(
                 fm.as_map().get("note"),
@@ -1693,7 +1745,7 @@ mod tests {
                 "tags": ["a", "b"],
                 "copy": "{{ tags }}",
             }));
-            interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new()).unwrap();
+            interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new(), &[]).unwrap();
             assert_eq!(fm.as_map().get("copy"), Some(&json!(["a", "b"])));
         }
 
@@ -1705,7 +1757,7 @@ mod tests {
                 "combined": "cwd is {{pwd}} and os is {{uname}}",
                 "plain": "literal"
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, true, None, &HashSet::new()).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, true, None, &HashSet::new(), &[]).unwrap();
             // combined depends on shell-pending keys, so it stays templated.
             assert_eq!(
                 fm.as_map().get("combined"),
@@ -1732,7 +1784,7 @@ mod tests {
                 "review_path": "@area/{{review}}"
             }));
 
-            interpolate_frontmatter(&mut fm, &test_context(), false, true, None, &HashSet::new()).unwrap();
+            interpolate_frontmatter(&mut fm, &test_context(), false, true, None, &HashSet::new(), &[]).unwrap();
             assert_eq!(
                 fm.as_map().get("review"),
                 Some(&json!("{{ dir + '/review-' + iteration + '.md' }}"))
@@ -1747,7 +1799,7 @@ mod tests {
                 .insert("dir".to_string(), json!("features/x"));
 
             // Second pass resolves the whole chain against the expanded value.
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, true, None, &HashSet::new()).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, true, None, &HashSet::new(), &[]).unwrap();
             assert_eq!(
                 fm.as_map().get("review"),
                 Some(&json!("features/x/review-1.md"))
@@ -1767,7 +1819,7 @@ mod tests {
                 "design": "{{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}"
             }));
 
-            interpolate_frontmatter(&mut fm, &test_context(), false, true, None, &HashSet::new()).unwrap();
+            interpolate_frontmatter(&mut fm, &test_context(), false, true, None, &HashSet::new(), &[]).unwrap();
 
             assert_eq!(
                 fm.as_map().get("dir"),
@@ -1788,7 +1840,7 @@ mod tests {
                 "combined": "cwd is {{pwd}}"
             }));
             // First pass: defer because pwd is shell-pending.
-            interpolate_frontmatter(&mut fm, &test_context(), false, true, None, &HashSet::new()).unwrap();
+            interpolate_frontmatter(&mut fm, &test_context(), false, true, None, &HashSet::new(), &[]).unwrap();
             assert_eq!(fm.as_map().get("combined"), Some(&json!("cwd is {{pwd}}")));
 
             // Simulate frontmatter shell expansion completing.
@@ -1796,7 +1848,7 @@ mod tests {
                 .insert("pwd".to_string(), json!("/real/path"));
 
             // Second pass: pwd is now concrete (no longer starts with `$(`).
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, true, None, &HashSet::new()).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, true, None, &HashSet::new(), &[]).unwrap();
             assert_eq!(
                 fm.as_map().get("combined"),
                 Some(&json!("cwd is /real/path"))
@@ -1816,7 +1868,7 @@ mod tests {
                 "s": "{{ 'x' }}",
                 "mixed": "prefix {{ false }}",
             }));
-            interpolate_frontmatter(&mut fm, &test_context(), false, true, None, &HashSet::new()).unwrap();
+            interpolate_frontmatter(&mut fm, &test_context(), false, true, None, &HashSet::new(), &[]).unwrap();
 
             let map = fm.as_map();
             assert_eq!(map.get("b"), Some(&json!(false)));
@@ -1840,7 +1892,7 @@ mod tests {
                 "abs": "{{ absolute('spec.md') }}",
                 "rel": "{{ relative('spec.md') }}",
             }));
-            interpolate_frontmatter(&mut fm, &test_context(), false, true, Some(ctx), &HashSet::new()).unwrap();
+            interpolate_frontmatter(&mut fm, &test_context(), false, true, Some(ctx), &HashSet::new(), &[]).unwrap();
 
             assert_eq!(fm.as_map().get("exists"), Some(&json!(true)));
             assert_eq!(fm.as_map().get("missing"), Some(&json!(false)));
@@ -1866,7 +1918,7 @@ mod tests {
                 "abs": "{{ absolute('spec.md') }}",
                 "rel": "{{ relative('spec.md') }}",
             }));
-            interpolate_frontmatter(&mut fm, &test_context(), false, false, Some(ctx), &HashSet::new()).unwrap();
+            interpolate_frontmatter(&mut fm, &test_context(), false, false, Some(ctx), &HashSet::new(), &[]).unwrap();
 
             assert_eq!(fm.as_map().get("exists"), Some(&json!(true)));
             assert_eq!(
@@ -1886,7 +1938,7 @@ mod tests {
             let mut fm = fm_from_json(json!({
                 "exists": "{{ file_exists('spec.md') }}",
             }));
-            let result = interpolate_frontmatter(&mut fm, &test_context(), true, false, None, &HashSet::new());
+            let result = interpolate_frontmatter(&mut fm, &test_context(), true, false, None, &HashSet::new(), &[]);
             assert!(result.is_err());
         }
 
@@ -1899,7 +1951,7 @@ mod tests {
                 "a": "{{ base }}/spec.md",
                 "b": "{{ doc.a }}",
             }));
-            interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new()).unwrap();
+            interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new(), &[]).unwrap();
             assert_eq!(fm.as_map().get("a"), Some(&json!("/root/spec.md")));
             assert_eq!(fm.as_map().get("b"), Some(&json!("/root/spec.md")));
         }
@@ -1911,7 +1963,7 @@ mod tests {
                 "combined": "cwd is {{pwd}}"
             }));
             // With defer disabled, the literal `$(pwd)` flows through.
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new()).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new(), &[]).unwrap();
             assert_eq!(fm.as_map().get("combined"), Some(&json!("cwd is $(pwd)")));
             assert_eq!(report.replacements, 1);
         }
@@ -1921,7 +1973,7 @@ mod tests {
             let mut fm = fm_from_json(json!({
                 "title": "{{{ name }}}"
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new()).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new(), &[]).unwrap();
             assert_eq!(fm.as_map().get("title"), Some(&json!("{{ name }}")));
             assert_eq!(report.replacements, 0);
         }
@@ -1932,7 +1984,7 @@ mod tests {
                 "x": "replaced",
                 "title": "{{{ {{ x }} }}}"
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new()).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new(), &[]).unwrap();
             assert_eq!(fm.as_map().get("title"), Some(&json!("{{ {{ x }} }}")));
             assert_eq!(report.replacements, 0);
         }
@@ -1947,7 +1999,7 @@ mod tests {
             }));
 
             // First pass: shell-pending `y` defers `greeting`; literal untouched.
-            interpolate_frontmatter(&mut fm, &test_context(), false, true, None, &HashSet::new()).unwrap();
+            interpolate_frontmatter(&mut fm, &test_context(), false, true, None, &HashSet::new(), &[]).unwrap();
             assert_eq!(fm.as_map().get("greeting"), Some(&json!("{{{ x }}} {{ y }}")));
 
             // Simulate frontmatter shell expansion completing.
@@ -1961,6 +2013,7 @@ mod tests {
                 false,
                 None,
                 &HashSet::new(),
+                &[],
             )
             .unwrap();
             assert_eq!(fm.as_map().get("greeting"), Some(&json!("{{ x }} hi")));
@@ -1999,7 +2052,7 @@ mod tests {
                 "failure": "{{base}}/failed"
             }));
             let exclude = ["failure"].into_iter().map(String::from).collect::<HashSet<_>>();
-            interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &exclude).unwrap();
+            interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &exclude, &[]).unwrap();
             // The excluded key keeps its raw `{{ }}` span.
             assert_eq!(
                 fm.as_map().get("failure"),
@@ -2017,7 +2070,7 @@ mod tests {
                 "failure": "{{ area }}"
             }));
             let exclude = ["failure"].into_iter().map(String::from).collect::<HashSet<_>>();
-            interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &exclude).unwrap();
+            interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &exclude, &[]).unwrap();
             // A whole-value `{{ area }}` would normally resolve to "docs" (typed
             // string), but as an excluded key it must stay raw.
             assert_eq!(
@@ -2036,7 +2089,7 @@ mod tests {
             }));
             let exclude = ["failure"].into_iter().map(String::from).collect::<HashSet<_>>();
             let report =
-                interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &exclude).unwrap();
+                interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &exclude, &[]).unwrap();
             // Non-excluded templated key still resolves.
             assert_eq!(fm.as_map().get("summary"), Some(&json!("/root/summary")));
             // Excluded key stays raw.
@@ -2055,7 +2108,7 @@ mod tests {
                 "base": "world"
             }));
             let exclude = ["initialize"].into_iter().map(String::from).collect::<HashSet<_>>();
-            interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &exclude).unwrap();
+            interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &exclude, &[]).unwrap();
             // The excluded key preserves its object shape with raw spans intact.
             let init = fm.as_map().get("initialize").expect("initialize present");
             assert!(init.is_object(), "object type preserved");
@@ -2070,7 +2123,7 @@ mod tests {
                 "base": "root"
             }));
             let exclude = ["steps"].into_iter().map(String::from).collect::<HashSet<_>>();
-            interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &exclude).unwrap();
+            interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &exclude, &[]).unwrap();
             let steps = fm.as_map().get("steps").expect("steps present");
             assert!(steps.is_array(), "array type preserved");
             assert_eq!(steps.get(0), Some(&json!("{{base}}")));
@@ -2083,7 +2136,7 @@ mod tests {
                 "base": "/root",
                 "spec": "{{base}}/spec.md"
             }));
-            interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &empty_exclude()).unwrap();
+            interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &empty_exclude(), &[]).unwrap();
             assert_eq!(fm.as_map().get("spec"), Some(&json!("/root/spec.md")));
         }
 
@@ -2098,7 +2151,7 @@ mod tests {
                 }
             }));
             let exclude = ["failure"].into_iter().map(String::from).collect::<HashSet<_>>();
-            let err = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &exclude)
+            let err = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &exclude, &[])
                 .unwrap_err();
             let msg = err.to_string();
             assert!(
@@ -2120,7 +2173,7 @@ mod tests {
                 }
             }));
             let exclude = ["failure"].into_iter().map(String::from).collect::<HashSet<_>>();
-            let err = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &exclude)
+            let err = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &exclude, &[])
                 .unwrap_err();
             let msg = err.to_string();
             assert!(msg.contains("summary"), "error names the composed key: {msg}");
@@ -2135,7 +2188,7 @@ mod tests {
                 "failure": "raw value"
             }));
             let exclude = ["failure"].into_iter().map(String::from).collect::<HashSet<_>>();
-            let err = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &exclude)
+            let err = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &exclude, &[])
                 .unwrap_err();
             let msg = err.to_string();
             assert!(msg.contains("echo"), "error names the composed key: {msg}");
@@ -2151,7 +2204,7 @@ mod tests {
             }));
             let exclude = ["failure"].into_iter().map(String::from).collect::<HashSet<_>>();
             let report =
-                interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &exclude).unwrap();
+                interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &exclude, &[]).unwrap();
             // summary resolves normally (it does not reference the deferred key).
             assert_eq!(fm.as_map().get("summary"), Some(&json!("/root/summary")));
             assert_eq!(report.replacements, 1);

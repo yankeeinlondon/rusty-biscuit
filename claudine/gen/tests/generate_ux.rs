@@ -89,11 +89,22 @@ fn full_fixture() -> Fixture {
 
 /// Runs the built binary against `area` with a closed (non-TTY) stdin.
 fn run_gen(area: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_claudine-gen"))
-        .arg("--area")
-        .arg(area)
-        .args(args)
-        .stdin(std::process::Stdio::null())
+    run_gen_env(area, args, &[])
+}
+
+/// Runs the built binary with extra environment variables (for color-mode
+/// coverage). `stdin` is closed and stdout is captured (non-TTY).
+fn run_gen_env(area: &Path, args: &[&str], envs: &[(&str, &str)]) -> Output {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_claudine-gen"));
+    cmd.arg("--area").arg(area).args(args);
+    // Neutralize any ambient color-forcing so the base case is deterministic.
+    cmd.env_remove("FORCE_COLOR")
+        .env_remove("CLICOLOR_FORCE")
+        .env_remove("NO_COLOR");
+    for (key, value) in envs {
+        cmd.env(key, value);
+    }
+    cmd.stdin(std::process::Stdio::null())
         .output()
         .expect("claudine-gen binary runs")
 }
@@ -109,6 +120,95 @@ fn introduce_drift(area: &Path) {
     let text = fs::read_to_string(&path).unwrap();
     assert!(text.contains("CLAUDE_MODEL"), "fixture expectation drifted");
     fs::write(&path, text.replace("CLAUDE_MODEL", "DOCTORED_MODEL")).unwrap();
+}
+
+/// Compact snapshot of the human-facing clean report. Detail rows remain
+/// covered by the focused report tests; the top-level lines pin provider and
+/// full-scope artifact ordering without embedding a volatile wall of research
+/// diagnostics.
+#[test]
+fn clean_check_report_summary_matches_phase_1_snapshot() {
+    let fixture = full_fixture();
+    let output = run_gen(fixture.path(), &["check"]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("generator output must be UTF-8");
+    let summary = stdout
+        .lines()
+        .filter(|line| !line.starts_with(' '))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert_eq!(
+        summary,
+        "claude: clean (inputs match the committed data.rs)\n\
+codex: clean (inputs match the committed data.rs)\n\
+gemini: clean (inputs match the committed data.rs)\n\
+goose: clean (inputs match the committed data.rs)\n\
+kimi: clean (inputs match the committed data.rs)\n\
+opencode: clean (inputs match the committed data.rs)\n\
+qwen: clean (inputs match the committed data.rs)\n\
+kilo: clean (inputs match the committed data.rs)\n\
+pi: clean (inputs match the committed data.rs)\n\
+antigravity: clean (inputs match the committed data.rs)\n\
+catalog.json: clean (inputs match the committed catalog)\n\
+signals generated.rs: clean (inputs match the committed tables)\n\
+stream vocabulary.rs: clean (inputs match the committed tables)\n\
+families generated.rs: clean (26 family keys compiled)\n\
+roster: every active entry has a wired Provider variant"
+    );
+}
+
+/// The `mapping` mode is machine-facing: pure JSON on stdout, never routed
+/// through the terminal renderer, so it carries no ANSI or prose framing and
+/// round-trips through a JSON parser.
+#[test]
+fn mapping_output_is_raw_parseable_json() {
+    let fixture = full_fixture();
+    let output = run_gen(fixture.path(), &["mapping"]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("mapping output must be UTF-8");
+    assert!(!stdout.contains('\u{1b}'), "machine JSON must carry no ANSI:\n{stdout}");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("mapping stdout must be valid JSON");
+    assert_eq!(parsed["provider_scope"], "all");
+    assert!(parsed["fields"].is_array());
+}
+
+/// Piped (non-TTY) stdout degrades to plain text even though `COLORTERM`
+/// would otherwise report truecolor: the report gates color on the output
+/// stream, so a captured run carries no SGR.
+#[test]
+fn non_tty_check_output_has_no_ansi() {
+    let fixture = full_fixture();
+    let output = run_gen(fixture.path(), &["check"]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("check output must be UTF-8");
+    assert!(!stdout.contains('\u{1b}'), "non-TTY output must be plain:\n{stdout}");
+    assert!(stdout.contains("claude: clean"));
+}
+
+/// `NO_COLOR` forces plain output regardless of the output stream.
+#[test]
+fn no_color_check_output_has_no_ansi() {
+    let fixture = full_fixture();
+    let output = run_gen_env(fixture.path(), &["check"], &[("NO_COLOR", "1")]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("check output must be UTF-8");
+    assert!(!stdout.contains('\u{1b}'), "NO_COLOR must strip all SGR:\n{stdout}");
+}
+
+/// `FORCE_COLOR=1` emits SGR into a captured (non-TTY) stream, matching
+/// `bt`'s escape hatch, while the visible status words are unchanged.
+#[test]
+fn force_color_check_output_carries_ansi() {
+    let fixture = full_fixture();
+    let output = run_gen_env(fixture.path(), &["check"], &[("FORCE_COLOR", "1")]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("check output must be UTF-8");
+    assert!(stdout.contains('\u{1b}'), "FORCE_COLOR must emit SGR");
+    // The green "clean" keyword is styled; the surrounding prose is intact.
+    assert!(stdout.contains("clean"));
+    assert!(stdout.contains("claude: "));
 }
 
 #[test]

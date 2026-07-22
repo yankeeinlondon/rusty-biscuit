@@ -47,7 +47,7 @@ impl McpProviderStateStore {
     /// Save to a specific path.
     pub fn save_to(&self, path: &Path) -> Result<()> {
         let content = serde_json::to_string_pretty(&self.state)?;
-        atomic_write(path, content.as_bytes())
+        Ok(atomic_write(path, content.as_bytes())?)
     }
 
     /// Record an imported entry (origin = Imported).

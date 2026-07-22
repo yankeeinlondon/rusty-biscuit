@@ -37,14 +37,14 @@ use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::schemas::{
     Constraint, DarkmatterSchemas, EffectiveSchema, PropertyAtom, PropertyDef, SchemaError,
     SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr, ValidationProblem,
-    ValidationProblemKind,
+    ValidationProblemCode, ValidationProblemKind,
 };
 
 use super::error::{
     CompositionError, DroppedOptional, DroppedOptionalSource, DroppedOptionalStage,
     InteractiveShape, MissingProperty, TextFormat,
 };
-use super::prepare::{PrepareOptions, prepare_direct, prepare_inline};
+use super::prepare::{PrepareOptions, PromptSource, prepare_direct_with_prompt, prepare_inline};
 use super::types::{PreparedComposition, ResolvedCompositionSource};
 
 pub mod classify;
@@ -126,7 +126,30 @@ pub fn prepare_direct_with_schema(
     source: &ResolvedCompositionSource,
     options: PrepareOptions,
 ) -> Result<PreparedComposition, CompositionError> {
-    prepare_with_schema(source, options, PrepareMode::Direct)
+    prepare_with_schema(
+        source,
+        options,
+        PrepareMode::Direct(PromptSource::ComposedBody),
+    )
+}
+
+/// [`prepare_direct_with_schema`] for a caller-supplied prompt.
+///
+/// The direct-wrapper passthrough case composes the document only for its
+/// effective frontmatter, so it needs the schema layer's categorization
+/// without the composed body becoming the prompt. Splitting this out is what
+/// lets the harness route reach the same typed schema errors as the `compose`
+/// and `sequence` routes; see [`prepare_document`][super::prepare_document].
+///
+/// ## Errors
+///
+/// See [`prepare_direct_with_schema`].
+pub fn prepare_direct_with_schema_and_prompt(
+    source: &ResolvedCompositionSource,
+    options: PrepareOptions,
+    prompt_source: PromptSource,
+) -> Result<PreparedComposition, CompositionError> {
+    prepare_with_schema(source, options, PrepareMode::Direct(prompt_source))
 }
 
 /// Wrap [`prepare_inline`] with schema-aware error categorization and
@@ -143,9 +166,9 @@ pub fn prepare_inline_with_schema(
     prepare_with_schema(source, options, PrepareMode::Inline)
 }
 
-#[derive(Clone, Copy)]
-enum PrepareMode {
-    Direct,
+#[derive(Clone)]
+pub(super) enum PrepareMode {
+    Direct(PromptSource),
     Inline,
 }
 
@@ -156,24 +179,26 @@ fn prepare_with_schema(
 ) -> Result<PreparedComposition, CompositionError> {
     let mut dropped: Vec<DroppedOptional> = Vec::new();
     let file_ref_fallback_dir = options.file_ref_fallback_dir.clone();
-    let prepared = match run_prepare(source, options.clone(), mode) {
+    let prepared = match run_prepare(source, options.clone(), &mode) {
         Ok(prepared) => prepared,
-        Err(err) => handle_compose_error(source, options, mode, err, &mut dropped)?,
+        Err(err) => handle_compose_error(source, options, &mode, err, &mut dropped)?,
     };
     // Re-validate the post-shell-expanded effective frontmatter and apply
     // the same typed error / drop-and-retry rules so values that became
     // invalid (or now satisfy the schema) after `$(...)` expansion are
     // judged on their final form.
-    post_shell_validate(source, prepared, dropped, mode, file_ref_fallback_dir.as_deref())
+    post_shell_validate(source, prepared, dropped, &mode, file_ref_fallback_dir.as_deref())
 }
 
 fn run_prepare(
     source: &ResolvedCompositionSource,
     options: PrepareOptions,
-    mode: PrepareMode,
+    mode: &PrepareMode,
 ) -> Result<PreparedComposition, CompositionError> {
     match mode {
-        PrepareMode::Direct => prepare_direct(source, options),
+        PrepareMode::Direct(prompt_source) => {
+            prepare_direct_with_prompt(source, options, prompt_source.clone())
+        }
         PrepareMode::Inline => prepare_inline(source, options),
     }
 }
@@ -193,7 +218,7 @@ fn post_shell_validate(
     source: &ResolvedCompositionSource,
     mut prepared: PreparedComposition,
     mut dropped: Vec<DroppedOptional>,
-    _mode: PrepareMode,
+    _mode: &PrepareMode,
     file_ref_fallback_dir: Option<&std::path::Path>,
 ) -> Result<PreparedComposition, CompositionError> {
     // No `$schema` → no validation work to do.
@@ -444,11 +469,33 @@ pub fn pre_validate_schema(
         });
     }
 
+    let caller_resolved_eager_files: std::collections::HashSet<_> = file_ref_fallback_dir
+        .zip(set_overrides.as_ref().and_then(serde_json::Value::as_object))
+        .map(|(fallback, overrides)| {
+            report
+                .problems
+                .iter()
+                .filter(|problem| {
+                    matches!(problem.code, ValidationProblemCode::InvalidFileReference)
+                })
+                .filter_map(|problem| top_level_pointer_segment(&problem.path))
+                .filter(|property| {
+                    overrides.get(property).is_some_and(|value| {
+                        file_override_resolves_from(value, fallback)
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
     // Filter problems composition-tolerantly: drop Invalid/Type verdicts
     // whose raw value contains template syntax, because Darkmatter may
-    // resolve them to valid values during composition. Missing verdicts
-    // are composition-independent (no template can conjure a key that is
-    // absent from both raw frontmatter and overrides).
+    // resolve them to valid values during composition. A caller-originated
+    // eager file likewise keeps its launch-area provenance only in canonical
+    // preparation, but only after the literal reference resolves there. An
+    // unresolved partial must remain visible so the CLI can offer completion.
+    // Missing verdicts are composition-independent (no template or provenance
+    // can conjure a key absent from both raw frontmatter and overrides).
     let instance_map = instance.as_object();
     let composition_independent: Vec<_> = report
         .problems
@@ -456,7 +503,14 @@ pub fn pre_validate_schema(
         .filter(|p| match p.kind {
             ValidationProblemKind::Missing => true,
             ValidationProblemKind::Type | ValidationProblemKind::Invalid => {
-                let raw = top_level_pointer_segment(&p.path)
+                let property = top_level_pointer_segment(&p.path);
+                if property
+                    .as_ref()
+                    .is_some_and(|name| caller_resolved_eager_files.contains(name))
+                {
+                    return false;
+                }
+                let raw = property
                     .as_deref()
                     .and_then(|name| instance_map.and_then(|m| m.get(name)));
                 !value_needs_composition(raw)
@@ -722,6 +776,18 @@ pub fn drop_invalid_optionals(
     }
 
     (source, set_overrides, dropped)
+}
+
+fn file_override_resolves_from(value: &serde_json::Value, base: &std::path::Path) -> bool {
+    match value {
+        serde_json::Value::String(raw) => biscuit_file::FileReference::new(raw)
+            .and_then(|reference| reference.resolve_from(base))
+            .is_ok_and(|resolved| resolved.is_some()),
+        serde_json::Value::Array(values) => {
+            !values.is_empty() && values.iter().all(|value| file_override_resolves_from(value, base))
+        }
+        _ => false,
+    }
 }
 
 /// Returns `true` when `value` contains a Darkmatter template marker

@@ -66,7 +66,7 @@ use std::time::Duration;
 use test_toolkit::{Level, require_level};
 
 mod common;
-use common::{TestWorkspace, augmented_path, write_executable};
+use common::{TestWorkspace, augmented_path, clear_no_color, write_executable};
 
 /// Tailwind Orange500 foreground (truecolor): the `System Prompt` header and
 /// block-quote border. Mirrors the generated palette in `renderable`.
@@ -242,6 +242,9 @@ fn capture_compose_tmux(fx: &Fixture, cols: u32, rows: u32, extra_args: &[&str])
     let session = spawn_tmux_session(cols, rows);
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
+    // This fixture asserts a *colored* surface under `FORCE_COLOR=1`, which an
+    // ambient `NO_COLOR` out-votes — see `common::clear_no_color`.
+    clear_no_color(&mut harness);
     let frame = send_compose(&mut harness, fx, cols, extra_args);
     kill_session_by_name(&session);
     frame
@@ -396,6 +399,9 @@ fn level2_prompt_reporting_system_link_osc8_in_wezterm() {
 
     let fx = Fixture::new(Some(SYSTEM_PROMPT_SHORT), USER_PROMPT_SHORT);
     let mut harness = WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm");
+    // This fixture asserts a *colored* surface under `FORCE_COLOR=1`, which an
+    // ambient `NO_COLOR` out-votes — see `common::clear_no_color`.
+    clear_no_color(&mut harness);
 
     // Clear the shared pane's screen *and* scrollback (`ESC[3J`) so the
     // scrollback capture below sees only this run's output — the pane is

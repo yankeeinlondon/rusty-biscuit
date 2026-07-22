@@ -15,6 +15,9 @@ System prompt handling is available on all wrapped provider subcommands:
 - `claudine qwen`
 - `claudine opencode`
 - `claudine goose`
+- `claudine kilo`
+- `claudine pi`
+- `claudine antigravity`
 
 The same flags are also shared by all composition entry points because `compose`, `inline-compose`, and `sequence` all flow through the same wrapper-grade execution path:
 
@@ -34,8 +37,9 @@ Behavior:
 
 - both switches are file-only
 - they are mutually exclusive
-- explicit files are resolved as plain paths relative to the launch CWD unless already absolute
+- explicit files are resolved through the shared `biscuit-file::FileReference` grammar against the launch context: a bare implicit reference is repository-root first, then the launch directory; an explicit `./`/`../` reference is the launch directory only; `@` is a magic-root search, `~/` is home-pinned, and absolute paths resolve to themselves
 - if an explicit file is selected, standard `system-prompt.md` discovery is skipped
+- direct provider wrappers additionally accept `--edit`, which opens the **user prompt** (not the system prompt) in an external editor before launch; composition entry points do not
 
 Internally these switches map to `claudine::system_prompt::SystemPromptArgs`.
 
@@ -147,6 +151,9 @@ Delivery is driven by the `SystemPromptSpec` declared in `ProviderInfo::system_p
 | Qwen Code | Yes | Yes | Append pushes `--append-system-prompt <content>`; replace pushes `--system-prompt <content>` |
 | OpenCode | Yes | Yes | Append sets `OPENCODE_CONFIG_CONTENT` with a temp instruction file; replace passes `--system <temp>` |
 | Goose | Yes | No | Append passes `--system <markdown>` directly |
+| Kilo | No | No | Both modes are currently unsupported |
+| Pi | Yes | Yes | Append pushes `--append-system-prompt <content>`; replace pushes `--system-prompt <content>` |
+| Antigravity | No | No | Both modes are currently unsupported |
 
 Unsupported modes are skipped with warnings rather than hard failures.
 
@@ -169,7 +176,9 @@ All transient overlay artifacts live inside the user's trust boundary:
 - inside a repo: `<repo_root>/.claudine/tmp/`
 - outside a repo: `<launch_cwd>/.claudine-tmp/`
 
-Files are created via `tempfile::Builder` with a `.md` suffix so the `Drop` impl deletes them when the wrap call returns. A best-effort `.gitignore` augmentation appends `.claudine/tmp/` idempotently when a repo-root `.gitignore` exists.
+Files are created via `tempfile::Builder` with a `.md` suffix so the `Drop` impl deletes them when the wrap call returns. A best-effort `.gitignore` augmentation idempotently appends the entry naming whichever directory was created — `.claudine/tmp/` inside a repo, `.claudine-tmp/` outside one — when a `.gitignore` already exists alongside it.
+
+Which of the two layouts applies is decided once, from the `repo_root` resolved at launch. A directory that gains a `.git` mid-session keeps its `.claudine-tmp/` for that invocation and switches to `.claudine/tmp/` on the next launch.
 
 ### Gemini Append Composition
 

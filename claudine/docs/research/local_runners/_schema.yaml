@@ -12,8 +12,9 @@
 # classifies this file as a SimplifiedSchema rather than raw JSON Schema
 # (a bare property mapping would validate vacuously).
 #
-# Nested shapes use quoted inline-object literals — YAML-native nested
-# mappings are rejected by the SimplifiedSchema parser today.
+# Nested shapes are written as quoted inline-object literals for uniformity;
+# YAML-native nested mappings are also accepted by the SimplifiedSchema parser
+# (they lower to the same inline objects).
 $schema:
     created: date
     last_updated: date(required)
@@ -72,6 +73,35 @@ $schema:
     # path); `expect` is the marker that confirms identity (needed where
     # ports collide — vLLM and oMLX both default to 8000).
     detection: "{ os: enum(macos,linux,windows,all; required), method: enum(binary,process,port,http,config_file,app_bundle,service; required), target: string(required), expect: string, confidence: enum(source_code,observed,documented,inferred; required), notes: string }[]"
+
+    # Ranked port-identity probes — the canonical, machine-consumable answer
+    # to "which runner is listening on this port?" Run probes in `rank` order
+    # (1 = try first) until one matches. `request` is the probe (e.g.
+    # "GET /api/version"; "ANY /" means any request, used for header
+    # fingerprinting). `match_in` selects where to look: `body` (substring in
+    # the response body), `json_field` (a named JSON key present/equal),
+    # `header` (a named response header), or `status` (status line only —
+    # almost never sufficient alone). `field` names the JSON key or header
+    # (empty for `body`/`status`); `marker` is the expected value or
+    # substring. `uniqueness` grades the probe: `unique` = this runner only,
+    # `strong` = near-definitive in combination with the port, `weak` =
+    # corroborating evidence only. `zero_model_ok` means the probe works on a
+    # server with no models loaded (detectors must not require a loaded
+    # model); `auth_gated` means the probe is refused when server auth is
+    # enabled (prefer ungated probes for identification).
+    identity_probes: "{ rank: number(required), request: string(required), match_in: enum(body,json_field,header,status; required), field: string, marker: string(required), uniqueness: enum(unique,strong,weak; required), zero_model_ok: boolean, auth_gated: boolean, confidence: enum(source_code,observed,documented,inferred; required), notes: string }[]"
+
+    # How to determine the INSTALLED version without starting the server (the
+    # running-server version is an identity_probes concern). One record per
+    # probe per OS where the answer differs. `method`: `cli` (version flag),
+    # `bundle` (app-bundle/package metadata), `package` (package manager
+    # query), `http` (running server only — include just to cross-reference).
+    # `command` is the exact invocation; `pattern` is a regex whose first
+    # capture group extracts the version from the output. Record what the
+    # output actually is — some CLIs print a commit hash or build tag instead
+    # of a semver (e.g. `lms --version` prints `CLI commit: <hash>`, not the
+    # LM Studio app version; llama-server prints `version: <build> (<sha>)`).
+    version_probe: "{ os: enum(macos,linux,windows,all; required), method: enum(cli,bundle,package,http; required), command: string(required), pattern: string, confidence: enum(source_code,observed,documented,inferred; required), notes: string }[]"
 
     config_mechanism: enum(config_file,env_vars,cli_flags,gui,mixed; required)
     config_files: "{ os: enum(macos,linux,windows; required), path: string(required), format: enum(json,jsonc,yaml,toml,ini,text,other; required), role: string, notes: string }[]"

@@ -24,25 +24,74 @@ pub(crate) struct HarnessPromptState {
     /// The original file reference string (for reporting).
     pub(crate) original_ref: String,
     pub(crate) base_prompt: Option<String>,
+    /// The evaluated `proxy.with` mapping for this document — immutable,
+    /// pre-schema, and never written to disk.
+    ///
+    /// Merged into the target's *authored* frontmatter at every read of it, so
+    /// it participates in frontmatter interpolation, selection hints,
+    /// `initialize` conditions, schema validation, lifecycle parsing, loop
+    /// configuration, and the body alike. Pre-schema is what makes a refresh
+    /// deterministic: schema coercion and invalid-optional drops shape the
+    /// prepared effective frontmatter, and if they could write back here, each
+    /// refresh would reapply a different overlay than the one the source
+    /// authored.
+    ///
+    /// Empty for a directly invoked document. Replaced wholesale — never merged
+    /// — when this document proxies on.
     pub(crate) overlay: indexmap::IndexMap<String, serde_json::Value>,
     pub(crate) prompt_tail: Vec<String>,
-    pub(crate) next_prompt_override: Option<String>,
-    pub(crate) next_resume_session_id: Option<String>,
-    /// Caller-supplied compose inputs re-applied on every re-materialization
-    /// (retry/resume/proxy), so a re-composed document keeps the caller's
-    /// `--set` params, launch-area file-ref anchor, and pre-approved shell
-    /// commands. Sourced from
-    /// [`PreparedComposition::rematerialize`][claudine::composition::PreparedComposition].
+    /// The caller's input layers, reapplied at every canonical preparation of
+    /// this document. Sourced from
+    /// [`PreparedComposition::input_layers`][claudine::composition::PreparedComposition].
     /// Empty for direct-wrapper passthrough runs, which have no compose params.
-    pub(crate) rematerialize: claudine::composition::RematerializeInputs,
+    /// The invocation-local runtime state cell.
+    ///
+    /// Lives here rather than on [`MaterializedHarnessPrompt`] because it must
+    /// outlive every re-materialization: a `set` written in iteration 1 is
+    /// still visible in iteration 5, and the `outputs` accumulator grows across
+    /// the whole invocation. Each materialization clones the handle so the
+    /// lifecycle executor writes through to this one cell.
+    pub(crate) runtime_state: std::sync::Arc<claudine::composition::RuntimeState>,
+    /// Withhold this run's `outputs` commit because the caller owns output
+    /// timing (the sequence task executor appends only after `teardown`).
+    /// [`Self::last_final_output`] still carries the captured text out.
+    pub(crate) suppress_output_commit: bool,
+    /// The most recent successful run's captured final text.
+    ///
+    /// Recorded whether or not the commit was suppressed, so a caller that
+    /// withheld the commit can still read what the run produced.
+    pub(crate) last_final_output: Option<String>,
+    pub(crate) input_layers: claudine::composition::CallerInputLayers,
+    /// Why the next preparation of this document is happening — stamped by the
+    /// control dispatch that decided the re-entry, so preparation reads the
+    /// stage row rather than re-deriving it from loop-local state.
+    pub(crate) entry: claudine::composition::DocumentEntryReason,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct MaterializedHarnessPrompt {
     pub(crate) frontmatter: serde_json::Value,
     pub(crate) prompt: String,
     pub(crate) env_overrides: Vec<(String, String)>,
+    /// The provider/model selection hints canonical preparation parsed from this
+    /// document's effective frontmatter.
+    ///
+    /// Carried so the R6 target launch rebuild can re-resolve a proxied target's
+    /// provider/model from the target's *own* `agent:`/`model:` hints (honoring
+    /// immutable CLI precedence) rather than inheriting the router's resolved
+    /// identity. Empty for the passthrough seed and the synthesized empty prompt.
+    pub(crate) selection_hints: claudine::composition::EffectiveSelectionHints,
     pub(crate) inline_closure_plan: Option<claudine::composition::InlineClosurePlan>,
+    pub(crate) file_resolution_context: Option<biscuit_file::FileResolutionContext>,
+    /// The lifecycle config canonical preparation parsed for this document,
+    /// with its shell commands already C3-resolved.
+    ///
+    /// Carried rather than re-parsed from [`Self::frontmatter`]: a re-parse
+    /// yields the *authored* commands with their `{{ }}` spans intact, so the
+    /// bytes the bootstrap gate approves would not be the bytes the executor
+    /// runs. `None` only for the passthrough seed and the synthesized empty
+    /// prompt, neither of which has a document lifecycle.
+    pub(crate) lifecycle: Option<claudine::composition::LifecycleConfig>,
     /// Shared cross-event live document frontmatter for the current attempt.
     ///
     /// Seeded from `frontmatter` when the prompt is materialized and threaded
@@ -53,10 +102,38 @@ pub(crate) struct MaterializedHarnessPrompt {
     /// late-binding spec's "current effective document state at the moment the
     /// event fires" contract. Re-created each loop iteration (a retry
     /// re-materializes from disk), giving the correct per-attempt lifetime.
-    pub(crate) live_frontmatter: std::cell::RefCell<serde_json::Map<String, serde_json::Value>>,
+    pub(crate) live_frontmatter: std::sync::Mutex<serde_json::Map<String, serde_json::Value>>,
+    /// Handle to the invocation-local runtime cell owned by
+    /// [`HarnessPromptState`]. Threaded into every lifecycle event so a `set`
+    /// accumulates across attempts instead of dying with `live_frontmatter`.
+    pub(crate) runtime_state: std::sync::Arc<claudine::composition::RuntimeState>,
+    /// The MCP `#tag`s this document's **canonically composed** body selects,
+    /// sorted and deduped.
+    ///
+    /// Captured here rather than re-lexed downstream because neither surviving
+    /// text can stand in for it. [`Self::prompt`] is the provider input, which a
+    /// resume deliberately replaces with the follow-up message; the document on
+    /// disk is raw authored Markdown, so it predates `proxy.with`, caller
+    /// overrides, and frontmatter interpolation — a body of `#{{ mcp_server }}`
+    /// names a server there only after composition. The launch rebuild reads
+    /// this field so retry and resume select the same servers a direct
+    /// invocation of the composed document selects (review-11 finding 3).
+    pub(crate) mcp_body_tags: Vec<String>,
 }
 
 impl MaterializedHarnessPrompt {
+    /// The sorted, deduped MCP tag set of a composed body.
+    ///
+    /// Single-sources the normalization the invocation pipeline applies when it
+    /// records its own launch facets (`composition::pipeline`), so a rebuilt
+    /// facet set compares equal to the recorded one for an unchanged document.
+    pub(crate) fn lex_body_mcp_tags(body: &str) -> Vec<String> {
+        let (_cleaned, mut tags) = claudine::mcp::session::lex_tags(body);
+        tags.sort();
+        tags.dedup();
+        tags
+    }
+
     /// Build the per-attempt live-frontmatter cell from a frontmatter value.
     ///
     /// A non-object frontmatter (e.g. the synthesized `Null` used when
@@ -64,8 +141,8 @@ impl MaterializedHarnessPrompt {
     /// builder's empty-frontmatter fallback.
     pub(crate) fn live_cell_from(
         frontmatter: &serde_json::Value,
-    ) -> std::cell::RefCell<serde_json::Map<String, serde_json::Value>> {
-        std::cell::RefCell::new(frontmatter.as_object().cloned().unwrap_or_default())
+    ) -> std::sync::Mutex<serde_json::Map<String, serde_json::Value>> {
+        std::sync::Mutex::new(frontmatter.as_object().cloned().unwrap_or_default())
     }
 }
 

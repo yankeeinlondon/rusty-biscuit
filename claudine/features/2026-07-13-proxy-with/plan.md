@@ -1,0 +1,2163 @@
+---
+created: 2026-07-16
+phase: 8
+total_phases: 14
+agent: claude/default
+yolo: "true"
+spec: ./spec.md
+packages:
+    - claudine
+    - claudine-cli
+source_files_during_phase_1:
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/proxy.rs
+    - claudine/cli/tests/composition_seams.rs
+    - claudine/cli/tests/level2_lifecycle_control.rs
+    - claudine/lib/src/composition/lifecycle/actions.rs
+docs_updated_during_phase_1:
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/features/2026-07-13-proxy-with/plan.md
+docs_created_during_phase_1:
+    - claudine/features/2026-07-13-proxy-with/notes/baseline.md
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/coordinator/mod.rs
+    - claudine/lib/src/composition/coordinator/active.rs
+    - claudine/lib/src/composition/coordinator/document.rs
+    - claudine/lib/src/composition/coordinator/handoff.rs
+    - claudine/lib/src/composition/coordinator/invocation.rs
+    - claudine/lib/src/composition/coordinator/transition.rs
+    - claudine/lib/src/composition/coordinator/tests.rs
+docs_updated_during_phase_2:
+    - claudine/features/2026-07-13-proxy-with/plan.md
+docs_created_during_phase_2:
+    - claudine/features/2026-07-13-proxy-with/notes/state-migration.md
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/lifecycle/action_shape.rs
+    - claudine/lib/src/composition/lifecycle/actions.rs
+    - claudine/lib/src/composition/lifecycle/actions/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/parse.rs
+    - claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs
+    - claudine/lib/src/composition/lifecycle/validate.rs
+docs_updated_during_phase_3:
+    - claudine/features/2026-07-13-proxy-with/plan.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/proxy.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/proxy.rs
+    - claudine/cli/tests/composition_seams.rs
+    - claudine/lib/src/composition/coordinator/handoff.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/lifecycle/actions.rs
+    - claudine/lib/src/composition/lifecycle/control.rs
+    - claudine/lib/src/composition/lifecycle/control/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/proxy_with_evaluation.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/parse.rs
+    - claudine/lib/src/composition/lifecycle/runtime/tests.rs
+    - claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs
+    - claudine/lib/src/composition/lifecycle/validate.rs
+    - claudine/lib/src/composition/looping/engine.rs
+docs_updated_during_phase_4:
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/features/2026-07-13-proxy-with/plan.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/wrap/composition/runner.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+    - claudine/cli/src/commands/wrap/harness_orch/types.rs
+    - claudine/cli/src/commands/wrap/wrapper_stages.rs
+    - claudine/cli/tests/composition_seams.rs
+    - claudine/lib/src/composition/coordinator/tests.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/prepare/entry.rs
+    - claudine/lib/src/composition/prepare/entry/tests.rs
+    - claudine/lib/src/composition/prepare/service.rs
+    - claudine/lib/src/composition/prepare/service/tests.rs
+    - claudine/lib/src/composition/select/tests.rs
+    - claudine/lib/src/composition/types.rs
+docs_updated_during_phase_5:
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/features/2026-07-13-proxy-with/plan.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_files_during_phase_6:
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/runner.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/coordinator.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/proxy.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/coordinator_adoption.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/lifecycle_ordering.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/proxy.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_evaluation.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_routing.rs
+    - claudine/cli/src/commands/wrap/wrapper_stages.rs
+    - claudine/cli/tests/composition_seams.rs
+    - claudine/cli/tests/wrap_compose_preflight.rs
+    - claudine/lib/src/composition/coordinator/commit.rs
+    - claudine/lib/src/composition/coordinator/handoff.rs
+    - claudine/lib/src/composition/coordinator/invocation.rs
+    - claudine/lib/src/composition/coordinator/mod.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs
+    - claudine/lib/src/composition/looping/types.rs
+    - claudine/lib/src/composition/mod.rs
+docs_updated_during_phase_6:
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/features/2026-07-13-proxy-with/plan.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+source_files_during_phase_7:
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/coordinator.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/coordinator_adoption.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+    - claudine/cli/src/commands/wrap/harness_orch/types.rs
+    - claudine/cli/src/commands/wrap/overlay.rs
+    - claudine/cli/tests/level2_lifecycle_control.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/validate.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/preflight/tests.rs
+docs_updated_during_phase_7:
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/features/2026-07-13-proxy-with/plan.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7: []
+source_files_during_phase_8:
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/coordinator.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/overlay_layering.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+    - claudine/cli/src/commands/wrap/harness_orch/types.rs
+    - claudine/cli/src/commands/wrap/overlay.rs
+    - claudine/cli/tests/level2_lifecycle_control.rs
+docs_updated_during_phase_8:
+    - claudine/features/2026-07-13-proxy-with/plan.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8: []
+# REVIEW-5 RESOLUTION (2026-07-17): the R6 launch rebuild, R7 loop ownership, and
+# R8 resume compatibility key that the Phase 9-13 comments below record as
+# "blocked / not started / #[ignore]d" ALL LANDED via review-5 findings 1-6, on
+# the surfaced-coordinator path (`compose/prep.rs::prepare_and_run_active_document`).
+# The previously-blocked criteria (7, 9-launch, 10, 15) now map to passing tests
+# and the two `#[ignore]`d reproductions are enabled. The phase comments below are
+# preserved as the historical record; read them through this note.
+#
+# REVIEW-6 RESOLUTION (2026-07-17): findings 1-5 closed the remaining gaps.
+# F1 moved the --dry-run seam ahead of lifecycle dispatch (no lifecycle events,
+# no filesystem side effects). F2 rebuilds the launch env at every retry/resume
+# fresh-read boundary, making the AC15 refusal reachable for `model`. F3
+# completed the AC9/AC10 L2 matrix, including two provider-SWITCH rows that pin
+# the launch bundle and MCP injection on the surfaced coordinator. F4 fixed a
+# REAL production bug: `prepare_and_run_active_document` lacked schema
+# pre-validation, so proxied targets rendered a raw Darkmatter error instead of
+# the typed CompositionError (AC28/R10 violation on both proxy routes). F5 is
+# the documentation reconciliation.
+# FINAL TALLY: 28 of 30 complete, 2 PARTIAL — AC10 (complete on the composition
+# commands; the in-harness fallback for direct provider wrappers still does not
+# re-select profile/binary, argv entrypoint, or MCP runtime injection) and AC15
+# (only 1 of 9 compatibility facets reachable end-to-end; the other 8 are
+# argv-derived or CLI-resolved and stay L1 projection-only). See
+# `notes/acceptance-map.md` for the authoritative per-criterion mapping.
+# Phase 9 is PARTIAL: the shell-approval group (R9) is complete and tested; the
+# launch-rebuild group (R6) is unstarted. `phase` therefore stays at 8 — see the
+# Phase 9 validation checkpoint for why R6 admits no safe partial landing.
+source_files_during_phase_9:
+    - claudine/cli/src/commands/wrap/harness_orch/shell_options.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/shell_approval.rs
+docs_updated_during_phase_9:
+    - claudine/features/2026-07-13-proxy-with/plan.md
+docs_created_during_phase_9: []
+skills_files_updated_during_phase_9:
+    - .claude/skills/claudine/architecture.md
+# Phase 10 was ATTEMPTED and NOT STARTED: it is blocked on Phase 9's R6 launch
+# rebuild, exactly as checkpoint 9 predicted. No production code was changed —
+# the only artifact is the blocker analysis and the relaunch-seam design
+# recorded at checkpoint 10. `phase` stays at 8.
+source_files_during_phase_10: []
+docs_updated_during_phase_10:
+    - claudine/features/2026-07-13-proxy-with/plan.md
+docs_created_during_phase_10: []
+skills_files_updated_during_phase_10: []
+# Phase 11 is PARTIAL: the budget-scoping group (tasks 5 and 7) is complete and
+# fixed a real proxy-boundary defect. The session-compatibility-key group (tasks
+# 1-4 and 6) is blocked on Phase 9's R6 — the key's facets are pre-loop launch
+# values, not document-derived ones, so no facet can move and the checkpoint's
+# per-facet L2s cannot be written. `phase` stays at 8.
+source_files_during_phase_11:
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/coordinator.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/budget_scoping.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/coordinator_adoption.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/overlay_layering.rs
+docs_updated_during_phase_11:
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/features/2026-07-13-proxy-with/plan.md
+docs_created_during_phase_11: []
+skills_files_updated_during_phase_11: []
+# Phase 12 is PARTIAL: both checkpoint gates (cross-route typed identity, overlay
+# redaction) pass, the eyre audit and handoff-failure routing are complete, and
+# the `eyre` audit plus the `ProxyCommitError::source()` fix closed two real
+# defects. One task-3 diagnostic — resume incompatibility after canonical refresh
+# — remains blocked on Phase 9's R6, transitively via Phases 10-11: the session
+# compatibility key's facets are pre-loop launch values, so no facet can move.
+# `phase` therefore stays at 8.
+source_files_during_phase_12:
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/coordinator.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/error_routing.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/proxy.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/coordinator_adoption.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/lifecycle_ordering.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/overlay_layering.rs
+    - claudine/cli/tests/composition_seams.rs
+    - claudine/cli/tests/level2_lifecycle_control.rs
+    - claudine/lib/src/composition/coordinator/commit.rs
+    - claudine/lib/src/composition/coordinator/document.rs
+    - claudine/lib/src/composition/coordinator/handoff.rs
+    - claudine/lib/src/composition/coordinator/tests.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/lifecycle/context.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/prepare/service.rs
+    - claudine/lib/src/composition/prepare/service/tests.rs
+    - claudine/lib/src/composition/schema/mod.rs
+    - claudine/lib/src/composition/schema/translate.rs
+docs_updated_during_phase_12:
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/features/2026-07-13-proxy-with/plan.md
+docs_created_during_phase_12: []
+skills_files_updated_during_phase_12: []
+# Phase 13 is PARTIAL: the equivalence harness, both passive corpus guards, the
+# suite triage, and the acceptance map (26/30 criteria mapped) all landed, and
+# the corpus guard found a real seventh ambient-capture site Phase 5 missed. Four
+# criteria (7, 9-launch, 10, 15) remain blocked on Phase 9's R6, transitively via
+# Phases 10-11 — the same wall as checkpoints 9-12. Tasks 2-3 (cross-platform CI)
+# conflict with ratified repo policy and need an owner decision. `phase` stays
+# at 8.
+source_files_during_phase_13:
+    - claudine/cli/tests/composition_seams.rs
+    - claudine/cli/tests/level2_lifecycle_control.rs
+docs_updated_during_phase_13:
+    - claudine/features/2026-07-13-proxy-with/plan.md
+docs_created_during_phase_13:
+    - claudine/features/2026-07-13-proxy-with/notes/acceptance-map.md
+skills_files_updated_during_phase_13: []
+source_files_during_phase_14: []
+docs_updated_during_phase_14:
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/lifecycle.md
+    - claudine/docs/topics/execution-flow.md
+    - claudine/docs/topics/non-interactive-sessions.md
+docs_created_during_phase_14: []
+skills_files_updated_during_phase_14:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/architecture.md
+source_code:
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/runner.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/coordinator.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/error_routing.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/proxy.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/budget_scoping.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/coordinator_adoption.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/lifecycle_ordering.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/overlay_layering.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/proxy.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/shell_approval.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_evaluation.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_routing.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+    - claudine/cli/src/commands/wrap/harness_orch/shell_options.rs
+    - claudine/cli/src/commands/wrap/harness_orch/types.rs
+    - claudine/cli/src/commands/wrap/overlay.rs
+    - claudine/cli/src/commands/wrap/wrapper_stages.rs
+    - claudine/cli/tests/composition_seams.rs
+    - claudine/cli/tests/level2_lifecycle_control.rs
+    - claudine/cli/tests/wrap_compose_preflight.rs
+    - claudine/lib/src/composition/coordinator/active.rs
+    - claudine/lib/src/composition/coordinator/commit.rs
+    - claudine/lib/src/composition/coordinator/document.rs
+    - claudine/lib/src/composition/coordinator/handoff.rs
+    - claudine/lib/src/composition/coordinator/invocation.rs
+    - claudine/lib/src/composition/coordinator/mod.rs
+    - claudine/lib/src/composition/coordinator/tests.rs
+    - claudine/lib/src/composition/coordinator/transition.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/lifecycle/action_shape.rs
+    - claudine/lib/src/composition/lifecycle/actions.rs
+    - claudine/lib/src/composition/lifecycle/actions/tests.rs
+    - claudine/lib/src/composition/lifecycle/context.rs
+    - claudine/lib/src/composition/lifecycle/control.rs
+    - claudine/lib/src/composition/lifecycle/control/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/proxy_with_evaluation.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/parse.rs
+    - claudine/lib/src/composition/lifecycle/runtime/tests.rs
+    - claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs
+    - claudine/lib/src/composition/lifecycle/validate.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs
+    - claudine/lib/src/composition/looping/types.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/preflight/tests.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/prepare/entry.rs
+    - claudine/lib/src/composition/prepare/entry/tests.rs
+    - claudine/lib/src/composition/prepare/service.rs
+    - claudine/lib/src/composition/prepare/service/tests.rs
+    - claudine/lib/src/composition/schema/mod.rs
+    - claudine/lib/src/composition/schema/translate.rs
+    - claudine/lib/src/composition/select/tests.rs
+    - claudine/lib/src/composition/types.rs
+documentation:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/architecture.md
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/execution-flow.md
+    - claudine/docs/topics/lifecycle.md
+    - claudine/docs/topics/non-interactive-sessions.md
+    - claudine/features/2026-07-13-proxy-with/notes/acceptance-map.md
+    - claudine/features/2026-07-13-proxy-with/notes/baseline.md
+    - claudine/features/2026-07-13-proxy-with/notes/state-migration.md
+    - claudine/features/2026-07-13-proxy-with/plan.md
+packages:
+    - claudine
+    - claudine-cli
+---
+
+# Execution Plan — Canonical Document Handoffs and Transient Proxy Frontmatter (`with:`)
+
+> **review-5 resolution (2026-07-17).** This plan's Phase 9-13 checkpoints record
+> the R6 target-specific launch rebuild, R7 loop ownership, and R8 resume
+> session-compatibility key as *blocked on R6 / not started / reproduced by
+> `#[ignore]`d L2 rows*. **Those blockers are resolved.** review-5 findings 1-6
+> landed the launch rebuild on the **surfaced-coordinator** path — a proxied
+> target surfaces its handoff to the command-owned coordinator, which re-prepares
+> it as a fresh document through `compose/prep.rs::prepare_and_run_active_document`,
+> rebuilding provider, model, document-loop ownership, `ComposeContext`, child
+> CWD, and system-prompt delivery from the target's own frontmatter. The two
+> `#[ignore]`d reproductions are enabled and pass. The statements below are the
+> historical phase record; read them through this note.
+>
+> **review-6 (2026-07-17) then closed the remaining gaps and set the final
+> tally: 28 of 30 complete, 2 partial.** Finding 1 moved the `--dry-run` seam
+> ahead of lifecycle dispatch so a dry run fires no lifecycle event and has no
+> filesystem side effect. Finding 2 rebuilds the launch env at every retry/resume
+> fresh-read boundary rather than snapshotting it at proxy adoption, which made
+> the AC 15 refusal reachable for `model`. Finding 3 completed the AC 9/AC 10 L2
+> matrix, adding the two provider-*switch* rows that pin the launch bundle and MCP
+> injection. Finding 4 found and fixed a **real production bug** — missing schema
+> pre-validation in `prepare_and_run_active_document` — which was an AC 28 / R10
+> violation on both proxy routes. Finding 5 reconciled the documentation.
+>
+> **The two partials, stated plainly.** *AC 10* is complete on the surfaced
+> command coordinator (all three composition commands) and L2-verified including a
+> provider switch; it stays partial only because the in-harness fallback used by
+> the direct provider wrappers still does not re-select profile/binary
+> sub-selection, the argv entrypoint, or MCP runtime injection. *AC 15* is
+> reachable end-to-end for **one of nine** compatibility facets (`model`); the
+> other eight are argv-derived or CLI-resolved, cannot move across a
+> same-document refresh, and remain L1 projection-only.
+> `SessionCompatibilityKey::extra` is intentionally empty. An open question is
+> recorded there: on refusal `start` fires before the comparison and
+> `success`/`finalize` never fire. See `notes/acceptance-map.md`.
+
+## How to read this plan
+
+Each phase ends with a **validation checkpoint**. Do not advance past a
+checkpoint that regresses the recorded baseline; the final checkpoint must be
+fully green unless the owner explicitly waives a named external failure. `just`
+recipes run from the `claudine/` package area unless stated otherwise
+(`just test` = L1, `just test-l2` = L2, `just lint`).
+
+Tasks marked **[∥]** may run concurrently with the sibling task or phase named
+in the marker. Everything else is dependency-ordered.
+
+File anchors below were captured from `HEAD` on branch `claudine` at plan time.
+Treat them as starting points, not as guarantees — re-locate before editing.
+
+Follow the Claudine test-placement rule while adding L1 coverage: keep small
+tests inline, but move them to a sibling `tests.rs` (or an existing sibling test
+module) once the production file is about 800 lines or the inline test module is
+about 300 lines. `claudine-cli/tests/test_placement.rs` is the structural gate.
+
+### Execution preconditions and completion signal
+
+- The spec is reviewed but still has `status: draft`. Do not start Phase 1
+  repository changes, including test scaffolding and drift guards, until the
+  owner marks the spec ready for implementation or explicitly authorizes work
+  against the reviewed draft. Read-only discovery may continue.
+- The two draft dependency specs have explicit integration gates below. A seam
+  is not a substitute for satisfying a declared dependency at sign-off.
+- The feature is complete only when the routed and direct forms of the
+  motivating multi-phase document execute the same deterministic fake-provider
+  fixture, acceptance criteria 1–30 map to passing tests, both drift guards are
+  at their final baselines, and all three package-area checks are green.
+
+### Phase index
+
+| Phase | Exit outcome |
+|---:|---|
+| 1 | Baseline, deterministic failing reproduction, resolver seam, drift guards |
+| 2 | Typed transitions and explicit state ownership |
+| 3 | Validated `proxy.with` authoring surface and diagnostics |
+| 4 | Atomic source-time evaluation into a typed request |
+| 5 | One canonical document-preparation service |
+| 6 | One coordinator owns active-document transitions |
+| 7 | Safe target `initialize`, stabilization, and reread |
+| 8 | Overlay precedence, semantics, and lifetime |
+| 9 | Target-specific launch rebuilding and shell approval |
+| 10 | Loop ownership follows the stabilized active document |
+| 11 | Canonical retry/resume and session compatibility |
+| 12 | Typed, redacted transition failures and status |
+| 13 | Cross-platform direct/proxy equivalence matrix |
+| 14 | Documentation, skill drift, and feature completion |
+
+---
+
+## Grounding: what the code actually looks like today
+
+These facts were verified against the tree and shape the phase ordering.
+
+**There are two parallel initialize-proxy channels, not one.**
+
+- Library loop engine: `lib/src/composition/looping/engine.rs:415-464` returns
+  the target out-of-band via `.with_init_proxy_target(resolved)` into
+  `LoopExecutionResult::init_proxy_target` (`lib/src/composition/looping/types.rs:189`).
+- CLI single-document pipeline: `cli/src/commands/wrap/composition/pipeline.rs:1130`
+  declares its own `let mut init_proxy_target: Option<PathBuf> = None`, sets it
+  at `:1175`, returns it at `:1215`, and feeds it to the harness loop at `:1407`
+  as `initial_proxy_target` (`loop_control.rs:79`).
+
+This is exactly the "second optional proxy-target channel" the spec bans in R1.
+
+**The banned second composer is real and half-migrated.**
+`cli/src/commands/wrap/harness_orch/prompt.rs:190` (`materialize_harness_prompt`)
+hand-rolls compose options and calls Darkmatter `compose_with` at `:218` and
+`:260`, with its own `apply_rematerialize_inputs` (`:70`) and
+`rematerialize_compose_options` (`:93`). `preflight_proxy_target` (`:124`)
+duplicates the option-building a third time (`:144-159`). The `Inline` arm
+(`:281`) already delegates to `prepare_inline`, so the file is partly migrated.
+Sanctioned composer sites are `lib/src/composition/prepare.rs:198`
+(`prepare_direct`) and `:373` (`prepare_inline`).
+
+**Proxy identity is swapped inside the attempt harness.**
+`cli/src/commands/wrap/harness_orch/control_dispatch.rs:209-213` mutates
+`prompt_state.source_path` / `original_ref` and clears the flow-control fields,
+then re-enters at `attempt: 1`.
+
+**Three pre-existing defects the refactor should absorb (do not fix ad hoc):**
+
+1. `control_dispatch.rs:181` calls `claudine::harness::resolve_harness_path`
+   **directly**, bypassing `resolve_proxy_target` (`lib/src/composition/lifecycle/control.rs:238`)
+   and therefore skipping its `is_file` existence check. A `failure: proxy(missing.md)`
+   resolves to a nonexistent path and fails later and differently than the same
+   proxy at `initialize`. Phase 1 fixes this as the seam; Phase 6 makes it
+   structurally impossible.
+2. `looping/engine.rs:439` calls `proxy_handoff_allowed(&[prompt_path], &resolved)`
+   with a **single-element chain slice**, so the loop route cannot see multi-hop
+   history. The invocation-wide chain in Phase 2 subsumes this.
+3. `proxy.target` loses whole-value typing: `executor.rs:1148` routes it through
+   `render_message` (`:887-899`), which collapses to `scalar_string`. `with:`
+   values must **not** reuse that path — they must reuse the typed rule.
+
+**The typed whole-value rule already exists and must be reused, not rebuilt.**
+`action_value_to_expr` (`lib/src/composition/lifecycle/action_shape.rs:329-367`)
+uses `darkmatter::markdown::compose::expression::ExpressionFinder::find_all_plain`,
+keeps a typed `Expr` when exactly one span covers the whole trimmed string, and
+maps YAML numbers/bools to literals. DM2 evaluation is
+`darkmatter::markdown::compose::subtree::SubtreeCompose` (`executor.rs:544-555`)
+followed by `reject_surviving_spans` (`executor.rs:1258-1275`).
+
+**Terminology correction for the spec's readers.** Composition lifecycle has
+**7 signals** (`LifecycleSignal::ALL`, `lib/src/composition/lifecycle/mod.rs:299`:
+`Initialize, Start, Success, Blocked, Failure, Finalize, Loop`). The "16 events"
+are provider hook events (`AgenticEvent::ALL`, `lib/src/events/agentic_event.rs:51`)
+and are a different axis. Do not conflate them when writing the stage matrix.
+
+**Loop vs single is decided at `cli/src/commands/compose/prep.rs:462`** — the
+presence of a `loop:` block via `resolve_loop_config`
+(`lib/src/composition/looping/config.rs:61`). Today that decision is made about
+the *router* before its `initialize` proxy fires. That is the motivating bug.
+
+### Dependency integration gates — read before Phase 1
+
+The spec's `depends_on` names two specs that are **`status: draft` and
+unimplemented**:
+
+- `claudine/features/2026-07-13-file-resolution/spec.md` — owns the shared resolver
+  that R2 requires the coordinator to call.
+- `claudine/features/2026-07-13-error-propogation/spec.md` — owns the typed
+  diagnostic transport that R10 requires.
+
+The dependency order is linear, not cyclic: file resolution declares
+`depends_on` error propagation, while error propagation lists file resolution
+only as `related`. The expected external order is therefore typed error
+propagation → unified file resolution → the coordinator's final resolver
+integration. This feature may use the narrow seams below while either
+dependency is pending, but it must not reverse that ownership or recreate
+either dependency locally.
+
+After this feature's readiness precondition is satisfied, independent parser,
+evaluator, state-model, and test-fixture work may proceed while these dependency
+specs remain drafts. Phase 1 establishes narrow seams so that work does not
+duplicate either dependency:
+
+- **File resolution**: consolidate on the single existing owner
+  (`resolve_proxy_target`, `control.rs:238`) and let the coordinator be its only
+  caller. When the file-resolution feature lands, it replaces that one function
+  body — not every call site.
+- **Error propagation**: keep concrete typed errors (`CompositionError` /
+  `HarnessError`) flowing to the render boundary and add **no new `eyre!`
+  stringification** on any transition path. When error-propagation lands, it
+  changes rendering/registry, not the transport.
+
+The gates are explicit:
+
+- **Before Phase 6 commits coordinator-owned file resolution**, the
+  file-resolution spec must either be implemented or the owner must approve the
+  existing `resolve_proxy_target` adapter as a temporary bridge. The completed
+  coordinator must delegate to that spec's `biscuit_file::FileReference`-based
+  authority; acceptance criterion 4 cannot be signed off while two resolver
+  semantics remain possible. If the dependency is still pending at Phase 13,
+  either implement it or amend this spec's `depends_on` with owner approval.
+- **Before Phase 12 closes typed error transport**, the error-propagation spec
+  must either be implemented or the owner must approve a documented integration
+  boundary that preserves concrete errors to the renderer. Acceptance criteria
+  28–29 cannot be deferred past feature completion.
+
+If either dependency lands mid-flight, its shared authority replaces the seam;
+do not absorb or reimplement the dependency's broader scope in this feature.
+
+---
+
+## Phase 1 — Baseline, dependency seams, and drift guards
+
+Goal: make current behavior measurable, make the drift observable, and pin the
+two dependency seams before any refactor starts.
+
+- [x] Record the exact starting commit and existing worktree changes, then run
+      `just test`, `just test-l2`, and `just lint` from `claudine/` before any
+      feature production/test edits. Write pass/fail counts and pre-existing
+      failures to `notes/baseline.md`. If unrelated worktree changes make the
+      result unattributable, use a clean disposable worktree at the recorded
+      commit; never reset or overwrite the user's changes.
+- [x] Add an ignored L2 reproduction of the motivating bug in
+      `cli/tests/level2_lifecycle_control.rs`. Use a self-contained temporary
+      router/loop-target fixture and the deterministic fake provider used by the
+      lifecycle suite; do not invoke a live Claude/Codex/Gemini service. Compare
+      the routed run with direct execution and assert the same iteration count,
+      phase mutations, and target `initialize` count. Document why it fails on
+      the baseline and re-enable it in Phase 10. Keep the shipped
+      `prompts/implement.md` command as a manual smoke case, not a CI dependency.
+- [x] Fix the resolver bypass at `control_dispatch.rs:181`: replace the direct
+      `resolve_harness_path` call with `resolve_proxy_target` so the failure-stack
+      proxy gets the same existence check as the initialize route. Add focused
+      L1 coverage that both dispatch paths call the shared resolver and reject a
+      nonexistent regular path before target adoption. Exact cross-route typed
+      identity belongs to Phase 12, after the error-transport dependency gate.
+- [x] **[∥]** Add the production `compose_with` allowlist drift guard as a test
+      under `cli/tests/`, modeled on the existing `dispatch_inventory.rs`
+      site-level guard. It must enumerate call sites by stable module + enclosing
+      function identity, not line number or a broad substring ban, and ship with
+      today's explicit baseline: `composition::prepare::{prepare_direct,
+      prepare_inline}`, `system_prompt::prepare::compose_prompt_markdown`,
+      `wrap::overlay::materialize_passthrough_harness_seed`, and the two arms of
+      `harness_orch::prompt::materialize_harness_prompt` with an expected count
+      of two (the `Passthrough` and `Compose` arms). The guard fails on a new
+      semantic owner or an unexpected count.
+- [x] **[∥]** Add a companion guard that fails on any **new** `Option<PathBuf>`
+      proxy-target return channel. Use the same Rust-aware structural scan and
+      seed it with today's two semantic owners:
+      `LoopExecutionResult::init_proxy_target` (`looping/types.rs:189`) and
+      `route_initialize::init_proxy_target` (`pipeline.rs:1130`). Phase 6
+      shrinks this list to zero; Phase 10 verifies it stays there.
+- [x] Correct the stale placement docs on `Proxy`, `Retry`, `Resume`, and
+      `Defer` in `lib/src/composition/lifecycle/actions.rs`. `is_valid_for`
+      (`actions.rs:195-200`) makes every control except `Skip` universally valid;
+      the enum comments still claim event-specific placement. Preserve useful
+      action semantics, but remove the incorrect validity claims. Code is
+      authoritative; the comments drifted.
+
+**Validation checkpoint 1**
+- `just test` and `just lint` green in `claudine/`.
+- Both drift guards pass against their seeded baselines.
+- The focused resolver-path tests pass; the motivating-bug L2 test is present
+  and ignored with a comment naming Phase 10.
+
+---
+
+## Phase 2 — Typed transitions and the four state layers
+
+**[∥ Phase 3]** — Phase 3 owns parser/diagnostic work while this phase owns the
+new state/transition types. Agree on shared module exports and error payloads
+before working concurrently.
+
+Goal: land the provider-neutral vocabulary in `claudine::composition` with no
+behavior wired to it yet. Nothing in this phase may perform process, terminal,
+filesystem I/O/resolution, or provider-adapter work (R1); carrying a resolved
+`PathBuf` value in a handoff type is expected.
+
+- [x] Define `DocumentTransition` in `lib/src/composition/` with the required
+      semantic surface: `Continue`, `Retry`, `Resume { session, message }`,
+      `Proxy(EvaluatedProxyRequest)`, `Complete`, and a typed abort path. Rust
+      names may differ from the spec; the surface may not. The abort path may be
+      generic or use a source-preserving envelope/coordinator outcome, but it
+      must not force CLI-only errors into `CompositionError`, erase them into a
+      string/`eyre!`, or create a library-to-CLI dependency.
+- [x] Define the two-stage handoff types: `EvaluatedProxyRequest { target: String,
+      overlay: IndexMap<String, serde_json::Value>, provenance: ProxyProvenance }`
+      and `ProxyHandoff { authored_target, resolved_target: PathBuf, overlay,
+      provenance }`. The type system must make it impossible to construct a
+      `ProxyHandoff` without a resolution step.
+- [x] Define `ProxyProvenance` carrying source path, lifecycle signal,
+      action/property location (reuse the dotted `"{event}.stack[{i}].action[{j}]"`
+      form from `preflight.rs:280-286`), and the proxy chain.
+- [x] Define the four ownership layers as distinct types (R2): invocation state
+      (immutable inputs plus a coordinator-owned run ledger), handoff state,
+      prepared document, and active-document execution state. Populate them from
+      the spec's field inventories. Cross-check against
+      today's carriers so nothing is dropped: `CompositionPrepContext`
+      (`cli/src/commands/wrap/composition/prep_context.rs:38`), `PreparedComposition`
+      (`lib/src/composition/types.rs:521`), `CompositionExecutionRequest`
+      (`types.rs:626`), `HarnessPromptState` (`harness_orch/types.rs:21`),
+      `MaterializedHarnessPrompt` (`types.rs:41`), `HarnessLoopState`
+      (`loop_control.rs:177`), `LifecycleRunGuard` (`lifecycle/mod.rs:475`).
+      Write the mapping into `notes/state-migration.md` — this table is the
+      checklist Phases 5–9 execute against.
+- [x] Split immutable invocation inputs from a coordinator-owned run ledger
+      within the invocation layer. Put the invocation-wide proxy chain/hop
+      accounting, exact-command approval cache, command/sequence timing
+      anchors, command-wide performance accumulation, and transition
+      provenance in that ledger. Proxy may never mutate the immutable inputs or
+      reset the ledger, and only the coordinator (or an adapter with a narrow
+      coordinator-supplied capability) may mutate it. Today proxy tracking is
+      `ProxyTracking { chain, pending }`
+      (`loop_control/proxy.rs:117`) with the "is this doc already in the chain"
+      test open-coded in four places (`loop_control.rs:203-208`,
+      `control_dispatch.rs:89`, `:189`, `:246`). Provide **one** method; leave the
+      call sites for Phase 6.
+- [x] Model active-document execution state as a document-iteration slice that
+      owns retry/resume budgets plus a replaceable provider-attempt slice. A
+      retry or resume replaces only the provider-attempt slice and retains and
+      decrements its budgets; proxy and the next document-loop iteration receive
+      fresh budgets. Give retry/resume/proxy/loop counters distinct labeled homes
+      (R8 forbids an unlabeled shared counter). Today:
+      `ControlBudgets { retry, resume }`
+      (`control_dispatch.rs:14`) + `control_budget_for` (`control.rs:176`).
+- [x] L1: model each layer separately and assert which fields survive initial,
+      retry, resume, proxy, and loop transitions. Assert active-document
+      execution state is discarded by proxy, retry/resume cannot reset their own
+      budget by replacing a provider attempt, immutable invocation inputs expose
+      no mutation, and transition-ledger mutation is coordinator-only.
+- [x] Enforce construction boundaries with private fields and narrow
+      constructors: lifecycle evaluation can construct only an
+      `EvaluatedProxyRequest`; constructing `ProxyHandoff` requires the opaque
+      resolved-reference value produced by the shared file-resolution authority
+      plus a successful coordinator hop/cycle decision. Downstream preparation
+      accepts the handoff by value and has no string-target resolver entry point.
+      Use compile-fail doctests only if these are public API boundaries;
+      otherwise unit-test the constructors and rely on Rust visibility rather
+      than an aspirational "type-level test."
+
+**Validation checkpoint 2**
+- `just test` green. New types compile with no production call sites yet.
+- `notes/state-migration.md` accounts for every field of all seven legacy
+  carriers — each is either mapped to a layer or explicitly marked as deleted
+  with a reason.
+
+---
+
+## Phase 3 — `proxy.with` parsing and diagnostics
+
+**[∥ Phase 2]**
+
+Goal: accept the authoring surface. No evaluation, no runtime.
+
+- [x] Add the typed `proxy` descriptor exception so the parser recognizes `with:`
+      **before** the generic sibling-key rule fires. The rule lives at
+      `parse.rs:438-483` (allowed siblings today: `when`, `action`, `no_error`);
+      the key/value proxy branch is `action_shape.rs:518-521`. The exception is
+      exact — it must not make nested maps valid for another proxy field or any
+      other action.
+- [x] Accept `with:` only on key/value form. `with: {}` parses and is equivalent
+      to omission.
+- [x] Reject a non-mapping `with:` with a typed, source-aware error.
+- [x] Reject dynamic or non-string `with:` keys with a source-aware diagnostic
+      rooted at `{event}.stack[i].action[j].with`; append `.key` only when the
+      key has a safe string representation. Never invent a misleading dotted
+      path for an unrepresentable YAML key.
+- [x] Reject `with: "{{ payload }}"` (whole-mapping interpolation) in v1 with an
+      actionable message pointing at explicit-key authoring. This is a named
+      out-of-scope follow-up, so the error must say so.
+- [x] Reject a proxy-only `with:` on any other action.
+- [x] Confirm — with a test, do not just assume — that positional `proxy:` plus a
+      sibling `with:` still produces the existing `LifecycleStackAmbiguous`
+      (`parse.rs:642-650`) with its actionable key/value rewrite. This is
+      acceptance criterion 19 and the spec asserts the *existing* diagnostic is
+      already correct.
+- [x] Add the new error variants to `lib/src/composition/error/mod.rs` and map
+      each to `FrontmatterHighlight::Property` in `frontmatter_block_spec()`
+      (`error/mod.rs:1685-1703`) so the `FrontmatterExcerpt` path highlights the
+      most specific locatable line.
+- [x] Add styled renderers in `lib/src/composition/error/render/lifecycle.rs`
+      alongside the existing ones (`:254`, `:276`, `:297`, `:318`, `:340`, `:358`).
+      Use `StatusBlock`/`Prose` — no raw `println!`/`eprintln!`.
+- [x] L1 in `lib/src/composition/lifecycle/tests/action_shape_control.rs`: parse
+      key/value proxy with omitted/empty mappings and mappings containing scalar
+      and nested values;
+      reject non-mapping, dynamic-key, whole-mapping, and wrong-action cases.
+
+**Validation checkpoint 3**
+- `just test` green; every new diagnostic has a test asserting its typed variant
+  **and** its rendered hint.
+- Existing proxy parser tests (`action_shape_control.rs:125`, `:441`, `:771`,
+  `:986`) still green — the `with:` exception did not widen the sibling rule.
+
+---
+
+## Phase 4 — `with:` evaluation into an evaluated request
+
+Depends on Phase 2 (types) and Phase 3 (parse).
+
+Goal: at event time, produce a fully-evaluated `EvaluatedProxyRequest` or fail
+atomically. No filesystem access in this phase (R2: evaluation is
+provider-neutral and does not consult the filesystem).
+
+- [x] Represent `with:` values as typed `Expr` trees at parse time by **recursing**
+      the existing `action_value_to_expr` rule (`action_shape.rs:329-367`) through
+      nested arrays and objects. Do not add a second interpolation grammar and do
+      not route values through `render_message` (`executor.rs:887-899`) — that is
+      the path that collapses `proxy.target` to a string.
+- [x] Evaluate at event time through `SubtreeCompose` with the same state,
+      globals, and resolution context as the rest of the lifecycle surface
+      (`executor.rs:501-555`), `.strict()`, followed by `reject_surviving_spans`
+      (`executor.rs:1258-1275`).
+- [x] Implement the value rules: mixed string → string; exactly-one-span →
+      preserved type (`bool`, number, string, array, object, null); authored YAML
+      scalars/arrays/objects/nulls keep their types; nested strings follow the
+      same rule.
+- [x] Guarantee no raw span survives into the overlay — a `{{ ... }}` must never
+      be deferred into target-time evaluation (acceptance criterion 20).
+- [x] Resolve against the source document's **live** frontmatter
+      (`MaterializedHarnessPrompt::live_frontmatter`, `harness_orch/types.rs:41`)
+      so a preceding `set_frontmatter` in the same stack is visible to `with:`.
+- [x] Scope globals per event: `err`, `timing`, `current` where applicable;
+      out-of-scope late-binding roots fail closed (reuse `LATE_BINDING_ROOTS`,
+      `lifecycle/mod.rs:131`).
+- [x] Enforce atomicity: evaluate target **and** the complete mapping before any
+      state change. On failure, install no partial overlay, leave the source
+      active for diagnostic attribution, and do not touch the target.
+- [x] Keep `no_error` accepted (it is a universal field, `actions.rs:58-70`) but
+      non-suppressing for proxy: proxy has no side-effect dispatch phase, so
+      overlay/target evaluation failures stay fatal. Today `no_error` only
+      suppresses dispatch (`executor.rs:767-793`), so this should require no
+      behavior change — add a test that locks it.
+- [x] Emit a typed interpolation-failure diagnostic naming the exact nested
+      `with` path (including object keys and array indices where representable),
+      the lifecycle event, the proxy action, and the target — **without** dumping
+      unrelated overlay values.
+- [x] L1: literal, mixed, whole-value, and nested interpolation semantics;
+      unknown root, malformed expression, unknown function, out-of-scope global;
+      atomic-failure assertions; `no_error` does not suppress.
+
+**Validation checkpoint 4**
+- `just test` green.
+- A narrow structural test (or the existing composition-call inventory,
+  extended if suitable) proves proxy-overlay evaluation delegates to
+  `SubtreeCompose`; behavioral tests alone cannot prove the absence of a second
+  interpolator.
+- A test proves `with: { x: "{{ true }}" }` yields JSON `true`, not `"true"`.
+
+---
+
+## Phase 5 — The canonical preparation service
+
+Depends on Phase 2.
+
+Goal: one service, explicit stages, explicit entry reason. This is the largest
+phase; land it in the listed order.
+
+- [x] Define the entry-reason enum and encode the spec's stage matrix as data,
+      not as scattered `if`s. Rows: Direct document, Proxy target, Retry, Resume,
+      Next loop iteration. Columns: source/input basis, `initialize`, schema +
+      full shell audit, loop ownership. No entry reason may fall through to a
+      different policy.
+- [x] Build the service around today's sanctioned composer (`prepare_direct`
+      `prepare.rs:198`, `prepare_inline` `:373`), giving it explicit stage
+      boundaries rather than a new parallel implementation.
+- [x] Make the prepared document store the **exact** `ComposeContext` used to
+      compose it (R5), plus the explicit environment override layer. Body
+      interpolation, effective frontmatter, lifecycle DM2 lookup, schema/file
+      evaluation, and shell preflight must all read that stored snapshot.
+- [x] Remove `ComposeContext::capture()` as a runtime fallback on any prepared
+      path. Today the capture sites are `prepare.rs:148`, `prepare.rs:328`,
+      `compose/prep.rs:260`, `compose/prep.rs:716`, `pipeline.rs:1001`,
+      `harness_orch/prompt.rs:96`. The snapshot must derive from immutable launch
+      inputs plus target-specific source/repo/workspace and resolved
+      provider/model identity — never from `std::env::current_dir()` after the
+      wrapper changes child CWD. (See the recorded hazard: the wrapper
+      intentionally mutates parent CWD to repo root.)
+- [x] Keep the late-binding `current.ctx.*` surface live and explicitly forbid it
+      as a fallback for a missing prepared `ctx.*`.
+- [x] Retire the second composer: delete the `compose_with` calls at
+      `harness_orch/prompt.rs:218` and `:260` and route `materialize_harness_prompt`
+      through the canonical service. Follow the `Inline` arm at `:281` as the
+      precedent — it already delegates to `prepare_inline`.
+- [x] Retire the third option-builder: `preflight_proxy_target`
+      (`harness_orch/prompt.rs:124-159`) becomes a canonical-service call.
+- [x] Resolve `RematerializeInputs` (`lib/src/composition/types.rs:496`): either
+      demote it to an internal input of the canonical service **with an honest
+      limited name**, or delete it in favor of the Phase 2 invocation/document
+      layers. Adding fields to it is explicitly not the answer. Note its in-flight
+      mutation at `prompt.rs:180-186` (`preflight_proxy_target` folding newly
+      approved commands into `pre_approved_commands`) — that behavior must be
+      preserved by whatever replaces it.
+- [x] L1: prove canonical preparation returns **semantically equivalent** prepared
+      documents for direct and proxy entry given the same resolved source and
+      assembled input layers. When proxy carries an overlay, compare against a
+      direct preparation supplied equivalent effective inputs rather than
+      treating the overlay as accidental route drift.
+- [x] L1: lock the stage matrix per entry reason — exactly one `initialize`
+      emission, full retry/resume validation, loop structural-plan reuse.
+- [x] L1: prove context construction is independent of later process-CWD changes
+      (construct, then change CWD, then assert `ctx.area` is unchanged). Because
+      CWD is process-global, use the existing RAII restore pattern and
+      `#[serial_test::serial(...)]`; the test must restore CWD even on panic.
+
+**Validation checkpoint 5**
+- `just test`, `just test-l2`, `just lint` green in `claudine/`.
+- The Phase 1 `compose_with` allowlist guard baseline **shrinks by two**:
+  `harness_orch/prompt.rs:218` and `:260` are gone. Update the guard's baseline
+  in the same commit and note the reduction.
+- `RematerializeInputs` is either renamed or deleted — grep proves no
+  source-specific field was added to it.
+
+---
+
+## Phase 6 — The active-document coordinator
+
+Depends on Phases 2, 4, 5 and the file-resolution integration gate. This phase
+removes the split ownership that causes the motivating bug; Phase 10 completes
+the observable loop-equivalence fix.
+
+- [x] Introduce the coordinator above both the document-loop engine and the
+      provider-attempt harness. Pure state decisions and the transition types
+      live in `claudine::composition`; the CLI driver owns process, terminal,
+      filesystem, and provider adapters (R1).
+- [x] Make the coordinator the **only** thing that may commit a change to active
+      document identity.
+- [x] Convert the harness to *request* `Proxy` instead of swapping its own source.
+      Delete the mutation at `control_dispatch.rs:209-213`.
+- [x] Collapse the two initialize-proxy channels into the one transition:
+      - remove `LoopExecutionResult::init_proxy_target` (`looping/types.rs:189`)
+        and `with_init_proxy_target` (`:228`); change `engine.rs:415-464` to
+        return the transition;
+      - remove `pipeline.rs:1130` / `:1175` / `:1215` and the
+        `initial_proxy_target` parameter (`loop_control.rs:79`, `:130`, `:167`).
+      There must be no supported proxy path whose consumption is optional.
+- [x] Make the coordinator the sole caller of `resolve_proxy_target` and of
+      hop/cycle validation, and have it atomically commit a `ProxyHandoff`. While
+      the file-resolution dependency is pending, `resolve_proxy_target` is only
+      a bridge; the final implementation delegates to the shared
+      `FileReference`-based resolver and preserves its typed resolved-reference
+      provenance. No downstream layer resolves the target again.
+- [x] Replace the four open-coded chain checks (`loop_control.rs:203-208`,
+      `control_dispatch.rs:89`, `:189`, `:246`) with the Phase 2 method. Fix the
+      loop engine's single-element chain slice (`engine.rs:439`) by passing the
+      invocation-wide chain.
+- [x] Implement clean-handoff semantics: once `proxy` is selected the coordinator
+      synthesizes **no** later source terminal/finalize/loop signal and applies no
+      uncommitted source closure. A proxy from `success`/`failure` skips that
+      attempt's ordinary `finalize`; a proxy from `finalize` does not re-enter it.
+      The target becomes the closure/output owner. Audit `LifecycleRunGuard`'s
+      Drop net (`lifecycle/mod.rs:846`) and `reset_for_proxy` (`:704`) against
+      this — the Drop net is a likely source of a synthetic emission.
+- [x] Nest the coordinator inside command-level ownership: `inline-compose` stays
+      inline mode but only the final target is eligible for the inline closure;
+      a sequence proxy stays inside its current step (no advance, no restart) and
+      retains the step's scoped inputs and timing identity; `compose` routes the
+      final active document's output to stdout.
+- [x] Preserve dry-run: it never traverses a dynamic proxy route.
+      **The premise of this task was wrong and the test caught it.** Dry-run
+      *does* fire lifecycle events — `level2_lifecycle_dispatch::level2_lifecycle_blocked_preflight_dry_run_shell_audit_fires_blocked_and_finalize_stacks`
+      pins `initialize` → `blocked` → `finalize` as contract — so `initialize`
+      can hand off on a dry run. Gating `initialize` off for dry-run was tried
+      and reverted: it broke that L2. The dry-run seam
+      (`wrap/composition/runner.rs`) instead consumes the transition explicitly
+      and renders the document it was given.
+      Test: `wrap_compose_preflight::compose_dry_run_does_not_traverse_a_proxy_handoff`.
+- [x] L1: assert the provider harness cannot mutate active document identity
+      (type-level if achievable, test-level otherwise).
+- [x] L1: assert every proxy producer returns the shared typed transition and
+      every coordinator outcome consumes or explicitly rejects it.
+- [x] L1: lock closure/output ownership for direct, inline, and sequence-step
+      modes, including the absence of a synthetic source finalize after a clean
+      proxy.
+
+**Validation checkpoint 6** — PASSED
+- The Phase 1 optional-proxy-channel guard baseline is **zero**. Delete the
+  seeded list.
+- All five named proxy L2s stayed green **unmodified**, including
+  `level2_lifecycle_failure_proxy_runs_target_document_no_loop`: the route drift
+  it encodes is Phase 10's to correct (loop recognition), not Phase 6's.
+- One library test was rewritten with the change intentional:
+  `looping::engine::tests::lifecycle_control::loop_initialize_proxy_unresolvable_routes_to_failure`
+  → `..._defers_resolution_to_the_coordinator`. It asserted that the loop engine
+  resolves a proxy target itself and routes a miss through `failure`/`finalize`
+  — the exact per-route resolution semantics this phase removes.
+- `claudine-gen::drift::committed_generated_artifacts_match_phase_1_byte_baseline`
+  fails on a missing baseline fixture (`reviews/2026-07-14-module-assessment/`
+  was archived with it). Absent at `HEAD`, untouched by this phase.
+- `just test`, `just test-l2`, `just lint` green.
+- Existing proxy L2s still green: `level2_lifecycle_initialize_proxy_runs_target_initialize`
+  (`cli/tests/level2_lifecycle_control.rs:1118`), `..._cycle_guarded` (`:1382`),
+  `..._respects_target_skip` (`:1311`), `..._respects_target_error` (`:1345`),
+  `level2_lifecycle_failure_proxy_runs_target_document_no_loop` (`:889`) — note
+  this last one encodes the corrected route drift and may need to be rewritten
+  rather than kept; if so, say so explicitly in the commit body.
+
+---
+
+## Phase 7 — Staged bootstrap initialize, safety gate, and target reread
+
+Depends on Phases 5, 6.
+
+This phase establishes the staged reads and a single input-layer assembly point
+using authored frontmatter plus caller overrides. Phase 8 wires the evaluated
+proxy overlay into that point for both reads. The `proxy.with` path is not
+end-to-end complete, and R4 is not signed off, until Phase 8 passes.
+
+- [x] Implement the staged canonical boot in order: resolve/read candidate →
+      apply input layers → derive target-specific repo, selection hints,
+      provider/model env, and the early-binding context `initialize` needs →
+      parse the bootstrap lifecycle surface → narrow safety gate → run
+      `initialize` through the normal evaluator → consume `skip`/`error`/`Proxy`
+      atomically → reread the stabilized target → full preparation.
+- [x] Build the narrow safety gate: parse and approve **every potentially
+      selected** `initialize` shell command against the same early-binding
+      snapshot, and route all other initialize actions through the existing
+      effect/permission engine. It does **not** run target schema validation or
+      audit later-event commands. "Initialize before full pre-flight" never means
+      "execute unapproved shell."
+- [x] Make the full post-stabilization audit cover every remaining lifecycle and
+      template shell surface and **reuse** exact-command approvals already granted
+      by the narrow gate (the cache is keyed on the normalized command string —
+      `harness/shell.rs:39`, `:213-240`).
+- [x] Reread the stabilized target after `initialize` so successful
+      initialize-time file/frontmatter mutations are visible, reapply caller
+      layers through the shared input-layer assembly point, and do **not** fire
+      `initialize` twice. Phase 8 adds the immutable overlay to this same point;
+      do not create a temporary overlay-specific read path here.
+- [x] Support an initialize proxy chaining another atomic proxy; stabilize the
+      chain before committing to provider launch or loop execution.
+- [x] Error routing at the boundaries: malformed frontmatter or a failure too
+      early to construct the target's lifecycle config cannot fire target catch
+      events — return the normal typed parse/bootstrap diagnostic. After the
+      target lifecycle exists, later bootstrap/preparation failures follow normal
+      `failure`/`finalize` routing without emitting either signal more than once.
+      Cross-check against `execute_initialize_catch` (`pipeline.rs:1027`) and
+      `route_initialize` (`:1086-1140`).
+- [x] Assert this staging did not create a second composition implementation —
+      shared work is a shared service with explicit stage boundaries. The Phase 1
+      allowlist guard is the mechanical check.
+- [x] L1: one initialize emission per document; reread-after-mutation observed;
+      chained initialize proxy stabilizes atomically.
+
+**Validation checkpoint 7** — PASSED
+- `just test` green for `claudine` (3510) and `claudine-cli` (1982); `just
+  test-l2` green (134). `just lint` green.
+- `claudine-gen::drift::committed_generated_artifacts_match_phase_1_byte_baseline`
+  still fails on its missing archived fixture — absent at `HEAD`, untouched by
+  this phase (same as checkpoint 6).
+- Both Phase 1 drift guards unchanged and green:
+  `composition_seams::compose_with_allowlist_holds_the_line` and
+  `composition_seams::no_new_optional_proxy_target_channel`. No new composer
+  appeared — the staging reuses the canonical service's stage boundaries.
+- The narrow gate before dispatch and the no-re-prompt reuse are proven by
+  `composition::preflight::tests::{initialize_scoped_audit_approves_only_the_initialize_command,
+  full_audit_reuses_the_narrow_gates_approval_without_reprompting}` (L1) and
+  `level2_lifecycle_proxy_target_initialize_shell_is_gated_before_dispatch` (L2,
+  a builtin-blacklisted `rm` that the pre-Phase-7 proxy route executed unaudited).
+- One L2 was rewritten with the change intentional:
+  `level2_lifecycle_proxy_target_lifecycle_parse_failure_routes_blocked_finalize_with_err`
+  → `..._fires_no_catch_events`. It asserted that a target's bootstrap parse
+  failure fires the **source's** `blocked`/`finalize` — a synthetic source
+  closure after the source already handed off, which R7 bans and this phase's
+  error-routing task corrects. The coordinator now discards the source's
+  lifecycle config at the commit.
+
+---
+
+## Phase 8 — Overlay input layering and precedence
+
+Depends on Phases 4, 5, 7.
+
+- [x] Merge the resolved overlay into **every** read of the target's authored
+      frontmatter: the bootstrap read before target `initialize` and the fresh
+      read after initialize-time mutations. Reapply caller overrides after.
+- [x] Close the deferred R4 sign-off from Phase 7: prove initialize conditions,
+      selection hints, and initialize actions observe the overlay on the
+      bootstrap read, while full preparation observes the same immutable overlay
+      after the stabilized reread.
+- [x] Place this before full Darkmatter composition and schema validation so the
+      overlay participates in target frontmatter interpolation and computed
+      properties, selection hints and initialize conditions, `SimplifiedSchema`
+      validation/coercion/defaults/eager-file handling, target lifecycle parsing
+      and shell discovery, loop configuration, and the prompt body.
+- [x] Implement precedence low→high: target-authored frontmatter < `proxy.with` <
+      caller `key=value` / `--set`. The caller stays authoritative at every
+      document; a router can never silently replace an explicit caller value.
+- [x] Implement shallow top-level semantics: scalar or array replaces; object
+      replaces (no deep merge); `null` removes the target-authored top-level
+      property before composition. Caller overrides may restore or replace any key.
+- [x] Route file-valued properties through the target's canonical file-resolution
+      context — `with:` adds no second path resolver.
+- [x] Store the overlay at document scope as the **immutable, evaluated,
+      pre-schema** input. Schema defaults, coercion, and invalid-optional drops
+      affect prepared effective frontmatter only, never the stored overlay; a
+      later refresh reapplies the same overlay deterministically.
+- [x] Implement overlay lifetime: survives retry, resume, and loop refresh of the
+      same target; available to every lifecycle signal and body composition for
+      that target; never written to disk; discarded when that target proxies on.
+      A downstream proxy gets only its own `with:` plus caller overrides —
+      forwarding is explicit; omitting `with:` installs an empty overlay.
+- [x] Confirm cycle detection and `MAX_PROXY_HOPS` (`control.rs:204`) still key on
+      resolved document paths — an overlay does not create a distinct identity.
+- [x] Handle control-plane overlays: `with:` may set any top-level key including
+      selection, lifecycle, loop, schema, timeout, and MCP. The target reparses
+      and validates all resulting structural configuration, and every shell,
+      filesystem, network, messaging, and provider effect stays subject to normal
+      target-side policy. A source-resolved string installed under a target
+      lifecycle key is **literal target data** — raw `{{ ... }}` may not survive
+      DM2 and become a second target-time evaluation.
+- [x] L1: shallow replacement, null removal, precedence, atomic failure, and
+      immediate-target overlay replacement — each tested independently.
+- [x] L1: schema normalization never mutates the stored overlay; control-plane
+      values are source-resolved once, reparsed by the target, and policy-bound.
+
+**Validation checkpoint 8** — PASSED
+- `just test` green for `claudine` (3510) and `claudine-cli` (2003, 1 flaky —
+  the known spurious nextest LEAK-FAIL on `argv_normalization`, green on retry);
+  `just test-l2` green (135); `just lint` green.
+- `claudine-gen::drift::committed_generated_artifacts_match_phase_1_byte_baseline`
+  still fails on its missing archived fixture. Re-verified pre-existing this
+  phase by stashing the change and re-running: identical failure. Absent at
+  `HEAD`, untouched here (same as checkpoints 6 and 7).
+- Both Phase 1 drift guards unchanged and green
+  (`composition_seams`, 12/12): the overlay reuses the existing assembly point,
+  so no composer and no proxy-target channel appeared.
+- **The wiring was one line.** Phases 5–7 had already built the pieces: an
+  unused `HarnessPromptState::overlay` carrier, `merge_frontmatter_overlay`'s
+  shallow/null semantics, and `load_overlaid_source` as the single assembly
+  point both staged reads already went through. `adopt` had been dropping
+  `handoff.overlay()` on the floor with a comment naming this phase. Installing
+  it there is what closes R4.
+- Precedence falls out of *where* each layer lands rather than from ordering
+  logic: the overlay merges into the authored frontmatter map, and the caller's
+  `set_overrides` ride on the compose options and are applied by Darkmatter on
+  top (`effective_state::apply_set_overrides`). There is no third place to get
+  the order wrong.
+- All 21 new L1s in
+  `loop_control::tests::overlay_layering` were verified to **fail** with the
+  one-line wiring removed, as was the L2 (which reported `note=from-target`).
+  A caller `--set` beating a conflicting `with:` is proven end-to-end through
+  the shipped binary by
+  `level2_lifecycle_proxy_with_overlay_loses_to_a_caller_set_and_beats_the_target`,
+  which also asserts both documents' bytes are unchanged.
+- **Scope note for Phase 12.** The harness route (`prepare_document`) composes
+  through `prepare_direct_with_prompt`, not through the schema-aware
+  `prepare_direct_with_schema` the `compose` command uses. So an invalid overlay
+  surfaces the target's typed
+  `CompositionError::ComposeFailed(SchemaValidationFailed)` — pre-launch, as the
+  checkpoint requires — but *not* the `SchemaValidation`/`MissingProperties`
+  categorization, and invalid-**optional** drop-and-retry does not run on this
+  route. This drift predates Phase 5 (the deleted composer never categorized
+  either) and is cross-route typed identity, which Phase 12 owns. It is not
+  overlay-specific: it affects every proxied/retried target equally.
+
+---
+
+## Phase 9 — Target-dependent launch rebuild and per-target shell approval
+
+Depends on Phases 6, 7, 8. The two task groups below are **[∥]** with each other.
+Phase 8 is required because control-plane overlay values can change selection,
+MCP, workspace, and shell surfaces.
+
+**Launch rebuild (R6)**
+
+- [ ] On every active-document change, recalculate from the target plus immutable
+      invocation state: provider/model selection, interactivity, MCP tags and
+      runtime injection, workspace/repository behavior, child CWD,
+      profile/binary, structured mode, system prompt, argv, child environment,
+      dispatch context, and the target-owned closure plan.
+- [ ] Keep the enclosing command/sequence output policy as invocation state — it
+      is not rebuilt.
+- [ ] Preserve normal precedence: explicit CLI intent stays authoritative; target
+      frontmatter affects only what was not explicitly fixed. Proxying to a
+      prompt pinned to another provider must behave like invoking that prompt
+      directly under the same CLI arguments.
+- [ ] L1: prove target-dependent decisions refresh on proxy while immutable CLI
+      inputs do not.
+
+**Shell approval (R9)**
+
+- [x] Give every fresh proxy target the same discovery and approval opportunity as
+      a direct invocation, covering body, frontmatter, and lifecycle shell
+      surfaces from the one prepared document that will execute.
+- [x] Allow the invocation-wide approval cache to be shared, but only an **exact**
+      already-approved command may bypass a new prompt. Freezing the cache for the
+      source must not block a target from requesting approval for newly
+      discovered commands. Audit `CompositionPrepContext.shared_approval_cache`
+      (`lib/src/composition/types.rs:697`) for a freeze that violates this.
+- [x] Rerun discovery and approval on retry/resume fresh-read preparation:
+      unchanged exact commands hit the cache; new or changed commands get normal
+      review. Loop-iteration materialization reuses the stamped structural plan
+      and cannot introduce new command bytes.
+- [x] Guarantee approved bytes equal executed bytes. A `with:` value that
+      influences a command must be present both at approval and at execution.
+- [x] L1/L2: a target-only command prompts even when the source's commands were
+      already approved; an identical command does not re-prompt.
+
+**Validation checkpoint 9** — **NOT PASSED. Shell approval (R9) landed; launch
+rebuild (R6) is unstarted and is a larger refactor than the task list implies.**
+
+- `just test` green for `claudine` (3510), `claudine-contract` (47),
+  `claudine-catalog-types` (21), and `claudine-cli` (2009, 1 flaky — the known
+  spurious nextest LEAK-FAIL); `just lint` green.
+- `claudine-gen::drift::committed_generated_artifacts_match_phase_1_byte_baseline`
+  still fails on its missing archived fixture — absent at `HEAD`, untouched by
+  this phase (same as checkpoints 6, 7, and 8). This phase changed no file under
+  `claudine/gen`.
+- The checkpoint's named test (provider-pinned proxy target; CLI `--codex` still
+  wins) is **not written** — it cannot pass until R6 lands. See below.
+
+**R9 — done.** The freeze violation the task predicted was real.
+`CachedHarnessLoopContext::freeze_shell_approvals` dropped the interactive
+approval handler for the whole invocation. Adoption resets `attempt = 1`, so
+the freeze *re-ran* for each target — against an already-`None` handler. A
+command only the target declared was therefore denied without ever being
+offered for review (`PreFlightFailed: "... requires approval but no approval
+handler is available"`), while the plan requires the target get "the same
+discovery and approval opportunity as a direct invocation". The fix scopes the
+freeze to the document that earned it: the context retains the run's original
+handler and `refresh` restores it **only on a document change**. Retry/resume
+re-read the same document mid-run and keep the freeze, which is the point —
+a hand-off happens between child processes, a retry happens behind a live one.
+All six new L1s in `loop_control::tests::shell_approval` were verified to fail
+with the one-line thaw removed.
+
+**R6 — not started, and it cannot be landed partially.** The blocker is
+structural, not effort-estimation:
+
+- Every launch decision R6 lists is computed **once, before the loop**, across
+  four `pipeline.rs` phases (`resolve_selection_and_launch` `:188`,
+  `prepare_environment_and_mcp` `:319`, `construct_argv_and_system_prompt`
+  `:513`, `construct_lifecycle_runtime` `:913`). `HarnessLoopCtx`
+  (`loop_control.rs:49-81`) holds their outputs as `&'a` borrows and `Copy`
+  scalars that outlive the loop, so rebuilding any of them requires owning them.
+- After `coordinator.adopt(...)` the loop re-derives only prompt, frontmatter,
+  lifecycle, harness plan, timeouts, and closure plan. Provider, model argv,
+  MCP, system prompt, child env, structured mode, profile/binary, child CWD,
+  and dispatch context all remain the **source** document's. `build_harness_launch`
+  (`launch.rs:10`) is not a launch builder — it takes `provider`/`profile`/
+  `base_args`/`base_env` as already-decided inputs and never reads
+  `agent:`/`model:`/`mcp:` off the materialized frontmatter.
+- **Provider and argv are inseparable.** argv is built entirely through
+  `profile.apply_entrypoint` (`pipeline.rs:621`),
+  `profile.apply_non_interactive_flags` (`:624`),
+  `resolve_model_and_validate(provider, profile, …)` (`:635`), and
+  `profile.apply_output_format` (`:656`). Rebuilding provider selection without
+  rebuilding argv would launch the target provider's binary with the source
+  provider's flags — strictly worse than today's stale-but-coherent launch.
+  So there is no safe subset: the checkpoint's `--codex` test cannot be
+  satisfied by a selection-only change.
+- The two candidate designs, for whoever picks this up:
+  1. **Owned launch + rebuilder seam.** Extract the three phases' inputs off
+     `&mut CompositionAttempt` into a `LaunchInputs` bundle so they become
+     functions of (immutable invocation state, prepared document); give the loop
+     an owned `TargetLaunch` plus a `&dyn TargetLaunchRebuilder` it calls at each
+     adoption. Precedence falls out for free — `resolve_execution_target`
+     (`target.rs:83`) already returns `ExplicitFlag` for `request.explicit_provider`
+     ahead of any frontmatter hint, which is exactly the checkpoint's
+     `--codex`-still-wins rule.
+     Complication: `prepare_environment_and_mcp` does real I/O (MCP catalog
+     load, `ensure_shadow_home`, injector, and an interactive `Select` prompt),
+     so a rebuild must be idempotent per provider and must not re-emit the
+     execution header or double-count perf substages.
+  2. **Relaunch seam.** Have the loop return a typed `Relaunch` once Phase 7's
+     staged boot has *stabilized* the target but before its first provider
+     attempt, and let `provider_run_handoff` re-enter the four phases for it.
+     This lands on the same seam Phase 10 wants ("move loop recognition to after
+     initialize routing stabilizes and before the first provider attempt").
+     Complication: the `LifecycleRunGuard` and `lifecycle_ctx` borrow from
+     `attempt.request`, which the relaunch must replace — so the ledger, overlay,
+     approval cache, budgets, and the already-emitted `initialize` all have to be
+     carried across an ownership boundary.
+- **Downstream impact.** Phase 10 declares "target-specific launch state must
+  already be canonical before loop ownership moves"; Phase 11's session
+  compatibility key is defined over the launch properties R6 rebuilds; Phase 13's
+  equivalence matrix compares provider/model/MCP/CWD/system-prompt/argv/child-env
+  between the direct and routed routes. None of those can be signed off on a
+  stale launch.
+
+---
+
+## Phase 10 — Loop ownership follows document identity
+
+Depends on Phases 6–9. **This closes the motivating bug.** Overlay-derived loop
+configuration and target-specific launch state must already be canonical before
+loop ownership moves.
+
+- [ ] Move loop recognition to after initialize routing stabilizes and before the
+      first provider attempt for the active target. Today the decision is made
+      about the router at `cli/src/commands/compose/prep.rs:462` via
+      `resolve_loop_config` (`looping/config.rs:61`) before its `initialize`
+      proxy fires.
+- [ ] Give a proxied target the same document-loop coordinator it would receive
+      when invoked directly.
+- [ ] Preserve the ratified loop contract for later iterations: `initialize` runs
+      once for the active document; the loop gate/mutations decide continuation;
+      per-iteration refresh uses canonical preparation inputs and the stored
+      document context and never falls back to the (now-deleted) reduced composer.
+- [ ] Make a proxy emitted by the loop lifecycle end the source document and
+      return a handoff to the coordinator — it does not become an extra iteration
+      of the source loop.
+- [ ] Reconcile the two copies of the initialize-control switch
+      (`looping/engine.rs:400-480` and `pipeline.rs:1130-1215`) — after Phase 6
+      they should already be one; verify and delete the remnant.
+- [ ] **Re-enable the Phase 1 motivating-bug L2 test.** The deterministic routed
+      fixture must match its direct target for iteration count, phase mutations,
+      and target `initialize` count. Separately run the shipped
+      `prompts/implement.md` → `prompts/_implement/implement-plan.md` command as
+      a manual smoke test when credentials/provider availability permit; do not
+      make live provider access part of the automated gate.
+
+**Validation checkpoint 10**
+- The Phase 1 ignored L2 test is enabled and **green**. This is the headline
+  acceptance signal for the whole feature.
+- `just test`, `just test-l2` green.
+- `loop_initialize_proxy_hands_off_without_iterating`
+  (`lib/src/composition/looping/engine/tests/lifecycle_control.rs:232`) still
+  encodes correct behavior, or is rewritten with the change documented.
+
+**Attempt 1 (2026-07-17) — NOT STARTED. Blocked on Phase 9 R6, as Phase 9's own
+checkpoint predicted. No production code was changed; no task above is checked.**
+
+Re-verified at `HEAD` (`8efdded07`): R6 is still unstarted — `LaunchInputs` and
+`TargetLaunchRebuilder` do not exist, and neither does any relaunch seam.
+
+**Why Phase 10 cannot be landed on top of Phase 9's partial state.** The
+coordinator is *not* above the loop engine. Phase 6 placed
+`ActiveDocumentCoordinator` (`loop_control/coordinator.rs:33`) inside
+`run_harness_loop`, which sits **below** the engine:
+
+```
+compose/prep.rs::execute_loop_or_single      ← decides loop vs single (origin doc only)
+  └── looping::engine::run_loop_with_overrides
+        └── per-iteration closure → execute_composition_attempt
+              └── pipeline.rs → run_harness_loop
+                    └── ActiveDocumentCoordinator::adopt   ← proxy targets land HERE
+```
+
+Loop recognition therefore happens two frames *above* the place a proxy target is
+adopted. Giving a proxied target its loop means inverting that ownership — which
+is the same relaunch seam R6 needs (`plan.md` Phase 9, candidate design 2).
+`run_harness_loop` returns `(i32, perf, signals)` (`loop_control.rs:36-40`);
+`LoopStep` is `NextAttempt | Return | Abort`; `SingleCompositionOutcome`
+(`runner.rs:495`) carries no document field. There is no outbound
+document-identity channel at any of the five frames between `adopt` and prep.
+
+**A narrow shortcut exists and was rejected.** Bailing out at the target's
+*bootstrap read* (before the narrow gate and before target `initialize`) and
+letting prep's engine drive the target would turn checkpoint 10's headline L2
+green without R6 — the router in `EQUIV_ROUTER` has no `loop:` and no `with:`,
+so no engine frame unwinds and the overlay is empty. It was not taken because it
+buys the signal by reintroducing what this feature exists to delete:
+
+1. **Phase 10's first task is not discharged.** Recognition would sit *before*
+   stabilization, so a target whose `initialize` authors or removes `loop:` is
+   misclassified — the `prep.rs:462` drift relocated one document downstream,
+   not removed.
+2. **Phase 10's preamble is violated.** `resolve_loop_config` reads
+   `source.markdown.frontmatter()` — authored bytes, no overlay.
+   `with: {max: 5}` + `loop: {max: "{{max}}"}` would not see the overlay.
+   `PrepareOptions` (`prep.rs:735-744`) has no overlay channel.
+3. **Two boot contracts — the split ownership Phase 6 deleted.** Loop targets
+   would get prep's audit-then-initialize order; non-loop targets keep Phase 7's
+   narrow-gate → initialize → stabilized reread → full audit. Loop targets would
+   ship exactly the drift Phase 7 fixed.
+
+**The correct seam, for whoever picks this up.** Bail *after* Phase 7's staged
+boot has stabilized the target (so recognition sees post-`initialize`,
+post-overlay `loop:`, and one boot contract survives), and unwind all the way to
+prep rather than relaunching inside `provider_run_handoff`. Unwinding to prep is
+what dissolves the knot Phase 9 named: the whole `CompositionAttempt` — and with
+it the `LifecycleRunGuard` borrow of `attempt.request` — drops on return. R6
+then falls out **incidentally** for the loop route, because each engine iteration
+re-enters all four pipeline phases fresh from the target's `prepared`
+(`prep.rs:581-600`); no in-place rebuilder is needed. Required pieces:
+
+- A `Relaunch` variant on `LoopStep`/`HarnessLoopResult`, surfaced through
+  `SingleCompositionOutcome` → `provider_run_handoff` → `run_composition_body` →
+  `execute_composition_request` to prep, raised only when the stabilized target
+  declares `loop:`. Non-loop targets never bail; the common path is untouched.
+- An "initialize already emitted" input to `execute_loop_with_lifecycle` — it
+  unconditionally emits `Initialize` at `engine.rs:352` on a fresh guard
+  (`:336`), which would double-fire the target's.
+- The `RunLedger` must cross and re-seed. `ActiveDocumentCoordinator::new`
+  (`coordinator.rs:45`) always calls `RunLedger::new`, so a fresh coordinator
+  loses cycle detection and resets the hop budget: `A → B → C(loop) → A` stops
+  being a cycle. The approval cache is an `Arc` and crosses free.
+- An overlay channel into the loop seed / `PrepareOptions`, so
+  `resolve_loop_config` and every iteration read the same immutable overlay
+  Phase 8 installed.
+- `resolved_target` and `header_emitted` must be cleared on relaunch, or
+  `resolve_execution_target` short-circuits on the router's provider
+  (`target.rs:88-90`) and the target reprints the router's execution line.
+  Precedence is free: `explicit_provider` is checked at `target.rs:110` ahead of
+  any frontmatter hint — which is also checkpoint 9's `--codex`-still-wins rule.
+
+Recommended order: land R6 (or the relaunch seam above, which subsumes its loop
+route) before re-attempting Phase 10. The two are one refactor, not two.
+
+---
+
+## Phase 11 — Retry and resume re-entry
+
+Depends on Phases 5–10. Retry/resume refresh must consume the completed overlay,
+target launch, shell-approval, and loop-ownership contracts rather than build a
+second partial re-entry path.
+
+- [ ] `Retry`: retain active document identity, caller overrides, the immediate
+      overlay, context-derivation inputs, and proxy provenance. Create a fresh
+      provider attempt/session. Refresh mutable document material through the
+      canonical service and derive one new coherent prepared-context snapshot;
+      do not reuse the previous snapshot as mutable state. Keep deriving
+      pre/post-stage re-entry from `provider_launched`
+      (`loop_control.rs:944`, `control.rs:138` → `reenter_preflight:
+      !provider_launched`), but source the refreshed body, lifecycle, and launch
+      plan from **one** coherent prepared document.
+- [ ] `Resume`: retain the active document and a compatible live session. Refresh
+      mutable document/lifecycle material canonically, then deliberately
+      substitute the evaluated follow-up as provider input. Do not rerun
+      `initialize`, change active document, or silently change session contract.
+- [ ] Implement the **session compatibility key** on the prepared document,
+      containing every launch property the provider cannot renegotiate on resume:
+      at minimum provider, model, profile/binary and resume protocol,
+      workspace/child CWD, permission/tool mode, structured-output mode,
+      system-prompt delivery **and** content, and effective MCP server set. Allow
+      provider adapters to contribute provider-specific identity fields. Today's
+      gate is only `check_resume_support` (`cli/src/commands/wrap/resume.rs:48`,
+      called `control_dispatch.rs:145`) — that is narrower than required.
+- [ ] On key change after a canonical refresh, fail resume with a typed
+      diagnostic that **names the incompatible facets** and recommends retry.
+      Never mix a live session with a newly prepared launch plan.
+- [x] Scope retry/resume budgets to the active document iteration; proxy or the
+      next loop iteration resets them while invocation-wide hop/cycle accounting
+      continues. Replacing the provider-attempt slice must retain and decrement
+      the current budgets, so a retry/resume cannot reset its own limit. Verify
+      `ControlBudgets` / `control_budget_for` (`control.rs:176`) reset at the
+      documented boundary.
+      **The verification found a real defect.** The proxy boundary did not reset:
+      `ControlBudgets` was built once in `HarnessLoopState::new` and none of the
+      six `coordinator.adopt` sites touched it. Because `budget_for` only
+      establishes a ceiling into an *empty* slot (`get_or_insert_with`), a
+      ceiling the router earned silently swallowed the target's own
+      `max_attempts` — a target's `retry: {max_attempts: 3}` at attempt 2 was
+      denied outright against the router's stale ceiling of 2. Fixed at the one
+      commit point: `adopt` now takes `&mut ControlBudgets` and calls
+      `reset_for_document()`, so a hand-off cannot be committed without retiring
+      the source's ceilings. The next-loop-iteration boundary already held —
+      each iteration calls `run_harness_loop` afresh.
+- [ ] L1: retry starts a fresh session; resume retains only an identical-key
+      session; proxy clears session and active-document execution state.
+- [x] L1: budgets persist across retry/resume attempts, then reset at the proxy
+      or next-loop-iteration boundary while hop/cycle state continues.
+      `loop_control::tests::budget_scoping`, 5 tests. The three asserting the
+      reset were verified to fail with `reset_for_document()` removed (the
+      behavioral ones report `got Fallthrough`); the other two lock behavior
+      that already held — a retry cannot re-arm its own ceiling, and a refused
+      hop leaves the still-active source's ceilings intact.
+
+**Validation checkpoint 11** — **NOT PASSED. The budget-scoping group landed and
+fixed a real defect; the session-compatibility-key group (tasks 1–4, 6) is
+blocked on Phase 9's R6, transitively via Phase 10.**
+
+- `just test` green for `claudine` (3510), `claudine-catalog-types` (21),
+  `claudine-contract` (47), and `claudine-cli` (2014); `just test-l2` green
+  (135); `just lint` green.
+- `claudine-gen::drift::committed_generated_artifacts_match_phase_1_byte_baseline`
+  still fails on its missing archived baseline fixture (`drift.rs:32` — "phase 1
+  artifact baseline must be readable: NotFound"). Absent at `HEAD`, untouched by
+  this phase, which changed no file under `claudine/gen` (`git status
+  claudine/gen` is empty). Same as checkpoints 6–9.
+- `dispatch-inventory.json` regenerated: sites 1357 → 1363. The six new sites are
+  all `Provider::Goose` `direct-ref`/`reference` rows in the new test file —
+  no new `match Provider` dispatch.
+- The checkpoint's named gate — one L2 per compatibility-key facet — is **not
+  written**, because no facet can move. See below.
+
+**Budgets (tasks 5, 7) — done, and the "verify" task found a live bug.** The
+proxy boundary did not reset budgets, so a proxy target's `retry`/`resume`
+`max_attempts` was silently ignored in favor of whatever ceiling the router had
+already earned (`get_or_insert_with` only fills an empty slot). A router that
+spent `retry: {max_attempts: 1}` handed its target a ceiling of 2; the target's
+own `retry: {max_attempts: 3}` at attempt 2 was denied outright. Fixed at the one
+commit point rather than at the six `adopt` call sites: `adopt` now takes
+`&mut ControlBudgets` and calls `reset_for_document()`, so the reset and the
+identity change are one operation and a hand-off cannot be committed without it.
+This is the same shape as the state `adopt` already discarded (tail, resume
+follow-up, session) — the budgets were simply the one piece of active-document
+execution state living on the loop rather than on `HarnessPromptState`.
+
+**The session compatibility key (tasks 1–4, 6) cannot be landed on R6-less
+state.** Not effort — the facets do not exist as document-derived values:
+
+- The key's required facets map one-to-one onto pre-loop `HarnessLoopCtx` fields
+  (`loop_control.rs:49-81`): `provider`, `profile`/`binary_path`, `child_cwd`,
+  `use_structured`, `base_args` (which carries model via
+  `resolve_model_and_validate` and system prompt/MCP via
+  `prepare_environment_and_mcp`), and `base_env`. Every one is computed **once,
+  before the loop**, and held as an `&'a` borrow or a `Copy` scalar. None is a
+  function of the prepared document.
+- Task 3 puts the key **on the prepared document**; task 4 fires when the key
+  changes **after a canonical refresh**. Recomputing the key from a refreshed
+  document *is* R6's rebuild. Without it the key is byte-identical by
+  construction across every refresh, task 4's branch is provably dead code, and
+  the checkpoint's per-facet L2s cannot be written — there is no input that makes
+  a facet move.
+- **The available shortcut is worse than the gap.** Deriving the key from the
+  materialized frontmatter (`agent:`/`model:`/`mcp:`) would make facets move, but
+  it is exactly the "second partial re-entry path" this phase's preamble bans:
+  the derived facets (effective MCP server set, system-prompt *content*, child
+  CWD, permission/tool mode) are outputs of the three pipeline phases, not raw
+  frontmatter, so the key would be honest about three facets and fabricated about
+  five. Worse, it would refuse a resume and recommend a retry that — R6 being
+  absent — relaunches with the *identical* stale plan. A diagnostic naming a
+  change the run cannot actually make is a worse failure than the silence it
+  replaces.
+
+Recommended order is unchanged from checkpoints 9 and 10: land R6 / the relaunch
+seam, then Phase 10, then tasks 1–4 and 6 here. Phase 9's candidate design 1
+(`LaunchInputs` + `TargetLaunchRebuilder`) is what task 3 needs specifically —
+it makes the launch properties functions of (immutable invocation state,
+prepared document), which is precisely the signature a document-scoped
+compatibility key requires.
+
+---
+
+## Phase 12 — Typed errors and status across transitions
+
+Depends on Phases 3, 4, and 6–11, plus the error-propagation integration gate.
+This phase unifies errors only after every transition producer and target boot
+stage exists.
+
+- [x] Audit every transition path for `eyre!` stringification of a typed error and
+      remove it. Resolution, initialization, preparation, schema, shell,
+      selection, retry, resume, and proxy failures keep their concrete error and
+      source/provenance context to the render boundary.
+      **The audit separated two populations, and only one was a defect.** The
+      dominant idiom — `emit_*_with_err(...).map(Report::from).unwrap_or_else(|| eyre!("{error}"))`
+      (`loop_control.rs` ×3, `runner.rs` ×2) — is correct as written: the `Some`
+      arm carries the typed error through and `eyre!` fires only when the catch
+      protocol produced *no* typed error, so there is nothing to lose. Left
+      alone. Four sites genuinely discarded a type at construction and were
+      converted:
+      - `proxy.rs` initialize abort → the existing typed
+        `CompositionError::LifecycleInitializeFailed`, which is what the
+        non-loop route already returns, so the two routes now agree.
+      - `proxy.rs` `{control:?}` for retry/resume/defer at initialize → the new
+        `LifecycleTransitionUnownedAtStage` (below).
+      - `loop_control.rs` ×2 "prepared without a lifecycle surface" → the new
+        `LifecycleProxyTargetBootstrapFailed` (below).
+      - `control_dispatch.rs` resume gate: `eyre!("{e}")` re-wrapped an
+        already-`eyre` report into a fresh one carrying only the `Display`
+        string, discarding its cause chain. Now propagates `e`.
+      The one *structural* loss was bigger than any of them and is easy to miss
+      by grepping for `eyre!`: `ProxyCommitError`'s `impl Error` took the
+      default `source()` → `None`, so the typed `HarnessError` /
+      `CompositionError` its variants carry were **unreachable to the renderer**,
+      which selects its styled block by walking `source()` and downcasting. The
+      data was right; the trait plumbing was not, and only the plumbing is what
+      production reads. Tests:
+      `loop_control::tests::coordinator_adoption::{a_rejected_hop_exposes_its_typed_cause_to_the_error_chain,
+      an_unresolvable_target_exposes_its_typed_cause_to_the_error_chain,
+      a_refused_handoff_projects_typed_err_facets_per_variant}` — the first two
+      verified to fail with the `source()` impl reverted.
+      Note `lib/tests/boundary_lint.rs`'s error-transport guard and the repo's
+      `✅ error-transport guard: no un-allowlisted typed-error→String collapses`
+      lint both stayed green throughout: they guard `.to_string()` collapses,
+      and none of these were that shape — which is why they had survived.
+- [x] Guarantee the same target failure has the same typed identity and rendering
+      whether the target was direct, proxied from `initialize`, or proxied from
+      terminal recovery.
+      **The Phase 8 scope note's gap was the whole of it, and it closed
+      mechanically.** `prepare_document` composed through
+      `prepare_direct_with_prompt` while `compose` and `sequence` composed
+      through `prepare_direct_with_schema` — so the harness route (every
+      proxied, retried, resumed, and loop-refreshed document) surfaced an
+      uncategorized `ComposeFailed(SchemaValidationFailed)` where the identical
+      document invoked directly surfaced typed `SchemaValidation` /
+      `MissingProperties`, and invalid-optional drop-and-retry never ran. The
+      one obstacle was that the schema layer hardcoded `PromptSource::ComposedBody`;
+      `PrepareMode::Direct` now carries the `PromptSource`, so the passthrough
+      case keeps skipping the body-emptiness check. Both proxy routes share one
+      commit point since Phase 6, so they were never the asymmetry — direct vs.
+      harness was.
+      Tests: `composition::prepare::service::tests::{a_schema_failure_has_one_typed_identity_across_every_entry,
+      a_missing_required_property_is_typed_on_the_harness_route,
+      an_invalid_optional_is_dropped_and_recorded_on_the_harness_route,
+      a_supplied_prompt_survives_the_schema_layer_with_an_empty_body}`. The
+      first three were verified to fail with the routing reverted, reporting
+      exactly the `ComposeFailed(SchemaValidationFailed)` the scope note named.
+- [x] Add the remaining typed diagnostics from the spec's Errors section not
+      already covered by Phase 3/4: target bootstrap/preparation failure with
+      source and proxy provenance; resume incompatibility after canonical refresh;
+      and any supported transition returned without an owning coordinator able to
+      consume it.
+      **Two of the three landed; resume incompatibility is blocked on R6.**
+      - `LifecycleProxyTargetBootstrapFailed { target_path, source_path,
+        property, reason }` — the target failed but the `proxy` that named it is
+        the only line the user authored, so the coordinator now retains the
+        committed handoff's provenance (`active_provenance()`) to attribute it.
+        Without that the user sees a document they never named failing for a
+        reason they cannot trace.
+      - `LifecycleTransitionUnownedAtStage { source_path, property, verb, stage,
+        reason }` — for `retry`/`resume`/`defer` reaching `initialize`. It names
+        the *stage* rather than calling the action invalid, because `is_valid_for`
+        makes every control except `skip` universally placeable: the authoring is
+        legal and there is simply no provider attempt yet to act on. Calling it
+        invalid would send the user hunting an authoring mistake they did not make.
+      - **Resume incompatibility after canonical refresh is not written**, and
+        the reason is Phase 11's, unchanged: the session compatibility key does
+        not exist, because its facets are pre-loop launch values rather than
+        document-derived ones. A diagnostic naming facets that cannot move would
+        be untestable and dishonest. Blocked on R6, transitively via Phases 10–11.
+      Both new variants are wired into `frontmatter_block_spec()` and
+      `render/lifecycle.rs::status_block`. While there, `LifecycleProxyCycle` —
+      which predates this phase — turned out to have **no arm in either**, so a
+      proxy cycle rendered through the generic `provider::status_block` catch-all
+      as a bare line. It now has both.
+- [x] Implement handoff-failure routing: event-aware, no duplicate lifecycle
+      emission. Before `finalize` it follows the existing failure/finalize
+      transition; after `finalize` has fired it surfaces directly; a failure
+      inside `finalize` never re-enters `finalize`. A failed handoff never
+      half-activates the target.
+      **This task found the phase's real bug.** All six `adopt` sites bare-`?`'d
+      a refused hand-off. On the two terminal routes the terminal event had
+      already fired, so the guard's `Drop` net stayed silent (it fires only on
+      `start_emitted && !terminal_emitted`) and the run exited **without its
+      owed `finalize`** — a `finalize.stack` releasing a lock or posting a
+      status simply never ran, on the path where it mattered most. The
+      "half-activates" half already held (`adopt` rejects before touching
+      identity), so the defect was the mirror image: too *little* emission, not
+      too much. New `error_routing::route_handoff_failure` routes all five
+      in-loop sites; event-awareness is not branched on — it falls out of the
+      guard's emission ledger and the existing `LifecycleCatchProtocol`, which
+      already encode all three arms.
+      Tests: `loop_control::tests::lifecycle_ordering::{a_handoff_failure_after_the_terminal_event_still_runs_the_owed_finalize,
+      a_handoff_failure_before_the_terminal_event_routes_blocked_then_finalize,
+      a_handoff_failure_after_finalize_surfaces_without_re_emitting}`. The first
+      two were verified to fail with the routing reverted to bare propagation;
+      the third passes either way (it asserts nothing fires, which bare
+      propagation trivially satisfies) and is kept as the pin on the third arm.
+- [x] Status/tracing redaction: status may report that a handoff **includes** an
+      overlay and tracing may record property names and counts, but neither may
+      print overlay values — they can contain secrets. Follow existing redaction
+      policy.
+      The policy already existed (`DocumentOverlay::property_names`, and
+      `LifecycleProxyWithEvaluationFailed`'s no-echo rule); the gap was that
+      nothing enforced it. `EvaluatedProxyRequest`, `ProxyHandoff`, and
+      `DocumentOverlay` all **derived** `Debug`, printing every overlay value
+      verbatim. No live `tracing::debug!(?handoff)` or `{:?}` existed on these
+      paths, so the leak was latent — but `Debug` is one keystroke from live,
+      and this is the phase that adds status output. All three now implement
+      `Debug` by hand, rendering `key: <redacted>`; `PreparedDocument` derives
+      `Debug` and is covered transitively through `DocumentOverlay`'s impl.
+      Tests: `coordinator::tests::{an_evaluated_request_debug_names_properties_but_never_values,
+      a_committed_handoff_debug_names_properties_but_never_values,
+      a_prepared_document_debug_never_prints_overlay_values,
+      redaction_does_not_hide_overlay_values_from_the_code_that_needs_them}`.
+      All four verified to fail with the derived `Debug`s restored. The
+      secret is planted nested inside an object and an array too, so a
+      top-level-only redaction does not pass.
+- [x] Render all new terminal status/diagnostics through `TerminalRenderable`
+      components (`StatusBlock`, `Prose`, lists, tables). No ad hoc
+      `println!`/`eprintln!` on any transition path — add a guard or a test.
+      Both new renderers are `StatusBlock`. The guard is
+      `composition_seams::no_ad_hoc_printing_on_a_transition_path`, reusing that
+      file's existing comment/string/`cfg(test)`-blanking scanner over an
+      explicit 12-file transition surface (a repo-wide ban would false-positive
+      on the many legitimate boundary writes). Baseline is one pre-existing site:
+      the Ctrl+C status line, whose content is already component-built.
+- [x] Note for the seam: this phase adds **no** new error registry or rendering
+      mechanics. Those belong to `../2026-07-13-error-propogation/spec.md`. If
+      that spec has landed by now, use it; if not, keep transport typed and leave
+      a `//!` pointer.
+      **It has not landed on this branch** — see the checkpoint. Transport is
+      kept typed and `//!` pointers are in place; no registry or rendering
+      mechanics were added (the two new `status_block` arms use the existing
+      `StatusBlock`/`ErrorHeader` vocabulary).
+
+**Validation checkpoint 12** — **PASSED, with one task blocked and named.**
+
+- `just test` green for `claudine-catalog-types` (21), `claudine` (3518),
+  `claudine-contract` (47), and `claudine-cli` (2021); `just test-l2` green
+  (135, no flakes); `just lint` green.
+- `claudine-gen::drift::committed_generated_artifacts_match_phase_1_byte_baseline`
+  still fails on its missing archived baseline fixture. Absent at `HEAD`,
+  untouched by this phase — `git status claudine/gen` is empty. Same as
+  checkpoints 6–11.
+- Both Phase 1 drift guards green, plus the new print-ban guard
+  (`composition_seams`, 13/13). The `compose_with` allowlist did **not** move:
+  the schema layer calls `prepare_direct_with_prompt`, not `compose_with`, so
+  routing the harness through it added no composer.
+- `dispatch-inventory.json` regenerated: a one-line shift from a test-helper
+  insertion. No new `match Provider` dispatch; site count unchanged.
+
+**The checkpoint's two named gates.**
+
+*Cross-route typed identity* is proven by
+`composition::prepare::service::tests::a_schema_failure_has_one_typed_identity_across_every_entry`,
+which asserts one typed variant **and** one rendered string across all five
+`DocumentEntryReason`s against the direct `prepare_direct_with_schema` baseline.
+It is placed at the preparation layer rather than as three end-to-end runs
+because that is where the asymmetry actually lived — and the asymmetry was **not
+direct-vs-proxy**. Phase 6 gave both proxy routes one commit point, so
+initialize-proxy and recovery-proxy have been identical since then. The real
+split was *direct* vs *harness*: `compose` and `sequence` composed through
+`prepare_direct_with_schema`, `prepare_document` through
+`prepare_direct_with_prompt`. Every proxied, retried, resumed, and
+loop-refreshed document was on the wrong side of it.
+
+*No overlay value in status or trace* is proven by the four
+`coordinator::tests` redaction tests. Note what they are really guarding: there
+is **no** live `tracing::debug!(?handoff)` or `{:?}` on these paths today, so
+nothing leaks at `HEAD`. The exposure was latent in the derived `Debug`s — one
+keystroke from live, in the phase that adds status output. The tests fail with
+the derives restored, so they are a guard on the next change rather than a fix
+for this one.
+
+**On the error-propagation gate.** The dependency is **not satisfied**:
+`features/2026-07-13-error-propogation/` here holds only `spec.md`, still
+`status: draft`. Its implementation lives on unmerged branch
+`error-prop-and-file-resolution`. This phase therefore took the plan's own
+documented alternative (task 7): transport is kept typed, `//!` pointers are in
+place at the seam, and **no** error registry or rendering mechanics were added —
+both new `status_block` arms reuse the existing `StatusBlock`/`ErrorHeader`
+vocabulary. Worth recording for whoever merges that branch: its AC5 was carried
+forward as *unsatisfiable* because "both proxy routes fail at different stages
+against different resolvers." **That premise no longer holds** — Phase 6 made
+the coordinator the sole caller of `resolve_proxy_target`, so the two proxy
+routes now share one resolver and one commit point. AC5 should be re-evaluated
+rather than inherited.
+
+**One L2 was rewritten, and one test's wait was fixed.**
+- `overlay_layering::an_invalid_overlay_fails_the_targets_schema_before_any_launch`
+  asserted `ComposeFailed(SchemaValidationFailed)` — the uncategorized failure
+  Phase 8's scope note explicitly recorded as drift and handed to Phase 12. It
+  now asserts the categorized `SchemaValidation` naming `/topic`. The pre-launch
+  timing its name pins is unchanged.
+- `level2_lifecycle_initialize_proxy_cycle_guarded` waited for `target-init` in
+  the log — a marker written *before* the back-proxy is refused — then captured
+  after a fixed 150ms grace. That raced the error block onto the pane, and the
+  race widened once `LifecycleProxyCycle` got a real (taller) `StatusBlock`. It
+  now uses the existing `run_compose_await_exit`, which waits for the sentinel
+  echoed only after claudine exits. Full L2 went from 1 flaky to 0.
+
+**Not done: resume incompatibility (part of task 3), blocked on R6.** Same wall
+as checkpoints 9–11 — the session compatibility key's facets are pre-loop launch
+values, so no facet can move and the diagnostic cannot be honestly written or
+tested. Recommended order is unchanged: land R6 / the relaunch seam, then Phase
+10, then Phase 11's tasks 1–4 and 6, then this one diagnostic.
+
+---
+
+## Phase 13 — L2 equivalence matrix and regression guards
+
+Depends on Phases 6–12. Fixture files and harness scaffolding may be drafted
+earlier, but assertions for typed rendering and final transition behavior are
+enabled only after Phase 12.
+
+- [ ] Build the equivalence harness: for each fixture, invoke the target directly
+      and through an initialize router, then compare prompt and effective
+      non-lifecycle frontmatter; `ctx.area`/`ctx.agent`/`ctx.model` and the
+      corresponding `env.AGENT`/`env.MODEL` in body, frontmatter, **and**
+      lifecycle surfaces; provider/model/interactivity, MCP, workspace/CWD,
+      system prompt, argv, child environment; lifecycle signal order and target
+      initialize count; loop iteration count and mutations; closure target,
+      sequence-step identity, and stdout/stderr routing; shell approval and
+      execution bytes; typed failure identity and rendered diagnostic.
+      **PARTIAL — the harness is built; the launch facets have one reproduction
+      row and are blocked on R6.** `stage_equivalence_arm` / `normalize_arm` /
+      `equivalence_arms` live at the end of `cli/tests/level2_lifecycle_control.rs`,
+      generalizing the Phase 1 pattern. Both arms execute the **same file**
+      (`target.md`), differing only in the route to it, so a copy under a second
+      name cannot make path-derived facets diverge for non-routing reasons;
+      `normalize_arm` rewrites each arm's own tempdir path/basename, since each
+      arm owns a separate workspace.
+      - **Landed and green** (`level2_lifecycle_equivalence_probe_matches_direct_run`):
+        authored frontmatter, a computed property, the `ctx.*` snapshot,
+        lifecycle signal order, and the target `initialize` count are
+        byte-identical across the two routes.
+      - **Blocked (R6), reproduced**
+        (`level2_lifecycle_equivalence_target_pinned_model_matches_direct_run`,
+        `#[ignore]`d): this is the row checkpoint 9 declared unwritable. It is
+        written and fails for exactly the documented reason — routed
+        `env.MODEL=` empty vs direct `env.MODEL=llamacpp/probe-model-x`. Its
+        fixture check passes, proving the target's own `model:` reaches the
+        launch environment when it is the invoked document and not when it is
+        proxied to. It probes `model:` because `--goose` pins the provider on
+        both arms (explicit CLI intent R6 must keep authoritative), so `model:`
+        is the one launch input free to move without a second provider stub or
+        an interactive selection prompt; the id rides Goose's declared
+        `llamacpp` namespace because frontmatter models are catalog-validated
+        and an invalid one is dropped silently — which would have emptied the
+        facet for a reason unrelated to routing. (Discovered the hard way: the
+        first attempt used an invented id and failed its *direct* arm.)
+      - **Not covered**: MCP, argv, system prompt, child environment, child CWD,
+        interactivity, structured mode, stdout/stderr routing, sequence-step
+        identity. The launch facets all move together on the same rebuild, so
+        one reproduction row pins the gap; adding rows per facet is redundant
+        until R6 exists. Loop iteration count is AC7's, blocked on Phase 10.
+- [ ] Use a fake provider and platform-neutral temporary paths so the matrix runs
+      on macOS, Windows, and Linux. Do not hardcode `/tmp` or POSIX separators.
+      Note the recorded hazard: `tempfile` creates `0755` dirs and some endpoint
+      fixtures require `0700` — build the dir explicitly if permissions matter.
+      **PARTIAL — the rows are platform-neutral; the suite around them is not,
+      by ratified policy.** The new rows use the existing fake `goose`, `tempdir()`,
+      and no hardcoded `/tmp` or separators. The fixture check deliberately does
+      **not** pin `ctx.os`'s text (the first draft did, which would have made the
+      matrix macOS-only); it asserts only that it resolved, and the cross-arm
+      equality carries the comparison. But `cli/tests/level2_lifecycle_control.rs`
+      is `#![cfg(unix)]` at file level with `#!/bin/sh` fake providers, so the
+      whole suite is Unix-only **by construction** — and
+      `docs/testing-strategy.md` ratifies that L2 "skips (harness absent)" on
+      Windows. This task, as written, cannot be satisfied without reversing that
+      policy. See `notes/acceptance-map.md` → Cross-platform status.
+- [ ] Run the matrix in the repository's existing macOS, Windows, and Linux CI
+      coverage. If a platform cannot be exercised from the implementation host,
+      record the CI job and result in `notes/acceptance-map.md`; local macOS-only
+      success is not cross-platform sign-off.
+      **BLOCKED — the premise is false: that CI coverage does not exist.**
+      Verified: `claudine-tests.yml` runs `ubuntu-latest` only and does not call
+      the reusable `_area-ci.yml`, so claudine has no Windows or macOS **test**
+      leg at all (`claudine-windows-ctrl-c.yml` is one specific L3 test). And no
+      CI job runs `just test-l2` for claudine on any platform — the only
+      `test-l2` invocations in `.github/workflows/` are `test.yml` (sniff) and
+      `_area-ci.yml`'s opt-in `l2` job, which claudine does not use. So the
+      matrix's CI result today is *not run anywhere*, and per ratified policy it
+      can never run on Windows and is opt-in on macOS.
+      Three resolutions are recorded in `notes/acceptance-map.md` (wire claudine
+      into `_area-ci.yml` with `l2: true`; amend the plan to match policy; or
+      reverse the policy). **None was taken**: each is either an owner decision
+      or a policy reversal, and a phase is not authorized to make either
+      unilaterally. This needs Ken's call.
+- [ ] Author the remaining L2 cases: caller-override precedence over `with:`;
+      target schema/computed-property/initialize/body observation of typed overlay
+      values; failure/finalize proxy using `err.*` inside `with:`; retry, resume,
+      and loop refresh retaining the overlay; resume incompatibility per facet;
+      a three-document chain with explicit and omitted forwarding;
+      cross-repository proxy context and file resolution; target-authored
+      provider/model and target-specific MCP tags; cycle, hop-limit, missing
+      target, invalid overlay, schema failure, shell denial; initialize proxy
+      returned from the library loop route proving it cannot be dropped silently;
+      initialize-time mutation followed by stabilized reread; control-plane
+      overlays adding target lifecycle/shell config with target-side validation
+      and approval still running; `inline-compose` proxy closure ownership and a
+      proxy inside a sequence step; dry-run proving no lifecycle side effect and
+      no dynamic proxy traversal.
+      **PARTIAL — most of this list was already discharged by Phases 6–12; the
+      remainder splits into blocked and genuinely missing.** The audit is in
+      `notes/acceptance-map.md`, which maps all 30 criteria to named tests.
+      - **Already covered** (verified to exist, not assumed): caller-override
+        precedence (`level2_lifecycle_proxy_with_overlay_loses_to_a_caller_set_and_beats_the_target`
+        plus 21 L1s in `overlay_layering`); typed overlay observation by schema,
+        computed properties, initialize, and body (`overlay_layering`);
+        `err.*` inside `with:` (`proxy_with_evaluation::err_global_is_readable_in_a_failure_with`
+        and its out-of-scope sibling); cycle/hop (`level2_lifecycle_initialize_proxy_cycle_guarded`
+        + 5 coordinator L1s); missing target
+        (`adopt_rejects_a_missing_target_without_activating_it`); invalid
+        overlay/schema failure (`an_invalid_overlay_fails_the_targets_schema_before_any_launch`);
+        shell denial (`level2_lifecycle_proxy_target_initialize_shell_is_gated_before_dispatch`,
+        `..._later_event_shell_is_audited_after_stabilization`); library-loop
+        proxy not silently dropped (`loop_initialize_proxy_hands_off_without_iterating`
+        + the new `composition_seams` endpoint census); initialize-time mutation
+        then stabilized reread (`level2_lifecycle_proxy_target_rereads_after_initialize_mutation`);
+        control-plane overlays with target-side validation and policy
+        (`a_control_plane_overlay_is_reparsed_by_the_target`,
+        `a_shell_command_installed_by_the_overlay_stays_subject_to_target_side_policy`);
+        `inline-compose` closure ownership (`inline_closure_ownership_follows_the_adopted_target`);
+        dry-run (`compose_dry_run_does_not_traverse_a_proxy_handoff`).
+      - **Blocked**: resume incompatibility per facet (AC15 — the compatibility
+        key does not exist; Phase 11, via R6); target-authored provider/model and
+        target-specific MCP tags (AC10 — R6; the one reproduction row above is
+        the pin); retry/loop-refresh overlay retention end-to-end (AC26 — a
+        proxied target has no loop until Phase 10; the L1 refresh half is
+        covered).
+      - **Genuinely missing, and honestly so**: a three-document chain with
+        explicit vs omitted forwarding (the L1 halves exist —
+        `a_second_hop_replaces_the_overlay_rather_than_merging_it`,
+        `a_hop_that_omits_with_installs_an_empty_overlay_rather_than_forwarding`,
+        `every_document_in_a_chain_gets_its_own_approval_window` — but no L2
+        drives three real documents); cross-repository proxy context and file
+        resolution; a proxy inside a sequence step; stdout/stderr routing.
+        None is blocked — they are unwritten, and should be written either here
+        on a follow-up pass or alongside Phase 10, whose relaunch seam changes
+        the chain-stabilization path they would assert on.
+- [x] Add passive corpus tests proving every production proxy route carries the
+      complete handoff and every canonical-preparation caller supplies explicit
+      context.
+      Both landed in `composition_seams` alongside the Phase 1 guards, reusing
+      that file's scanner and site-identity model.
+      - `every_production_proxy_route_carries_the_typed_handoff` censuses all
+        five `DocumentTransition::Proxy` endpoints. It pins **both** ends — three
+        producers and two consumers — because AC3 is a claim about both
+        ("returned ... always consumed or rejected explicitly"); a
+        producers-only census would miss a consumer that drops a handoff. The
+        completeness half needs no scan: `EvaluatedProxyRequest` cannot be built
+        without target/overlay/provenance and `ProxyHandoff` cannot be built
+        without a resolution step, so the type system already carries it.
+      - `every_canonical_preparation_caller_supplies_explicit_context` bans the
+        ambient argument-less `ComposeContext::capture()`. **It found a real R5
+        gap Phase 5 missed**: `sequence::phase1c::build_template_preflight_options`
+        (`cli/src/commands/wrap/sequence/phase1c.rs:484`) still builds its base
+        context ambiently, so `ctx.*` in a sequence step's template shell
+        preflight resolves from the process CWD the wrapper has already moved to
+        the repo root. Phase 5's task named six capture sites and retired all
+        six; this seventh was never on the list. Its own docblock names the
+        hazard and patches one face of it (`with_file_ref_fallback_dir` anchors
+        file-ref resolution on the launch area) while leaving the context itself
+        ambient. Baselined as **debt, explicitly not a sanctioned owner**, so
+        the guard stops a second one; fixing it means choosing the correct
+        anchor for a sequence step, which is a behavior change a guard phase
+        should not make. Tracked in `notes/acceptance-map.md`.
+- [x] Triage the existing suites (proxy parser, lifecycle placement, cycle/hop,
+      retry, resume, loop, caller override). Each must stay green **or** be
+      rewritten with an explicit note that it encoded route drift intentionally
+      corrected here. `level2_lifecycle_failure_proxy_runs_target_document_no_loop`
+      (`cli/tests/level2_lifecycle_control.rs:889`) is the most likely candidate —
+      its name asserts the exact behavior R7 changes.
+      **Nothing needed rewriting, and that is the expected result rather than a
+      lucky one.** Phase 13 changes no production behavior — it adds tests and
+      guards — so every suite stayed green unmodified (3518 L1 + 136 L2).
+      The named candidate stays green for a reason worth recording: it asserts
+      `..._no_loop`, and a proxied target still gets no loop, because Phase 10 is
+      not landed. **It remains the right candidate, just not yet.** Whoever lands
+      Phase 10 must rewrite it in that phase — its name states the drift Phase 10
+      deletes, so a green `..._no_loop` after loop ownership moves would mean
+      Phase 10 did not work. The earlier phases that *did* change behavior
+      already did their own triage in-phase (checkpoint 6 rewrote
+      `loop_initialize_proxy_unresolvable_routes_to_failure`, checkpoint 7
+      rewrote the target-parse-failure L2, checkpoint 12 rewrote the invalid
+      overlay L2), which is why none of that work was left for this phase.
+- [x] Follow the L2 conventions: use `just test-l2`, never raw nextest. The
+      recipe supplies the `level2_` filter, required-level environment, and
+      bounded self-spawn concurrency. Harness capture has no scrollback, so long
+      output needs a tall pane.
+      Every L2 invocation in this phase went through `just test-l2`. The new
+      rows reuse `run_until_settled`, which polls `events.log` rather than the
+      pane, so the no-scrollback constraint does not bind them: the assertion
+      surface is the side-effect log and the pane is carried only for
+      diagnostics.
+
+**Validation checkpoint 13** — **NOT PASSED. The sign-off artifact landed and
+26 of 30 criteria map to passing tests; 4 are blocked on Phase 9's R6, and the
+cross-platform CI task rests on a false premise that needs Ken's decision.**
+
+- `just test` green for `claudine-catalog-types` (21), `claudine` (3518 — see
+  the timeout note below), `claudine-contract` (47), and `claudine-cli`;
+  `just test-l2` green (**136**, up from 135: the new probe row; the R6
+  reproduction row is `#[ignore]`d and does not count); `just lint` green.
+- **One pre-existing load-induced timeout**, not a regression:
+  `composition::interpolation_conformance::loop_and_lifecycle_agree_on_shared_syntax`
+  times out at nextest's 30s ceiling under full-suite parallelism but **passes
+  in isolation** in 8.9s (nextest flags it `slow`). It is a `claudine` **library**
+  test; this phase changed only two `cli/tests/` files plus documentation, so it
+  cannot be reached by the diff. A concurrent background run of the same
+  `just test` exited 0, which is the corroboration: it is the recorded
+  concurrent-agent load hazard, not breakage.
+- `claudine-gen::drift::committed_generated_artifacts_match_phase_1_byte_baseline`
+  still fails on its missing archived baseline fixture. Absent at `HEAD`,
+  untouched here — `git status claudine/gen` is empty. Same as checkpoints 6–12.
+- All four Phase 1 + Phase 12 drift guards green, plus the two new corpus guards
+  (`composition_seams`, 15/15). Neither the `compose_with` allowlist nor the
+  optional-proxy-channel baseline (still zero) moved: this phase adds tests, not
+  composers or channels.
+
+**The checkpoint's three named gates.**
+
+*The acceptance map* is written (`notes/acceptance-map.md`) and is the artifact
+this checkpoint asks for. Every test name in it was verified to exist rather
+than recalled. **26 of 30 criteria map to passing tests.** The four that do not
+all trace to one root — R6 is unstarted — and are named rather than papered
+over: AC7 (loop ownership, Phase 10), AC9's launch half and AC10 (launch
+rebuild, R6), AC15 (resume compatibility key, Phase 11). AC26 is marked partial
+for the same reason: a proxied target has no loop to refresh yet.
+
+*Both drift guards at their final baselines* holds. The optional-proxy-channel
+baseline is zero and stays zero; the `compose_with` allowlist is at its
+post-Phase-5 four.
+
+*All three package checks green* holds modulo the load-induced timeout above.
+
+**The phase's real find was a guard finding a bug, which is the point of a guard
+phase.** `every_canonical_preparation_caller_supplies_explicit_context` caught a
+**seventh ambient `ComposeContext::capture()`** that Phase 5 never saw:
+`sequence::phase1c::build_template_preflight_options`. Phase 5's task enumerated
+six sites and retired all six; this one was not on the list, so no one looked at
+it. A sequence step's template shell preflight therefore builds its base context
+from the process CWD — which the wrapper deliberately moves to the repo root —
+so `ctx.*` there resolves against the wrong document. Its own docblock names the
+hazard and patches one face of it (`with_file_ref_fallback_dir` anchors file-ref
+resolution on the launch area) while leaving the context ambient, which is
+exactly how it survived review. It is baselined as **debt, explicitly not a
+sanctioned owner**, so the guard still stops a second one. Not fixed here:
+choosing the right anchor for a sequence step is a behavior change with L2 blast
+radius, and a guard phase should not make it. Recommend folding it into R6,
+which is already rebuilding per-document context.
+
+**Phase 13 wrote the row checkpoint 9 called unwritable.** Checkpoint 9 said its
+named test "cannot pass until R6 lands" and left it unwritten.
+`level2_lifecycle_equivalence_target_pinned_model_matches_direct_run` is that
+row, `#[ignore]`d against R6 exactly as Phase 1 ignored the motivating-bug
+reproduction. It is worth the ignore: it converts a prose claim into an
+executable one, fails today for precisely the documented reason (routed
+`env.MODEL=` empty vs direct `env.MODEL=llamacpp/probe-model-x`), and turns
+green the moment the launch rebuild lands. Checkpoint 9's instinct was right
+that a *provider*-pinned test cannot be written — `--codex` would be explicit CLI
+intent — but `model:` moves without one.
+
+**Tasks 2 and 3 conflict with ratified repo policy, and this is Ken's call, not
+a phase's.** The plan asks for a matrix that "runs on macOS, Windows, and Linux"
+inside "the repository's existing macOS, Windows, and Linux CI coverage".
+`docs/testing-strategy.md` ratifies that L2 **skips on Windows** (tmux harness
+absent) and is macOS opt-in, and `cli/tests/level2_lifecycle_control.rs` is
+`#![cfg(unix)]` with `#!/bin/sh` fakes — Unix-only by construction, not by
+neglect. Worse for task 3, the CI coverage it names **does not exist**:
+`claudine-tests.yml` is `ubuntu-latest`-only, does not use `_area-ci.yml`, and
+**no CI job runs `just test-l2` for claudine on any platform**. The matrix is
+therefore not run in CI at all today. Three resolutions are recorded in
+`notes/acceptance-map.md`; none was taken, because each is either an owner
+decision (wire claudine into `_area-ci.yml` with `l2: true`; amend the plan) or
+a policy reversal (make L2 cross-platform). Flagging rather than choosing.
+
+**Recommended order is unchanged from checkpoints 9–12**: land R6 / the relaunch
+seam, then Phase 10, then Phase 11's tasks 1–4 and 6, then Phase 12's one
+remaining diagnostic, then re-run this checkpoint — at which point both
+`#[ignore]`d rows should be enabled and the four blocked criteria close.
+
+---
+
+## Phase 14 — Documentation and drift
+
+Depends on Phase 13.
+
+- [x] Update the lifecycle topic doc (`claudine/docs/topics/`, surfaced as the
+      skill's `lifecycle.md`) with: key/value `proxy.with` syntax and typed
+      interpolation; source-time evaluation; the advanced control-plane-overlay
+      trust model; precedence and immediate-target overlay lifetime; transient
+      `with:` versus persistent `set_frontmatter`/`merge_frontmatter`.
+      Landed as `### Proxy Handoffs` with six subsections, plus a `with:` note
+      on the flow-control table's `proxy` row.
+- [x] Update the composition topic doc with: the direct-versus-proxy equivalence
+      contract; active-document ownership; the retry/resume re-entry contract and
+      the resume compatibility key; the per-entry stage matrix; target-specific
+      context/provider/MCP/workspace/loop behavior; inline closure ownership,
+      sequence-step containment, and dry-run behavior.
+      Landed as `## Document Handoffs and the Equivalence Contract`. **Two
+      subjects are documented as gaps rather than as behavior, because they are
+      not implemented**: the resume compatibility key (AC15) and the
+      target-specific launch rebuild covering provider/model/MCP/argv/env/CWD/
+      system-prompt/loop (AC7/9/10). Both carry a blockquote naming the blocker
+      and pointing at `notes/acceptance-map.md`. Documenting them as shipped
+      would have been the one failure mode this task cannot afford.
+- [x] Recommend schema-declared data properties for ordinary parameter passing and
+      explicitly call out control-plane overlays as an advanced, trusted-prompt
+      capability.
+      `lifecycle.md` → `#### Trust model: prefer schema-declared data
+      properties`, which also enumerates the four safety properties that hold
+      regardless (target reparse/revalidate, pre-launch schema failure,
+      target-side shell policy, no value disclosure).
+- [x] Correct stale documentation that describes retry/resume/proxy in terms of a
+      reduced harness path, or that implies recovery is limited to `failure` when
+      the universal lifecycle contract supports other runtime signals.
+      Six sites across four docs. Two classes of real drift found:
+      - **`Requeue` never existed** under that name any more — the verb was
+        renamed to `defer` on 2026-06-23 (`universal-flow-control`), but four
+        recovery lists still advertised `Requeue` as an available action.
+        Corrected to `defer` with its not-implemented status stated.
+      - **`resume` was documented as `failure`-only** (`lifecycle.md`'s
+        "Resume after a timeout" example), directly contradicting the same
+        file's universal-flow-control paragraph 300 lines above. Code is
+        authoritative (`is_valid_for` restricts `Skip` only); the comment
+        drifted.
+      Also narrowed the off-loop paragraph: it lumped `proxy` in with `retry` as
+      having "no re-entry loop to act on", which stopped being true when the
+      coordinator landed. `initialize` `proxy` is now a first-class transition;
+      what remains unsupported is `retry` from `initialize` and
+      `retry`/`resume`/`proxy` from a pre-flight `blocked` or the `loop` gate.
+- [x] Ship the reader note verbatim in the compatibility section: a proxied target
+      may now run additional loop iterations, select its authored provider/model,
+      request approval for its own shell actions, or surface the typed error
+      direct invocation already produced. These are compatibility **fixes**, not
+      preserved quirks.
+      Shipped verbatim in `composition.md` → `### Backward compatibility`,
+      **followed by a correction paragraph**, because two of its four claims are
+      false on today's tree: loop iterations and authored-provider/model
+      selection are both blocked on R6. The note is shipped as the intended
+      contract and the paragraph states which halves are live (shell approval,
+      typed errors) and which are pending. Shipping it verbatim and unqualified
+      would have made the topic doc assert the exact two behaviors that the
+      `#[ignore]`d L2 rows exist to prove absent.
+- [x] Update `.claude/skills/claudine/SKILL.md` and `architecture.md` for the new
+      module structure (coordinator, canonical preparation service, transition
+      types) and the retired carriers.
+      `architecture.md`: `coordinator/` and `prepare/` added to the module tree;
+      new `### Active-Document Coordinator and Canonical Preparation` section
+      covering the transition/handoff/commit/state-layer split, the stage matrix
+      as data, the stored-`ComposeContext` rule, both `composition_seams` guards
+      (including the baselined `phase1c` debt), the retired carriers
+      (`RematerializeInputs` → `CallerInputLayers`; both `init_proxy_target`
+      channels; the second/third composers), and the R6 gap. `SKILL.md`: a new
+      `Document handoffs` row in the wrapper/composition subsystem table.
+- [x] Update `claudine/docs/dependencies.md` if any crate changed (e.g. `indexmap`
+      for the overlay).
+      **No-op, verified rather than assumed.** `indexmap` was already a
+      dependency of both `claudine` and `claudine-cli` before this feature
+      (`git log -L` dates it to `bf8d4e109` / `12af3075b`), and
+      `git diff main...HEAD -- claudine/lib/Cargo.toml claudine/cli/Cargo.toml`
+      shows this feature added no crate. The only `cli/Cargo.toml` delta on the
+      branch is an unrelated rendezvous dev-dependency change.
+- [x] Regenerate the skill `hash:` frontmatter with `md hash <file>` for every
+      edited skill document.
+      Only two edited documents carry a `hash:` — `SKILL.md` and `composition.md`
+      (the topic doc the skill symlinks). `lifecycle.md`, `architecture.md`,
+      `execution-flow.md`, and `non-interactive-sessions.md` have no frontmatter
+      and therefore no hash to stamp.
+- [ ] Move this feature directory to `features/_completed/` once checkpoint 14
+      passes. Before moving it, update the spec status to the repository's
+      implemented/completed convention and verify both declared dependency gates
+      are satisfied; a completed directory must not hide an unresolved required
+      dependency.
+      **Not done, and must not be** — on two independent grounds. (1) The
+      instruction driving this phase explicitly withholds the move from its
+      scope. (2) The move's own precondition is unmet: checkpoint 14 requires
+      checkpoint 13, which did not pass (4 of 30 criteria blocked on R6), and
+      the task's own wording forbids a completed directory that hides an
+      unresolved dependency. Both declared dependency gates (file-resolution,
+      error-propagation) also remain owner-approved bridges rather than
+      satisfied dependencies. This is the task that would launder the R6 gap
+      into "done"; leaving it open is the point.
+
+**Validation checkpoint 14**
+- `just test`, `just test-l2`, `just lint` green.
+- The `md hash` value of each edited skill doc matches its `hash:` frontmatter.
+- No documentation still describes a reduced harness composer.
+
+---
+
+## Dependency graph
+
+External dependency order: error propagation → file resolution → Phase 6 final
+resolver integration. The Phase 12 gate remains necessary when Phase 6 proceeds
+under an approved temporary resolver bridge.
+
+```
+1 ──> (2 ∥ 3)
+2 + 3 ──> 4
+2 ──> 5
+2 + 4 + 5 + file-resolution gate ──> 6
+5 + 6 ──> 7
+4 + 5 + 7 ──> 8
+6 + 7 + 8 ──> 9
+6 + 7 + 8 + 9 ──> 10
+5 + 6 + 7 + 8 + 9 + 10 ──> 11
+3 + 4 + 6 + 7 + 8 + 9 + 10 + 11 + error-propagation gate ──> 12
+6 + 7 + 8 + 9 + 10 + 11 + 12 ──> 13 ──> 14
+```
+
+Parallelizable:
+
+- **2 ∥ 3** — state types versus parser/diagnostics; coordinate shared module
+  exports and error payload types before editing.
+- **9's two task groups** are internally parallel after their shared prepared
+  launch-state shape is agreed.
+- **Phase 13 fixture data/scaffolding** may start after Phase 4, but final
+  assertions wait for Phase 12. This is preparation overlap, not permission to
+  declare Phase 13 complete early.
+
+## Risk register
+
+| Risk | Signal | Mitigation |
+|---|---|---|
+| Spec is reviewed but still a draft | `status: draft` on this feature spec | Read-only discovery may continue; require owner authorization before any Phase 1 repository change. |
+| Both dependency specs are unimplemented drafts | `status: draft` on file-resolution and error-propogation | Use the Phase 6 and Phase 12 integration gates; seams prevent duplication but do not waive dependencies. |
+| Dependency order is accidentally reversed | File resolution depends on error propagation; the reverse edge is only `related` | Land or bridge typed error transport first, then unified file resolution, then replace the coordinator seam. |
+| Phase 5 is the biggest single blast radius | Deletes the second composer that three call sites depend on | The `Inline` arm at `prompt.rs:281` already delegates — follow it as precedent. Allowlist guard gives a mechanical done-check. |
+| Phase 10 changes observable behavior on purpose | Existing L2s named `..._no_loop` assert the old drift | Triage in Phase 13 is a task, not a surprise. Rewrite with an explicit note. |
+| `ComposeContext` recapture after CWD change | The wrapper mutates parent CWD to repo root by design | Phase 5 removes `capture()` as a runtime fallback; the regression test uses serialized RAII CWD restoration. |
+| L2 matrix is large and tmux-driven | Slow, flaky under load | Use `just test-l2`; do not compare across runs without a drift bracket. |
+| A live provider makes the headline regression nondeterministic | Credentials, quotas, model changes, and network availability | Use the fake provider in CI; retain the shipped Codex command only as a manual smoke test. |
+| Scope creep into `defer` | `Defer` is a parsed-but-unimplemented verb | Explicit non-goal. Do not implement or serialize a handoff. |
+
+## Mega-merge Phase 6 audit
+
+Audited candidate: `df13f68dd7ad3ef22ef7e324dbdc213ed75afcd6`.
+Fresh macOS L1, proxy/composition seam guards, generator/drift checks, and
+package-area lint gates passed. The full L2 gate is blocked by the deterministic
+unavailable-provider retry failure, and required Linux, native Windows, and
+attended L3 evidence is not attached. The frozen proxy feature tip is not an
+ancestor of the candidate, so this feature remains active.

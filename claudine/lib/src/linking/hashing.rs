@@ -22,7 +22,7 @@ pub fn hash_skill_dir(skill_dir: &Path) -> Result<u64> {
     let mut file_paths: Vec<std::path::PathBuf> = Vec::new();
 
     for entry in WalkDir::new(&resolved).follow_links(true) {
-        let entry = entry.map_err(|e| std::io::Error::other(e.to_string()))?;
+        let entry = entry.map_err(std::io::Error::other)?;
         if entry.file_type().is_file() {
             file_paths.push(entry.into_path());
         }
@@ -39,7 +39,7 @@ pub fn hash_skill_dir(skill_dir: &Path) -> Result<u64> {
     for path in &file_paths {
         let relative = path
             .strip_prefix(&resolved)
-            .map_err(|e| std::io::Error::other(e.to_string()))?;
+            .map_err(std::io::Error::other)?;
         // Include relative path as separator to distinguish files with
         // identical content but different names
         combined.extend_from_slice(relative.to_string_lossy().as_bytes());

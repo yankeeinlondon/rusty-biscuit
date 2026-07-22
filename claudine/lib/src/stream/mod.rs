@@ -280,17 +280,13 @@ mod tests {
                 create_semantic_parser(Provider::Claude, sink, ParserConfig::default());
 
             parser
-                .feed_line(r#"{"type":"init","session_id":"s1","model":"claude"}"#)
-                .unwrap();
+                .feed_line(r#"{"type":"init","session_id":"s1","model":"claude"}"#);
             parser
-                .feed_line(r#"{"type":"assistant","content":[{"type":"text","text":"Hello"}]}"#)
-                .unwrap();
+                .feed_line(r#"{"type":"assistant","content":[{"type":"text","text":"Hello"}]}"#);
             parser
-                .feed_line(r#"{"type":"tool_use","id":"t1","name":"bash","input":{"cmd":"ls"}}"#)
-                .unwrap();
+                .feed_line(r#"{"type":"tool_use","id":"t1","name":"bash","input":{"cmd":"ls"}}"#);
             parser
-                .feed_line(r#"{"type":"tool_result","tool_use_id":"t1","content":"ok"}"#)
-                .unwrap();
+                .feed_line(r#"{"type":"tool_result","tool_use_id":"t1","content":"ok"}"#);
 
             let collected = events.lock().unwrap().clone();
             let kinds = kinds_of(&collected);
@@ -312,8 +308,7 @@ mod tests {
             let mut parser =
                 create_semantic_parser(Provider::Claude, sink, ParserConfig::default());
 
-            let result = parser.feed_line("not json {{{");
-            assert!(result.is_ok());
+            parser.feed_line("not json {{{");
 
             let collected = events.lock().unwrap().clone();
             assert!(
@@ -337,8 +332,7 @@ mod tests {
             parser
                 .feed_line(
                     r#"{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"pondering"}}"#,
-                )
-                .unwrap();
+                );
 
             let collected = events.lock().unwrap().clone();
             assert!(collected.iter().any(
@@ -358,8 +352,7 @@ mod tests {
             parser
                 .feed_line(
                     r#"{"type":"rate_limit_event","is_throttled":true,"retry_after_ms":5000,"message":"Rate limit"}"#,
-                )
-                .unwrap();
+                );
 
             let collected = events.lock().unwrap().clone();
             assert!(collected.iter().any(

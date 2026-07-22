@@ -419,10 +419,9 @@ pub enum PropertyState {
 /// `set_overrides`, mirroring the validation Darkmatter would run during
 /// composition.
 ///
-/// `file_ref_fallback_dir` is the captured launch area used as the
-/// document-first / launch-area-fallback anchor for `file`-typed property
-/// resolution, matching the expression path. Pass `None` only when no launch
-/// area is known (e.g. unit tests).
+/// `file_ref_fallback_dir` is captured launch metadata retained by
+/// `file`-typed property diagnostics. Pass `None` only when no launch area is
+/// known (for example, in unit tests).
 ///
 /// Returns `Ok(None)` when the document has no `$schema` declaration.
 ///

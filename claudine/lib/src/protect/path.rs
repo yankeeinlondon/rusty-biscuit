@@ -393,6 +393,11 @@ mod tests {
         );
     }
 
+    // Unix-only for the *fixture*, not the behavior: creating a symlink on
+    // Windows needs SeCreateSymbolicLinkPrivilege (developer mode or elevation),
+    // which a test host cannot assume. `canonicalize_existing_ancestor` itself is
+    // cross-platform and covered on every host by the sibling tests.
+    #[cfg(unix)]
     #[test]
     fn canonicalize_existing_ancestor_resolves_symlink_parent() {
         let tmp = tempfile::tempdir().unwrap();

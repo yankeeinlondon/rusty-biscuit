@@ -119,7 +119,7 @@ pub struct FileReferenceDiagnostic {
     pub kind: FileRefFailure,
     /// The document-relative base directory resolution started from.
     pub base_dir: PathBuf,
-    /// The launch-area fallback directory, when the context carries one.
+    /// Launch-area metadata retained by the resolution diagnostic.
     pub fallback_dir: Option<PathBuf>,
     /// The underlying typed cause, when one exists (absent for a clean miss).
     pub source: Option<Arc<biscuit_file::FileReferenceError>>,

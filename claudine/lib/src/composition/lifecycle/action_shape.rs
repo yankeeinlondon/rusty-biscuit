@@ -32,23 +32,25 @@ fn classify_positional_value(
         serde_json::Value::Null => Ok(Vec::new()),
         serde_json::Value::String(_)
         | serde_json::Value::Number(_)
-        | serde_json::Value::Bool(_) => Ok(vec![action_value_to_expr(value).map_err(|message| {
+        | serde_json::Value::Bool(_) => Ok(vec![action_value_to_expr(value).map_err(|source| {
             CompositionError::LifecycleActionInvalidLongForm {
                 source_path: source_file.to_path_buf(),
                 property: property_name.to_string(),
                 action: verb.to_string(),
-                message,
+                message: source.to_string(),
+                source: Some(source),
             }
         })?]),
         serde_json::Value::Array(items) => {
             let mut args = Vec::with_capacity(items.len());
             for item in items {
-                args.push(action_value_to_expr(item).map_err(|message| {
+                args.push(action_value_to_expr(item).map_err(|source| {
                     CompositionError::LifecycleActionInvalidLongForm {
                         source_path: source_file.to_path_buf(),
                         property: property_name.to_string(),
                         action: verb.to_string(),
-                        message,
+                        message: source.to_string(),
+                        source: Some(source),
                     }
                 })?);
             }
@@ -95,6 +97,9 @@ pub(super) fn validate_positional_arity_and_build(
             check_exact_positional_arity(verb, &args, 1, source_file, property_name)?;
             A::Proxy {
                 target: args.into_iter().next().expect("arity checked"),
+                // Positional form stays compact and carries no overlay; an
+                // author who needs `with:` opts into key/value form.
+                with: ProxyWith::default(),
             }
         }
         "retry" => {
@@ -326,7 +331,7 @@ pub(super) fn did_you_mean_verb(verb: &str) -> Option<&'static str> {
 ///
 /// The `when`/`until`/`while` keys are **not** action parameters — they remain
 /// boolean expressions parsed by [`parse_condition`].
-pub(super) fn action_value_to_expr(value: &serde_json::Value) -> Result<Expr, String> {
+pub(super) fn action_value_to_expr(value: &serde_json::Value) -> Result<Expr, ActionExprError> {
     match value {
         serde_json::Value::String(s) => {
             let trimmed = s.trim();
@@ -340,9 +345,9 @@ pub(super) fn action_value_to_expr(value: &serde_json::Value) -> Result<Expr, St
                 && span.start == 0
                 && span.end == trimmed.len()
             {
-                // Whole-value expansion: preserve the expression's typed value.
-                parse(&span.expression)
-                    .map_err(|e| format!("whole-value expression is not valid: {e}"))
+                // Whole-value expansion: preserve the expression's typed value,
+                // and its typed parse error when it fails.
+                Ok(parse(&span.expression).map_err(|e| ActionExprError::Parse(Box::new(e)))?)
             } else {
                 // Literal text, including mixed interpolation.
                 Ok(Expr::StringLiteral(s.clone()))
@@ -351,18 +356,18 @@ pub(super) fn action_value_to_expr(value: &serde_json::Value) -> Result<Expr, St
         serde_json::Value::Number(n) => {
             let f = n
                 .as_f64()
-                .ok_or_else(|| format!("unsupported number `{n}`"))?;
+                .ok_or_else(|| ActionExprError::Invalid(format!("unsupported number `{n}`")))?;
             Ok(Expr::NumberLiteral(f))
         }
         serde_json::Value::Bool(b) => Ok(Expr::BoolLiteral(*b)),
-        serde_json::Value::Null => Err(
+        serde_json::Value::Null => Err(ActionExprError::Invalid(
             "null values are not supported as action parameters; use a whole-value `{{ null }}` interpolation to pass null"
                 .to_string(),
-        ),
-        other => Err(format!(
+        )),
+        other => Err(ActionExprError::Invalid(format!(
             "{} values are not supported as action parameters; pass object/array data through a whole-value `{{{{ ... }}}}` interpolation",
             json_type_name(other)
-        )),
+        ))),
     }
 }
 
@@ -376,6 +381,7 @@ pub(super) fn build_action_from_params(
     verb: &str,
     params: Vec<(String, Expr)>,
     no_error: bool,
+    proxy_with: Option<ProxyWith>,
     source_file: &Path,
 ) -> Result<LifecycleAction, CompositionError> {
     let property = signal.property_name();
@@ -386,7 +392,7 @@ pub(super) fn build_action_from_params(
 
     // Lifecycle control actions.
     if let Some(control) =
-        parse_lifecycle_control_long(verb, &mut params_map, signal, source_file)?
+        parse_lifecycle_control_long(verb, &mut params_map, proxy_with, signal, source_file)?
     {
         reject_extra_params(control.verb(), &params_map, property, source_file)?;
         return Ok(LifecycleAction {
@@ -406,6 +412,7 @@ pub(super) fn build_action_from_params(
                 property: property.to_string(),
                 action: verb.to_string(),
                 message: format!("`{verb}` requires a `message` parameter"),
+                source: None,
             })?;
         let route = params_map.remove("route");
         reject_extra_params(verb, &params_map, property, source_file)?;
@@ -427,6 +434,7 @@ pub(super) fn build_action_from_params(
                 property: property.to_string(),
                 action: verb.to_string(),
                 message: "`shell` requires a `command` parameter".to_string(),
+                source: None,
             }
         })?;
         let on_error = params_map.remove("on_error");
@@ -496,6 +504,7 @@ pub(super) fn build_action_from_params(
 fn parse_lifecycle_control_long(
     verb: &str,
     params: &mut std::collections::HashMap<String, Expr>,
+    proxy_with: Option<ProxyWith>,
     signal: LifecycleSignal,
     source_file: &Path,
 ) -> Result<Option<LifecycleControlAction>, CompositionError> {
@@ -518,6 +527,9 @@ fn parse_lifecycle_control_long(
             target: params.remove("target").ok_or_else(|| {
                 invalid_args("`proxy` requires a `target` parameter".to_string())
             })?,
+            // An omitted `with:` and an authored `with: {}` are the same empty
+            // overlay.
+            with: proxy_with.unwrap_or_default(),
         },
         "retry" => {
             let max_attempts = params.remove("max_attempts");
@@ -592,6 +604,7 @@ fn collect_named_signature_args(
                 "`{verb}` is missing required parameter(s): {}",
                 missing.join(", ")
             ),
+            source: None,
         });
     }
     Ok(args)
@@ -615,6 +628,7 @@ fn reject_extra_params(
         property: property.to_string(),
         action: verb.to_string(),
         message: format!("unknown parameter(s): {}", keys.join(", ")),
+        source: None,
     })
 }
 

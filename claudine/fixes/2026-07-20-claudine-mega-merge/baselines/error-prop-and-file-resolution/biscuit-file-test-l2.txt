@@ -1,0 +1,12 @@
+Revision: 43c23c6535cf6e52a35dbb06ea6f4ccce0c88e97
+Detached worktree: /tmp/claudine-mega-foundation.L8eU1A/tree
+Working directory: biscuit-file
+Command: just test-l2
+Timeout policy: SIGINT at 60s; SIGKILL 5s later
+Exit status: 0
+Classification: passed
+Elapsed seconds: 0.000001625
+
+[[STDOUT]]
+test-l2: not applicable for biscuit-file
+[[STDERR]]

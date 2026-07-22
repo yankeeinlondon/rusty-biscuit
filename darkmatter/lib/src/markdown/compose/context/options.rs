@@ -16,6 +16,13 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 use url::Url;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum SourceDerivation {
+    #[default]
+    Ordinary,
+    TrustedExternal,
+}
+
 /// Configuration for the compose pipeline.
 ///
 /// Controls which operations run, how transclusion resolves references,
@@ -135,6 +142,12 @@ pub struct ComposeOptions {
     /// whether the path is searched before (`Start`) or after (`End`) the
     /// default roots (git repo root, HOME).
     pub(crate) magic_paths: Vec<(PathBuf, biscuit_file::PathPosition)>,
+
+    /// Immutable request-scoped file-resolution inputs supplied by the host.
+    pub(crate) file_resolution_context: Option<biscuit_file::FileResolutionContext>,
+
+    /// How the current file source entered this compose run.
+    pub(crate) source_derivation: SourceDerivation,
 
     // ── Shell expansion ────────────────────────────────────────────
     /// Maximum execution time for a single `::shell` command.
@@ -281,6 +294,18 @@ pub struct ComposeOptions {
     /// required string) must still fail fast here. Default: `false`.
     pub(crate) defer_shell_pending_schema_problems: bool,
 
+    /// When `true`, the schema-validation stage still coerces frontmatter to
+    /// the declared types but reports no problems: this pass is not the one
+    /// that owns the document's schema verdict.
+    ///
+    /// Two callers need it. A shell-discovery pass composes only to find
+    /// commands. And a pre-`initialize` bootstrap read composes a document whose
+    /// own `initialize` may still add or repair a schema property — judging it
+    /// here would fail the document for a violation the very next stage is about
+    /// to fix. In both cases a later terminal pass composes the settled document
+    /// and reports the verdict. Default: `false`.
+    pub(crate) defer_schema_verdict: bool,
+
     // ── Deferred frontmatter keys (DM1) ────────────────────────────
     /// Top-level frontmatter keys deferred from every compose-time value
     /// resolution pass (`{{ }}` interpolation, whole-value expansion,
@@ -291,6 +316,14 @@ pub struct ComposeOptions {
     /// only resolution is skipped. The caller owns event-time interpolation
     /// of these subtrees. Default: empty (no behavior change for any caller).
     pub(crate) exclude_keys: std::collections::HashSet<String>,
+
+    // ── Named-object string coercion (Sequence Plus) ───────────────
+    /// Frontmatter keys whose OBJECT values render their `name` string field
+    /// when interpolated in inline string context (`{{key}}`). Whole-value
+    /// spans, dotted paths (`{{key.x}}`), and typed `get()` lookups are
+    /// unaffected. Empty by default; Claudine sets `["state","previous","next"]`
+    /// for sequence steps.
+    pub(crate) name_coercion_keys: Vec<String>,
 
     // ── Link normalization ────────────────────────────────────────
     /// Environment variables that may be used as path-prefix abstractions
@@ -330,19 +363,21 @@ pub struct ComposeOptions {
     /// request per URL. `None` means each stage builds its own.
     pub(crate) remote_fetch: Option<RemoteFetchRuntime>,
 
-    // ── File-reference fallback (launch-area anchor) ───────────────
-    /// Explicit fallback directory for caller-supplied file references that
-    /// are not authored inside the document (e.g. a CLI-supplied path relative
-    /// to the launch area). Propagated into both
-    /// [`expression_resolution_context`] and [`frontmatter_resolution_context`]
-    /// as `ResolutionContext::file_ref_fallback_dir`, and into the
-    /// [`DarkmatterSchemas`] builder used by the compose-stage schema
-    /// validation. `None` (the default) preserves the legacy document-only +
-    /// ambient-CWD behavior for callers that have not captured a launch area.
+    // ── File-reference launch-area anchor (diagnostic only) ────────
+    /// The captured launch-area directory a top-level caller (Claudine) was
+    /// invoked from.
+    ///
+    /// Per D2 the launch directory is a base for **top-level** references only;
+    /// it is **not** a resolution fallback for references authored inside a
+    /// nested document. Darkmatter's document-backed resolution is
+    /// repository-first then source-relative and never consults this directory,
+    /// so it is retained solely as a diagnostic facet (the `fallback_dir` field
+    /// of a file-reference diagnostic) and as an authored `ComposeOptions`
+    /// identity input. It participates in neither the resolution candidate order
+    /// nor the compiled-validator resolution.
     ///
     /// [`expression_resolution_context`]: Self::expression_resolution_context
     /// [`frontmatter_resolution_context`]: Self::frontmatter_resolution_context
-    /// [`DarkmatterSchemas`]: crate::markdown::schemas::DarkmatterSchemas
     pub(crate) file_ref_fallback_dir: Option<PathBuf>,
 }
 
@@ -412,6 +447,7 @@ impl std::fmt::Debug for ComposeOptions {
             .field("context", &self.context)
             .field("remote_read_config", &self.remote_read_config)
             .field("exclude_keys", &self.exclude_keys)
+            .field("name_coercion_keys", &self.name_coercion_keys)
             .field("file_ref_fallback_dir", &self.file_ref_fallback_dir)
             .finish()
     }
@@ -450,6 +486,8 @@ impl ComposeOptions {
             ignore_invalid_references: None,
             resolve_repo_root: true,
             magic_paths: Vec::new(),
+            file_resolution_context: None,
+            source_derivation: SourceDerivation::Ordinary,
             shell_timeout: std::time::Duration::from_secs(10),
             shell_timeout_behavior: ShellTimeoutBehavior::Error,
             shell_policy_root: None,
@@ -476,9 +514,11 @@ impl ComposeOptions {
             trigger_schemas: false,
             remote_read_config: RemoteReadConfig::default(),
             defer_shell_pending_schema_problems: false,
+            defer_schema_verdict: false,
             preflight_graph: None,
             remote_fetch: None,
             exclude_keys: std::collections::HashSet::new(),
+            name_coercion_keys: Vec::new(),
             file_ref_fallback_dir: None,
         }
     }
@@ -511,6 +551,26 @@ impl ComposeOptions {
     #[must_use]
     pub fn with_source_file(mut self, path: impl Into<PathBuf>) -> Self {
         self.source = ComposeSource::File(path.into());
+        self.source_derivation = SourceDerivation::Ordinary;
+        self
+    }
+
+    /// Sets a child source that has already passed file-reference resolution.
+    #[must_use]
+    pub(crate) fn with_accepted_source_file(mut self, path: impl Into<PathBuf>) -> Self {
+        let path = path.into();
+        self.source_derivation = self
+            .file_resolution_context
+            .as_ref()
+            .filter(|snapshot| {
+                snapshot.for_source(&path).validate().is_err()
+                    && snapshot
+                        .for_trusted_external_source(&path)
+                        .validate()
+                        .is_ok()
+            })
+            .map_or(SourceDerivation::Ordinary, |_| SourceDerivation::TrustedExternal);
+        self.source = ComposeSource::File(path);
         self
     }
 
@@ -820,6 +880,22 @@ impl ComposeOptions {
         self
     }
 
+    /// Supplies the immutable request snapshot used by every document-backed
+    /// file-reference surface in this compose run.
+    #[must_use]
+    pub fn with_file_resolution_context(
+        mut self,
+        context: biscuit_file::FileResolutionContext,
+    ) -> Self {
+        self.file_resolution_context = Some(context);
+        self
+    }
+
+    /// Returns the host-supplied request snapshot, when present.
+    pub fn file_resolution_context(&self) -> Option<&biscuit_file::FileResolutionContext> {
+        self.file_resolution_context.as_ref()
+    }
+
     /// Sets the fallback language for code transclusion.
     #[must_use]
     pub fn with_code_fallback_language(mut self, language: impl Into<String>) -> Self {
@@ -842,6 +918,8 @@ impl ComposeOptions {
             ignore_invalid: self.ignore_invalid_references,
             resolve_repo_root: self.resolve_repo_root,
             magic_paths: self.magic_paths.clone(),
+            file_resolution_context: self.file_resolution_context.clone(),
+            source_derivation: self.source_derivation,
         }
     }
 
@@ -872,13 +950,41 @@ impl ComposeOptions {
         &self,
         remote_fetch: &super::super::remote_fetch::RemoteFetchRuntime,
     ) -> super::super::expression::ResolutionContext {
-        let mut context =
-            super::super::expression::ResolutionContext::new(self.resolution_base_dir());
+        let base_dir = self.resolution_base_dir();
+        let file_resolution_context = self.file_resolution_context.as_ref().map(|snapshot| {
+            match (&self.source, self.source_derivation) {
+                (ComposeSource::File(path), SourceDerivation::TrustedExternal) => {
+                    snapshot.for_trusted_external_source(path)
+                }
+                (ComposeSource::File(path), SourceDerivation::Ordinary) => snapshot.for_source(path),
+                _ => snapshot.for_base(&base_dir),
+            }
+        });
+        let (repository_root, package_area, home_dir) = match &file_resolution_context {
+            Some(ctx) => (
+                ctx.repository_root().map(Path::to_path_buf),
+                ctx.package_area().map(Path::to_path_buf),
+                ctx.home_dir().map(Path::to_path_buf),
+            ),
+            None => {
+                let repository_root =
+                    crate::markdown::compose::util::find_git_root_from(&base_dir);
+                let package_area = crate::markdown::compose::util::find_package_area_from(
+                    &base_dir,
+                    repository_root.as_deref(),
+                );
+                (repository_root, package_area, dirs::home_dir())
+            }
+        };
+        let mut context = super::super::expression::ResolutionContext::new(base_dir);
+        context.repository_root = repository_root;
+        context.package_area = package_area;
         context.magic_paths = self.magic_paths.clone();
         context.file_ref_fallback_dir = self.file_ref_fallback_dir.clone();
         context.remote_fetch = self.remote_reads_enabled().then(|| remote_fetch.clone());
         context.ctx_values = self.context_values_for_resolution();
-        context.home_dir = dirs::home_dir();
+        context.home_dir = home_dir;
+        context.file_resolution_context = file_resolution_context;
         context
     }
 
@@ -889,13 +995,51 @@ impl ComposeOptions {
     /// [`expression_resolution_context`]: Self::expression_resolution_context
     /// [`ResolutionContext`]: super::super::expression::ResolutionContext
     pub(crate) fn frontmatter_resolution_context(&self) -> super::super::expression::ResolutionContext {
-        let mut context =
-            super::super::expression::ResolutionContext::new(self.resolution_base_dir());
+        let mut context = self.local_expression_resolution_context();
+        context.remote_fetch = self.remote_reads_enabled().then(|| self.remote_fetch_runtime());
+        context
+    }
+
+    /// Builds the local-only expression context for the configured source.
+    ///
+    /// Hosts that evaluate document-authored expressions outside the main
+    /// compose pipeline use this adapter so they retain the same immutable
+    /// file-resolution snapshot, source derivation, and magic roots.
+    pub fn local_expression_resolution_context(&self) -> super::super::expression::ResolutionContext {
+        let base_dir = self.resolution_base_dir();
+        let file_resolution_context = self.file_resolution_context.as_ref().map(|snapshot| {
+            match (&self.source, self.source_derivation) {
+                (ComposeSource::File(path), SourceDerivation::TrustedExternal) => {
+                    snapshot.for_trusted_external_source(path)
+                }
+                (ComposeSource::File(path), SourceDerivation::Ordinary) => snapshot.for_source(path),
+                _ => snapshot.for_base(&base_dir),
+            }
+        });
+        let (repository_root, package_area, home_dir) = match &file_resolution_context {
+            Some(ctx) => (
+                ctx.repository_root().map(Path::to_path_buf),
+                ctx.package_area().map(Path::to_path_buf),
+                ctx.home_dir().map(Path::to_path_buf),
+            ),
+            None => {
+                let repository_root =
+                    crate::markdown::compose::util::find_git_root_from(&base_dir);
+                let package_area = crate::markdown::compose::util::find_package_area_from(
+                    &base_dir,
+                    repository_root.as_deref(),
+                );
+                (repository_root, package_area, dirs::home_dir())
+            }
+        };
+        let mut context = super::super::expression::ResolutionContext::new(base_dir);
+        context.repository_root = repository_root;
+        context.package_area = package_area;
         context.magic_paths = self.magic_paths.clone();
         context.file_ref_fallback_dir = self.file_ref_fallback_dir.clone();
-        context.remote_fetch = self.remote_reads_enabled().then(|| self.remote_fetch_runtime());
         context.ctx_values = self.context_values_for_resolution();
-        context.home_dir = dirs::home_dir();
+        context.home_dir = home_dir;
+        context.file_resolution_context = file_resolution_context;
         context
     }
 
@@ -1149,6 +1293,38 @@ impl ComposeOptions {
         &self.exclude_keys
     }
 
+    /// Sets the frontmatter keys whose OBJECT values render their `name` string
+    /// field when interpolated in inline string context (`{{key}}`).
+    ///
+    /// Whole-value spans, dotted paths (`{{key.x}}`), and typed `get()` lookups
+    /// are unaffected. Empty by default; Claudine sets
+    /// `["state","previous","next"]` for sequence steps.
+    #[must_use]
+    pub fn with_name_coercion_keys(mut self, keys: Vec<String>) -> Self {
+        self.name_coercion_keys = keys;
+        self
+    }
+
+    /// Composes without owning the document's schema verdict: frontmatter is
+    /// still coerced to the declared types, but no schema problem is reported.
+    ///
+    /// Set it only when a later terminal pass composes the settled document and
+    /// reports the verdict — a shell-discovery pass, or a read taken before an
+    /// `initialize` stage that may still add or repair the offending property.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::compose::ComposeOptions;
+    ///
+    /// let options = ComposeOptions::new().with_deferred_schema_verdict(true);
+    /// ```
+    #[must_use]
+    pub fn with_deferred_schema_verdict(mut self, deferred: bool) -> Self {
+        self.defer_schema_verdict = deferred;
+        self
+    }
+
     /// Sets the explicit fallback directory for caller-supplied file references
     /// (typically the captured launch area).
     ///
@@ -1301,6 +1477,12 @@ pub(crate) struct TransclusionOptions {
 
     /// Custom search roots for `@`-prefixed (magic) file references.
     pub magic_paths: Vec<(PathBuf, biscuit_file::PathPosition)>,
+
+    /// Immutable request snapshot inherited by every nested document.
+    pub file_resolution_context: Option<biscuit_file::FileResolutionContext>,
+
+    /// How the current file source entered the traversal.
+    pub(crate) source_derivation: SourceDerivation,
 }
 
 impl Default for TransclusionOptions {
@@ -1315,6 +1497,8 @@ impl Default for TransclusionOptions {
             ignore_invalid: None,
             resolve_repo_root: true,
             magic_paths: Vec::new(),
+            file_resolution_context: None,
+            source_derivation: SourceDerivation::Ordinary,
         }
     }
 }
@@ -1574,6 +1758,59 @@ fn baseline_canonical_json(
     std::borrow::Cow::Owned(canonical_json_sorted(&json))
 }
 
+/// Encodes every file-resolution input that can change candidate construction.
+fn encode_file_resolution_context(
+    enc: &mut GraphIdentityEncoder,
+    context: &Option<biscuit_file::FileResolutionContext>,
+) {
+    let Some(context) = context else {
+        enc.tag(0);
+        return;
+    };
+    enc.tag(1);
+
+    for path in [
+        context.source_path(),
+        Some(context.base_dir()),
+        Some(context.request_base_dir()),
+        context.repository_root(),
+        context.package_area(),
+        context.home_dir(),
+    ] {
+        match path {
+            Some(path) => {
+                enc.tag(1);
+                enc.path(path);
+            }
+            None => enc.tag(0),
+        }
+    }
+    enc.bool(context.is_trusted_external_authoring_base());
+
+    let mut env: Vec<(&str, &str)> = context
+        .env()
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    env.sort_unstable();
+    enc.count(env.len());
+    for (key, value) in env {
+        enc.str(key);
+        enc.str(value);
+    }
+
+    for paths in [
+        context.prepended_magic_paths(),
+        context.appended_magic_paths(),
+        context.vault_roots(),
+    ] {
+        enc.count(paths.len());
+        for path in paths {
+            enc.path(path);
+        }
+    }
+}
+
 impl ComposeOptions {
     /// Exhaustively classifies every field into the two identity products.
     ///
@@ -1598,6 +1835,8 @@ impl ComposeOptions {
             ignore_invalid_references,
             resolve_repo_root,
             magic_paths,
+            file_resolution_context,
+            source_derivation,
             shell_timeout,
             shell_timeout_behavior,
             shell_policy_root,
@@ -1623,7 +1862,9 @@ impl ComposeOptions {
             trigger_schemas,
             remote_read_config,
             defer_shell_pending_schema_problems,
+            defer_schema_verdict,
             exclude_keys,
+            name_coercion_keys,
             env_path_whitelist,
             preflight_graph,
             remote_fetch,
@@ -1728,6 +1969,13 @@ impl ComposeOptions {
                 biscuit_file::PathPosition::End => 1,
             });
         }
+        enc.field("file_resolution_context");
+        encode_file_resolution_context(&mut enc, file_resolution_context);
+        enc.field("source_derivation");
+        enc.tag(match source_derivation {
+            SourceDerivation::Ordinary => 0,
+            SourceDerivation::TrustedExternal => 1,
+        });
 
         enc.field("shell_timeout_ns");
         enc.u128(shell_timeout.as_nanos());
@@ -1897,6 +2145,8 @@ impl ComposeOptions {
 
         enc.field("defer_shell_pending_schema_problems");
         enc.bool(*defer_shell_pending_schema_problems);
+        enc.field("defer_schema_verdict");
+        enc.bool(*defer_schema_verdict);
 
         // Unordered set: sort for canonical order.
         enc.field("exclude_keys");
@@ -1907,6 +2157,12 @@ impl ComposeOptions {
             for key in keys {
                 enc.str(key);
             }
+        }
+        // Ordered vector: preserve the caller's coercion precedence.
+        enc.field("name_coercion_keys");
+        enc.count(name_coercion_keys.len());
+        for key in name_coercion_keys {
+            enc.str(key);
         }
         // Ordered vector: preserve order.
         enc.field("env_path_whitelist");
@@ -1978,6 +2234,13 @@ impl ComposeOptions {
                 biscuit_file::PathPosition::End => 1,
             });
         }
+        cenc.field("file_resolution_context");
+        encode_file_resolution_context(&mut cenc, file_resolution_context);
+        cenc.field("source_derivation");
+        cenc.tag(match source_derivation {
+            SourceDerivation::Ordinary => 0,
+            SourceDerivation::TrustedExternal => 1,
+        });
 
         cenc.field("list_spacing");
         cenc.tag(match list_spacing {
@@ -2024,6 +2287,13 @@ impl ComposeOptions {
         }
         cenc.field("trigger_schemas");
         cenc.bool(*trigger_schemas);
+        cenc.field("defer_schema_verdict");
+        cenc.bool(*defer_schema_verdict);
+        cenc.field("name_coercion_keys");
+        cenc.count(name_coercion_keys.len());
+        for key in name_coercion_keys {
+            cenc.str(key);
+        }
 
         cenc.field("file_ref_fallback_dir");
         match file_ref_fallback_dir {
@@ -2198,36 +2468,58 @@ mod tests {
     }
 
     #[test]
-    fn frontmatter_and_body_contexts_share_remote_query_single_flight() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        use std::sync::Arc;
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn expression_and_frontmatter_adapters_reuse_the_request_snapshot() {
+        use biscuit_file::file_reference::fetch::FetchPolicy;
+        use biscuit_file::FileReference;
 
+        let request_root = tempfile::tempdir().unwrap();
+        let nested = request_root.path().join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        let target = request_root.path().join("captured.md");
+        std::fs::write(&target, "captured").unwrap();
+        let ambient = tempfile::tempdir().unwrap();
+        let prior = std::env::var_os("DARKMATTER_SNAPSHOT_ROOT");
+
+        let mut env = std::collections::HashMap::new();
+        env.insert(
+            "DARKMATTER_SNAPSHOT_ROOT".to_string(),
+            request_root.path().display().to_string(),
+        );
+        let snapshot = biscuit_file::FileResolutionContext::new(request_root.path()).with_env(env);
         let options = ComposeOptions::new()
-            .with_allowed_host("provider.example")
-            .with_shared_remote_fetch();
-        let runtime = options.remote_fetch_runtime();
+            .with_source_file(nested.join("child.md"))
+            .with_file_resolution_context(snapshot);
+
+        // SAFETY: this test is serialized while mutating process-global state.
+        unsafe { std::env::set_var("DARKMATTER_SNAPSHOT_ROOT", ambient.path()) };
+        let remote_fetch = crate::markdown::compose::remote_fetch::RemoteFetchRuntime::with_policy(
+            FetchPolicy::deny_all(),
+        );
+        let expression = options.expression_resolution_context(&remote_fetch);
         let frontmatter = options.frontmatter_resolution_context();
-        let body = options.expression_resolution_context(&runtime);
-        let executions = Arc::new(AtomicUsize::new(0));
+        let file_ref = FileReference::new("{{DARKMATTER_SNAPSHOT_ROOT}}/captured.md").unwrap();
+        let resolved = [&expression, &frontmatter].map(|ctx| {
+            crate::markdown::compose::expression::resolve_ctx::resolve_document_file_ref(
+                &file_ref,
+                &ctx.base_dir,
+                ctx.repository_root.as_deref(),
+                ctx.package_area.as_deref(),
+                &ctx.magic_paths,
+                ctx.file_resolution_context.as_ref(),
+            )
+            .unwrap()
+        });
+        match prior {
+            Some(value) => unsafe { std::env::set_var("DARKMATTER_SNAPSHOT_ROOT", value) },
+            None => unsafe { std::env::remove_var("DARKMATTER_SNAPSHOT_ROOT") },
+        }
 
-        let first_counter = Arc::clone(&executions);
-        let first = frontmatter
-            .cached_provider_query("pr", "pr:123".to_string(), || {
-                first_counter.fetch_add(1, Ordering::SeqCst);
-                Ok(serde_json::Value::String("shared".to_string()))
-            })
-            .unwrap();
-        let second_counter = Arc::clone(&executions);
-        let second = body
-            .cached_provider_query("pr", "pr:123".to_string(), || {
-                second_counter.fetch_add(1, Ordering::SeqCst);
-                Ok(serde_json::Value::String("unexpected".to_string()))
-            })
-            .unwrap();
-
-        assert_eq!(first, serde_json::Value::String("shared".to_string()));
-        assert_eq!(second, first);
-        assert_eq!(executions.load(Ordering::SeqCst), 1);
+        assert_eq!(expression.base_dir, nested);
+        assert_eq!(frontmatter.base_dir, nested);
+        for path in resolved {
+            assert_eq!(path.as_deref(), Some(target.as_path()));
+        }
     }
 
     /// The fallback appears in the `Debug` output so diagnostics surface it.

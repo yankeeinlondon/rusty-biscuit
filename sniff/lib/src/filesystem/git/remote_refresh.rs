@@ -829,9 +829,9 @@ pub(crate) fn populate_recent_commit_remotes_from_snapshot(
 ///
 /// Returns a HashMap keyed by branch name. Anonymous worktrees (without a name)
 /// are filtered out. Paths, branches, and HEAD commits come directly from gix's
-/// worktree proxy and administrative `HEAD`; a checkout is opened as a
-/// repository only when requested status or graph details are unavailable from
-/// the already-open current repository.
+/// worktree proxy and administrative `HEAD`. Metadata-only inspection validates
+/// the linked checkout marker without opening the repository; repository opens,
+/// status walks, and graph probes run only when details are requested.
 ///
 /// When `full_details` is `false`, the expensive per-worktree probes — the
 /// commit-graph walks (ahead/behind, merge-conflict detection) and the
@@ -887,8 +887,8 @@ pub(crate) fn get_worktrees_from_snapshot(
 
     // HEAD and checkout location live in each proxy's administrative directory,
     // so metadata-only projections do not need to open the checkout as a full
-    // repository. A repository open remains the fallback only when status or
-    // graph details were explicitly requested for that worktree.
+    // repository. The checkout marker is still validated so a present but
+    // structurally corrupt linked checkout is not reported as healthy.
     let mut worktree_metadata = Vec::new();
     for proxy in proxies {
         let name = proxy.id().to_str_lossy().into_owned();
@@ -953,9 +953,22 @@ pub(crate) fn get_worktrees_from_snapshot(
                 .workdir()
                 .map(|path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()));
             let base_is_worktree = base_workdir.as_deref() == Some(metadata.path.as_path());
-            let mut opened_worktree = if compute_full && !base_is_worktree {
+            if !base_is_worktree && !compute_full && !metadata.path.join(".git").is_file() {
+                return Err(SniffError::git(
+                    "open",
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "registered worktree is missing its .git file",
+                    ),
+                ));
+            }
+            let mut opened_worktree = if !base_is_worktree && compute_full {
                 performance::increment_counter(counters::GIT_WORKTREE_OPENS, 1);
-                let mut opened = super::open::trusted_open(&metadata.path)?;
+                let Some(mut opened) = super::open::trusted_open_registered_worktree(
+                    &metadata.path,
+                )? else {
+                    return Ok(None);
+                };
                 super::open::configure_cache(&mut opened);
                 Some(opened)
             } else {

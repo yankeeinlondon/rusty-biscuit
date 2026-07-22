@@ -45,7 +45,7 @@ pub(super) fn schema_error_to_composition_error(
 pub(super) fn handle_compose_error(
     source: &ResolvedCompositionSource,
     options: PrepareOptions,
-    mode: PrepareMode,
+    mode: &PrepareMode,
     err: CompositionError,
     dropped: &mut Vec<DroppedOptional>,
 ) -> Result<PreparedComposition, CompositionError> {
@@ -75,7 +75,7 @@ pub(super) fn handle_compose_error(
 pub(super) fn translate_schema_failure(
     source: &ResolvedCompositionSource,
     options: PrepareOptions,
-    mode: PrepareMode,
+    mode: &PrepareMode,
     problems: Vec<ValidationProblem>,
     summary: String,
     schema_source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
@@ -352,4 +352,3 @@ pub(super) fn filter_droppable_invalid_optionals(
 }
 
 // -- categorization ---------------------------------------------------------
-

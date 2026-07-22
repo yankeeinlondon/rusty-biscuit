@@ -243,18 +243,14 @@ impl PerfNode {
 /// Single-shot compose stamps `prep_phase` to span the compose pass
 /// (`prep_phase ⊇ compose_perf.total`, RC-2), so composition nests beneath
 /// `prep phase` ([`UnderPrep`](Self::UnderPrep)). Sequence runs never stamp
-/// `prep_phase`; their per-step compose work is metered during environment
-/// setup (Phase 1c) and rendered under `environment setup → step preparation`
-/// (TM-3) — the window that actually contains it. The per-step execution
-/// wall-clock the `steps` node measures does **not** contain composition, so
-/// nesting compose there would let a slow compose exceed its displayed parent
-/// (G-2). [`UnderEnvSetup`](Self::UnderEnvSetup) is the sequence marker; the
-/// merged `report.composition` aggregate is not rendered (it would double-count
-/// the per-step `step preparation` detail).
+/// `prep_phase`: a step is composed just in time, inside the execution window
+/// `steps → step N` measures, so its composition nests under that step
+/// ([`UnderStep`](Self::UnderStep)). The merged `report.composition` aggregate
+/// is not rendered — it would double-count the per-step detail.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CompositionPlacement {
     UnderPrep,
-    UnderEnvSetup,
+    UnderStep,
 }
 
 /// Per-step performance data collected during a sequence run.
@@ -269,6 +265,20 @@ pub(crate) struct SequenceStepPerf {
     pub wall_clock: Duration,
     pub compose_perf: Option<darkmatter::markdown::compose::ComposePerfReport>,
     pub agent_perf: Option<AgentExecutionPerf>,
+    /// When the step ran a group, one entry per member task in declaration
+    /// order; empty for every other step.
+    ///
+    /// These are `Breakdown` detail, never reconciling: a *parallel* group's
+    /// member durations overlap, so they routinely sum past the step's own
+    /// wall-clock and cannot be treated as a partition of it.
+    pub group_tasks: Vec<SequenceTaskPerf>,
+}
+
+/// One group member task's contribution to the `--perf` tree.
+#[derive(Debug, Clone)]
+pub(crate) struct SequenceTaskPerf {
+    pub name: String,
+    pub duration: Duration,
 }
 
 #[cfg(test)]

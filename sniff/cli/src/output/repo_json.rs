@@ -2885,7 +2885,7 @@ mod tests {
 
         #[test]
         fn aggregate_structure_child_includes_monorepo_topology() {
-            let (_temp, path) = super::aggregate::temp_git_repo();
+            let (_temp, _path) = super::aggregate::temp_git_repo();
             let repo = repo_with_layers();
             let result = result_with_repo(repo.clone());
             let aggregate = super::aggregate::synthetic_aggregate(repo);

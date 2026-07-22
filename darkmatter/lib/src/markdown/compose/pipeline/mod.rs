@@ -165,6 +165,7 @@ impl Markdown {
                     shell_expansion_enabled,
                     Some(options.frontmatter_resolution_context()),
                     &options.exclude_keys,
+                    &options.name_coercion_keys,
                 )
                 .map_err(|e| e.with_on_disk_source(&fm_source_ctx))?;
                 report.frontmatter_interpolations_applied = fm_report.replacements;
@@ -282,6 +283,7 @@ impl Markdown {
                         false,
                         Some(options.frontmatter_resolution_context()),
                         &options.exclude_keys,
+                        &options.name_coercion_keys,
                     )
                     .map_err(|e| e.with_on_disk_source(&fm_source_ctx))?;
                     report.frontmatter_interpolations_applied += fm_report.replacements;
@@ -322,6 +324,7 @@ impl Markdown {
                 .with_replace_parent_wins(options.replace_parent_wins)
                 .with_context(options.context().clone())
                 .with_allow_ctx_override(options.allow_ctx_override)
+                .with_name_coercion_keys(options.name_coercion_keys.clone())
                 .build()?;
             if let Some(start) = esb_start {
                 perf.record(perf::PerfMetricKind::EffectiveStateBuild, start.elapsed());

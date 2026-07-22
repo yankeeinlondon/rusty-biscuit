@@ -1,21 +1,20 @@
 //! Shared protobuf schema, generated gRPC stubs, and IPC helpers for the
 //! rendezvous daemon and its clients.
 //!
-//! Phase 1 wired the `Ping` / `Status` round-trip over a Unix Domain
-//! Socket. Phase 2 adds the session-log document model
-//! ([`session_log`]) plus the append/read RPC surface that exercises
-//! the daemon's redb-backed Loro persistence and the DuckDB analytical
-//! projection. Later phases will extend the `Rendezvous` service with
-//! pairing and sync operations.
+//! The control plane runs over whichever local transport the host speaks —
+//! [`local_endpoint`] names it — and carries the `Ping` / `Status` round-trip,
+//! the session-log document model ([`session_log`]) with its append/read RPC
+//! surface over the daemon's redb-backed Loro persistence and DuckDB
+//! projection, and the pairing and sync operations.
 
 pub mod document;
 pub mod envelope;
 pub mod identity;
 pub mod invitation;
+pub mod local_endpoint;
 pub mod repo_identity;
 pub mod session_log;
 pub mod session_status;
-pub mod socket;
 pub mod sync;
 
 /// Generated protobuf types and gRPC stubs for the `rendezvous` package.
@@ -60,6 +59,9 @@ pub use identity::{
     NodeIdentity, NodeIdentityError, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH, verify_signature,
 };
 pub use invitation::{INVITATION_HRP, INVITATION_VERSION, Invitation, InvitationError};
+pub use local_endpoint::{
+    ENDPOINT_ENV_VAR, ENDPOINT_STEM, LocalEndpoint, LocalEndpointError, default_local_endpoint,
+};
 
 pub use session_log::{
     ChunkConfig, ChunkId, ChunkIdParseError, ChunkMetadata, DEFAULT_MAX_BYTES_PER_CHUNK,

@@ -179,7 +179,7 @@ impl SequencePerfAccumulator {
             composition,
             agent: if self.dry_run { None } else { agent },
             notes,
-            placement: CompositionPlacement::UnderEnvSetup,
+            placement: CompositionPlacement::UnderStep,
             sequence_steps: self.steps,
         }
     }

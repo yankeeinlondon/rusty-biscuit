@@ -801,4 +801,101 @@ fn test_page_block_false_from_interpolated_frontmatter() {
     assert!(composed.content().contains("After"));
 }
 
+// ── Named-object string coercion (Sequence Plus) ────────────────
+
+#[test]
+fn name_coercion_renders_name_in_inline_body_context() {
+    let content = "---\ntitle: t\n---\nName is {{state}}";
+    let md: Markdown = content.into();
+    let (composed, _report) = md
+        .compose_with(
+            ComposeOptions::new()
+                .only(&[
+                    ComposeOperation::FrontmatterInterpolation,
+                    ComposeOperation::Interpolation,
+                ])
+                .with_set_overrides(serde_json::json!({"state": {"name": "alpha", "index": 1}}))
+                .with_name_coercion_keys(vec!["state".to_string()]),
+        )
+        .unwrap();
+
+    assert!(
+        composed.content().contains("Name is alpha"),
+        "inline {{{{state}}}} must render the name field, got: {}",
+        composed.content()
+    );
+}
+
+#[test]
+fn name_coercion_is_opt_in_body_renders_json_without_keys() {
+    // Same document WITHOUT with_name_coercion_keys: the object renders as JSON,
+    // proving the coercion is opt-in and off by default.
+    let content = "---\ntitle: t\n---\nName is {{state}}";
+    let md: Markdown = content.into();
+    let (composed, _report) = md
+        .compose_with(
+            ComposeOptions::new()
+                .only(&[
+                    ComposeOperation::FrontmatterInterpolation,
+                    ComposeOperation::Interpolation,
+                ])
+                .with_set_overrides(serde_json::json!({"state": {"name": "alpha", "index": 1}})),
+        )
+        .unwrap();
+
+    assert!(
+        !composed.content().contains("Name is alpha\n") && !composed.content().ends_with("Name is alpha"),
+        "without coercion keys the object must not collapse to the bare name, got: {}",
+        composed.content()
+    );
+    assert!(
+        composed.content().contains("\"name\":\"alpha\""),
+        "without coercion keys the object renders as JSON, got: {}",
+        composed.content()
+    );
+}
+
+#[test]
+fn name_coercion_whole_value_frontmatter_span_keeps_object() {
+    // A whole-value `{{ state }}` span keeps the TYPED object even when the key
+    // is registered for name coercion.
+    let content = "---\nx: \"{{ state }}\"\n---\nBody";
+    let md: Markdown = content.into();
+    let (composed, _report) = md
+        .compose_with(
+            ComposeOptions::new()
+                .only(&[ComposeOperation::FrontmatterInterpolation])
+                .with_set_overrides(serde_json::json!({"state": {"name": "alpha", "index": 1}}))
+                .with_name_coercion_keys(vec!["state".to_string()]),
+        )
+        .unwrap();
+
+    assert_eq!(
+        composed.frontmatter().as_map().get("x"),
+        Some(&serde_json::json!({"name": "alpha", "index": 1})),
+        "whole-value span must keep the typed object"
+    );
+}
+
+#[test]
+fn name_coercion_inline_frontmatter_value_coerces() {
+    // Inline-compose path: a frontmatter value with mixed text coerces the
+    // named object to its `name` when the key is registered.
+    let content = "---\nprompt: \"Work on {{state}}\"\n---\nBody";
+    let md: Markdown = content.into();
+    let (composed, _report) = md
+        .compose_with(
+            ComposeOptions::new()
+                .only(&[ComposeOperation::FrontmatterInterpolation])
+                .with_set_overrides(serde_json::json!({"state": {"name": "alpha", "index": 1}}))
+                .with_name_coercion_keys(vec!["state".to_string()]),
+        )
+        .unwrap();
+
+    assert_eq!(
+        composed.frontmatter().as_map().get("prompt"),
+        Some(&serde_json::json!("Work on alpha")),
+        "inline frontmatter value must coerce to the name"
+    );
+}
 

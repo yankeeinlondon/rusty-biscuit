@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use crate::log;
 
+#[derive(Clone)]
 pub(crate) struct StructuredCodexOutput {
     pub(crate) last_message_path: PathBuf,
 }

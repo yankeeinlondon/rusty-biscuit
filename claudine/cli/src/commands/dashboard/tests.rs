@@ -235,31 +235,25 @@ fn report_html_fragment_carries_the_figures() {
 /// then drive the command's own `fetch_snapshot` against it. Guards the
 /// RPC-response → fold field mapping the unit tests above stub out.
 ///
-/// Unix-only: spawns the real `rendezvous-daemon`, a `cfg(unix)`-gated
-/// dev-dependency (its server binds a `UnixListener`). The Windows
-/// named-pipe daemon server is a tracked follow-up.
-#[cfg(unix)]
+/// Spawns the real `rendezvous-daemon`, which is not a dev-dependency on
+/// `x86_64-pc-windows-gnu` — its bundled `duckdb` cannot clear GNU `as`' COFF
+/// section cap. See the gate comment in `claudine/cli/Cargo.toml`.
+#[cfg(not(all(windows, target_env = "gnu")))]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fetch_snapshot_reflects_a_live_session() {
-    use std::time::{Duration, Instant};
+    use rendezvous_core::local_endpoint::test_support::private_endpoint;
 
     let tmp = tempfile::TempDir::new().expect("tempdir");
-    let socket = tmp.path().join("daemon.sock");
+    let endpoint = private_endpoint(tmp.path(), "daemon");
     let mut config = rendezvous_daemon::server::DaemonConfig::with_data_dir(
         tmp.path().join("data"),
     )
     .with_in_memory_projection();
     config.networking = None;
-    let daemon =
-        rendezvous_daemon::server::spawn_uds_server(socket.clone(), config).expect("spawn daemon");
+    let daemon = rendezvous_daemon::local_transport::spawn_local_server(endpoint.clone(), config)
+        .expect("spawn daemon");
 
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !socket.exists() {
-        assert!(Instant::now() < deadline, "daemon socket never appeared");
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-
-    let mut client = rendezvous_client::connect(&socket).await.expect("client");
+    let mut client = rendezvous_client::connect(&endpoint).await.expect("client");
     client
         .report_session_event(rendezvous_core::ReportSessionEventRequest {
             session_id: "sess-live".into(),

@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use serde_json::{Map, Value, json};
 use tokio::fs;
 
-use crate::error::{ClaudineError, Result};
+use crate::error::{ClaudineError, PolicyParseCause, Result};
 use crate::opencode_config::{deep_merge, merge_overlay, yolo_permission_block};
 use crate::permissions::backend::{BackendCapabilities, BackendFidelity, ProviderPolicyBackend};
 use crate::permissions::canonical::{
@@ -125,6 +125,7 @@ impl ProviderPolicyBackend for OpenCodePolicyBackend {
                 ClaudineError::PolicyNativeParse {
                     source_id: source.id.clone(),
                     message: error.to_string(),
+                    source: Some(PolicyParseCause::Json(error)),
                 }
             })?;
             layers.push(NativePolicyLayer::new(
@@ -150,6 +151,7 @@ impl ProviderPolicyBackend for OpenCodePolicyBackend {
                     return Err(ClaudineError::PolicyCliParse {
                         provider: Provider::OpenCode,
                         message: "parsed CLI overrides belong to another provider".to_owned(),
+                        source: None,
                     });
                 }
                 let typed = parsed
@@ -158,6 +160,7 @@ impl ProviderPolicyBackend for OpenCodePolicyBackend {
                     .ok_or_else(|| ClaudineError::PolicyCliParse {
                         provider: Provider::OpenCode,
                         message: "parsed CLI overrides had an unexpected payload type".to_owned(),
+                        source: None,
                     })?;
                 Ok(ProviderCliOverrides::new(Provider::OpenCode, typed))
             }
@@ -193,6 +196,7 @@ impl ProviderPolicyBackend for OpenCodePolicyBackend {
                     ClaudineError::PolicyNativeParse {
                         source_id: layer.source.id.clone(),
                         message: "OpenCode layer payload type mismatch".to_owned(),
+                        source: None,
                     }
                 })?;
                 Ok((layer.source.clone(), config))
@@ -235,6 +239,7 @@ impl ProviderPolicyBackend for OpenCodePolicyBackend {
                 .ok_or_else(|| ClaudineError::PolicyNativeParse {
                     source_id: "opencode-effective".to_owned(),
                     message: "OpenCode effective policy payload type mismatch".to_owned(),
+                    source: None,
                 })?;
 
         let mut policy = CanonicalPolicy::empty(

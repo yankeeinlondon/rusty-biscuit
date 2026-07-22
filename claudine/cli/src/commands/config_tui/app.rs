@@ -87,7 +87,12 @@ pub struct App {
     pub cached_agents: Vec<claudine::config::AgentInfo>,
     /// Pending webhook test connection result receiver.
     /// When Some, the TUI event loop polls this channel for async test results.
-    pub pending_test: Option<std::sync::mpsc::Receiver<Result<(), String>>>,
+    ///
+    /// Carries the typed failure rather than pre-rendered prose: the event loop
+    /// is the render boundary, and `MessagingError`'s `Display` is already
+    /// webhook-redacted.
+    pub pending_test:
+        Option<std::sync::mpsc::Receiver<Result<(), claudine::messaging::MessagingError>>>,
 }
 
 #[derive(Debug, Clone)]

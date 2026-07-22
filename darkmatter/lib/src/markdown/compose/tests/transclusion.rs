@@ -195,6 +195,89 @@ fn test_stage2_frontmatter_prologue_epilogue() {
     assert_eq!(report.transclusions_applied, 2);
 }
 
+fn frontmatter_file_reference_error(
+    error: &MarkdownError,
+) -> &biscuit_file::FileReferenceError {
+    match error {
+        MarkdownError::Transclusion(inner) => match inner.as_ref() {
+            transclusion::TransclusionError::FileReference(source) => source,
+            other => panic!("expected a file-reference transclusion error, got: {other:?}"),
+        },
+        other => panic!("expected a transclusion error, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_stage2_frontmatter_reference_parse_errors_match_preflight_and_execution() {
+    for property in ["prologue", "epilogue"] {
+        for reference in ["@//escape.md", "%@//escape.md", "~alice/secret.md"] {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            std::fs::write(
+                &root,
+                format!("---\n{property}: {reference:?}\n---\nBody"),
+            )
+            .unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .with_ignore_invalid_references(Some(true));
+            let preflight_error = md.compose_preflight(&options).unwrap_err();
+            let execution_error = md.compose_with(options).unwrap_err();
+            let preflight_source = frontmatter_file_reference_error(&preflight_error);
+            let execution_source = frontmatter_file_reference_error(&execution_error);
+
+            assert_eq!(preflight_source.to_string(), execution_source.to_string());
+            if reference.starts_with('~') {
+                assert!(matches!(
+                    preflight_source,
+                    biscuit_file::FileReferenceError::UnsupportedUserHome(_)
+                ));
+                assert!(matches!(
+                    execution_source,
+                    biscuit_file::FileReferenceError::UnsupportedUserHome(_)
+                ));
+            } else {
+                assert!(matches!(
+                    preflight_source,
+                    biscuit_file::FileReferenceError::InvalidSyntax(_)
+                ));
+                assert!(matches!(
+                    execution_source,
+                    biscuit_file::FileReferenceError::InvalidSyntax(_)
+                ));
+            }
+        }
+    }
+}
+
+#[test]
+fn test_stage2_frontmatter_inline_content_matches_preflight_and_execution() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("root.md");
+    std::fs::write(
+        &root,
+        "---\nprologue: Inline preface text\nepilogue: Inline closing text\n---\nBody",
+    )
+    .unwrap();
+
+    let md = Markdown::try_from(root.as_path()).unwrap();
+    let options = ComposeOptions::new().with_source_file(&root);
+    let preflight = md.compose_preflight(&options).unwrap();
+    assert!(preflight.preflight_graph.edges.is_empty());
+
+    let (composed, report) = md.compose_with(options).unwrap();
+    assert!(composed.content().starts_with("Inline preface text"));
+    assert!(
+        composed
+            .content()
+            .trim_end_matches('\n')
+            .ends_with("Inline closing text")
+    );
+    assert_eq!(report.transclusions_applied, 0);
+}
+
 #[test]
 fn test_stage2_same_file_can_be_used_in_prologue_and_body() {
     let dir = tempfile::tempdir().unwrap();
@@ -1095,6 +1178,61 @@ mod remote_transclusion_tests {
         assert!(text.contains("fn main()"), "content: {text}");
         assert!(text.contains("```rs"), "content: {text}");
         assert_eq!(report.transclusions_applied, 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn mixed_case_http_file_and_code_targets_execute_as_remote_transclusions() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/remote.md"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("remote markdown"))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/snippet.rs"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("fn mixed_case() {}"))
+            .mount(&server)
+            .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let remote_base = server.uri().replacen("http://", "hTtP://", 1);
+        let content = format!(
+            "::file {remote_base}/remote.md\n\n::code {remote_base}/snippet.rs\n"
+        );
+        std::fs::write(&root, &content).unwrap();
+
+        let (composed, report) =
+            compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
+                .await
+                .unwrap();
+
+        assert!(composed.content().contains("remote markdown"));
+        assert!(composed.content().contains("fn mixed_case()"));
+        assert_eq!(report.transclusions_applied, 2);
+        assert_eq!(report.remote_fetch_stats.unwrap().fetched, 2);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn mixed_case_http_target_is_denied_by_remote_host_policy() {
+        let server = MockServer::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let remote_url = format!(
+            "{}/blocked.md",
+            server.uri().replacen("http://", "HtTp://", 1)
+        );
+        let content = format!("::file {remote_url}\n");
+        std::fs::write(&root, &content).unwrap();
+
+        let err = compose_with_remote(&content, &root, &server, Vec::new())
+            .await
+            .expect_err("mixed-case HTTP must remain subject to the deny-all policy");
+
+        assert!(
+            err.to_string().contains("denied") || err.to_string().contains("not allowed"),
+            "expected remote policy denial, got: {err}"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

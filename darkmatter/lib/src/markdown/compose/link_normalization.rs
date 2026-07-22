@@ -120,11 +120,15 @@ pub fn normalize_links(
     let base_dir = base_file
         .as_ref()
         .and_then(|p| p.parent().map(|p| p.to_path_buf()));
-    let git_root = base_dir
-        .as_ref()
-        .and_then(|d| super::find_git_root_from(d))
-        .map(|r| std::fs::canonicalize(&r).unwrap_or(r));
-    let home = dirs::home_dir();
+    let git_root = match options.file_resolution_context.as_ref() {
+        Some(context) => context.repository_root().map(Path::to_path_buf),
+        None => base_dir.as_ref().and_then(|d| super::find_git_root_from(d)),
+    }
+    .map(|r| std::fs::canonicalize(&r).unwrap_or(r));
+    let home = match options.file_resolution_context.as_ref() {
+        Some(context) => context.home_dir().map(Path::to_path_buf),
+        None => dirs::home_dir(),
+    };
 
     for (record, abs_path) in to_normalize {
         let mut replacement = None;
@@ -154,7 +158,11 @@ pub fn normalize_links(
             let mut longest_len = 0;
 
             for var_name in whitelist {
-                if let Ok(val) = std::env::var(&var_name) {
+                let val = match options.file_resolution_context.as_ref() {
+                    Some(context) => context.env().get(&var_name).cloned(),
+                    None => std::env::var(&var_name).ok(),
+                };
+                if let Some(val) = val {
                     let var_path = PathBuf::from(val);
                     if abs_path.starts_with(&var_path) {
                         let path_len = var_path.as_os_str().len();
@@ -342,6 +350,28 @@ mod tests {
             "Content was: {}",
             md.content()
         );
+        assert_eq!(report.link_normalizations_applied, 1);
+    }
+
+    #[test]
+    fn link_normalization_reuses_snapshot_environment() {
+        let dir = tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let target = root.join("config.json");
+        fs::write(&target, "{}").unwrap();
+        let content = format!("[config]({})\n", target.display());
+        let mut md = Markdown::new(&content);
+        let mut env = std::collections::HashMap::new();
+        env.insert("CAPTURED_ROOT".to_string(), root.display().to_string());
+        let snapshot = biscuit_file::FileResolutionContext::new(&root).with_env(env);
+        let options = ComposeOptions::new()
+            .with_env_path_whitelist(vec!["CAPTURED_ROOT".to_string()])
+            .with_file_resolution_context(snapshot);
+        let mut report = ComposeReport::new();
+
+        normalize_links(&mut md, &options, &mut report).unwrap();
+
+        assert!(md.content().contains("${CAPTURED_ROOT}/config.json"));
         assert_eq!(report.link_normalizations_applied, 1);
     }
 

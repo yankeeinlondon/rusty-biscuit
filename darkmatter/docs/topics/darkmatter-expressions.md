@@ -461,8 +461,10 @@ whether a local path exists; they operate on the resolved path shape.
 
 #### Shared Path Rules
 
-- Paths are resolved through `FileReference` plus the document's magic paths,
-  package paths, and git-root fallbacks.
+- Paths are resolved through `FileReference` against the document resolution
+  context: explicit `./`/`../` paths from the source document's directory only,
+  bare implicit paths repository-root first then the source directory, plus the
+  document's magic (`@`) and package (`!`) roots for those reference forms.
 - Output paths use `/` as the separator, regardless of platform.
 - Missing local files are generally **not** an error for path helpers; existence
   is checked only when the operation genuinely needs it.

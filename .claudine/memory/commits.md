@@ -31,6 +31,15 @@ do not belong here.
 - Scan staged blobs for all diff3 conflict-marker forms, including the base
   marker `|||||||`; partial resolutions can leave it behind after deleting the
   `=======` separator and `>>>>>>>` terminator.
+- Conflict-marker checks must inspect the full staged blob (`git show :<path>`),
+  not only staged diff hunks or `git diff --check`; malformed or pre-existing
+  marker fragments outside the changed hunk can otherwise pass unnoticed.
+- When a full-blob scan finds unresolved markers in an assigned path, the
+  subagent MUST refuse the commit, leave the path staged, and report the
+  markers' file coordinates (grep output or `file:line` from `git show`).
+  The orchestrator resolves them in the working tree (`edit` or equivalent),
+  restages the same single path (`git add <path>`), and re-issues the
+  `--only -- <path>` commit — never amend, never reset, never restage peers.
 - Use `git log` for commit-history examples. `sniff git commits` is not valid.
 
 ## Path-Limited Commits
@@ -44,8 +53,18 @@ do not belong here.
 - Put Git options before `--`. For very large explicit path lists, use
   `--pathspec-from-file` and inspect the generated list.
 - Feed commit messages through `-F -` with a single-quoted heredoc, or through a
+  checked temp file for long bodies. Prefer the temp-file pattern when the
+  commit may need to be retried (lock contention): an in-place heredoc does not
+  compose cleanly with a retry loop inside a single shell invocation, while a
+  prewritten file lets the loop reuse the same body verbatim. A bare
+  `git commit -- <paths> <<EOF` can open the configured editor and block.
   checked temp file for long bodies. A bare `git commit -- <paths> <<EOF` can
   open the configured editor and block.
+- `--` between `-F -` and the pathspec list is mandatory, even with `--only`.
+  Without it, git parses the first path as a subcommand (e.g. `git commit
+  --only -F - claudine/lib/...` tries to invoke `git-claudine`) and may also
+  re-enter the working directory as a relative path, triggering a permission
+  denied error. Always: `git commit --only -F - -- path1 path2 … <<'MSG' …`.
 - Do not place messages containing backticks, dollar signs, or other shell
   metacharacters in a double-quoted `-m` argument.
 - **`--only` + `-F -` argument order.** In a path-restricted commit that reads
@@ -55,6 +74,22 @@ do not belong here.
   `error: pathspec '-F' did not match any file(s) known to git`. The heredoc
   payload is then never read. Pair this with the single-quoted `<<'COMMIT_MSG'`
   delimiter above.
+
+## Credential and Signing Blockers
+
+- The system prompt warns against running `gpg` / `ssh-add` / credential
+  helpers directly. The same hang hazard applies when parent config already
+  enables signing — `commit.gpgsign=true` (set globally or per-repo) makes
+  every `git commit` silently invoke `gpg-agent` and block on `/dev/tty`
+  for the passphrase, even though the sub-agent did not opt in. Pre-flight
+  with `git config --get commit.gpgsign` and `git config --show-origin
+  --get commit.gpgsign`; if truthy, override per invocation:
+  `git -c commit.gpgsign=false commit --only -F - -- <paths>`. Do not
+  `git config --unset` or otherwise rewrite repo config from a sub-agent.
+- Always export `GIT_TERMINAL_PROMPT=0` before any git invocation in a
+  non-interactive session, even when no prompt is expected. Cheap insurance
+  against credential helpers opening `/dev/tty` for HTTP proxies, push
+  remotes, etc.
 
 ## Mixed-State Paths
 
@@ -164,6 +199,17 @@ do not belong here.
 - Never amend or create follow-up fixup commits after a successful commit in a
   concurrent batch. Report the issue so the orchestrator can decide whether to
   accept, revert, or coordinate a rewrite.
+- `git commit --only -- <pathspec>` commits only the named paths while preserving
+  unrelated staged entries. Parallel agents still need disjoint pathspecs and
+  lock retries, but successful sibling commits do not naturally narrow the
+  remaining index.
+- After all groups finish, reconcile `git status --short` against the original
+  staged set. Any staged path left behind belongs to a failed or unassigned
+  group and must be reported before taking further action.
+- Git lock failures are transient contention. On index/ref lock contention, do
+  not remove the lockfile; wait 1–3 seconds and retry the identical commit up
+  to five times. A concurrent worker may own the lock.
+
 - Run commands from the inherited worktree root. Do not change to a guessed
   repository path, and do not push commits.
 - In zsh wrappers, avoid special variable names such as `status` and `path`.
@@ -210,6 +256,54 @@ do not belong here.
   actively iterated and the working tree is a clean superset of staged
   intent, stage it once and commit directly as the orchestrator in a single
   shell — do not keep re-dispatching. Reserve sub-agents for stable snapshots.
+- A sub-agent's *return report* can come back empty even when the commit
+  itself landed cleanly with a fully intact body. This is distinct from the
+  body-truncation pattern above (which corrupts the commit) — here the
+  committed `git log -1 --format=%B <hash>` shows all bullets, but the
+  agent's final message to the orchestrator is blank. Treat an empty
+  report as "unknown, verify independently" rather than "failed". The
+  existing Verification section already mandates this; the lesson is that
+  it can happen even when the sub-agent had nothing to report as a problem.
+- The corollary is sharper than the existing wording suggests: an empty
+  return report can also mean the commit *never ran*. Observed in a 13-group
+  batch: one sub-agent returned a blank final message and its three assigned
+  paths were still staged. Treat empty/ambiguous reports as **silent failure
+  until proven otherwise** by `git status --short` showing the assigned paths
+  gone (and the expected hash in the log). Verify per-agent rather than
+  only at the end of the batch — recovering from a missed commit is much
+  cheaper while the orchestrator still has the intended commit body and
+  pathspec in context.
+- A sub-agent given a pathspecs **file** plus an `xargs -I {} git commit ...
+  < paths.txt` command shape will produce **N stacked commits** (one per
+  line) instead of one commit. The shape that says "commit a list of
+  paths" is not `xargs` over a per-line list — it is one
+  `git commit --only -F body -- p1 p2 ... pN` invocation, or
+  `git commit --only -F body --pathspec-from-file=<file>`. Observed in a
+  3-group batch: a 35-path refactor landed as 35 stacked `refactor(claudine):
+  plumb request-scoped FileResolutionContext through composition` commits.
+  The path set, tree, and subject were correct in every one; the batch
+  shape was wrong.
+- **Mitigation in the brief.** When the orchestrator wants one commit, the
+  brief must say, explicitly, "one `git commit --only -F body -- p1 p2 ...
+  pN` invocation with all paths as positional arguments; never `xargs` per
+  path; never per-path loops". For very long path lists use
+  `--pathspec-from-file=<file>` and a single invocation, not a shell loop.
+- **Recovery from N stacked commits when the orphans are yours.** If the
+  wrong-shape commits are entirely the sub-agent's work (not the
+  developer's), `git update-ref HEAD <old> <new>` (note: ref, newvalue,
+  oldvalue — the order differs from `git reset`) is the documented
+  CAS-advance pattern. It is the non-destructive equivalent of
+  `git reset --soft`: HEAD moves, the index is preserved, the working
+  tree is preserved, and the orphaned commits stay reachable from the
+  reflog / object database until GC. After the move, all of the formerly
+  committed paths reappear in `git diff --staged --name-only` (because
+  the index holds their post-commit state, which now differs from the
+  new HEAD) and the orchestrator can recommit them as one commit. Verify
+  the new HEAD before recommitting: `git log --oneline -3` and
+  `git status --short`. The developer's *unstaged* changes are
+  untouched by the move; only the staged snapshot, which is exactly what
+  a soft reset would touch, is at issue, and the soft-reset is what
+  `update-ref` performs.
 
 ## Verification
 
@@ -227,10 +321,37 @@ do not belong here.
   which protects downstream tooling that depends on `git log --pretty=%G?`
   showing a good signature (e.g. `darkmatter/features/*` review-cycle
   tooling).
+- Capture the new commit hash from `git commit`'s bracketed success banner and
+  verify it with `git show --stat <hash>` or `git show --name-status <hash>`.
+  Parse the hash token inside the brackets, not the first whitespace-delimited
+  field, because branch refs and wrappers can make that field ambiguous.
+- In a concurrent batch, `git rev-parse HEAD` immediately after success is not
+  authoritative for that invocation: a sibling can advance `HEAD` between the
+  commit and the read. Use the captured banner hash; if stdout was hidden,
+  recover with `git reflog --grep '<subject-substring>' -1` and verify the
+  subject and exact path set.
+- Do not rely on `git log -1` after concurrent commits; HEAD may already have
+  advanced.
+- After all groups finish, inspect `git status --short` for staged paths left
+  behind and report or commit them as appropriate.
 - Agent or task completion alone does not prove that its commit landed. After
   all groups finish, inspect `git status --short` and recent history for staged
   paths or missing commits. Treat empty or ambiguous agent reports as unknown.
+- A subagent report of "path no longer staged" or similar is often a positive
+  signal that a parallel committer (developer or sibling subagent) already
+  produced the commit. Before re-staging or re-committing, run `git log -3` (or
+  search recent commits for the expected subject) to confirm the intended
+  commit landed. Restaging after a parallel committer has already produced the
+  commit produces a redundant second commit.
 - For whitespace-only groups, sanity-check with
   `git diff --staged --stat --ignore-all-space --ignore-blank-lines` or
   `--numstat --ignore-all-space --ignore-blank-lines`. Zero output means no
   non-whitespace changes remain.
+- `git reflog -1` is unreliable as a post-commit lookup when other agents are
+  committing against the same worktree in parallel: any operation that lands
+  between your commit and your read — e.g. an unrelated `chore: refresh
+  GitNexus index counts` commit from a sibling agent — displaces the top of
+  reflog and your hash becomes `HEAD@{1}` (or deeper), not `HEAD@{0}`. Recover
+  with `git reflog --grep '<subject-substring>' -1` to filter by commit
+  message, then verify that hash with `git show --name-status <hash>` and
+  `git log -1 --format=%B <hash>`.

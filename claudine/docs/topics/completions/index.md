@@ -32,4 +32,4 @@ In an ongoing effort to support **effective laziness** (altruism at it's finest)
 
 With these two features we expect your Claudine CLI experience to be more fulfilling and less encumbering. Enjoy and you're welcome.
 
-> **Note:** some of the more anal retentive of you may have seen and _objected_ to this document being called **auto completions** while structurally/semantically linking to two distinct concepts -- _shell completions_ and _CLI auto-completions_ -- where one is called "auto-completions" too? Well Claudine noticed that too and doesn't care. She said that you should seek counciling for you're overzealous need to emphasize structure over flow.
+> **Note:** some of the more anal retentive of you may have seen and _objected_ to this document being called **auto completions** while structurally/semantically linking to two distinct concepts -- _shell completions_ and _CLI auto-completions_ -- where one is called "auto-completions" too? Well Claudine noticed that too and doesn't care. She said that you should seek counseling for you're overzealous need to emphasize structure over flow.

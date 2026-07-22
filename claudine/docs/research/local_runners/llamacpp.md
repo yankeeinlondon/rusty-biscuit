@@ -237,6 +237,62 @@ detection:
     confidence: source_code
     notes: No primary server config file. Configuration is by CLI flags, `LLAMA_ARG_*` environment variables, and optional Web UI JSON or router preset files.
 
+identity_probes:
+  - rank: 1
+    request: ANY /health
+    match_in: header
+    field: Server
+    marker: llama.cpp
+    uniqueness: unique
+    zero_model_ok: true
+    auth_gated: false
+    confidence: source_code
+    notes: "server-http.cpp sets `Server: llama.cpp` on every response with no flag to disable — the cheapest possible probe (any request, even /health while the model is still loading and returning 503). No other fleet runner sends it."
+  - rank: 2
+    request: GET /props
+    match_in: json_field
+    field: build_info
+    marker: '"build_info":"bNNNN-<commit>"'
+    uniqueness: unique
+    zero_model_ok: true
+    auth_gated: true
+    confidence: source_code
+    notes: /props is llama-only and also carries total_slots, chat_template, and default_generation_settings; in router mode (/models-dir, no -m) it returns "role":"router". Auth-gated when --api-key is set.
+  - rank: 3
+    request: GET /v1/models
+    match_in: json_field
+    field: data[].owned_by
+    marker: '"owned_by":"llamacpp"'
+    uniqueness: strong
+    zero_model_ok: true
+    auth_gated: false
+    confidence: source_code
+    notes: Public endpoint; single-model mode is the clearest case. Generic path, llama-specific value.
+  - rank: 4
+    request: GET /api/tags
+    match_in: json_field
+    field: models[].digest
+    marker: empty digest/modified_at/size fields
+    uniqueness: weak
+    zero_model_ok: true
+    auth_gated: false
+    confidence: source_code
+    notes: Deliberate Ollama mimicry — the path cannot distinguish llama-server from Ollama, but llama.cpp's dummy empty digest/modified_at fields are a reverse-tell when Ollama's banner probe (rank 1 in ollama.md) fails on port 11434.
+
+version_probe:
+  - os: all
+    method: cli
+    command: llama-server --version
+    pattern: "version: (\\d+) \\(([0-9a-f]+)\\)"
+    confidence: observed
+    notes: "Observed `version: 8168 (723c71064)` — the version is a BUILD NUMBER plus commit sha, not a semver. On this host the binary prints Metal/backend init lines BEFORE the version line, so match the `version:` line anywhere in the output, never the first line. For a running server, `GET /props` → build_info carries the same `bNNNN-<sha>` identity (identity_probes rank 2)."
+  - os: windows
+    method: cli
+    command: llama-server.exe --version
+    pattern: "version: (\\d+) \\(([0-9a-f]+)\\)"
+    confidence: documented
+    notes: Pre-built Windows archives and winget installs use the .exe suffix; same output shape.
+
 config_mechanism: mixed
 
 config_files:
@@ -527,6 +583,24 @@ Recommended ordered probes:
 8. Do not rely on a config file. There is no default server config file.
 
 Observed negative evidence on this host: `curl` to `/`, `/health`, `/v1/health`, `/models`, `/v1/models`, `/props`, and `/metrics` on `127.0.0.1:8080` failed to connect because no server was running.
+
+### Port identity
+
+Port 8080 collides with LocalAI and countless development servers, so the
+ranked `identity_probes` frontmatter block is the canonical strategy for
+answering "which runner is listening on this port?":
+
+1. Header check — `server-http.cpp` sets `Server: llama.cpp` on **every**
+   response (even the 503 "Loading model" during startup), with no flag to
+   disable it. This is the cheapest identity probe in the fleet: one request
+   to any path, and no other runner sends the header.
+2. `GET /props` — llama-only path carrying `build_info` (`bNNNN-<commit>`),
+   `total_slots`, and `default_generation_settings`; router mode returns
+   `"role":"router"`. Auth-gated when `--api-key` is set.
+3. `GET /v1/models` — `"owned_by":"llamacpp"` on a generic path.
+4. `GET /api/tags` — deliberate Ollama mimicry; the empty dummy
+   `digest`/`modified_at` fields are a reverse-tell distinguishing it from
+   real Ollama.
 
 ## Configuration
 
