@@ -8,6 +8,28 @@ reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-07-21
 reviewed_seed: ff6de1834fe07de9d34d9ffd3cd717d7941d54f2
+source_files_during_phase_1: []
+docs_updated_during_phase_1:
+  - claudine/fixes/2026-07-20-claudine-mega-merge/plan.md
+docs_created_during_phase_1:
+  - claudine/fixes/2026-07-20-claudine-mega-merge/acceptance-ledger.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/baselines/**/*.txt
+  - claudine/fixes/2026-07-20-claudine-mega-merge/baselines/summary.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/conflict-checklist.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/dirty-worktree-inventory.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact-review.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/**/*.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/marker-baseline.txt
+  - claudine/fixes/2026-07-20-claudine-mega-merge/merge-previews/**/*.txt
+  - claudine/fixes/2026-07-20-claudine-mega-merge/phase1-closeout.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/phase1-gates/*.txt
+  - claudine/fixes/2026-07-20-claudine-mega-merge/phase1-gates/current-gate-summary.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/reviewed-seed-audit.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/sha-ledger.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/user-owned-worktree.patch
+skills_files_updated_during_phase_1: []
+packages:
+  - claudine
 ---
 
 # Claudine Mega-Merge Execution Plan
@@ -44,35 +66,35 @@ Spec mapping: spec Phase 0. Goal: inputs recoverable, refs frozen, baselines rec
 
 ### Tasks
 
-- [ ] Write `sha-ledger.md` in this directory. Record `git rev-parse refs/heads/claudine` as the execution seed, the two frozen feature-tip SHAs, and both merge bases. Record the command, timestamp, and operator; this artifact is the authoritative ref freeze for the rest of the plan.
-- [ ] Compare the execution seed with reviewed seed `ff6de1834`. Audit `ff6de1834..<execution-seed>` and confirm that every intervening commit is understood and contains no implementation from either feature branch. Any unreviewed implementation change requires a refreshed specification review before proceeding.
-- [ ] Verify each feature SHA and merge base against the named refs. Any divergence triggers R14: stop, update the reviewed inputs, regenerate previews, and refresh branch-tip baselines.
-- [ ] Rerun `git status --short --branch` and classify every modified or untracked path (R13). Preserve each user-owned path in a recoverable location or dedicated scratch commit, and record its disposition. The older research inventory is context, not an instruction to assume that the same paths are still dirty.
-- [ ] Confirm the actual integration worktree is clean: `git status --short --branch` shows nothing unexpected. If it cannot be clean, halt (spec Stop Conditions).
-- [ ] Create and name a recoverable integration branch from the execution seed recorded in `sha-ledger.md`; record its name in the ledger. Keep `claudine` and both feature source refs unchanged until final promotion, and preserve full ancestry through merge commits.
-- [ ] Freeze all three source refs until Phase 6 closes. The separate integration branch may advance only through commits required by this plan. Record the freeze owner/time and notify collaborators who can move those refs.
-- [ ] Enable `git rerere` on the integration branch in case of repeated attempts. Reused resolutions still require per-conflict review.
-- [ ] Before either merge, scan tracked text with `git grep -n -E '^(<<<<<<< .+|\|\|\|\|\|\|\| .+|=======|>>>>>>> .+)$'` and save the output to `marker-baseline.txt`. Classify intentional fixture hits. The reviewed seed is expected to contain only the two known `CLAUDE.md` lines; any additional unclassified hit halts Phase 1 (R16).
-- [ ] Refresh non-mutating merge previews with the exact SHAs from `sha-ledger.md`: execution seed ↔ foundation, execution seed ↔ proxy, and foundation ↔ proxy. Save stdout, stderr, command, and exit status under `merge-previews/`; exit `1` is expected when a preview reports conflicts and is evidence, not a gate failure by itself.
-- [ ] Export the refreshed feature-to-feature conflict inventory into `conflict-checklist.md`, grouped by cluster (Architecture & records; CLI prep & composition; Harness & proxy routing; Sequence integration; Library composition/lifecycle; Darkmatter; Generated/docs). Start from 36 reviewed paths, but use the refreshed output as authoritative. Add the execution-seed conflict lists and every auto-merged/one-sided hotspot from the spec. Each row gets path, cluster, owner, resolution status, rationale, and evidence slots.
-- [ ] Capture baseline gate results at `error-prop-and-file-resolution` tip (`43c23c6`). Save to `baselines/error-prop-and-file-resolution/`. *(parallelizable with: the proxy-with baseline below)*
-    - [ ] From `biscuit-file/`: `just test`, `just test-l2`, and `just lint` as three recorded commands.
-    - [ ] From `darkmatter/`: `just test`, `just test-l2`, and `just lint` as three recorded commands.
-    - [ ] From the repository root: `just test biscuit-test-harness` and `just _lint biscuit-test-harness`; this leaf crate has no area `justfile`.
-    - [ ] From `claudine/rendezvous/`: `just check`, `just test`, and `just lint` as three recorded commands.
-    - [ ] From `claudine/`: `just test`, `just test-l2 --no-fail-fast`, `just lint`, and `just check-windows` as four recorded commands.
-- [ ] Capture the same independent baseline gates at `proxy-with` tip (`e348486c`). Save them to `baselines/proxy-with/`. *(parallelizable with: the foundation baseline above)* Run both baselines from separate detached worktrees at the exact SHAs; never switch the dirty authoring worktree between refs.
-- [ ] Label red, timed-out, skipped, cross-compile-only, and backend-blocked baseline results truthfully. Backend denial (e.g. tmux setup failure on managed macOS) is recorded as debt, never silently waived (R10, R11).
-- [ ] Build `acceptance-ledger.md` from the owning revisions, not the older copies on the integration seed: the error-propagation, file-resolution, and Sequence Plus specs plus `validation-matrix.md` at `43c23c6`, and the proxy-with spec plus `notes/acceptance-map.md` at `e348486c`. Read them with `git show` or from the exact detached worktrees and record each full source path/SHA in the ledger. Each row records a stable criterion ID, contract, named merged-tree test or audit, tier (L1/L2/L3), platform, owner, status (`passed`/`failed`/`blocked`/`skipped`/`compile-only`/`accepted-debt`), acceptance-candidate SHA, and evidence location.
-- [ ] Import all 12 mandatory combined seam cases as `MM-S01` through `MM-S12`. Assign each a concrete test owner, tier, and platform before code editing; isolated feature suites cannot satisfy these rows.
-- [ ] Confirm GitNexus index freshness for each exact revision used by the impact reports (execution seed and both feature tips), using the detached worktrees rather than switching the authoring tree. If stale, refresh with `node .gitnexus/run.cjs analyze` (fallback `npx gitnexus analyze`; npm 11 crash → `npm i -g gitnexus`). Record the indexed revision with every report.
-- [ ] Resolve the following hot-spot file/module labels to concrete symbol identities with GitNexus `query()`/`context()`, then run upstream `impact()` for every symbol that may be edited and save the reports to `impact/`. Use an index at the exact branch tip that owns the symbol and record that revision; shared symbols need both feature-tip views. Ambiguous labels such as `mod`, `types`, `prep`, or `proxy` are not valid impact targets by themselves:
-    - [ ] `prep` (compose), `composition::{mod,pipeline,runner}` (wrap), `wrapper_stages`
-    - [ ] `loop_control`, `control_dispatch`, `proxy` (harness_orch), `overlay`, `prompt`, `types`
-    - [ ] `sequence::{iterate,mod,phase1c}`
-    - [ ] `composition::error::{mod,render}`, `composition::lifecycle::{context,executor}`, `composition::looping::engine`, `composition::{mod,preflight,prepare,types}`
-    - [ ] Darkmatter `markdown::compose::context::options`
-- [ ] For every HIGH/CRITICAL impact finding, open a row in `impact-review.md` with the proposed resolution owner. These must be reviewed before the corresponding Phase 2/3 edit lands.
+- [x] Write `sha-ledger.md` in this directory. Record `git rev-parse refs/heads/claudine` as the execution seed, the two frozen feature-tip SHAs, and both merge bases. Record the command, timestamp, and operator; this artifact is the authoritative ref freeze for the rest of the plan.
+- [x] Compare the execution seed with reviewed seed `ff6de1834`. Audit `ff6de1834..<execution-seed>` and confirm that every intervening commit is understood and contains no implementation from either feature branch. Any unreviewed implementation change requires a refreshed specification review before proceeding.
+- [x] Verify each feature SHA and merge base against the named refs. Any divergence triggers R14: stop, update the reviewed inputs, regenerate previews, and refresh branch-tip baselines.
+- [x] Rerun `git status --short --branch` and classify every modified or untracked path (R13). Preserve each user-owned path in a recoverable location or dedicated scratch commit, and record its disposition. The older research inventory is context, not an instruction to assume that the same paths are still dirty.
+- [x] Confirm the actual integration worktree is clean: `git status --short --branch` shows nothing unexpected. If it cannot be clean, halt (spec Stop Conditions).
+- [x] Create and name a recoverable integration branch from the execution seed recorded in `sha-ledger.md`; record its name in the ledger. Keep `claudine` and both feature source refs unchanged until final promotion, and preserve full ancestry through merge commits.
+- [x] Freeze all three source refs until Phase 6 closes. The separate integration branch may advance only through commits required by this plan. Record the freeze owner/time and notify collaborators who can move those refs.
+- [x] Enable `git rerere` on the integration branch in case of repeated attempts. Reused resolutions still require per-conflict review.
+- [x] Before either merge, scan tracked text with `git grep -n -E '^(<<<<<<< .+|\|\|\|\|\|\|\| .+|=======|>>>>>>> .+)$'` and save the output to `marker-baseline.txt`. Classify intentional fixture hits. The reviewed seed is expected to contain only the two known `CLAUDE.md` lines; any additional unclassified hit halts Phase 1 (R16).
+- [x] Refresh non-mutating merge previews with the exact SHAs from `sha-ledger.md`: execution seed ↔ foundation, execution seed ↔ proxy, and foundation ↔ proxy. Save stdout, stderr, command, and exit status under `merge-previews/`; exit `1` is expected when a preview reports conflicts and is evidence, not a gate failure by itself.
+- [x] Export the refreshed feature-to-feature conflict inventory into `conflict-checklist.md`, grouped by cluster (Architecture & records; CLI prep & composition; Harness & proxy routing; Sequence integration; Library composition/lifecycle; Darkmatter; Generated/docs). Start from 36 reviewed paths, but use the refreshed output as authoritative. Add the execution-seed conflict lists and every auto-merged/one-sided hotspot from the spec. Each row gets path, cluster, owner, resolution status, rationale, and evidence slots.
+- [x] Capture baseline gate results at `error-prop-and-file-resolution` tip (`43c23c6`). Save to `baselines/error-prop-and-file-resolution/`. *(parallelizable with: the proxy-with baseline below)*
+    - [x] From `biscuit-file/`: `just test`, `just test-l2`, and `just lint` as three recorded commands.
+    - [x] From `darkmatter/`: `just test`, `just test-l2`, and `just lint` as three recorded commands.
+    - [x] From the repository root: `just test biscuit-test-harness` and `just _lint biscuit-test-harness`; this leaf crate has no area `justfile`.
+    - [x] From `claudine/rendezvous/`: `just check`, `just test`, and `just lint` as three recorded commands.
+    - [x] From `claudine/`: `just test`, `just test-l2 --no-fail-fast`, `just lint`, and `just check-windows` as four recorded commands.
+- [x] Capture the same independent baseline gates at `proxy-with` tip (`e348486c`). Save them to `baselines/proxy-with/`. *(parallelizable with: the foundation baseline above)* Run both baselines from separate detached worktrees at the exact SHAs; never switch the dirty authoring worktree between refs.
+- [x] Label red, timed-out, skipped, cross-compile-only, and backend-blocked baseline results truthfully. Backend denial (e.g. tmux setup failure on managed macOS) is recorded as debt, never silently waived (R10, R11).
+- [x] Build `acceptance-ledger.md` from the owning revisions, not the older copies on the integration seed: the error-propagation, file-resolution, and Sequence Plus specs plus `validation-matrix.md` at `43c23c6`, and the proxy-with spec plus `notes/acceptance-map.md` at `e348486c`. Read them with `git show` or from the exact detached worktrees and record each full source path/SHA in the ledger. Each row records a stable criterion ID, contract, named merged-tree test or audit, tier (L1/L2/L3), platform, owner, status (`passed`/`failed`/`blocked`/`skipped`/`compile-only`/`accepted-debt`), acceptance-candidate SHA, and evidence location.
+- [x] Import all 12 mandatory combined seam cases as `MM-S01` through `MM-S12`. Assign each a concrete test owner, tier, and platform before code editing; isolated feature suites cannot satisfy these rows.
+- [x] Confirm GitNexus index freshness for each exact revision used by the impact reports (execution seed and both feature tips), using the detached worktrees rather than switching the authoring tree. If stale, refresh with `node .gitnexus/run.cjs analyze` (fallback `npx gitnexus analyze`; npm 11 crash → `npm i -g gitnexus`). Record the indexed revision with every report.
+- [x] Resolve the following hot-spot file/module labels to concrete symbol identities with GitNexus `query()`/`context()`, then run upstream `impact()` for every symbol that may be edited and save the reports to `impact/`. Use an index at the exact branch tip that owns the symbol and record that revision; shared symbols need both feature-tip views. Ambiguous labels such as `mod`, `types`, `prep`, or `proxy` are not valid impact targets by themselves:
+    - [x] `prep` (compose), `composition::{mod,pipeline,runner}` (wrap), `wrapper_stages`
+    - [x] `loop_control`, `control_dispatch`, `proxy` (harness_orch), `overlay`, `prompt`, `types`
+    - [x] `sequence::{iterate,mod,phase1c}`
+    - [x] `composition::error::{mod,render}`, `composition::lifecycle::{context,executor}`, `composition::looping::engine`, `composition::{mod,preflight,prepare,types}`
+    - [x] Darkmatter `markdown::compose::context::options`
+- [x] For every HIGH/CRITICAL impact finding, open a row in `impact-review.md` with the proposed resolution owner. These must be reviewed before the corresponding Phase 2/3 edit lands.
 - [ ] Stage only the Phase 1 planning/evidence artifacts, review their size and contents for secrets, run `git diff --check`, the anchored marker scans with the known baseline exception, and GitNexus `detect_changes({scope: "compare", base_ref: "main"})`, then create a documentation-only baseline checkpoint commit. Raw logs that contain secrets or are impractically large stay in an access-controlled artifact store; commit a redacted summary and stable evidence pointer instead.
 
 ### Validation Checkpoint (Phase 1 exit)

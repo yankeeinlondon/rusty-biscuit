@@ -28,7 +28,7 @@ success:
 
     stack:
         - action:
-            - shell: "git add ."
+            - shell: "git add .."
             - shell: "just commit"
 blocked:
     message: "💥  phase **{{phase}}** (_of {{total_phases}}_) was **blocked** because it has shell commands which were not approved for execution!"

@@ -1,0 +1,11 @@
+Command: git grep -n -E '^(<<<<<<< .+|\|\|\|\|\|\|\| .+|=======|>>>>>>> .+)$'
+Revision: 72a5843af470ba75c1ae6f6e1ccf16ba10a427eb
+Exit status: 0
+Captured: 2026-07-22T05:18:00Z
+
+CLAUDE.md:121:<<<<<<< HEAD
+CLAUDE.md:122:||||||| 4a7e2f8c6
+
+Classification: both hits are the known reviewed-seed defect described in the
+specification. They are not fixtures and must be removed during Phase 2's first
+merge conflict resolution. No additional tracked-text marker hit was found.

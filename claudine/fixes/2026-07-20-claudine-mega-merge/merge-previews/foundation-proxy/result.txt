@@ -1,0 +1,137 @@
+Command: git merge-tree --write-tree --name-only 43c23c6535cf6e52a35dbb06ea6f4ccce0c88e97 e348486c810969abe87a6b7209979034f5454b07
+Exit status: 1 (expected conflict-reporting evidence)
+Stdout:
+596f94111eb8bbf780eac4b914e79159142beb29
+.claude/skills/claudine/SKILL.md
+.claude/skills/claudine/architecture.md
+.claudine/memory/commits.md
+CLAUDE.md
+claudine/cli/src/commands/compose/prep.rs
+claudine/cli/src/commands/wrap/composition/mod.rs
+claudine/cli/src/commands/wrap/composition/pipeline.rs
+claudine/cli/src/commands/wrap/composition/runner.rs
+claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+claudine/cli/src/commands/wrap/harness_orch/loop_control/proxy.rs
+claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/proxy.rs
+claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+claudine/cli/src/commands/wrap/harness_orch/types.rs
+claudine/cli/src/commands/wrap/overlay.rs
+claudine/cli/src/commands/wrap/sequence/iterate.rs
+claudine/cli/src/commands/wrap/sequence/mod.rs
+claudine/cli/src/commands/wrap/sequence/phase1c.rs
+claudine/cli/src/commands/wrap/wrapper_stages.rs
+claudine/docs/providers/dispatch-inventory.json
+claudine/docs/topics/composition.md
+claudine/gen/tests/drift.rs
+claudine/lib/src/composition/error/mod.rs
+claudine/lib/src/composition/error/render/mod.rs
+claudine/lib/src/composition/error/tests.rs
+claudine/lib/src/composition/lifecycle/context.rs
+claudine/lib/src/composition/lifecycle/executor.rs
+claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+claudine/lib/src/composition/looping/engine.rs
+claudine/lib/src/composition/mod.rs
+claudine/lib/src/composition/preflight.rs
+claudine/lib/src/composition/prepare.rs
+claudine/lib/src/composition/types.rs
+darkmatter/lib/src/markdown/compose/context/options.rs
+
+Auto-merging .claude/skills/claudine/SKILL.md
+CONFLICT (content): Merge conflict in .claude/skills/claudine/SKILL.md
+Auto-merging .claude/skills/claudine/architecture.md
+CONFLICT (content): Merge conflict in .claude/skills/claudine/architecture.md
+Auto-merging .claudine/memory/commits.md
+CONFLICT (content): Merge conflict in .claudine/memory/commits.md
+Auto-merging .config/nextest.toml
+Auto-merging CLAUDE.md
+CONFLICT (content): Merge conflict in CLAUDE.md
+Auto-merging claudine/cli/Cargo.toml
+Auto-merging claudine/cli/src/commands/compose/mod.rs
+Auto-merging claudine/cli/src/commands/compose/prep.rs
+CONFLICT (content): Merge conflict in claudine/cli/src/commands/compose/prep.rs
+Auto-merging claudine/cli/src/commands/wrap/composition/mod.rs
+CONFLICT (content): Merge conflict in claudine/cli/src/commands/wrap/composition/mod.rs
+Auto-merging claudine/cli/src/commands/wrap/composition/pipeline.rs
+CONFLICT (content): Merge conflict in claudine/cli/src/commands/wrap/composition/pipeline.rs
+Auto-merging claudine/cli/src/commands/wrap/composition/runner.rs
+CONFLICT (content): Merge conflict in claudine/cli/src/commands/wrap/composition/runner.rs
+Auto-merging claudine/cli/src/commands/wrap/composition/target.rs
+Auto-merging claudine/cli/src/commands/wrap/composition/tests.rs
+Auto-merging claudine/cli/src/commands/wrap/env/mod.rs
+Auto-merging claudine/cli/src/commands/wrap/harness_orch/attempt.rs
+Auto-merging claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+CONFLICT (content): Merge conflict in claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+Auto-merging claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+CONFLICT (content): Merge conflict in claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+Auto-merging claudine/cli/src/commands/wrap/harness_orch/loop_control/proxy.rs
+CONFLICT (content): Merge conflict in claudine/cli/src/commands/wrap/harness_orch/loop_control/proxy.rs
+Auto-merging claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+CONFLICT (content): Merge conflict in claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+Auto-merging claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/proxy.rs
+CONFLICT (content): Merge conflict in claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/proxy.rs
+Auto-merging claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+CONFLICT (content): Merge conflict in claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+Auto-merging claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_evaluation.rs
+Auto-merging claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+CONFLICT (content): Merge conflict in claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+Auto-merging claudine/cli/src/commands/wrap/harness_orch/types.rs
+CONFLICT (content): Merge conflict in claudine/cli/src/commands/wrap/harness_orch/types.rs
+Auto-merging claudine/cli/src/commands/wrap/mod.rs
+Auto-merging claudine/cli/src/commands/wrap/overlay.rs
+CONFLICT (content): Merge conflict in claudine/cli/src/commands/wrap/overlay.rs
+Auto-merging claudine/cli/src/commands/wrap/sequence/iterate.rs
+CONFLICT (content): Merge conflict in claudine/cli/src/commands/wrap/sequence/iterate.rs
+Auto-merging claudine/cli/src/commands/wrap/sequence/mod.rs
+CONFLICT (content): Merge conflict in claudine/cli/src/commands/wrap/sequence/mod.rs
+Auto-merging claudine/cli/src/commands/wrap/sequence/phase1c.rs
+CONFLICT (content): Merge conflict in claudine/cli/src/commands/wrap/sequence/phase1c.rs
+Auto-merging claudine/cli/src/commands/wrap/wrapper_stages.rs
+CONFLICT (content): Merge conflict in claudine/cli/src/commands/wrap/wrapper_stages.rs
+Auto-merging claudine/cli/tests/level2_lifecycle_control.rs
+Auto-merging claudine/cli/tests/level2_lifecycle_dispatch.rs
+Auto-merging claudine/docs/providers/dispatch-inventory.json
+CONFLICT (content): Merge conflict in claudine/docs/providers/dispatch-inventory.json
+Auto-merging claudine/docs/topics/composition.md
+CONFLICT (content): Merge conflict in claudine/docs/topics/composition.md
+Auto-merging claudine/docs/topics/lifecycle.md
+Auto-merging claudine/gen/tests/drift.rs
+CONFLICT (content): Merge conflict in claudine/gen/tests/drift.rs
+Auto-merging claudine/lib/src/composition/error/mod.rs
+CONFLICT (content): Merge conflict in claudine/lib/src/composition/error/mod.rs
+Auto-merging claudine/lib/src/composition/error/render/lifecycle.rs
+Auto-merging claudine/lib/src/composition/error/render/mod.rs
+CONFLICT (content): Merge conflict in claudine/lib/src/composition/error/render/mod.rs
+Auto-merging claudine/lib/src/composition/error/tests.rs
+CONFLICT (content): Merge conflict in claudine/lib/src/composition/error/tests.rs
+Auto-merging claudine/lib/src/composition/interpolation_conformance.rs
+Auto-merging claudine/lib/src/composition/lifecycle/action_shape.rs
+Auto-merging claudine/lib/src/composition/lifecycle/context.rs
+CONFLICT (content): Merge conflict in claudine/lib/src/composition/lifecycle/context.rs
+Auto-merging claudine/lib/src/composition/lifecycle/control.rs
+Auto-merging claudine/lib/src/composition/lifecycle/control/tests.rs
+Auto-merging claudine/lib/src/composition/lifecycle/executor.rs
+CONFLICT (content): Merge conflict in claudine/lib/src/composition/lifecycle/executor.rs
+Auto-merging claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+CONFLICT (content): Merge conflict in claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+Auto-merging claudine/lib/src/composition/lifecycle/mod.rs
+Auto-merging claudine/lib/src/composition/lifecycle/parse.rs
+Auto-merging claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs
+Auto-merging claudine/lib/src/composition/looping/engine.rs
+CONFLICT (content): Merge conflict in claudine/lib/src/composition/looping/engine.rs
+Auto-merging claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs
+Auto-merging claudine/lib/src/composition/mod.rs
+CONFLICT (content): Merge conflict in claudine/lib/src/composition/mod.rs
+Auto-merging claudine/lib/src/composition/preflight.rs
+CONFLICT (content): Merge conflict in claudine/lib/src/composition/preflight.rs
+Auto-merging claudine/lib/src/composition/preflight/tests.rs
+Auto-merging claudine/lib/src/composition/prepare.rs
+CONFLICT (content): Merge conflict in claudine/lib/src/composition/prepare.rs
+Auto-merging claudine/lib/src/composition/types.rs
+CONFLICT (content): Merge conflict in claudine/lib/src/composition/types.rs
+Auto-merging darkmatter/lib/src/markdown/compose/context/options.rs
+CONFLICT (content): Merge conflict in darkmatter/lib/src/markdown/compose/context/options.rs
+Auto-merging darkmatter/lib/src/markdown/compose/schema_validation.rs
+Stderr:
