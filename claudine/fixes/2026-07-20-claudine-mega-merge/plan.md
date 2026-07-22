@@ -1,7 +1,7 @@
 ---
 total_phases: 6
 created: 2026-07-21
-phase: 3
+phase: 4
 agent: "opencode/zai-coding-plan/glm-5.2"
 yolo: "false"
 reviewed: true
@@ -126,11 +126,36 @@ docs_created_during_phase_3:
 skills_files_updated_during_phase_3:
   - .claude/skills/claudine/SKILL.md
   - .claude/skills/claudine/architecture.md
+source_files_during_phase_4:
+  - claudine/cli/src/commands/compose/mod.rs
+  - claudine/cli/src/commands/wrap/profile/mod.rs
+  - claudine/cli/src/commands/wrap/profile/tests/positional.rs
+  - claudine/lib/src/provider/methods/tests.rs
+docs_updated_during_phase_4:
+  - CLAUDE.md
+  - claudine/docs/topics/building-an-agent-wrapper.md
+  - claudine/docs/topics/cli-pre-parsing.md
+  - claudine/docs/topics/completions/shell-completions.md
+  - claudine/docs/topics/composition.md
+  - claudine/docs/topics/execution-flow.md
+  - claudine/docs/topics/flow-control/looping.md
+  - claudine/docs/topics/system-prompt.md
+  - claudine/docs/topics/unified-events.md
+  - claudine/features/2026-07-13-proxy-with/notes/acceptance-map.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/plan.md
+docs_created_during_phase_4:
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/reconciliation-detect.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/phase4-gates.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/phase4-test-map.md
+skills_files_updated_during_phase_4:
+  - .claude/skills/claudine/SKILL.md
+  - .claude/skills/claudine/architecture.md
+  - .claude/skills/claudine/cli-reference.md
+  - .claude/skills/claudine/linking-strategy.md
 packages:
   - claudine
   - claudine-cli
   - claudine-gen
-  - darkmatter
 ---
 
 # Claudine Mega-Merge Execution Plan
@@ -338,25 +363,25 @@ Spec mapping: spec Phase 3. Goal: derived artifacts describe the merged tree, no
 
 ### Tasks
 
-- [ ] Regenerate `claudine/docs/providers/dispatch-inventory.json` with the command embedded by its owning test: `CLAUDINE_UPDATE_INVENTORY=1 cargo nextest run -p claudine-cli --test dispatch_inventory`. Review the resulting inventory before accepting it. *(parallelizable with: the generator check below)*
-- [ ] Reconcile the conflict in `claudine/gen/tests/drift.rs` manually as test source; it is not generated output. Then run `cargo run -p claudine-gen -- check`. If merged inputs intentionally changed generated artifacts, run `cargo run -p claudine-gen -- generate`, review every proposed file, and rerun `check`.
-- [ ] Run source-scan, generated-artifact, dispatch, and test-placement guards. Any guard that only passes by weakening scope halts work (spec Stop Conditions).
-- [ ] Reconcile `.claude/skills/claudine/SKILL.md` against the merged responsibility map. *(parallelizable with: other doc reconciliations below)*
-- [ ] Reconcile `.claude/skills/claudine/architecture.md` against the merged responsibility map. *(parallelizable)*
-- [ ] Reconcile `claudine/docs/topics/composition.md` with the merged composition/preparation contract. *(parallelizable)*
-- [ ] Reconcile lifecycle documentation with the single effective `DiagnosticSnapshot` selector and coordinator-owned transition state machine. *(parallelizable)*
-- [ ] Reconcile file-reference documentation with the `FileReference` grammar, repository-first bare precedence, strict explicit-relative, and ordered probe detail (I2). *(parallelizable)*
-- [ ] Reconcile schema documentation with the deferred schema-verdict ordering (I9). *(parallelizable)*
-- [ ] Reconcile Sequence Plus documentation with the merged task/group containment model (I6). *(parallelizable)*
-- [ ] Reconcile system-prompt topic and delivery documentation (trunk `.gitignore` fix preserved). *(parallelizable)*
-- [ ] Reconcile completion documentation with the merged completion behavior. *(parallelizable)*
-- [ ] Reconcile error-architecture documentation with the typed diagnostic registry and exactly-once terminal behavior (I1, I10). *(parallelizable)*
-- [ ] Preserve trunk lifecycle-schema scaffolding and local-runner schemas/research (I11).
-- [ ] Correct the stale proxy-with acceptance-map description of the Linux L2 workflow (called out by proxy review 18).
-- [ ] Comment pass: verify inline `//` and `///` docs describe merged behavior. Treat code as authoritative unless an acceptance invariant proves the code wrong; otherwise fix or delete drift (AGENTS.md Comment Quality).
-- [ ] Confirm no branch-local line-number inventories, hashes, or status claims were copied into the merged tree unchanged (R9).
-- [ ] Run `git diff --check`, the anchored worktree/index marker scans, and GitNexus `detect_changes({scope: "compare", base_ref: "main"})`; review the complete staged diff and save the change report to `impact/reconciliation-detect.md`.
-- [ ] Create a scoped reconciliation commit for generated artifacts, guards, skills, and documentation. Capture its SHA as the acceptance candidate; Phase 5 records it in `sha-ledger.md` alongside the evidence results.
+- [x] Regenerate `claudine/docs/providers/dispatch-inventory.json` with the command embedded by its owning test: `CLAUDINE_UPDATE_INVENTORY=1 cargo nextest run -p claudine-cli --test dispatch_inventory`. Review the resulting inventory before accepting it. *(parallelizable with: the generator check below)*
+- [x] Reconcile the conflict in `claudine/gen/tests/drift.rs` manually as test source; it is not generated output. Then run `cargo run -p claudine-gen -- check`. If merged inputs intentionally changed generated artifacts, run `cargo run -p claudine-gen -- generate`, review every proposed file, and rerun `check`.
+- [x] Run source-scan, generated-artifact, dispatch, and test-placement guards. Any guard that only passes by weakening scope halts work (spec Stop Conditions).
+- [x] Reconcile `.claude/skills/claudine/SKILL.md` against the merged responsibility map. *(parallelizable with: other doc reconciliations below)*
+- [x] Reconcile `.claude/skills/claudine/architecture.md` against the merged responsibility map. *(parallelizable)*
+- [x] Reconcile `claudine/docs/topics/composition.md` with the merged composition/preparation contract. *(parallelizable)*
+- [x] Reconcile lifecycle documentation with the single effective `DiagnosticSnapshot` selector and coordinator-owned transition state machine. *(parallelizable)*
+- [x] Reconcile file-reference documentation with the `FileReference` grammar, repository-first bare precedence, strict explicit-relative, and ordered probe detail (I2). *(parallelizable)*
+- [x] Reconcile schema documentation with the deferred schema-verdict ordering (I9). *(parallelizable)*
+- [x] Reconcile Sequence Plus documentation with the merged task/group containment model (I6). *(parallelizable)*
+- [x] Reconcile system-prompt topic and delivery documentation (trunk `.gitignore` fix preserved). *(parallelizable)*
+- [x] Reconcile completion documentation with the merged completion behavior. *(parallelizable)*
+- [x] Reconcile error-architecture documentation with the typed diagnostic registry and exactly-once terminal behavior (I1, I10). *(parallelizable)*
+- [x] Preserve trunk lifecycle-schema scaffolding and local-runner schemas/research (I11).
+- [x] Correct the stale proxy-with acceptance-map description of the Linux L2 workflow (called out by proxy review 18).
+- [x] Comment pass: verify inline `//` and `///` docs describe merged behavior. Treat code as authoritative unless an acceptance invariant proves the code wrong; otherwise fix or delete drift (AGENTS.md Comment Quality).
+- [x] Confirm no branch-local line-number inventories, hashes, or status claims were copied into the merged tree unchanged (R9).
+- [x] Run `git diff --check`, the anchored worktree/index marker scans, and GitNexus `detect_changes({scope: "compare", base_ref: "main"})`; review the complete staged diff and save the change report to `impact/reconciliation-detect.md`. *(The index was intentionally empty because this execution request prohibits staging; the complete worktree diff and untracked evidence were reviewed instead.)*
+- [x] Commit handoff recorded: the scoped reconciliation commit and acceptance-candidate SHA are intentionally deferred to the history-owning follow-up because this execution request prohibits staging or committing. No commit or SHA was created in this phase session.
 
 ### Validation Checkpoint (Phase 4 exit)
 
@@ -364,7 +389,7 @@ Spec mapping: spec Phase 3. Goal: derived artifacts describe the merged tree, no
 - All source-scan / drift / dispatch / test-placement guards pass without scope weakening.
 - Every reconciled doc cites final merged behavior (responsibility map, invariants, grammar, stage matrix).
 - No stale branch-local inventories remain.
-- The reconciliation commit is clean and identified as the immutable acceptance-candidate SHA.
+- The reconciliation worktree is cleanly reviewed; the immutable acceptance-candidate SHA remains the explicitly deferred history-owner handoff above.
 
 ---
 

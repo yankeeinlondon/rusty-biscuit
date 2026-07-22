@@ -77,7 +77,8 @@ Dynamic completion fires at markdown-expecting argument positions on all
 three composition commands and on the `--append-system-prompt` /
 `--replace-system-prompt` flag values — both on compose/inline-compose/
 sequence themselves and on every wrapped provider subcommand (`claude`,
-`codex`, `gemini`, `goose`, `kimi`, `opencode`, `qwen`). All three
+`codex`, `gemini`, `goose`, `kimi`, `opencode`, `qwen`, `kilo`, `pi`,
+`antigravity`). All three
 composition commands share one markdown-only contract; there is no
 per-command frontmatter validation at completion time.
 
@@ -332,7 +333,7 @@ When stdout is a terminal and no explicit `--<provider>` flag is given:
 
 When stdout is not a terminal (e.g., CI, scripts), resolution follows a strict chain with no interactive fallback:
 
-1. **Explicit flag** (`--provider <slug>`, or the shorthand booleans `--claude`, `--codex`, `--gemini`, `--opencode`, `--qwen`, `--goose`, `--kimi`) — highest priority
+1. **Explicit flag** (`--provider <slug>`, or the catalog-derived shorthand booleans `--claude`, `--codex`, `--gemini`, `--opencode`, `--qwen`, `--goose`, `--kimi`, `--kilo`, `--pi`, `--antigravity`) — highest priority
 2. **Singular frontmatter `agent`** — a single provider name in the effective (composed) frontmatter, fuzzy-matched against known providers
 3. **List-valued frontmatter `agent`** — an ordered list of provider names; the first installed provider in the list is chosen
 4. **Config favorite** — `favorite_agent` from `~/.claudine/config.json`

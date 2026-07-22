@@ -594,13 +594,14 @@ policy reversal outside this feature.
 
 **Resolved since: the intent of option 1 has landed, by a different mechanism.**
 `claudine-tests.yml` now carries a purpose-built `test-l2` job on
-`ubuntu-latest`. That satisfies what option 1 was after — a real Linux CI leg for
-the matrix — while avoiding the two hazards that made `_area-ci.yml l2: true`
-unsafe to switch on: it does not set `BISCUIT_TEST_LEVEL_REQUIRED=2`, and it runs
-in the workflow that already provisions the AI-CLI provider stubs. Options 1 and
-2 are therefore both satisfied; option 3 remains a policy reversal outside this
-feature. **This section's premise — that the matrix has no CI home — no longer
-holds; it is retained for the reasoning, not the conclusion.**
+`ubuntu-latest`. The job installs tmux explicitly and sets
+`BISCUIT_TEST_LEVEL_REQUIRED=2`, so a missing or unusable harness fails closed
+instead of turning the matrix into a skip. It does not reuse the L1 job's
+PATH-level AI-CLI stubs; the L2 fixtures provide their own task-scoped fake
+providers. Options 1 and 2 are therefore both satisfied; option 3 remains a
+policy reversal outside this feature. **This section's premise — that the
+matrix has no CI home — no longer holds; it is retained for the reasoning, not
+the conclusion.**
 
 ## Open items carried out of review-7 — both closed by review-8
 
@@ -824,7 +825,7 @@ loose text, not table rows) and the Linux row was stale. Both corrected here.
 
 | Platform | Status |
 |---|---|
-| CI (Linux) | **wired** — `.github/workflows/claudine-tests.yml` now has a dedicated `test-l2` job on `ubuntu-latest` running `just test-l2`. This supersedes the earlier "not wired / owner-enablement path" record: the matrix *does* have a real CI leg. It is a purpose-built job rather than `_area-ci.yml l2: true`, which sidesteps that reusable job's `BISCUIT_TEST_LEVEL_REQUIRED=2` hard-fail and its lack of AI-CLI provider stubs |
+| CI (Linux) | **wired** — `.github/workflows/claudine-tests.yml` has a dedicated `test-l2` job on `ubuntu-latest` running `just test-l2`. The job explicitly installs tmux and sets `BISCUIT_TEST_LEVEL_REQUIRED=2`, so harness absence is a hard failure. The L2 fixtures create their own fake providers and do not depend on the L1 job's PATH-level provider stubs. |
 | CI (Windows) | not applicable — L2 skips by ratified policy; Windows proxy coverage is L1 |
 | CI (macOS) | not applicable — compile-check only by ratified policy |
 

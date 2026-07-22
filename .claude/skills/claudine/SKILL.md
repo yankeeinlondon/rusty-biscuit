@@ -2,7 +2,7 @@
 name: claudine
 description: Use when working in the claudine/ package area or with the Claudine library/CLI — normalizing agentic-CLI lifecycle events and hooks, wrapping providers (Claude Code, Codex, Gemini, Goose, Kimi, OpenCode, Qwen, Kilo, Pi, Antigravity), composing Markdown prompts (compose/inline-compose/sequence), managing the MCP catalog, linking skills/commands/agents across providers, or researching agentic CLI platform behavior.
 last_updated: 2026-07-22
-hash: 65dc854540ca152c-6dc3e5320f666a03
+hash: 65dc854540ca152c-105a3f08ffc6e25e
 ---
 
 ## Overview
@@ -47,7 +47,7 @@ Nineteen modules plus the shared error type and the flat `provider_id` leaf (the
 | `render` | Functional render components — `FinalMessage`, `AgentPrompt`/`SystemPrompt` (under `render/prompt/`, absorbed the former `prompt_reporting` module), `EventRenderer` + the exhaustive `DISPATCH` table (live-sink stderr status dispatch), the dual-target `MetricsReport` (`TerminalRenderable` + `BrowserRenderable`), and the `StreamRenderable` span contract (`open`/`append`/`flush_idle`/`close`) with its `AssistantStream` streaming-markdown component, and `TaskStream`/`TaskStreamFrame` + the two-channel `TaskStreamSink` seam and its `TaskLiveOutput` binding (attributed color-bar framing for group tasks — headers/footers on the status channel, task body data on the data channel; `TaskBar::Invisible` gives serial work the same geometry); all consume data + policy (`DisplayPolicy`), never `match provider` |
 | `reporting` | JSONL-to-SQLite metrics index |
 | `runaway` | Pure content-guard detector (exit-expressions, group-cycle repetition, volume cap) + per-layer config; trips map to `ProcessTermination::Aborted` |
-| `stream` | Structured stream parsing for 8 providers (typed models in `stream::protocol`; Kilo reuses OpenCode's parser) |
+| `stream` | Structured stream parsing through 8 parser implementations for 9 provider identities (typed models in `stream::protocol`; Kilo reuses OpenCode's parser; Goose has no native stream parser) |
 | `system_prompt` | Launch-CWD detection (`LaunchContext`), `system-prompt.md` discovery, `ResolvedSystemPrompt` resolution |
 | `provider_id` *(leaf)* | `Provider` enum, `provider_info()`, `PROVIDERS_DISPLAY_ORDER`, `OutputFormatSelector` (split from `provider/mod.rs` to break the `provider` ⇄ `stream` import cycle) |
 
@@ -80,7 +80,7 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 
 | Command | Description |
 |---------|-------------|
-| `claudine claude\|codex\|gemini\|goose\|kimi\|opencode\|qwen` | Wrap a provider CLI with preflight checks, env sanitization, system prompt resolution, optional `--edit` prompt drafting, MCP injection, and structured streaming |
+| `claudine claude\|codex\|gemini\|goose\|kimi\|opencode\|qwen\|kilo\|pi\|antigravity` | Wrap a provider CLI with preflight checks, env sanitization, system prompt resolution, optional `--edit` prompt drafting, MCP injection, and structured streaming where the provider exposes it |
 
 **Composition**
 

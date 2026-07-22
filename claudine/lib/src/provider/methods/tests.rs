@@ -47,7 +47,7 @@ fn can_use_as_hashmap_key() {
 
 #[test]
 fn supports_skills() {
-    // All seven providers report first-class skill support per the
+    // Every compiled provider reports first-class skill support per the
     // skills research topic (generator v1 graduation; the old
     // Goose/Kimi `false` constants were ruled stale - Open question 3).
     for provider in crate::provider::PROVIDERS_DISPLAY_ORDER {

@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-6bf9593d6502cd51
-last_updated: 2026-07-14
+hash: ef46db3751d8e999-8e60d79447372a8e
+last_updated: 2026-07-22
 ---
 # Claudine CLI Reference
 
@@ -113,7 +113,7 @@ Shows which events each provider supports as a glyph matrix. One glyph vocabular
 - 🅐 = acp (captured via the Agent Client Protocol)
 - – = not supported (no capture path)
 
-When the terminal is too narrow for all seven provider columns, the matrix degrades into stacked tables of fewer providers (it never refuses to render). `--support` and `--mapping` both close with the "Not mappable — configure natively" list of provider-native events with no canonical mapping.
+When the terminal is too narrow for all provider columns, the matrix degrades into stacked tables of fewer providers (it never refuses to render). `--support` and `--mapping` both close with the "Not mappable — configure natively" list of provider-native events with no canonical mapping.
 
 ---
 

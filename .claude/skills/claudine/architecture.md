@@ -28,7 +28,7 @@ claudine/lib/src/
 ├── render/       → Functional render components (FinalMessage, AgentPrompt/SystemPrompt, EventRenderer + DISPATCH table, MetricsReport, StreamRenderable/AssistantStream); consume data + policy (DisplayPolicy), never `match provider`
 ├── reporting/    → JSONL-to-SQLite reporting index, sync, and typed queries
 ├── services/     → Cross-provider runtime policy services (ProtectService)
-├── stream/       → Structured stream parsing for 8 providers (Kilo reuses OpenCode's) + summary/reporting
+├── stream/       → Eight structured-stream parser implementations serving nine provider identities (Kilo reuses OpenCode's; Goose has no native parser) + summary/reporting
 │   ├── logs/opencode/bridge/   → Stderr bridge: ingest dispatch, session tracking, stall guard, signals, formatting
 │   ├── logs/opencode/classify/ → Error classification: asset, LLM, session, text utilities
 │   └── logs/opencode/state.rs  → Shared stderr state and summary merge
@@ -84,7 +84,7 @@ pub enum AgenticEvent {
 
 ### Provider Enum
 
-7-variant enum (Claude, Codex, Gemini, Goose, KimiCode, OpenCode, QwenCode) with slug, docs URL, event support queries, and native event name mappings:
+10-variant enum (Claude, Codex, Gemini, Goose, KimiCode, OpenCode, QwenCode, Kilo, Pi, Antigravity) with slug, docs URL, event support queries, and native event name mappings:
 
 - `EventSupportLevel` — `Hook` | `NonHook` | `NotSupported` per provider-event pair
 
@@ -134,7 +134,7 @@ Composition commands resolve whether a session runs interactive via `SharedCompo
 
 ## Provider Adapters
 
-Each provider has its own adapter implementing the `ProviderAdapter` trait. The `adapter_for(provider)` factory returns the appropriate adapter. Each adapter normalizes the provider's native JSON payload into `(AgenticEvent, EventMeta)` and can format `HookResponse` back into provider-native response payloads.
+Each provider exposes adapter behavior through its catalog entry. The `adapter_for(provider)` factory returns the appropriate `ProviderAdapter`; Kilo deliberately shares OpenCode's wire-compatible implementation. Each adapter normalizes the provider's native JSON payload into `(AgenticEvent, EventMeta)` and can format `HookResponse` back into provider-native response payloads.
 
 | Adapter | Parses | Status |
 |---------|--------|--------|
@@ -145,6 +145,9 @@ Each provider has its own adapter implementing the `ProviderAdapter` trait. The 
 | `goose` | Stream-json + env var (type/event field) | Implemented (non-blocking) |
 | `kimicode` | Wire mode JSON-RPC (event_name/method field) | Implemented (blocking: tool, permission) |
 | `qwen` | Stream-json output (event_name/type field) | Implemented (blocking: permission) |
+| `kilo` | OpenCode-shaped events through the shared OpenCode adapter | Implemented |
+| `pi` | Pi extension hook payloads | Implemented |
+| `antigravity` | Camel-case agy hook payloads with event inference from fields | Implemented |
 
 ### Claude Code
 
@@ -384,7 +387,7 @@ The prose-bearing sections (System Prompt, **Agent Prompt**, Thinking Prose) ren
 
 So when rendered prompt output shows wrong wrapping, spurious newlines, lines bleeding past the width, or mis-styled inline spans, the defect is in **darkmatter / biscuit-terminal**, not claudine. Reproduce at that layer (`md.as_terminal` with a fixed `max_width`) rather than through the claudine CLI. Known gotcha: a CommonMark *tight* list item carries its content as a flat run of inline siblings (`[Text, InlineCode, Text]`) with no wrapping `Paragraph`, and the terminal renderer must coalesce that run before wrapping — the wrap is per-list-item, not per-inline-node.
 
-### Provider Parsers (6)
+### Provider Parsers (8 implementations, 9 provider identities)
 
 | Parser | Format | Summary source |
 |--------|--------|----------------|
@@ -392,8 +395,13 @@ So when rendered prompt output shows wrong wrapping, spurious newlines, lines bl
 | `codex` | JSONL (`exec --json`) | `turn.completed` usage + `--output-last-message` file for text |
 | `gemini` | stream-json | `result.stats` with token counts |
 | `kimi` | stream-json | Latest `StatusUpdate` snapshot (no aggregate result) |
-| `opencode` | NDJSON (`json`) | Accumulated per-step usage/cost |
+| `opencode` / `kilo` | NDJSON (`json`) | Accumulated per-step usage/cost; one implementation stamps the selected provider identity and vocabulary |
 | `qwen` | stream-json | Final result/usage event |
+| `pi` | NDJSON (`--mode json`) | `message_end` usage/cost accumulated through the terminal `agent_end` event |
+| `antigravity` | One buffered JSON envelope (`--output-format json`) | `usage`, duration, turn count, response, and conversation id from the terminal envelope |
+
+Goose exposes no native structured stream protocol, so it is the only compiled
+provider identity without a dedicated parser path.
 
 ### Infrastructure
 
@@ -445,7 +453,8 @@ owns orchestration. The split follows the two execution phases:
 - `sequence/{model,normalize,reserved,source,grammar,data,expr}.rs` — typed step
   state, id/`sequence_id` generation, the reserved-key catalog, and the
   `<file-ref> [-> offset] [::op(args)]` source grammar. Data files load through
-  `biscuit_file` and resolve through `FileReference::resolve_from(authoring_dir)`;
+  `biscuit_file` and resolve through `FileReference::resolve_in_context` using
+  the request-scoped `FileResolutionContext` derived for the authoring source;
   string sources classify through `biscuit_file::ListFormat`.
 - `sequence/preflight/` — the recursive task-graph loader. Walks inline tasks,
   `kind: task` / `kind: group` / `kind: group-catalog` files, and every `prompt:`
@@ -525,9 +534,9 @@ travel through the caller layer so this resolution distinction is preserved.
 
 Two `cli/tests/composition_seams.rs` guards hold these lines mechanically: the
 `compose_with` allowlist (four sanctioned composer sites) and the ambient-capture
-ban. The latter carries one baselined **debt** entry —
-`sequence::phase1c::build_template_preflight_options` — which is not a
-sanctioned owner.
+ban. The ambient `ComposeContext::capture()` baseline is empty; sequence
+template preflight now captures one anchored context and reuses it through
+validation and execution.
 
 **Retired carriers.** `RematerializeInputs` → `CallerInputLayers` (the four
 invocation-scoped caller layers, an input of the canonical service — a
@@ -699,7 +708,7 @@ Note: OpenCode also reads `.claude/skills/` directly
 ## Key Lessons
 
 - **Hook handlers must respond fast**: `claudine handle` enforces a hard **5-second execution deadline** (overridable via `CLAUDINE_HANDLE_DEADLINE_SECONDS`) to prevent blocking the parent agent session. When exceeded, the handler aborts and exits 124. Bash and messenger actions also have tighter 3s timeouts when running inside a hook handler. Phase-level tracing spans ensure any hang is diagnostic.
-- **All 7 adapters are implemented**: each provider adapter has full event mapping, metadata extraction, and tests. Claude, Gemini, OpenCode, and Codex use config-based hooks; Goose, KimiCode, and Qwen parse stream-json or wire-mode payloads directly. KimiCode and Qwen support blocking responses; Goose is observation-only.
+- **All 10 provider identities have adapter behavior**: nine adapter implementations are registered and tested, with Kilo deliberately reusing OpenCode's wire-compatible adapter. Hook delivery mechanisms and blocking capabilities are catalog data; the event-support matrix above is the authoritative summary.
 - **Sound effects are fire-and-forget**: TTS and sound playback spawn tokio tasks to avoid blocking the event pipeline. Log and report actions run inline because they're fast.
 - **Atomic writes prevent config corruption**: all config file mutations go through `config::atomic` to handle concurrent hook firings safely.
 - **Runtime config precompiles regexes**: matcher patterns and Call action mapper regexes are compiled once at config load time, failing fast on invalid patterns with contextual error messages.

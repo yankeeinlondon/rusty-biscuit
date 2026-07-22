@@ -554,8 +554,8 @@ pub(crate) trait WrapperProfile: Send + Sync {
     /// `false` pending a mode-aware gate. Ratified end-state (Ken,
     /// 2026-07-04): whenever the provider natively supports resume,
     /// Claudine must too — a `false` here is only ever a
-    /// not-yet-implemented gap, never a durable posture. All 7 current
-    /// providers are `FirstClass` and implement
+    /// not-yet-implemented gap, never a durable posture. Every compiled
+    /// provider is currently `FirstClass` and implements
     /// [`build_resume_args`](Self::build_resume_args).
     fn supports_resume(&self) -> bool {
         matches!(

@@ -58,7 +58,7 @@ rules in a fixed order, and returns the rewritten vector:
 
 | Rule | Purpose | Gated on |
 |---|---|---|
-| **Rule 1** | `--claude` / `--codex` / `--gemini` / `--goose` / `--kimi` / `--opencode` / `--qwen` → `--provider <slug>` | `compose`, `inline-compose`, `sequence` |
+| **Rule 1** | Catalog-derived `--<provider>` booleans → `--provider <slug>` | `compose`, `inline-compose`, `sequence` |
 | **Rule 2** | Fuzzy canonicalization of `--provider <value>` and `--provider=<value>` via `Provider::fuzzy_match_cli_name` | Any subcommand (flag-driven) |
 | **Rule 4** | Hoist a trailing `--help` / `-h` to argv position 1 so the root custom help handler fires | `compose`, `inline-compose`, `sequence` |
 
@@ -89,11 +89,11 @@ The normalizer never mutates argv when any of the following hold:
    `OsString` values are copied verbatim.
 4. **Argv with fewer than two elements** — nothing downstream needs
    parsing.
-5. **Non-composition subcommands** — Rules 1, 3, and 4 are gated to the
+5. **Non-composition subcommands** — Rules 1 and 4 are gated to the
    composition trio. Wrapper subcommands (`claude`, `codex`, `gemini`,
-   `goose`, `kimi`, `opencode`, `qwen`) and every other subcommand pass
-   through unchanged. Rule 2 remains flag-driven so `--provider`
-   resolution works regardless of subcommand.
+   `goose`, `kimi`, `opencode`, `qwen`, `kilo`, `pi`, `antigravity`) and every
+   other subcommand pass through unchanged. Rule 2 remains flag-driven so
+   `--provider` resolution works regardless of subcommand.
 
 ## Clap parsing stage
 
@@ -142,10 +142,10 @@ Several properties of the clap surface shape the pre-parser's rules:
   removes the agent tail before clap sees it, so this positional only ever
   receives the file and Claudine setters; Rule 4 handles the trailing
   `--help` case separately.
-- The seven provider booleans on `SharedComposeArgs` are retained only
-  as clap help entries and shell-completion hints. Rule 1 rewrites them
-  before clap sees them, so `explicit_provider()` reads a single field
-  (`self.provider`) instead of re-resolving seven booleans.
+- The original seven provider booleans on `SharedComposeArgs` are retained only
+  as clap help entries. Rule 1 accepts every catalog-derived provider boolean,
+  including providers without a dedicated struct field, and rewrites it before
+  clap sees it. `explicit_provider()` therefore reads only `self.provider`.
 - `Provider::fuzzy_match_cli_name` is the single source of truth for
   fuzzy provider name resolution. Rule 2 delegates to it so the same
   fuzzy behavior applied to `--provider <value>` remains intact after
@@ -175,21 +175,19 @@ it as the help flag. The tip is actively misleading — the user did not
 want `--help` as a value.
 
 This is structurally unavoidable in clap's derive model without giving
-up either the greedy positional or help recognition. The pre-parser
-converts the argv into a shape clap already handles correctly
-(`--help` hoisted to a root-level flag position, `--` inserted before
-the trailing setters).
+up either the greedy positional or help recognition. The pre-parser and
+ownership partition convert argv into a shape clap already handles correctly:
+`--help` is hoisted to a root-level flag position, and the provider tail is
+removed before clap receives composition setters.
 
-### 2. Seven provider booleans plus `--provider`
+### 2. Catalog-derived provider booleans plus `--provider`
 
-The composition surface accepts provider selection eight ways: seven
-boolean flags (`--claude`, `--codex`, `--gemini`, `--goose`, `--kimi`,
-`--opencode`, `--qwen`) plus the canonical `--provider
-<value>`. Without normalization, downstream code has to re-resolve all
-eight every time it needs the selected provider. Rewriting booleans into
-`--provider <slug>` collapses those eight representations into one and
-removes the need for an `explicit_provider()` helper that inspects seven
-fields.
+The composition surface accepts one boolean flag for every compiled provider,
+plus the canonical `--provider <value>`. Without normalization, downstream
+code would have to re-resolve every representation whenever it needs the
+selected provider. Rewriting booleans into `--provider <slug>` collapses those
+representations into one and lets `explicit_provider()` read only the canonical
+field.
 
 ### 3. Fuzzy provider matching existed but was applied inconsistently
 

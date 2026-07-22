@@ -1,10 +1,10 @@
 # Linking Strategy
 
-Claudine's linking system synchronizes skills, commands, agents, and scripts across 7 agentic CLI providers. The goal is **write once, use everywhere**: author a resource in one canonical provider and have it appear in all others via symlinks or format-converted derived artifacts.
+Claudine's linking system synchronizes skills, commands, agents, and scripts across the compiled agentic CLI provider catalog. The goal is **write once, use everywhere**: author a resource in one canonical provider and have it appear in all compatible providers via symlinks or format-converted derived artifacts.
 
 ## Why Linking Exists
 
-Each agentic CLI reads resources from its own directory tree. Without linking, a user who writes a skill for Claude Code must manually copy or re-create it for Codex, Gemini, OpenCode, Goose, Kimi, and Qwen. Claudine automates this by:
+Each agentic CLI reads resources from its own directory tree. Without linking, a user who writes a skill for one provider must manually copy or re-create it for every compatible provider. Claudine automates this by:
 
 1. Electing a **canonical provider** per resource type and scope
 2. **Discovering** resources across all provider directories
@@ -171,7 +171,7 @@ AlreadyLinked { name, source_provider }     -- Already symlinked
 
 ### `ProviderPaths` / `ProviderSkillPaths` (paths.rs)
 
-Path resolution for all providers. `ProviderPaths` holds per-provider directories (user/repo for skills/commands) plus `also_reads_from` lists. `ProviderSkillPaths` wraps all 7 providers with resolved home and repo root paths.
+Path resolution for all providers. `ProviderPaths` holds per-provider directories (user/repo for skills/commands) plus `also_reads_from` lists. `ProviderSkillPaths` is derived from the complete compiled catalog with resolved home and repo root paths.
 
 ### `ProviderCapabilities` (capabilities.rs)
 
@@ -188,6 +188,9 @@ Complete capability metadata per provider: skill/command/agent/script support de
 | KimiCode | `~/.config/agents/skills` | `.kimi/skills` | `.claude/skills`, `.agents/skills`, `.codex/skills` |
 | OpenCode | `~/.config/opencode/skills` | `.opencode/skills` | `.claude/skills`, `.agents/skills` |
 | QwenCode | `~/.qwen/skills` | `.qwen/skills` | -- |
+| Kilo | `~/.config/kilo/skills` | `.kilo/skills` | `.claude/skills`, `.agents/skills` |
+| Pi | `~/.pi/agent/skills` | `.pi/skills` | `.agents/skills` |
+| Antigravity | `~/.gemini/config/skills` | `.agents/skills` | -- |
 
 ## Provider Command Paths
 
@@ -200,6 +203,9 @@ Complete capability metadata per provider: skill/command/agent/script support de
 | KimiCode | -- | -- | Built-in only |
 | OpenCode | `~/.config/opencode/commands` | `.opencode/commands` | Markdown |
 | QwenCode | `~/.qwen/commands` | `.qwen/commands` | Markdown |
+| Kilo | `~/.config/kilo/commands` | `.kilo/commands` | Markdown |
+| Pi | `~/.pi/agent/prompts` | `.pi/prompts` | Markdown |
+| Antigravity | -- | -- | Skill-derived only |
 
 ## Conflict Detection and Resolution
 

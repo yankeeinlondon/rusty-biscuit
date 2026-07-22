@@ -15,6 +15,9 @@ System prompt handling is available on all wrapped provider subcommands:
 - `claudine qwen`
 - `claudine opencode`
 - `claudine goose`
+- `claudine kilo`
+- `claudine pi`
+- `claudine antigravity`
 
 The same flags are also shared by all composition entry points because `compose`, `inline-compose`, and `sequence` all flow through the same wrapper-grade execution path:
 
@@ -148,6 +151,9 @@ Delivery is driven by the `SystemPromptSpec` declared in `ProviderInfo::system_p
 | Qwen Code | Yes | Yes | Append pushes `--append-system-prompt <content>`; replace pushes `--system-prompt <content>` |
 | OpenCode | Yes | Yes | Append sets `OPENCODE_CONFIG_CONTENT` with a temp instruction file; replace passes `--system <temp>` |
 | Goose | Yes | No | Append passes `--system <markdown>` directly |
+| Kilo | No | No | Both modes are currently unsupported |
+| Pi | Yes | Yes | Append pushes `--append-system-prompt <content>`; replace pushes `--system-prompt <content>` |
+| Antigravity | No | No | Both modes are currently unsupported |
 
 Unsupported modes are skipped with warnings rather than hard failures.
 

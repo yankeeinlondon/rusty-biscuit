@@ -17,7 +17,7 @@ the engine hits its sub-100 ms target without an on-disk cache.
 
 Key code:
 
-- Engine entry point — [`claudine/cli/src/completion/engine.rs`](../../../cli/src/completion/engine.rs)
+- Engine entry point — [`claudine/cli/src/completion/engine/mod.rs`](../../../cli/src/completion/engine/mod.rs)
 - Root menu — [`claudine/cli/src/completion/root_menu.rs`](../../../cli/src/completion/root_menu.rs)
 - Composition pipeline — [`claudine/cli/src/completion/composition/mod.rs`](../../../cli/src/completion/composition/mod.rs)
 - ENTER-path autocomplete UI — [`claudine/cli/src/completion/autocomplete_ui.rs`](../../../cli/src/completion/autocomplete_ui.rs)
@@ -69,8 +69,9 @@ a run of global flags), the engine emits a curated, spec-ordered
 subcommand list. The order is:
 
 1. **Composition** — `compose`, `inline-compose`, `sequence`.
-2. **Wrapped execution** — `claude`, `codex`, `gemini`, `goose`, `kimi`,
-   `opencode`, `qwen`.
+2. **Wrapped execution** — one catalog-derived token per compiled provider:
+   `claude`, `codex`, `gemini`, `goose`, `kimi`, `opencode`, `qwen`, `kilo`,
+   `pi`, `antigravity`.
 3. **Shared resources** — `skills`, `commands`, `agents`, `mcp`.
 4. **Hooks & actions** — `hooks`, `actions`.
 5. **Administration** — `sync`, `uninstall`, `providers`, `logs`,
@@ -784,7 +785,8 @@ on those shells know what to expect.
 $ claudine <TAB>
 compose        inline-compose  sequence
 claude         codex           gemini          goose
-kimi           opencode        qwen
+kimi           opencode        qwen            kilo
+pi             antigravity
 skills         commands        agents          mcp
 hooks          actions
 sync           uninstall       providers       logs

@@ -1,6 +1,6 @@
 # Claudine Unified Events Design
 
-This document defines the unified event model for Claudine: a system that normalizes lifecycle events from 7 agentic CLI providers into 16 canonical hooks, then dispatches configurable actions (TTS, sound effects, logging, shell commands) when those hooks fire.
+This document defines the unified event model for Claudine: a system that normalizes lifecycle events from every compiled agentic CLI provider into 16 canonical hooks, then dispatches configurable actions (TTS, sound effects, logging, shell commands) when those hooks fire.
 
 ## Design Target and Migration Scope
 
@@ -12,7 +12,12 @@ When there is a mismatch between this design and the existing code:
 2. The mismatch is treated as migration work.
 3. Compatibility behavior (when needed) is called out explicitly.
 
-## Supported CLIs
+The detailed research below documents the original seven-provider design set.
+The generated provider catalog and the event-support matrix in the Claudine
+architecture skill are authoritative for the current ten-provider roster,
+which also includes Kilo, Pi, and Antigravity.
+
+## Original Design CLIs
 
 | # | CLI | Vendor | Events | Design Reference |
 |---|-----|--------|:------:|------------------|
@@ -240,7 +245,7 @@ Unique: Permission priority chain (excludeTools > plan mode > yolo mode > allowe
 
 ## 3. Unified Design
 
-This is the core section. It defines the types, traits, and dispatch logic that allow Claudine to operate across all 7 CLIs through a single abstraction layer.
+This is the core section. It defines the types, traits, and dispatch logic that allow Claudine to operate across every compiled provider identity through a single abstraction layer.
 
 ### 3.1 `AgenticEvent` Enum
 
@@ -249,7 +254,7 @@ The 16-variant normalized event enum is the canonical hook set for the refactor 
 ```rust
 use serde::{Deserialize, Serialize};
 
-/// Normalized lifecycle events across all 7 supported agentic CLI providers.
+/// Normalized lifecycle events across supported agentic CLI providers.
 ///
 /// Each variant represents a lifecycle moment that Claudine can observe and
 /// react to. Provider adapters convert their native events into this enum
@@ -1371,7 +1376,7 @@ The design does not introduce a separate `UnifiedHook` enum. The existing `Agent
 
 ### 4.2 Adapter Pattern for Provider Diversity
 
-The 7 CLIs use fundamentally different architectures:
+The provider CLIs use fundamentally different architectures:
 
 | Architecture | CLIs |
 |---|---|
@@ -1385,7 +1390,7 @@ The `ProviderAdapter` trait abstracts over all of these. Each adapter knows how 
 
 ### 4.3 Graceful Degradation for Non-Blocking Providers
 
-Only 5 of 7 CLIs support any form of blocking (Claude, Gemini, OpenCode, Kimi, Qwen), and even among those, the number of blockable events varies from 1 (Qwen) to 7 (Claude). The unified model handles this through the `can_block` flag:
+Within the original seven-provider research set, five CLIs support some form of blocking (Claude, Gemini, OpenCode, Kimi, Qwen), and the number of blockable events varies by provider. The unified model handles this through the `can_block` flag:
 
 1. Every `ResolvedHook` carries a `can_block` boolean set by the adapter for the specific event
 2. `Call` actions always execute regardless of `can_block` (for side effects and logging)

@@ -43,13 +43,13 @@ pub(crate) use setters::{json_type_name, merge_set_overrides, parse_composition_
 ///
 /// ## Notes
 ///
-/// The seven provider boolean fields (`claude`, `codex`, `gemini`, `goose`,
-/// `kimicode`, `opencode`, `qwen`) are handled entirely by the
-/// pre-clap argv normalizer in [`crate::argv`]: Rule 1 rewrites each
-/// `--<provider>` token to the canonical `--provider <slug>` pair before
-/// clap ever sees it. The struct fields and clap `#[arg(...)]` declarations
-/// are retained as user-facing help entries only — their parsed boolean
-/// values are never read at runtime (see [`Self::explicit_provider`]).
+/// The provider boolean fields are handled entirely by the pre-clap argv
+/// normalizer in [`crate::argv`]: Rule 1 derives the supported flags from the
+/// provider catalog and rewrites each `--<provider>` token to the canonical
+/// `--provider <slug>` pair before clap ever sees it. The struct fields and
+/// clap `#[arg(...)]` declarations are retained as user-facing help entries
+/// only — their parsed boolean values are never read at runtime (see
+/// [`Self::explicit_provider`]).
 ///
 /// Retiring these fields is tracked in the
 /// `2026-04-17-cli-pre-processing` spec follow-ups.
