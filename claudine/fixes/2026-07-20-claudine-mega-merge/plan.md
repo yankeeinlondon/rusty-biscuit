@@ -3,32 +3,38 @@ total_phases: 6
 created: 2026-07-21
 phase: 1
 agent: "opencode/zai-coding-plan/glm-5.2"
-yolo: "true"
+yolo: "false"
+reviewed: true
+reviewed_by: codex/default
+reviewed_on: 2026-07-21
+reviewed_seed: ff6de1834fe07de9d34d9ffd3cd717d7941d54f2
 ---
 
 # Claudine Mega-Merge Execution Plan
 
 Derived from [`spec.md`](./spec.md) with the `claudine-log.md`, `error-prop-and-file-resolution-log.md`, `proxy-with-log.md`, and `conflict-report.md` inputs.
 
-The spec defines six stages labelled Phase 0–5. Per execution-plan convention this plan renumbers the freeze stage as **Phase 1** and shifts every later stage by one, yielding six phases total. Phase naming in this document therefore differs from the spec by exactly one; invariant and risk-register IDs (I1–I12, R1–R15) are preserved verbatim.
+The spec defines six stages labeled Phase 0–5. Per execution-plan convention this plan renumbers the freeze stage as **Phase 1** and shifts every later stage by one, yielding six phases total. Every phase heading states its spec mapping; invariant and risk-register IDs (I1–I12, R1–R16) are preserved verbatim.
 
 ## Conventions
 
-- Every task is observable: it produces a commit, a file, a recorded gate result, a saved impact report, or an explicit `accepted-debt` ledger row.
+- Every task is observable: it produces a commit, file, recorded gate result, saved impact report, or ledger update.
 - `(parallelizable with: …)` flags work that can be dispatched concurrently. Sequencing inside a phase is otherwise top-to-bottom in dependency order.
 - Canonical commands: `just test` (L1, nextest), `just test-l2` (real-terminal, fail-closed), `just lint`. Never `cargo test`; never `cargo fmt` / `rustfmt` write-mode.
-- GitNexus `impact()` is mandatory before editing any conflicted symbol; HIGH/CRITICAL findings halt for review (R14, R15).
+- Run independent gates as independent commands and record every exit status; do not use an `&&` chain that hides later evidence after the first failure.
+- GitNexus `impact()` is mandatory before editing any conflicted symbol. Resolve file/module names to concrete symbols first; HIGH/CRITICAL findings halt for review.
+- Only `passed` satisfies a required acceptance row. `accepted-debt` can document a deliberate code-integration exception, but it cannot close this fix or move its records to `_completed`.
 - Stop conditions (spec §"Stop Conditions and Recovery") apply at every checkpoint. Recovery uses recoverable Git operations only — never a destructive reset on a broad path or dirty worktree (R13).
 
-## SHA Ledger (authoritative inputs)
+## Reviewed Revision Ledger
 
-| Branch | Reviewed tip | Merge base with `claudine` |
+| Input | Reviewed revision | Merge base with `claudine` |
 |---|---|---|
-| `claudine` (integration seed) | `d2d0a8fc4467230ed78e2a1d3146b7c336cc17fd` | — |
+| `claudine` (latest reviewed seed) | `ff6de1834fe07de9d34d9ffd3cd717d7941d54f2` | — |
 | `error-prop-and-file-resolution` | `43c23c6535cf6e52a35dbb06ea6f4ccce0c88e97` | `8fc8711434b01327479297af9b40a67685409d00` |
 | `proxy-with` | `e348486c810969abe87a6b7209979034f5454b07` | `6cdb8bf56321c3747d5ea16a1241e47c2bff7fce` |
 
-The pre-merge preview MUST be refreshed against the integration seed in Phase 1 because the conflict report predates it. If any ref moves after the ledger is written, the new SHA becomes a reviewed input only after the conflict inventory and baseline evidence are regenerated (R14).
+The SHA of the commit that contains this reviewed plan cannot be embedded in the plan itself. Phase 1 therefore records the actual execution seed in `sha-ledger.md`, audits every commit between the reviewed seed above and that execution seed, and refreshes previews against it. If either feature ref moves, the new SHA becomes a reviewed input only after the conflict inventory and branch-tip baseline evidence are regenerated (R14).
 
 ---
 
@@ -38,43 +44,48 @@ Spec mapping: spec Phase 0. Goal: inputs recoverable, refs frozen, baselines rec
 
 ### Tasks
 
-- [ ] Write `sha-ledger.md` in this directory recording the three tip SHAs and both merge bases from the table above. This is the authoritative ref freeze for the rest of the plan.
-- [ ] Verify each SHA against `git rev-parse <branch>` and confirm no divergence from the spec.
-- [ ] Quarantine and preserve dirty/untracked worktree inputs (R13): back up `.claudine/memory/commits.md`, `CLAUDE.md`, untracked `.claude/settings.local.json`, and this entire `claudine/fixes/2026-07-20-claudine-mega-merge/` directory plus `darkmatter/fixes/2026-07-20-mega-merge/` to a recoverable copy or a dedicated commit on a scratch branch. Do not overwrite.
+- [ ] Write `sha-ledger.md` in this directory. Record `git rev-parse refs/heads/claudine` as the execution seed, the two frozen feature-tip SHAs, and both merge bases. Record the command, timestamp, and operator; this artifact is the authoritative ref freeze for the rest of the plan.
+- [ ] Compare the execution seed with reviewed seed `ff6de1834`. Audit `ff6de1834..<execution-seed>` and confirm that every intervening commit is understood and contains no implementation from either feature branch. Any unreviewed implementation change requires a refreshed specification review before proceeding.
+- [ ] Verify each feature SHA and merge base against the named refs. Any divergence triggers R14: stop, update the reviewed inputs, regenerate previews, and refresh branch-tip baselines.
+- [ ] Rerun `git status --short --branch` and classify every modified or untracked path (R13). Preserve each user-owned path in a recoverable location or dedicated scratch commit, and record its disposition. The older research inventory is context, not an instruction to assume that the same paths are still dirty.
 - [ ] Confirm the actual integration worktree is clean: `git status --short --branch` shows nothing unexpected. If it cannot be clean, halt (spec Stop Conditions).
-- [ ] Create the recoverable integration branch from the frozen `claudine` seed (`d2d0a8f`). Keep all three source branches unchanged; full ancestry must survive through merge commits.
-- [ ] Freeze the three branch refs (stop feature work on them until Phase 6 closes). Announce the freeze to anyone with push access.
+- [ ] Create and name a recoverable integration branch from the execution seed recorded in `sha-ledger.md`; record its name in the ledger. Keep `claudine` and both feature source refs unchanged until final promotion, and preserve full ancestry through merge commits.
+- [ ] Freeze all three source refs until Phase 6 closes. The separate integration branch may advance only through commits required by this plan. Record the freeze owner/time and notify collaborators who can move those refs.
 - [ ] Enable `git rerere` on the integration branch in case of repeated attempts. Reused resolutions still require per-conflict review.
-- [ ] Refresh non-mutating merge previews against the frozen SHAs: `git merge-tree --write-tree --name-only d2d0a8f 43c23c6` and `git merge-tree --write-tree --name-only d2d0a8f e348486c`, plus the two-feature preview `git merge-tree --write-tree --name-only 43c23c6 e348486c`. Save raw output to `merge-previews/`.
-- [ ] Export the 36-path conflict inventory into `conflict-checklist.md`, grouped by cluster (Architecture & records; CLI prep & composition; Harness & proxy routing; Sequence integration; Library composition/lifecycle; Darkmatter; Generated/docs). Each row gets: path, cluster, owner per responsibility map, resolution status, rationale slot, evidence slot.
+- [ ] Before either merge, scan tracked text with `git grep -n -E '^(<<<<<<< .+|\|\|\|\|\|\|\| .+|=======|>>>>>>> .+)$'` and save the output to `marker-baseline.txt`. Classify intentional fixture hits. The reviewed seed is expected to contain only the two known `CLAUDE.md` lines; any additional unclassified hit halts Phase 1 (R16).
+- [ ] Refresh non-mutating merge previews with the exact SHAs from `sha-ledger.md`: execution seed ↔ foundation, execution seed ↔ proxy, and foundation ↔ proxy. Save stdout, stderr, command, and exit status under `merge-previews/`; exit `1` is expected when a preview reports conflicts and is evidence, not a gate failure by itself.
+- [ ] Export the refreshed feature-to-feature conflict inventory into `conflict-checklist.md`, grouped by cluster (Architecture & records; CLI prep & composition; Harness & proxy routing; Sequence integration; Library composition/lifecycle; Darkmatter; Generated/docs). Start from 36 reviewed paths, but use the refreshed output as authoritative. Add the execution-seed conflict lists and every auto-merged/one-sided hotspot from the spec. Each row gets path, cluster, owner, resolution status, rationale, and evidence slots.
 - [ ] Capture baseline gate results at `error-prop-and-file-resolution` tip (`43c23c6`). Save to `baselines/error-prop-and-file-resolution/`. *(parallelizable with: the proxy-with baseline below)*
-    - [ ] `cd biscuit-file && just test && just test-l2 && just lint`
-    - [ ] `cd darkmatter && just test && just test-l2 && just lint`
-    - [ ] `cd biscuit-test-harness && just test && just lint`
-    - [ ] `cd claudine/rendezvous && just check && just test && just lint`
-    - [ ] `cd claudine && just test && just test-l2 --no-fail-fast && just lint && just check-windows`
-- [ ] Capture baseline gate results at `proxy-with` tip (`e348486c`). Save to `baselines/proxy-with/`. *(parallelizable with: the error-prop-and-file-resolution baseline above)* — same command set, run against the `proxy-with` ref (clean worktree or dedicated checkout).
+    - [ ] From `biscuit-file/`: `just test`, `just test-l2`, and `just lint` as three recorded commands.
+    - [ ] From `darkmatter/`: `just test`, `just test-l2`, and `just lint` as three recorded commands.
+    - [ ] From the repository root: `just test biscuit-test-harness` and `just _lint biscuit-test-harness`; this leaf crate has no area `justfile`.
+    - [ ] From `claudine/rendezvous/`: `just check`, `just test`, and `just lint` as three recorded commands.
+    - [ ] From `claudine/`: `just test`, `just test-l2 --no-fail-fast`, `just lint`, and `just check-windows` as four recorded commands.
+- [ ] Capture the same independent baseline gates at `proxy-with` tip (`e348486c`). Save them to `baselines/proxy-with/`. *(parallelizable with: the foundation baseline above)* Run both baselines from separate detached worktrees at the exact SHAs; never switch the dirty authoring worktree between refs.
 - [ ] Label red, timed-out, skipped, cross-compile-only, and backend-blocked baseline results truthfully. Backend denial (e.g. tmux setup failure on managed macOS) is recorded as debt, never silently waived (R10, R11).
-- [ ] Build `acceptance-ledger.md` from the four feature specs + Sequence Plus validation matrix + proxy-with acceptance map. Each row: criterion ID, contract, test/matrix row, tier (L1/L2/L3), platform, owner, status (`passed`/`failed`/`blocked`/`skipped`/`compile-only`/`accepted-debt`), merged SHA slot, evidence slot.
-- [ ] Import the 10 mandatory combined seam cases (spec §"Mandatory combined seam cases") as their own ledger block — these cannot be satisfied by isolated feature suites.
-- [ ] Confirm the GitNexus index is current against the frozen `claudine` seed. If stale, refresh with `node .gitnexus/run.cjs analyze` (fallback `npx gitnexus analyze`; npm 11 crash → `npm i -g gitnexus`).
-- [ ] Precompute impact analyses for hot-spot symbols and save to `impact/`. Required before any Phase 2/3 edit:
+- [ ] Build `acceptance-ledger.md` from the owning revisions, not the older copies on the integration seed: the error-propagation, file-resolution, and Sequence Plus specs plus `validation-matrix.md` at `43c23c6`, and the proxy-with spec plus `notes/acceptance-map.md` at `e348486c`. Read them with `git show` or from the exact detached worktrees and record each full source path/SHA in the ledger. Each row records a stable criterion ID, contract, named merged-tree test or audit, tier (L1/L2/L3), platform, owner, status (`passed`/`failed`/`blocked`/`skipped`/`compile-only`/`accepted-debt`), acceptance-candidate SHA, and evidence location.
+- [ ] Import all 12 mandatory combined seam cases as `MM-S01` through `MM-S12`. Assign each a concrete test owner, tier, and platform before code editing; isolated feature suites cannot satisfy these rows.
+- [ ] Confirm GitNexus index freshness for each exact revision used by the impact reports (execution seed and both feature tips), using the detached worktrees rather than switching the authoring tree. If stale, refresh with `node .gitnexus/run.cjs analyze` (fallback `npx gitnexus analyze`; npm 11 crash → `npm i -g gitnexus`). Record the indexed revision with every report.
+- [ ] Resolve the following hot-spot file/module labels to concrete symbol identities with GitNexus `query()`/`context()`, then run upstream `impact()` for every symbol that may be edited and save the reports to `impact/`. Use an index at the exact branch tip that owns the symbol and record that revision; shared symbols need both feature-tip views. Ambiguous labels such as `mod`, `types`, `prep`, or `proxy` are not valid impact targets by themselves:
     - [ ] `prep` (compose), `composition::{mod,pipeline,runner}` (wrap), `wrapper_stages`
     - [ ] `loop_control`, `control_dispatch`, `proxy` (harness_orch), `overlay`, `prompt`, `types`
     - [ ] `sequence::{iterate,mod,phase1c}`
     - [ ] `composition::error::{mod,render}`, `composition::lifecycle::{context,executor}`, `composition::looping::engine`, `composition::{mod,preflight,prepare,types}`
     - [ ] Darkmatter `markdown::compose::context::options`
 - [ ] For every HIGH/CRITICAL impact finding, open a row in `impact-review.md` with the proposed resolution owner. These must be reviewed before the corresponding Phase 2/3 edit lands.
+- [ ] Stage only the Phase 1 planning/evidence artifacts, review their size and contents for secrets, run `git diff --check`, the anchored marker scans with the known baseline exception, and GitNexus `detect_changes({scope: "compare", base_ref: "main"})`, then create a documentation-only baseline checkpoint commit. Raw logs that contain secrets or are impractically large stay in an access-controlled artifact store; commit a redacted summary and stable evidence pointer instead.
 
 ### Validation Checkpoint (Phase 1 exit)
 
 - `sha-ledger.md` exists and matches `git rev-parse` for all three refs.
 - `git status --short --branch` is clean in the integration worktree.
-- Integration branch exists, based on `d2d0a8f`.
+- Integration branch exists, based on the execution seed in `sha-ledger.md`; the reviewed-seed range audit is attached.
+- `marker-baseline.txt` exists, with every hit classified and the two known `CLAUDE.md` lines explicitly tracked as Phase 2 removal work.
 - `baselines/error-prop-and-file-resolution/` and `baselines/proxy-with/` each contain the five area gate logs (or explicitly labeled backend debt).
-- `conflict-checklist.md` has all 36 paths plus the auto-merged/one-sided review list from spec §"Conflict Review Scope".
-- `acceptance-ledger.md` exists with every spec criterion, every Sequence Plus matrix row, every proxy-with acceptance row, and all 10 seam cases as open rows.
-- `impact/` contains a report per hot-spot symbol; `impact-review.md` queues HIGH/CRITICAL findings.
+- `conflict-checklist.md` contains every path from all three refreshed previews plus the auto-merged/one-sided review list from spec §"Conflict Review Scope".
+- `acceptance-ledger.md` exists with every spec criterion, every Sequence Plus matrix row, every proxy-with acceptance row, and all 12 seam cases as open rows.
+- `impact/` contains revision-labeled reports for every concrete hot-spot symbol on the branch tips where it exists; `impact-review.md` queues HIGH/CRITICAL findings.
+- The baseline checkpoint commit contains the redacted Phase 1 artifacts and the integration worktree is clean.
 
 ---
 
@@ -88,7 +99,7 @@ Spec mapping: spec Phase 1. Goal: a known-good foundation merge commit carrying 
 - [ ] Start the merge non-fast-forward and uncommitted: `git merge --no-ff --no-commit 43c23c6`.
 - [ ] Resolve the three predicted trunk conflicts in repository records and shared prompts:
     - [ ] `.claudine/memory/commits.md` — reconcile history, keep it factual and final-architecture-aligned.
-    - [ ] `CLAUDE.md` — keep trunk content; merge in foundation additions where they describe behavior that survives.
+    - [ ] `CLAUDE.md` — reconcile the surviving guidance and remove the two pre-existing marker lines recorded in `marker-baseline.txt`; `AGENTS.md` exposes this file through a symlink and needs no separate edit.
     - [ ] `prompts/_implement/implement-suggestions.md` (and any other shared prompt files surfaced by the refreshed preview).
 - [ ] Manually audit the auto-merged composition pipeline, wrapper stages, composition/system-prompt topics. A clean textual merge is not semantic compatibility (R7).
 - [ ] Verify the trunk's transient system-prompt `.gitignore` fix survives (I11). Re-apply if the merge dropped it.
@@ -107,35 +118,38 @@ Spec mapping: spec Phase 1. Goal: a known-good foundation merge commit carrying 
     - [ ] JIT state visibility, tasks/groups, deterministic merges, process ownership.
     - [ ] Source/list grammar, exact approved shell bytes, serial/parallel ordering.
 - [ ] Run supporting-package L1 + lint gates *(parallelizable across packages)*:
-    - [ ] `cd biscuit-file && just test && just lint`
-    - [ ] `cd darkmatter && just test && just lint`
-    - [ ] `cd biscuit-test-harness && just test && just lint`
-    - [ ] `cd claudine/rendezvous && just check && just test && just lint`
-- [ ] Run full Claudine L1 + lint: `cd claudine && just test && just lint`.
-- [ ] Scan both worktree and staged blobs for conflict markers: `git diff --check` and a staged-blob scan (e.g. `git ls-files -s | ...` grep for `<<<<<<<`/`=======`/`>>>>>>>`). Both must be clean.
+    - [ ] From `biscuit-file/`, run `just test` and `just lint` independently.
+    - [ ] From `darkmatter/`, run `just test` and `just lint` independently.
+    - [ ] From the repository root, run `just test biscuit-test-harness` and `just _lint biscuit-test-harness` independently.
+    - [ ] From `claudine/rendezvous/`, run `just check`, `just test`, and `just lint` independently.
+- [ ] From `claudine/`, run full Claudine L1 and lint as independent commands: `just test`, then `just lint`.
+- [ ] Run `git diff --check`, then scan both worktree and index with the anchored marker expression from Phase 1 (`git grep ...` and `git grep --cached ...`). Both scans must be empty after classified fixture exclusions, and the known `CLAUDE.md` markers must be gone (R16).
 - [ ] Inspect staged changes: `git diff --cached --stat`. Confirm only intended files are present; investigate any surprise.
-- [ ] Run `gitnexus detect_changes` against `main`. Review affected symbols, processes, and modules; record in `impact/foundation-merge-detect.md`.
-- [ ] Create the foundation merge commit with ancestry preserved. Record the new SHA in `sha-ledger.md`.
+- [ ] Run GitNexus `detect_changes({scope: "compare", base_ref: "main"})`. Review affected symbols, processes, and modules; record in `impact/foundation-merge-detect.md`.
+- [ ] Create the foundation merge commit with ancestry preserved and capture its SHA.
+- [ ] Refresh `git merge-tree --write-tree --name-only <foundation-merge-sha> e348486c` against the exact sequential inputs. Save command/output/status under `merge-previews/post-foundation-proxy/`, update `sha-ledger.md`, `conflict-checklist.md`, and any newly implicated impact reports. Do not treat the earlier feature-tip-to-feature-tip preview as the exact Phase 3 conflict list.
+- [ ] Run change detection and staged-diff/marker review for those planning-only updates, then create a documentation-only checkpoint commit so Phase 3 starts clean.
 
 ### Validation Checkpoint (Phase 2 exit)
 
 - Foundation merge commit exists on the integration branch, ancestry preserved.
 - All foundation-focused tests pass; L1/lint green across biscuit-file, darkmatter, biscuit-test-harness, rendezvous, claudine.
 - Trunk `.gitignore` fix and trunk schemas/research/docs are present in the merged tree.
-- `git diff --check` clean; staged-blob marker scan clean.
+- `git diff --check` and both anchored marker scans are clean; the pre-existing `CLAUDE.md` marker debt is discharged.
 - GitNexus change-detection report reviewed; no HIGH/CRITICAL surprise.
-- Foundation SHA recorded in `sha-ledger.md`.
+- Foundation merge SHA is committed in `sha-ledger.md`; the worktree is clean.
+- The exact foundation-merge ↔ proxy preview is recorded, and every surfaced path is represented in the conflict/impact checklists.
 
 ---
 
 ## Phase 3 — Integrate `proxy-with` by dependency order
 
-Spec mapping: spec Phase 2. Goal: one preparation service, one transition path, one resolution grammar, one diagnostic selector, one launch bundle, and zero conflict markers in staged or unstaged content. This is the highest-risk phase (R1–R6, R15).
+Spec mapping: spec Phase 2. Goal: one preparation service, one transition path, one resolution grammar, one diagnostic selector, one launch bundle, and zero conflict markers in staged or unstaged content. This is the highest-risk phase (R1–R6, R15, R16).
 
 ### Tasks
 
-- [ ] Re-read impact reports for proxy-side symbols (coordinator, lifecycle executor, loop engine, launch plan, overlay, sequence runner). Clear every HIGH/CRITICAL item in `impact-review.md` with a recorded rationale before editing.
-- [ ] Start the merge uncommitted: `git merge --no-commit e348486c`.
+- [ ] Re-read impact reports for proxy-side symbols (coordinator, lifecycle executor, loop engine, launch plan, overlay, sequence runner). For a symbol that exists only on `proxy-with`, use the report generated from that exact feature tip; for a shared symbol, review both feature-tip reports. Clear every HIGH/CRITICAL item in `impact-review.md` before editing.
+- [ ] Start the merge with ancestry preserved and without committing: `git merge --no-ff --no-commit e348486c`.
 
 ### Conflict clusters (resolve in this order)
 
@@ -172,25 +186,26 @@ For each conflict:
 ### Invariant and responsibility audit
 
 - [ ] Verify the Architectural Responsibility Map has exactly one owner per row in the merged tree.
-- [ ] Verify invariants I1–I12 hold against merged source. For each, cite the merged-code test that proves it in `acceptance-ledger.md`.
+- [ ] Verify invariants I1–I12 against merged source. For each, cite the appropriate merged-code test, source audit, generated guard, or platform evidence row in `acceptance-ledger.md`; do not invent a unit-test citation for documentation, ancestry, or native-platform obligations.
 
 ### Commit gates
 
-- [ ] Scan both worktree and staged blobs for conflict markers. Both clean.
+- [ ] Run `git diff --check` and the anchored worktree/index marker scans from Phase 2. Both scans are empty after classified fixture exclusions.
 - [ ] Inspect staged changes: `git diff --cached --stat`. No surprises.
 - [ ] Run focused tests across all eight clusters, then Claudine L1 + lint.
-- [ ] Run `gitnexus detect_changes` against `main`. Save to `impact/proxy-merge-detect.md`. Review unexpected symbols, execution flows, deleted guards, duplicate paths.
-- [ ] Create the proxy-with merge commit with ancestry preserved. Record SHA in `sha-ledger.md`.
+- [ ] Run GitNexus `detect_changes({scope: "compare", base_ref: "main"})`. Save the report to `impact/proxy-merge-detect.md`; review unexpected symbols, execution flows, deleted guards, and duplicate paths.
+- [ ] Create the proxy-with merge commit with ancestry preserved. Capture its SHA, update `sha-ledger.md`, run change detection and staged-diff/marker review for that ledger-only change, then create a documentation-only checkpoint commit so Phase 4 starts clean.
 
 ### Validation Checkpoint (Phase 3 exit)
 
 - One preparation service, one transition path, one resolution grammar, one diagnostic selector, one launch bundle.
-- Zero conflict markers in unstaged or staged content.
+- `git diff --check` and the anchored worktree/index marker scans are clean.
 - Every conflict row in `conflict-checklist.md` has owner, rationale, and evidence pointer.
 - Responsibility map audit complete; one owner per row.
-- I1–I12 each have a merged-code test citation in the acceptance ledger.
+- I1–I12 each have applicable merged-tree evidence in the acceptance ledger.
 - Claudine L1 + lint green.
 - GitNexus change detection reviewed; no HIGH/CRITICAL surprise unresolved.
+- Proxy merge SHA is committed in `sha-ledger.md`; the worktree is clean.
 
 ---
 
@@ -200,8 +215,8 @@ Spec mapping: spec Phase 3. Goal: derived artifacts describe the merged tree, no
 
 ### Tasks
 
-- [ ] Regenerate `claudine/docs/providers/dispatch-inventory.json` with its owning tool. *(parallelizable with: other regenerate tasks below)*
-- [ ] Regenerate `claudine/gen/tests/drift.rs` fixture with `claudine-gen`. *(parallelizable)*
+- [ ] Regenerate `claudine/docs/providers/dispatch-inventory.json` with the command embedded by its owning test: `CLAUDINE_UPDATE_INVENTORY=1 cargo nextest run -p claudine-cli --test dispatch_inventory`. Review the resulting inventory before accepting it. *(parallelizable with: the generator check below)*
+- [ ] Reconcile the conflict in `claudine/gen/tests/drift.rs` manually as test source; it is not generated output. Then run `cargo run -p claudine-gen -- check`. If merged inputs intentionally changed generated artifacts, run `cargo run -p claudine-gen -- generate`, review every proposed file, and rerun `check`.
 - [ ] Run source-scan, generated-artifact, dispatch, and test-placement guards. Any guard that only passes by weakening scope halts work (spec Stop Conditions).
 - [ ] Reconcile `.claude/skills/claudine/SKILL.md` against the merged responsibility map. *(parallelizable with: other doc reconciliations below)*
 - [ ] Reconcile `.claude/skills/claudine/architecture.md` against the merged responsibility map. *(parallelizable)*
@@ -217,19 +232,27 @@ Spec mapping: spec Phase 3. Goal: derived artifacts describe the merged tree, no
 - [ ] Correct the stale proxy-with acceptance-map description of the Linux L2 workflow (called out by proxy review 18).
 - [ ] Comment pass: verify inline `//` and `///` docs describe merged behavior. Treat code as authoritative unless an acceptance invariant proves the code wrong; otherwise fix or delete drift (AGENTS.md Comment Quality).
 - [ ] Confirm no branch-local line-number inventories, hashes, or status claims were copied into the merged tree unchanged (R9).
+- [ ] Run `git diff --check`, the anchored worktree/index marker scans, and GitNexus `detect_changes({scope: "compare", base_ref: "main"})`; review the complete staged diff and save the change report to `impact/reconciliation-detect.md`.
+- [ ] Create a scoped reconciliation commit for generated artifacts, guards, skills, and documentation. Capture its SHA as the acceptance candidate; Phase 5 records it in `sha-ledger.md` alongside the evidence results.
 
 ### Validation Checkpoint (Phase 4 exit)
 
-- Regenerated files match their generators from a clean merged checkout.
+- The dispatch inventory and every `claudine-gen`-owned artifact match their generators from a clean merged checkout; `gen/tests/drift.rs` accurately tests the merged contract.
 - All source-scan / drift / dispatch / test-placement guards pass without scope weakening.
 - Every reconciled doc cites final merged behavior (responsibility map, invariants, grammar, stage matrix).
 - No stale branch-local inventories remain.
+- The reconciliation commit is clean and identified as the immutable acceptance-candidate SHA.
 
 ---
 
 ## Phase 5 — Layered merged-tree verification
 
 Spec mapping: spec Phase 4. Goal: localize failures by running focused tests after each subsystem, then complete area gates. Do not debug all failures from one giant final run.
+
+All evidence in this phase names the acceptance-candidate SHA from Phase 4. If
+any production, test, generator, guard, or behavior-documentation file changes,
+discard affected evidence, return to the owning earlier phase, create a new
+candidate, and rerun the affected matrix.
 
 ### Tasks
 
@@ -242,8 +265,8 @@ Spec mapping: spec Phase 4. Goal: localize failures by running focused tests aft
     - [ ] `cd darkmatter && just test-l2`
     - [ ] `cd darkmatter && just lint`
 - [ ] Biscuit Test Harness gates *(parallelizable)*:
-    - [ ] `cd biscuit-test-harness && just test`
-    - [ ] `cd biscuit-test-harness && just lint`
+    - [ ] From the repository root: `just test biscuit-test-harness`
+    - [ ] From the repository root: `just _lint biscuit-test-harness`
 - [ ] Rendezvous gates *(parallelizable)*:
     - [ ] `cd claudine/rendezvous && just check`
     - [ ] `cd claudine/rendezvous && just test`
@@ -253,30 +276,35 @@ Spec mapping: spec Phase 4. Goal: localize failures by running focused tests aft
     - [ ] `cd claudine && just test-l2 --no-fail-fast`
     - [ ] `cd claudine && just lint`
     - [ ] `cd claudine && just check-windows` (recorded as `compile-only`, NOT runtime evidence — I12, R11)
-- [ ] Run the 10 mandatory combined seam cases (spec §"Mandatory combined seam cases") as a single suite at the appropriate tier. Each must reach its assertion:
-    - [ ] 1. Bare proxy target resolves repository-first; missing target exposes ordered candidate/probe diagnostic identically in terminal, `err.*`, snapshot.
-    - [ ] 2. Explicit relative proxy target stays source-local; nested references derive from target source/repository.
-    - [ ] 3. `proxy.with` overlay into a Sequence Plus step whose target owns a loop: step runs once, loop completes, JIT state/output visible.
-    - [ ] 4. Proxied target typed schema failure matches direct execution; source and target each receive their owed lifecycle events.
-    - [ ] 5. Initialize-time vs terminal-time handoff failures retain distinct triggering events, closure ownership, diagnostic identity.
-    - [ ] 6. Overlay values survive retry, resume, immediate-target loop refresh; absent from downstream proxy unless resupplied.
-    - [ ] 7. Provider/model/MCP/credential changes across retry/resume rebuild launch plan; typed incompatibility when a live session cannot be reused.
-    - [ ] 8. Session compatibility key derived from the exact spawned launch bundle.
-    - [ ] 9. Sequence/task preflight approves the exact shell bytes later executed after handoff and context re-anchoring.
-    - [ ] 10. Failure from a proxied target inside a parallel group: correct attribution, stdout/stderr ordering preserved, all children settled, deterministic state merge, process descendants torn down.
+- [ ] Execute the 12 mandatory combined seam rows at the tier/platform assigned in Phase 1. They may live in several focused test binaries; the requirement is one stable `MM-Sxx` row per interaction and fresh merged-tree evidence, not one oversized test process:
+    - [ ] `MM-S01` — A bare proxy target resolves repository-first; a missing target exposes the ordered candidate/probe diagnostic identically in terminal, `err.*`, and snapshot output.
+    - [ ] `MM-S02` — An explicit-relative proxy target stays source-local without fallback; nested references derive from the target source/repository.
+    - [ ] `MM-S03` — A `proxy.with` overlay enters a Sequence Plus step whose target owns a loop; the step runs once, the loop completes, and JIT state/output remain visible.
+    - [ ] `MM-S04` — A proxied target's typed schema failure matches direct execution; source and target each receive exactly their owed lifecycle events.
+    - [ ] `MM-S05` — Initialize-time and terminal-time handoff failures retain distinct triggering events, closure ownership, and diagnostic identity.
+    - [ ] `MM-S06` — Overlay values survive retry, resume, and immediate-target loop refresh but remain absent from a downstream proxy unless supplied again.
+    - [ ] `MM-S07` — Provider/model/MCP/credential changes across retry or resume rebuild the launch plan and yield typed incompatibility when a live session cannot be reused.
+    - [ ] `MM-S08` — The session compatibility key derives from the exact launch bundle that is spawned.
+    - [ ] `MM-S09` — Sequence/task preflight approves the exact shell bytes later executed after handoff and context re-anchoring.
+    - [ ] `MM-S10` — A proxied-target failure inside a parallel group retains task attribution and stdout/stderr order, settles all children, merges state deterministically, and tears down descendants.
+    - [ ] `MM-S11` — A target in another repository re-anchors authoring/nested resolution while the provider keeps the invocation-fixed child CWD; diagnostics distinguish the two contexts.
+    - [ ] `MM-S12` — Dry-run reports static selection intent without lifecycle execution, dynamic proxy traversal, environment/MCP side effects, document mutation, or overlay disclosure.
 - [ ] Capture L2 terminal evidence (plain / color / OSC 8 / concurrent task failure) through `just test-l2` only. Backend failures recorded separately from feature failures (R10).
 - [ ] Schedule and run guarded L3 keyboard/process-interruption tests through attended/native or designated CI workflows only. Their opt-in and platform requirements remain visible in the ledger.
+- [ ] Run required Linux L1 behavior and lints in CI against the acceptance-candidate SHA; run Windows L1 rows in CI where supported. Record native execution separately from cross-checks.
 - [ ] Run the dedicated Linux tmux-backed L2 CI job (`.github/workflows/claudine-tests.yml`). It MUST reach assertions; a tmux setup failure is `blocked`, not a pass (R10, I12).
-- [ ] Attach native Windows runtime evidence for Windows-specific terminal, named-pipe, console-control, HOME, and descendant-termination claims. `just check-windows` alone is `compile-only` and never satisfies a runtime row (R11, I12).
-- [ ] Update every acceptance-ledger row touched in this phase with merged SHA, tier, platform, status, and evidence pointer.
+- [ ] Attach passing native Windows runtime evidence for Windows-specific terminal, named-pipe, console-control, HOME, and descendant-termination claims. `just check-windows` alone is `compile-only` and never satisfies a runtime row (R11, I12).
+- [ ] Update every acceptance-ledger row touched in this phase with acceptance-candidate SHA, tier, platform, status, and evidence pointer.
+- [ ] After every required row passes, record the acceptance-candidate SHA in `sha-ledger.md`, stage only the evidence/ledger updates, run `git diff --check`, the anchored marker scans, and GitNexus `detect_changes({scope: "compare", base_ref: "main"})`, then create a documentation-only evidence commit. Capture that commit's SHA for the Phase 6 closeout record; do not attempt to make a commit self-reference its own SHA.
 
 ### Validation Checkpoint (Phase 5 exit)
 
 - Every required L1 and L2 assertion ran and passed; `compile-only` and `blocked` rows accurately labeled.
-- All 10 seam cases reached their assertions.
-- Linux L2 CI job reached assertions; any backend denial recorded as debt.
-- Native Windows runtime evidence attached where the platform matrix requires it.
+- All 12 seam cases reached their assertions and passed at their assigned tiers/platforms.
+- Linux L2 CI reached its assertions and passed. A blocked backend is recorded accurately but prevents Phase 5 exit until a compliant rerun passes.
+- Required Linux/Windows L1 and native Windows runtime rows passed; cross-check-only evidence remains labeled `compile-only`.
 - All lints green.
+- A documentation-only evidence commit records results against the unchanged acceptance candidate.
 
 ---
 
@@ -286,14 +314,14 @@ Spec mapping: spec Phase 5. Goal: the completion definition from spec §"Complet
 
 ### Tasks
 
-- [ ] From a clean merged checkout, run `gitnexus detect_changes` against `main`. Review unexpected affected symbols, execution flows, deleted guards, and duplicate execution paths. Save to `impact/final-audit-detect.md`.
+- [ ] From a clean merged checkout, run GitNexus `detect_changes({scope: "compare", base_ref: "main"})`. Review unexpected affected symbols, execution flows, deleted guards, and duplicate execution paths. Save the report to `impact/final-audit-detect.md`.
 - [ ] Review the final `git diff` for unintended production, test, generated, and documentation changes.
 - [ ] Verify generators and drift/source-scan guards pass from the clean merged checkout (not a stale worktree).
 - [ ] Repeat full L1, L2, and lint gates from the clean checkout. Record fresh results.
 - [ ] Attach native macOS evidence per ledger row requiring it.
 - [ ] Attach native Linux evidence per ledger row requiring it (including the dedicated Linux L2 CI job).
 - [ ] Attach native Windows runtime evidence per ledger row requiring it (distinct from `just check-windows`).
-- [ ] Update all four feature records (`2026-07-13-error-propogation`, `2026-07-13-file-resolution`, `2026-07-11-sequence-plus`, `2026-07-13-proxy-with`) with the final merged SHA and fresh results.
+- [ ] Update all four source feature records (`2026-07-13-error-propogation`, `2026-07-13-file-resolution`, `2026-07-11-sequence-plus`, `2026-07-13-proxy-with`) and this mega-merge fix record with the acceptance-candidate SHA and fresh results.
 - [ ] Verify completion definition from spec §"Completion Definition":
     - [ ] `claudine` contains both feature histories through reviewed merge commits.
     - [ ] All mandatory invariants (I1–I12) and the responsibility map hold in final source.
@@ -305,14 +333,18 @@ Spec mapping: spec Phase 5. Goal: the completion definition from spec §"Complet
     - [ ] Package-area lints, drift guards, generators, source scans, and test-placement checks pass.
     - [ ] Documentation and skills describe the merged behavior.
     - [ ] A clean-checkout final audit finds no conflict markers, stale generated data, unexpected changes, or unowned acceptance rows.
-- [ ] Move feature/fix records to `_completed/` only after every required criterion is `passed` or explicitly accepted as documented residual debt by the owner (`accepted-debt` with scope, consequence, mitigation, follow-up — never silently waived).
+- [ ] Move the four source feature records and this mega-merge fix record to their `_completed/` directories only after every required ledger row is `passed`. If the owner accepts residual debt, record its scope, consequence, mitigation, and follow-up, but leave the affected records active; accepted debt does not satisfy completion.
+- [ ] Record the Phase 5 evidence-commit SHA in `sha-ledger.md`. After the record updates/moves, run `git diff --check`, anchored worktree/index marker scans, documentation/link guards, and GitNexus `detect_changes({scope: "compare", base_ref: "main"})`. Review the staged diff, then create the documentation-only closeout commit; its own SHA is the resulting branch tip and is not self-recorded.
+- [ ] Re-verify that `claudine` and both feature refs still match `sha-ledger.md`. Switch to `claudine` and fast-forward it to the integration branch with `git merge --ff-only <integration-branch>`. If fast-forward is impossible, stop and review the unexpected movement; never force-update the branch.
 - [ ] Close the SHA freeze on the three source branches.
 
 ### Validation Checkpoint (Phase 6 exit — merge complete)
 
 - Clean-checkout audit clean.
-- Acceptance ledger: every required row `passed` or explicit `accepted-debt` with documented residual.
-- All four feature records updated with merged SHA and moved to `_completed/` (or residual debt precisely documented and owner-accepted).
+- Acceptance ledger: every required row is `passed`; no `blocked`, `skipped`, `compile-only`, or `accepted-debt` row is being counted as acceptance.
+- All four source feature records and this mega-merge fix record are updated with the acceptance-candidate SHA and moved to `_completed/`.
+- Documentation-only evidence and closeout commits exist; all runtime evidence remains anchored to the unchanged acceptance-candidate SHA.
+- `claudine` points to the integration closeout commit by fast-forward and contains both feature histories.
 - Branch ref freeze lifted.
 - Completion definition from spec §"Completion Definition" fully satisfied.
 
@@ -332,6 +364,8 @@ Spec mapping: spec Phase 5. Goal: the completion definition from spec §"Complet
 Pause and return to the last recoverable checkpoint if any of these occurs (spec §"Stop Conditions and Recovery"):
 
 - Branch tips no longer match `sha-ledger.md`.
+- The execution-seed range contains unreviewed implementation or the merge bases differ from the ledger.
+- An unclassified conflict-marker hit appears, or a post-resolution marker scan is non-empty after documented fixture exclusions.
 - Impact analysis reports HIGH or CRITICAL risk without a reviewed resolution.
 - A conflict cannot be assigned to one owner in the responsibility map.
 - Two preparation, transition, resolution, diagnostic-selection, or launch paths remain after resolution.

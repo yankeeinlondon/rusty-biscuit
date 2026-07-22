@@ -5,7 +5,7 @@ reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-07-21
 area: claudine
-integration_seed: 2fb3692a3e87806ef719c665559e6139b87ca930
+integration_seed: ff6de1834fe07de9d34d9ffd3cd717d7941d54f2
 feature_tips:
     error-prop-and-file-resolution: 43c23c6535cf6e52a35dbb06ea6f4ccce0c88e97
     proxy-with: e348486c810969abe87a6b7209979034f5454b07
@@ -41,31 +41,34 @@ This specification is derived from:
 
 The conflict report analyzed these tips:
 
-| Branch | Reviewed tip |
+| Input | Reviewed revision |
 |---|---|
-| `claudine` | `dc4cdebde57897516aa836c69d96cb3b9e062186` |
+| `claudine` conflict-report tip | `dc4cdebde57897516aa836c69d96cb3b9e062186` |
+| `claudine` latest reviewed integration seed | `ff6de1834fe07de9d34d9ffd3cd717d7941d54f2` |
 | `error-prop-and-file-resolution` | `43c23c6535cf6e52a35dbb06ea6f4ccce0c88e97` |
 | `proxy-with` | `e348486c810969abe87a6b7209979034f5454b07` |
 
-The current `claudine` integration seed is
-`2fb3692a3e87806ef719c665559e6139b87ca930`. Since the originally analyzed
+The latest reviewed `claudine` integration seed is
+`ff6de1834fe07de9d34d9ffd3cd717d7941d54f2`. Since the originally analyzed
 seed (`d2d0a8fc4467230ed78e2a1d3146b7c336cc17fd`), the branch has added the
-mega-merge specification and execution plan, a repository-memory record, and
-a GitNexus count refresh; it has not added implementation from either feature
-branch. Non-mutating previews were refreshed during review on 2026-07-21 and
-still report three trunk/foundation conflicts, one trunk/proxy conflict, and
-36 conflicts between the two feature tips. The feature tips and merge bases
-still match the report:
+mega-merge records, repository memory, model-serving API research, related
+documentation maintenance, and GitNexus count refreshes; it has not added
+implementation from either feature branch. Non-mutating previews were
+refreshed during review on 2026-07-21 and still report three
+trunk/foundation conflicts, one trunk/proxy conflict, and 36 conflicts between
+the two feature tips. The feature tips and merge bases still match the report:
 
 - `claudine` ↔ `error-prop-and-file-resolution`:
   `8fc8711434b01327479297af9b40a67685409d00`
 - `claudine` ↔ `proxy-with`:
   `6cdb8bf56321c3747d5ea16a1241e47c2bff7fce`
 
-The pre-merge preview MUST be refreshed against the exact integration seed
-because the four-input conflict report predates it. If any branch moves again,
-the new SHA becomes a reviewed input only after the conflict inventory and
-baseline evidence are refreshed.
+The pre-merge preview MUST be refreshed against the exact execution seed
+recorded after these reviewed documents are committed because a plan cannot
+embed the SHA of its own future commit. Phase 0 MUST compare that execution
+seed with the reviewed seed above and classify every intervening commit. If
+any source branch moves again, the new SHA becomes a reviewed input only after
+the conflict inventory and baseline evidence are refreshed.
 
 The worktree may contain concurrent user-owned changes; at review start this
 included the untracked `.claude/settings.local.json`, and further edits may
@@ -391,15 +394,24 @@ The following automatically merged or one-sided areas MUST also be reviewed:
 7. Record independent baseline results at both feature tips. Red, timed-out,
    skipped, and backend-blocked results remain labeled as such.
 8. Build the acceptance ledger before editing. Import every criterion from the
-   four feature specs, the Sequence Plus validation matrix, and the proxy-with
-   acceptance map. Each row needs a merged-code test, tier, platform, owner,
-   status, and evidence location.
+   error-propagation, file-resolution, and Sequence Plus specs at `43c23c6`,
+   the proxy-with spec at `e348486c`, the Sequence Plus validation matrix at
+   `43c23c6:claudine/features/2026-07-11-sequence-plus/validation-matrix.md`,
+   and the proxy-with acceptance map at
+   `e348486c:claudine/features/2026-07-13-proxy-with/notes/acceptance-map.md`.
+   Read branch-owned artifacts from their frozen revisions rather than from a
+   convenient working tree. Each row needs a stable criterion ID, merged-code
+   test, tier, platform, owner, status, and evidence location.
 9. Confirm the GitNexus index is current. Before editing a conflicted symbol,
    run upstream impact analysis and record direct callers, affected processes,
    and risk. Stop and warn before editing a HIGH or CRITICAL symbol until the
    resolution is reviewed.
 10. Enable `git rerere` if repeated attempts are expected. Reused resolutions
    still require review against this specification.
+11. Review and commit the Phase 0 ledger, previews, baselines, marker record,
+    conflict checklist, and impact reports on the integration branch. Run
+    change detection and marker/diff checks before this checkpoint commit so
+    Phase 1 starts from a clean worktree.
 
 Phase 0 exits only when the inputs are recoverable, refs are frozen, baselines
 and the pre-existing marker debt are recorded, the execution plan agrees with
@@ -434,6 +446,11 @@ Before recording the first merge commit:
   markers, proving the known `CLAUDE.md` markers were removed; and
 - run GitNexus change detection against `main`, record affected symbols and
   execution flows, and resolve unexpected scope before committing.
+
+After the foundation merge commit exists, refresh the non-mutating proxy
+preview against that exact commit. Update the conflict checklist and impact
+inventory before Phase 2; the feature-tip-to-feature-tip preview is a risk
+forecast, not an exact substitute for the sequential merge input.
 
 Phase 1 exits with a known-good foundation merge commit. Failures originating
 here MUST be resolved before proxy-with is introduced so later regressions
@@ -478,8 +495,9 @@ result, and resolve unexpected scope.
 
 After runtime behavior is settled:
 
-1. regenerate or intentionally refresh dispatch inventories and generated
-   drift fixtures with their owning tools;
+1. regenerate the dispatch inventory with its embedded bless command, then
+   run `claudine-gen check`; reconcile `claudine/gen/tests/drift.rs` as test
+   source rather than treating it as generated output;
 2. run source-scan, generated-artifact, dispatch, and test-placement guards;
 3. reconcile the Claudine skill and architecture docs against the merged
    responsibility map;
@@ -487,20 +505,28 @@ After runtime behavior is settled:
    system-prompt, completion, and error-architecture documentation;
 5. preserve trunk lifecycle schemas and local-runner research;
 6. correct the stale proxy-with acceptance-map description of the Linux L2
-   workflow; and
+   workflow;
 7. reconcile `plan.md` and its checklists with the final seam suite and
-   completion rule; and
+   completion rule;
 8. verify that comments describe the merged behavior, deleting or correcting
    drift while treating the code as authoritative unless an acceptance
    invariant proves the code wrong.
+
+Before committing this reconciliation, run GitNexus change detection against
+`main`, review the complete staged diff, and repeat the marker scans. Record
+the resulting commit as the acceptance-candidate SHA. Acceptance evidence in
+later phases MUST name that immutable revision; any subsequent production,
+test, generator, guard, or behavior-documentation change invalidates affected
+rows and returns the work to the appropriate earlier phase.
 
 Do not copy branch-local line-number inventories, hashes, or status claims into
 the merged tree unchanged.
 
 ### Phase 4 — Layered merged-tree verification
 
-Run focused tests after each subsystem, then complete area gates. Canonical
-commands include:
+Run focused tests after each subsystem, then complete area gates against the
+acceptance-candidate SHA. Run from detached/clean checkouts where evidence
+provenance requires it. Canonical commands include:
 
 ```sh
 cd biscuit-file
@@ -513,11 +539,11 @@ just test
 just test-l2
 just lint
 
-cd ../biscuit-test-harness
-just test
-just lint
+cd ..
+just test biscuit-test-harness
+just _lint biscuit-test-harness
 
-cd ../claudine/rendezvous
+cd claudine/rendezvous
 just check
 just test
 just lint
@@ -549,11 +575,20 @@ visible in the ledger.
 4. Repeat full L1, L2, and lint gates from that checkout.
 5. Attach native macOS, Linux, and Windows evidence at the level required by
    each ledger row.
-6. Update all four feature records with the final merged SHA and fresh results.
+6. Update all four feature records with the acceptance-candidate SHA and fresh
+   results.
 7. Move feature/fix records to `_completed` only after all required evidence is
    green and the completion definition below is satisfied. Accepted debt may
    permit a merge commit, but its record remains active and links to a scoped
    follow-up until the required evidence passes.
+8. Run final change detection, staged-diff review, anchored marker scans, and
+   documentation/link guards after the record updates; then create the
+   documentation-only closeout commit. The acceptance-candidate SHA remains
+   the evidence anchor, while the closeout commit records the results.
+9. Verify the three frozen source refs still match the SHA ledger, then
+   fast-forward the `claudine` branch to the completed integration branch.
+   A non-fast-forward promotion or a moved source ref requires review rather
+   than force-updating either branch.
 
 ## Acceptance Assurance
 
@@ -619,7 +654,7 @@ the completion definition. The other statuses never become implicit passes.
 
 The ledger SHOULD use this shape:
 
-| Criterion ID | Contract | Test or audit | Tier | Platform | Status | Merged SHA | Evidence |
+| Criterion ID | Contract | Test or audit | Tier | Platform | Status | Candidate SHA | Evidence |
 |---|---|---|---|---|---|---|---|
 | Example | Direct/proxy schema parity | named test/matrix row | L2 | Linux | blocked | `<sha>` | tmux setup failed before assertion |
 
