@@ -134,6 +134,12 @@ do not belong here.
 - Agent or task completion alone does not prove that its commit landed. After
   all groups finish, inspect `git status --short` and recent history for staged
   paths or missing commits. Treat empty or ambiguous agent reports as unknown.
+- A subagent report of "path no longer staged" or similar is often a positive
+  signal that a parallel committer (developer or sibling subagent) already
+  produced the commit. Before re-staging or re-committing, run `git log -3` (or
+  search recent commits for the expected subject) to confirm the intended
+  commit landed. Restaging after a parallel committer has already produced the
+  commit produces a redundant second commit.
 - For whitespace-only groups, sanity-check with
   `git diff --staged --stat --ignore-all-space --ignore-blank-lines` or
   `--numstat --ignore-all-space --ignore-blank-lines`. Zero output means no
