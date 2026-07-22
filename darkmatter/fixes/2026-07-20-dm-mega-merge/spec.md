@@ -1,8 +1,9 @@
 ---
-status: ready for planning and implementation
+status: ready for implementation
 reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-07-21
+review_iterations: 1
 created: 2026-07-21
 area: darkmatter
 packages:
@@ -145,8 +146,9 @@ This work does not:
 
 1. Before the merge, the implementer MUST record:
    - the three pinned revisions;
-   - the path, status, and exact Git blob identity of this specification and
-     each listed control artifact;
+   - the path and status of this specification and each listed control
+     artifact, plus separate HEAD, index, and exact working-content blob
+     identities wherever those states exist;
    - `git status --short` for both source worktrees;
    - every unrelated tracked modification and untracked file that must remain
      outside the integration result; and
@@ -178,6 +180,15 @@ This work does not:
    MUST wait, use isolated resources, or be deferred and reported.
 9. Every Git command that could consult credentials MUST run with
    `GIT_TERMINAL_PROMPT=0`; all commands MUST be one-shot and non-interactive.
+10. Because the authoritative resolution record does not exist in the pinned
+    integration tree, pre-merge evidence MUST first be written to a dedicated
+    external ledger outside every Git worktree. Before conflict edits, its
+    preflight manifest MUST be frozen and hashed. After the no-commit merge has
+    started, the implementer MUST summarize that evidence in the R12 resolution
+    record and record the external ledger's absolute path and immutable
+    manifest identity.
+    Preflight evidence files MUST NOT be added to the integration index merely
+    to make them convenient to reference.
 
 ### R2. Scope discovery and change intelligence
 
@@ -415,10 +426,13 @@ shell expressions, CLI commands, and DMLS passive projections.
 
 1. One validation owner MUST run gates from the integration worktree.
 2. Package-area gates MUST run serially, not concurrently across worktrees.
-3. `CARGO_BUILD_JOBS` and `NEXTEST_TEST_THREADS` SHOULD be capped to a recorded
-   host budget and held constant across comparable runs.
-4. Real-terminal tests MUST retain their existing serialization and MUST NOT run
-   concurrently from multiple worktrees.
+3. `CARGO_BUILD_JOBS`, `NEXTEST_TEST_THREADS`, and any area-controlled
+   `BISCUIT_L2_THREADS` setting SHOULD be capped to a recorded host budget and
+   held constant across comparable runs.
+4. Real-terminal tests MUST run only through the owning package area's
+   `just test-l2` recipe, retain that recipe's shared-pane or isolated
+   owned-pane concurrency policy, and MUST NOT run concurrently from multiple
+   worktrees.
 5. Performance measurements whose specifications require a quiet host MUST be
    declined when the host does not meet that contract. A noisy result MUST NOT
    be substituted as acceptance evidence.
@@ -445,6 +459,13 @@ shell expressions, CLI commands, and DMLS passive projections.
 5. Handoff MUST leave the integration in an inspected, fully resolved
    no-commit merge state. Creating the merge commit is outside this
    specification unless separately authorized.
+6. Before the merge starts, each reviewed control artifact MUST receive one
+   recorded disposition: `external-only` or
+   `authorized-documentation-delta`. Staged, modified, or untracked status in a
+   source worktree is not authorization. Only artifacts with the latter
+   disposition may be copied into and staged from the integration worktree,
+   and their staged bytes MUST match the frozen working-content identity unless
+   a separately reviewed edit is recorded.
 
 ## Sequencing and Checkpoints
 
@@ -452,7 +473,9 @@ shell expressions, CLI commands, and DMLS passive projections.
 
 1. Verify that the pinned objects are commits and that their computed merge
    base equals the pinned merge base. Do not substitute moving branch tips.
-2. Record the status and Git blob identity of the reviewed control artifacts.
+2. Create the external preflight ledger, record the HEAD/index/working-content
+   identities of the reviewed control artifacts, and assign each artifact its
+   R12 disposition.
 3. Regenerate the branch deltas, shared-path inventory, and conflict preview
    only if the source commits are intentionally repinned.
 4. Inventory dirty/untracked source-worktree state and preserve unrelated work.
@@ -475,7 +498,9 @@ current.
 2. Compare the actual conflicts with the predicted six.
 3. Stop and update the conflict inventory if any unexpected conflict or
    modify/delete case appears.
-4. Save the pre-resolution status and unmerged-path list in the merge record.
+4. Save the pre-resolution status and unmerged-path list in the external
+   ledger, then create the authoritative resolution record in the integration
+   worktree and import the frozen preflight summary.
 5. Verify that `HEAD` still equals the pinned `darkmatter` commit and
    `MERGE_HEAD` equals the pinned `more-is-more` commit.
 
@@ -509,27 +534,29 @@ without changing the lockfile, and the authority-boundary audit is complete.
 4. Confirm no local duplicate tmux harness, parser, validator, or formatter was
    restored.
 
-Checkpoint: focused tests compile far enough to confirm imports, feature flags,
-and test harness topology before broad package-area gates.
+Checkpoint: imports, feature flags, harness topology, and the exact focused-test
+commands are statically reconciled before Phase 5 executes them and before any
+broad package-area gate.
 
-### Phase 4: Resolve documentation, policy, and generated metadata
+### Phase 4: Resolve documentation and policy; defer generated metadata
 
 1. Merge the Darkmatter skill content semantically.
 2. Merge commit safety guidance without weakening either branch.
 3. Retain Review 8 and repair the Review 7 -> 8 -> 9 -> 10 chain.
 4. Review workflow, schema, prompt, and public-documentation unions.
-5. Refresh the Darkmatter skill hash with `md hash <file> --save` only after its
-   content is final, then verify it with `md hash <file> --diff`.
-6. Refresh GitNexus and its generated counts only after the full source tree is
-   final.
-7. Add the frozen control artifacts only if they are explicitly in the intended
-   integration deliverables, and record them as a separate documentation delta.
+5. Resolve the skill-hash and GitNexus-count conflicts with recorded temporary
+   parent values; do not claim those values describe the merged tree. Defer both
+   generated refreshes until Phase 7, after all tests and corrective edits.
+6. Add the frozen control artifacts only if they have the
+   `authorized-documentation-delta` disposition, and record them as a separate
+   documentation delta.
+7. Keep `external-only` control artifacts outside the integration index.
 
 Checkpoint: `git ls-files -u` is empty, `git diff --check` passes, review links
-are valid, and regenerated metadata describes the merged tree rather than
-either source tree. Any conflict-marker scan MUST be limited to changed text
-files and account for intentional conflict fixtures; a repository-wide textual
-scan is not authoritative.
+are valid, and generated values are explicitly pending final refresh. Any
+conflict-marker scan MUST be limited to changed text files and account for
+intentional conflict fixtures; a repository-wide textual scan is not
+authoritative.
 
 ### Phase 5: Focused convergence tests
 
@@ -590,24 +617,29 @@ serial with no source-worktree test process competing for resources.
 
 ### Phase 7: Final audit and handoff
 
-1. Run GitNexus `detect_changes` against `main` and compare affected symbols and
+1. Refresh the Darkmatter skill hash from the final body with
+   `md hash <file> --save`, verify it with `md hash <file> --diff`, then refresh
+   GitNexus once from the final tested source tree and replace the temporary
+   generated counts in `CLAUDE.md`.
+2. Run GitNexus `detect_changes` for all integration-worktree changes and
+   against `main`, then compare affected symbols and
    execution flows with the recorded scope.
-2. Compare the resolved tree against each pinned parent as well as `main`.
+3. Compare the resolved tree against each pinned parent as well as `main`.
    The first-parent comparison identifies the incoming integration delta; the
    second-parent comparison proves preservation of `darkmatter`-side work;
    `main` satisfies the repository-wide change-detection contract.
-3. Inspect `git status`, the complete diff, and the staged diff from the
+4. Inspect `git status`, the complete diff, and the staged diff from the
    integration worktree.
-4. Reconfirm `HEAD`, `MERGE_HEAD`, the merge base, and the absence of unmerged
+5. Reconfirm `HEAD`, `MERGE_HEAD`, the merge base, and the absence of unmerged
    index entries.
-5. Confirm all ten shared paths have resolution/audit entries.
-6. Confirm no unrelated source-worktree file, local setting, generated junk, or
+6. Confirm all ten shared paths have resolution/audit entries.
+7. Confirm no unrelated source-worktree file, local setting, generated junk, or
    bulk snapshot update is present.
-7. Confirm all carried-forward evidence gaps are still documented and have not
+8. Confirm all carried-forward evidence gaps are still documented and have not
    been mislabeled as closed.
-8. Re-run `git status --short` in both source worktrees and prove that the merge
+9. Re-run `git status --short` in both source worktrees and prove that the merge
    did not change their tracked or untracked state.
-9. Produce a concise merge report listing pinned inputs, actual conflicts,
+10. Produce a concise merge report listing pinned inputs, actual conflicts,
    resolutions, focused evidence, package-area gates, generated metadata, and
    any non-blocking follow-up.
 

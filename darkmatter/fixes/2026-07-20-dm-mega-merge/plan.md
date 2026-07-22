@@ -2,8 +2,478 @@
 agent: opencode/zai-coding-plan/glm-5.2
 total_phases: 8
 created: 2026-07-21
-phase: 1
-yolo: "true"
+phase: 8
+source_files_during_phase_1:
+  - claudine/cli/src/commands/context/format.rs
+  - claudine/lib/src/composition/lifecycle/executor.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests.rs
+  - claudine/lib/src/composition/lifecycle/tests.rs
+  - claudine/lib/src/composition/lifecycle/validate.rs
+  - claudine/lib/src/composition/looping/config.rs
+  - claudine/lib/src/composition/preflight.rs
+  - claudine/lib/src/composition/schema/classify.rs
+  - claudine/lib/src/dispatch/matcher.rs
+  - darkmatter/cli/src/commands/compose.rs
+  - darkmatter/cli/src/commands/schema/about.rs
+  - darkmatter/cli/tests/level2_code_block_styling.rs
+  - darkmatter/cli/tests/level2_errors.rs
+  - darkmatter/cli/tests/schema_about.rs
+  - darkmatter/dmls/src/diagnostics/codes.rs
+  - darkmatter/dmls/src/diagnostics/frontmatter.rs
+  - darkmatter/dmls/src/graph/substrate.rs
+  - darkmatter/dmls/src/overlay/doc_links.rs
+  - darkmatter/dmls/src/overlay/expressions.rs
+  - darkmatter/dmls/src/overlay/frontmatter.rs
+  - darkmatter/dmls/src/overlay/mod.rs
+  - darkmatter/dmls/src/overlay/schema.rs
+  - darkmatter/dmls/src/providers/dsl.rs
+  - darkmatter/dmls/src/providers/frontmatter.rs
+  - darkmatter/dmls/src/providers/mod.rs
+  - darkmatter/dmls/tests/lsp_session.rs
+  - darkmatter/dmls/tests/no_side_effects.rs
+  - darkmatter/lib/src/markdown/compose/context/capture/git.rs
+  - darkmatter/lib/src/markdown/compose/context/capture/groups.rs
+  - darkmatter/lib/src/markdown/compose/context/capture/mod.rs
+  - darkmatter/lib/src/markdown/compose/context/capture/snapshot.rs
+  - darkmatter/lib/src/markdown/compose/context/catalog.rs
+  - darkmatter/lib/src/markdown/compose/context/options.rs
+  - darkmatter/lib/src/markdown/compose/expression/ast.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog/ast.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog/parser.rs
+  - darkmatter/lib/src/markdown/compose/expression/error.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/cicd.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/escape.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/git.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/paths.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/provider.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/pull_requests.rs
+  - darkmatter/lib/src/markdown/compose/expression/lexer.rs
+  - darkmatter/lib/src/markdown/compose/expression/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/parser.rs
+  - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+  - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+  - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+  - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/tests.rs
+  - darkmatter/lib/src/markdown/compose/interpolation/fatality_characterization.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+  - darkmatter/lib/src/markdown/compose/remote.rs
+  - darkmatter/lib/src/markdown/compose/remote_fetch.rs
+  - darkmatter/lib/src/markdown/compose/subtree.rs
+  - darkmatter/lib/src/markdown/compose/tests/mod.rs
+  - darkmatter/lib/src/markdown/compose/tests/provider_network.rs
+  - darkmatter/lib/src/markdown/compose/tests/transclusion.rs
+  - darkmatter/lib/src/markdown/errors/blocks.rs
+  - darkmatter/lib/src/markdown/schemas/about.rs
+  - darkmatter/lib/src/markdown/schemas/coerce.rs
+  - darkmatter/lib/src/markdown/schemas/errors.rs
+  - darkmatter/lib/src/markdown/schemas/format.rs
+  - darkmatter/lib/src/markdown/schemas/mod.rs
+  - darkmatter/lib/src/markdown/schemas/reference.rs
+  - darkmatter/lib/src/markdown/schemas/resolve.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/cursor.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/standalone.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/yaml_scalar.rs
+  - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+  - darkmatter/lib/src/markdown/schemas/validate.rs
+  - darkmatter/lib/tests/git_context_integration.rs
+  - darkmatter/lib/tests/level2_render_tree_terminal/images.rs
+  - darkmatter/lib/tests/level2_render_tree_terminal/support/mod.rs
+  - darkmatter/lib/tests/level3_image_painting.rs
+  - darkmatter/lib/tests/meta_schema_phase1.rs
+  - darkmatter/lib/tests/meta_schema_phase3.rs
+  - darkmatter/lib/tests/meta_schema_phase4.rs
+  - darkmatter/lib/tests/meta_schema_phase5.rs
+  - darkmatter/lib/tests/meta_schema_phase6.rs
+  - darkmatter/lib/tests/meta_schema_reference_graph.rs
+  - darkmatter/lib/tests/meta_schema_repo_schemas.rs
+  - darkmatter/lib/tests/more_is_more_literals_and_indexes.rs
+  - darkmatter/lib/tests/predict_conflicts.rs
+  - darkmatter/lib/tests/schemas_grammar_proptest.rs
+  - darkmatter/lib/tests/schemas_source_projection.rs
+  - darkmatter/lib/tests/suggest_constraint_phase4.rs
+  - sniff/cli/tests/snapshots.rs
+  - sniff/lib/src/credentials.rs
+  - sniff/lib/src/error.rs
+  - sniff/lib/src/filesystem/blast_radius.rs
+  - sniff/lib/src/filesystem/formatting.rs
+  - sniff/lib/src/filesystem/git/api.rs
+  - sniff/lib/src/filesystem/git/merge_conflicts.rs
+  - sniff/lib/src/filesystem/git/mod.rs
+  - sniff/lib/src/filesystem/git/open.rs
+  - sniff/lib/src/filesystem/git/recent_commits.rs
+  - sniff/lib/src/filesystem/git/remote_observation.rs
+  - sniff/lib/src/filesystem/git/remote_refresh.rs
+  - sniff/lib/src/filesystem/git/remote_resolver.rs
+  - sniff/lib/src/filesystem/git/status.rs
+  - sniff/lib/src/filesystem/git/types.rs
+  - sniff/lib/src/filesystem/git/worktree.rs
+  - sniff/lib/src/filesystem/mod.rs
+  - sniff/lib/src/filesystem/repo/area.rs
+  - sniff/lib/src/filesystem/repo/identity.rs
+  - sniff/lib/src/lib.rs
+  - sniff/lib/src/network/mod.rs
+  - sniff/lib/src/remote/focused.rs
+  - sniff/lib/src/remote/mod.rs
+  - sniff/lib/src/remote/provider.rs
+  - sniff/lib/src/remote/provider_url.rs
+  - sniff/lib/src/remote/types.rs
+  - sniff/lib/src/remote/url_parser.rs
+  - sniff/lib/src/remote/web_link.rs
+  - sniff/lib/tests/focused_provider.rs
+  - sniff/lib/tests/git_parity.rs
+  - sniff/lib/tests/integration.rs
+  - sniff/lib/tests/merge_conflict_prediction.rs
+  - sniff/lib/tests/remote_observation.rs
+  - sniff/lib/tests/remote_resolution.rs
+docs_updated_during_phase_1:
+  - .claudine/memory/commits.md
+  - CLAUDE.md
+  - darkmatter/dmls/docs/diagnostics.md
+  - darkmatter/docs/topics/context-variables.md
+  - darkmatter/docs/topics/darkmatter-expressions.md
+  - darkmatter/docs/topics/schema-definition.md
+  - darkmatter/features/2026-07-13-meta-schema/plan.md
+  - darkmatter/features/2026-07-13-meta-schema/spec.md
+  - darkmatter/features/2026-07-13-more-is-more/plan.md
+  - darkmatter/features/2026-07-13-more-is-more/spec.md
+  - darkmatter/features/2026-07-15-performance-followup/review-7.md
+  - darkmatter/fixes/2026-07-20-dm-mega-merge/plan.md
+  - docs/testing-strategy.md
+  - sniff/docs/sniff-library-architecture.md
+  - sniff/lib/README.md
+docs_created_during_phase_1:
+  - darkmatter/features/2026-07-13-meta-schema/log.md
+  - darkmatter/features/2026-07-13-meta-schema/phase1-impact.md
+  - darkmatter/features/2026-07-13-meta-schema/phase1-test-matrix.md
+  - darkmatter/features/2026-07-13-meta-schema/phase2-test-map.md
+  - darkmatter/features/2026-07-13-meta-schema/phase3-test-map.md
+  - darkmatter/features/2026-07-13-meta-schema/phase4-test-map.md
+  - darkmatter/features/2026-07-13-meta-schema/phase5-baseline-replay.md
+  - darkmatter/features/2026-07-13-meta-schema/phase5-test-map.md
+  - darkmatter/features/2026-07-13-meta-schema/phase6-test-map.md
+  - darkmatter/features/2026-07-13-meta-schema/phase7-test-map.md
+  - darkmatter/features/2026-07-13-meta-schema/review-10.md
+  - darkmatter/features/2026-07-13-meta-schema/review-11.md
+  - darkmatter/features/2026-07-13-meta-schema/review-12.md
+  - darkmatter/features/2026-07-13-meta-schema/review-13.md
+  - darkmatter/features/2026-07-13-meta-schema/review-14.md
+  - darkmatter/features/2026-07-13-meta-schema/review-2.md
+  - darkmatter/features/2026-07-13-meta-schema/review-3.md
+  - darkmatter/features/2026-07-13-meta-schema/review-4.md
+  - darkmatter/features/2026-07-13-meta-schema/review-5.md
+  - darkmatter/features/2026-07-13-meta-schema/review-6.md
+  - darkmatter/features/2026-07-13-meta-schema/review-7.md
+  - darkmatter/features/2026-07-13-meta-schema/review-8.md
+  - darkmatter/features/2026-07-13-meta-schema/review-9.md
+  - darkmatter/features/2026-07-13-more-is-more/log.md
+  - darkmatter/features/2026-07-13-more-is-more/review-15.md
+  - darkmatter/features/2026-07-13-more-is-more/review-16.md
+  - darkmatter/features/2026-07-13-more-is-more/review-17.md
+  - darkmatter/features/2026-07-13-more-is-more/review-18.md
+  - darkmatter/features/2026-07-13-more-is-more/review-19.md
+  - darkmatter/features/2026-07-13-more-is-more/review-20.md
+  - darkmatter/features/2026-07-13-more-is-more/review-21.md
+  - darkmatter/features/2026-07-13-more-is-more/review-22.md
+  - darkmatter/features/2026-07-13-more-is-more/review-23.md
+  - darkmatter/features/2026-07-13-more-is-more/review-24.md
+  - darkmatter/features/2026-07-13-more-is-more/review-25.md
+  - darkmatter/features/2026-07-13-more-is-more/review-26.md
+  - darkmatter/features/2026-07-13-more-is-more/review-27.md
+  - darkmatter/features/2026-07-13-more-is-more/review-plan-19.md
+  - darkmatter/fixes/2026-07-20-dm-mega-merge/resolution-record.md
+  - prompts/_implement/implement-review-findings-plan.md
+  - prompts/_implement/review-findings-plan.md
+skills_files_updated_during_phase_1:
+  - .claude/skills/darkmatter/SKILL.md
+  - .claude/skills/rust-devops/SKILL.md
+  - .claude/skills/rust-devops/gitoxide.md
+  - .claude/skills/sniff/SKILL.md
+source_files_during_phase_2: []
+docs_updated_during_phase_2:
+  - darkmatter/fixes/2026-07-20-dm-mega-merge/plan.md
+  - darkmatter/fixes/2026-07-20-dm-mega-merge/resolution-record.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - darkmatter/cli/tests/level2_code_block_styling.rs
+  - darkmatter/cli/tests/level2_errors.rs
+docs_updated_during_phase_3:
+  - darkmatter/fixes/2026-07-20-dm-mega-merge/plan.md
+  - darkmatter/fixes/2026-07-20-dm-mega-merge/resolution-record.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+packages_during_phase_3:
+  - darkmatter-cli
+source_files_during_phase_4: []
+docs_updated_during_phase_4:
+  - .claudine/memory/commits.md
+  - CLAUDE.md
+  - darkmatter/features/2026-07-15-performance-followup/review-7.md
+  - darkmatter/features/2026-07-15-performance-followup/review-10.md
+  - darkmatter/fixes/2026-07-20-dm-mega-merge/plan.md
+  - darkmatter/fixes/2026-07-20-dm-mega-merge/resolution-record.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/darkmatter/SKILL.md
+packages_during_phase_4: []
+source_files_during_phase_5:
+  - darkmatter/cli/tests/level2_schema_about.rs
+docs_updated_during_phase_5:
+  - darkmatter/fixes/2026-07-20-dm-mega-merge/plan.md
+  - darkmatter/fixes/2026-07-20-dm-mega-merge/resolution-record.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+packages_during_phase_5:
+  - darkmatter-cli
+source_files_during_phase_6:
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+  - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+  - claudine/cli/tests/level2_context_capture.rs
+  - sniff/cli/src/output/repo_json.rs
+  - sniff/cli/tests/cli.rs
+  - sniff/lib/src/lib.rs
+  - sniff/lib/tests/integration.rs
+docs_updated_during_phase_6:
+  - claudine/docs/providers/dispatch-inventory.json
+  - darkmatter/fixes/2026-07-20-dm-mega-merge/plan.md
+  - darkmatter/fixes/2026-07-20-dm-mega-merge/resolution-record.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+packages_during_phase_6:
+  - claudine-cli
+  - sniff
+  - sniff-cli
+source_files_during_phase_7: []
+docs_updated_during_phase_7:
+  - darkmatter/fixes/2026-07-20-dm-mega-merge/plan.md
+  - darkmatter/fixes/2026-07-20-dm-mega-merge/resolution-record.md
+docs_created_during_phase_7:
+  - darkmatter/fixes/2026-07-20-dm-mega-merge/merge-report.md
+skills_files_updated_during_phase_7:
+  - .claude/skills/darkmatter/SKILL.md
+packages_during_phase_7: []
+source_files_during_phase_8: []
+docs_updated_during_phase_8:
+  - darkmatter/fixes/2026-07-20-dm-mega-merge/merge-report.md
+  - darkmatter/fixes/2026-07-20-dm-mega-merge/plan.md
+  - darkmatter/fixes/2026-07-20-dm-mega-merge/resolution-record.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8: []
+packages_during_phase_8: []
+source_code:
+  - claudine/cli/src/commands/context/format.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+  - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+  - claudine/cli/tests/level2_context_capture.rs
+  - claudine/lib/src/composition/lifecycle/executor.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests.rs
+  - claudine/lib/src/composition/lifecycle/tests.rs
+  - claudine/lib/src/composition/lifecycle/validate.rs
+  - claudine/lib/src/composition/looping/config.rs
+  - claudine/lib/src/composition/preflight.rs
+  - claudine/lib/src/composition/schema/classify.rs
+  - claudine/lib/src/dispatch/matcher.rs
+  - darkmatter/cli/src/commands/compose.rs
+  - darkmatter/cli/src/commands/schema/about.rs
+  - darkmatter/cli/tests/level2_code_block_styling.rs
+  - darkmatter/cli/tests/level2_errors.rs
+  - darkmatter/cli/tests/level2_schema_about.rs
+  - darkmatter/cli/tests/schema_about.rs
+  - darkmatter/dmls/src/diagnostics/codes.rs
+  - darkmatter/dmls/src/diagnostics/frontmatter.rs
+  - darkmatter/dmls/src/graph/substrate.rs
+  - darkmatter/dmls/src/overlay/doc_links.rs
+  - darkmatter/dmls/src/overlay/expressions.rs
+  - darkmatter/dmls/src/overlay/frontmatter.rs
+  - darkmatter/dmls/src/overlay/mod.rs
+  - darkmatter/dmls/src/overlay/schema.rs
+  - darkmatter/dmls/src/providers/dsl.rs
+  - darkmatter/dmls/src/providers/frontmatter.rs
+  - darkmatter/dmls/src/providers/mod.rs
+  - darkmatter/dmls/tests/lsp_session.rs
+  - darkmatter/dmls/tests/no_side_effects.rs
+  - darkmatter/lib/src/markdown/compose/context/capture/git.rs
+  - darkmatter/lib/src/markdown/compose/context/capture/groups.rs
+  - darkmatter/lib/src/markdown/compose/context/capture/mod.rs
+  - darkmatter/lib/src/markdown/compose/context/capture/snapshot.rs
+  - darkmatter/lib/src/markdown/compose/context/catalog.rs
+  - darkmatter/lib/src/markdown/compose/context/options.rs
+  - darkmatter/lib/src/markdown/compose/expression/ast.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog/ast.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog/parser.rs
+  - darkmatter/lib/src/markdown/compose/expression/error.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/cicd.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/escape.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/git.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/paths.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/provider.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/pull_requests.rs
+  - darkmatter/lib/src/markdown/compose/expression/lexer.rs
+  - darkmatter/lib/src/markdown/compose/expression/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/parser.rs
+  - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+  - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+  - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+  - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/tests.rs
+  - darkmatter/lib/src/markdown/compose/interpolation/fatality_characterization.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+  - darkmatter/lib/src/markdown/compose/remote.rs
+  - darkmatter/lib/src/markdown/compose/remote_fetch.rs
+  - darkmatter/lib/src/markdown/compose/subtree.rs
+  - darkmatter/lib/src/markdown/compose/tests/mod.rs
+  - darkmatter/lib/src/markdown/compose/tests/provider_network.rs
+  - darkmatter/lib/src/markdown/compose/tests/transclusion.rs
+  - darkmatter/lib/src/markdown/errors/blocks.rs
+  - darkmatter/lib/src/markdown/schemas/about.rs
+  - darkmatter/lib/src/markdown/schemas/coerce.rs
+  - darkmatter/lib/src/markdown/schemas/errors.rs
+  - darkmatter/lib/src/markdown/schemas/format.rs
+  - darkmatter/lib/src/markdown/schemas/mod.rs
+  - darkmatter/lib/src/markdown/schemas/reference.rs
+  - darkmatter/lib/src/markdown/schemas/resolve.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/cursor.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/standalone.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/yaml_scalar.rs
+  - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+  - darkmatter/lib/src/markdown/schemas/validate.rs
+  - darkmatter/lib/tests/git_context_integration.rs
+  - darkmatter/lib/tests/level2_render_tree_terminal/images.rs
+  - darkmatter/lib/tests/level2_render_tree_terminal/support/mod.rs
+  - darkmatter/lib/tests/level3_image_painting.rs
+  - darkmatter/lib/tests/meta_schema_phase1.rs
+  - darkmatter/lib/tests/meta_schema_phase3.rs
+  - darkmatter/lib/tests/meta_schema_phase4.rs
+  - darkmatter/lib/tests/meta_schema_phase5.rs
+  - darkmatter/lib/tests/meta_schema_phase6.rs
+  - darkmatter/lib/tests/meta_schema_reference_graph.rs
+  - darkmatter/lib/tests/meta_schema_repo_schemas.rs
+  - darkmatter/lib/tests/more_is_more_literals_and_indexes.rs
+  - darkmatter/lib/tests/predict_conflicts.rs
+  - darkmatter/lib/tests/schemas_grammar_proptest.rs
+  - darkmatter/lib/tests/schemas_source_projection.rs
+  - darkmatter/lib/tests/suggest_constraint_phase4.rs
+  - sniff/cli/src/output/repo_json.rs
+  - sniff/cli/tests/cli.rs
+  - sniff/cli/tests/snapshots.rs
+  - sniff/lib/src/credentials.rs
+  - sniff/lib/src/error.rs
+  - sniff/lib/src/filesystem/blast_radius.rs
+  - sniff/lib/src/filesystem/formatting.rs
+  - sniff/lib/src/filesystem/git/api.rs
+  - sniff/lib/src/filesystem/git/merge_conflicts.rs
+  - sniff/lib/src/filesystem/git/mod.rs
+  - sniff/lib/src/filesystem/git/open.rs
+  - sniff/lib/src/filesystem/git/recent_commits.rs
+  - sniff/lib/src/filesystem/git/remote_observation.rs
+  - sniff/lib/src/filesystem/git/remote_refresh.rs
+  - sniff/lib/src/filesystem/git/remote_resolver.rs
+  - sniff/lib/src/filesystem/git/status.rs
+  - sniff/lib/src/filesystem/git/types.rs
+  - sniff/lib/src/filesystem/git/worktree.rs
+  - sniff/lib/src/filesystem/mod.rs
+  - sniff/lib/src/filesystem/repo/area.rs
+  - sniff/lib/src/filesystem/repo/identity.rs
+  - sniff/lib/src/lib.rs
+  - sniff/lib/src/network/mod.rs
+  - sniff/lib/src/remote/focused.rs
+  - sniff/lib/src/remote/mod.rs
+  - sniff/lib/src/remote/provider.rs
+  - sniff/lib/src/remote/provider_url.rs
+  - sniff/lib/src/remote/types.rs
+  - sniff/lib/src/remote/url_parser.rs
+  - sniff/lib/src/remote/web_link.rs
+  - sniff/lib/tests/focused_provider.rs
+  - sniff/lib/tests/git_parity.rs
+  - sniff/lib/tests/integration.rs
+  - sniff/lib/tests/merge_conflict_prediction.rs
+  - sniff/lib/tests/remote_observation.rs
+  - sniff/lib/tests/remote_resolution.rs
+documentation:
+  - .claudine/memory/commits.md
+  - CLAUDE.md
+  - claudine/docs/providers/dispatch-inventory.json
+  - darkmatter/dmls/docs/diagnostics.md
+  - darkmatter/docs/topics/context-variables.md
+  - darkmatter/docs/topics/darkmatter-expressions.md
+  - darkmatter/docs/topics/schema-definition.md
+  - darkmatter/features/2026-07-13-meta-schema/log.md
+  - darkmatter/features/2026-07-13-meta-schema/phase1-impact.md
+  - darkmatter/features/2026-07-13-meta-schema/phase1-test-matrix.md
+  - darkmatter/features/2026-07-13-meta-schema/phase2-test-map.md
+  - darkmatter/features/2026-07-13-meta-schema/phase3-test-map.md
+  - darkmatter/features/2026-07-13-meta-schema/phase4-test-map.md
+  - darkmatter/features/2026-07-13-meta-schema/phase5-baseline-replay.md
+  - darkmatter/features/2026-07-13-meta-schema/phase5-test-map.md
+  - darkmatter/features/2026-07-13-meta-schema/phase6-test-map.md
+  - darkmatter/features/2026-07-13-meta-schema/phase7-test-map.md
+  - darkmatter/features/2026-07-13-meta-schema/plan.md
+  - darkmatter/features/2026-07-13-meta-schema/review-10.md
+  - darkmatter/features/2026-07-13-meta-schema/review-11.md
+  - darkmatter/features/2026-07-13-meta-schema/review-12.md
+  - darkmatter/features/2026-07-13-meta-schema/review-13.md
+  - darkmatter/features/2026-07-13-meta-schema/review-14.md
+  - darkmatter/features/2026-07-13-meta-schema/review-2.md
+  - darkmatter/features/2026-07-13-meta-schema/review-3.md
+  - darkmatter/features/2026-07-13-meta-schema/review-4.md
+  - darkmatter/features/2026-07-13-meta-schema/review-5.md
+  - darkmatter/features/2026-07-13-meta-schema/review-6.md
+  - darkmatter/features/2026-07-13-meta-schema/review-7.md
+  - darkmatter/features/2026-07-13-meta-schema/review-8.md
+  - darkmatter/features/2026-07-13-meta-schema/review-9.md
+  - darkmatter/features/2026-07-13-meta-schema/spec.md
+  - darkmatter/features/2026-07-13-more-is-more/log.md
+  - darkmatter/features/2026-07-13-more-is-more/plan.md
+  - darkmatter/features/2026-07-13-more-is-more/review-15.md
+  - darkmatter/features/2026-07-13-more-is-more/review-16.md
+  - darkmatter/features/2026-07-13-more-is-more/review-17.md
+  - darkmatter/features/2026-07-13-more-is-more/review-18.md
+  - darkmatter/features/2026-07-13-more-is-more/review-19.md
+  - darkmatter/features/2026-07-13-more-is-more/review-20.md
+  - darkmatter/features/2026-07-13-more-is-more/review-21.md
+  - darkmatter/features/2026-07-13-more-is-more/review-22.md
+  - darkmatter/features/2026-07-13-more-is-more/review-23.md
+  - darkmatter/features/2026-07-13-more-is-more/review-24.md
+  - darkmatter/features/2026-07-13-more-is-more/review-25.md
+  - darkmatter/features/2026-07-13-more-is-more/review-26.md
+  - darkmatter/features/2026-07-13-more-is-more/review-27.md
+  - darkmatter/features/2026-07-13-more-is-more/review-plan-19.md
+  - darkmatter/features/2026-07-13-more-is-more/spec.md
+  - darkmatter/features/2026-07-15-performance-followup/review-10.md
+  - darkmatter/features/2026-07-15-performance-followup/review-7.md
+  - darkmatter/fixes/2026-07-20-dm-mega-merge/merge-report.md
+  - darkmatter/fixes/2026-07-20-dm-mega-merge/plan.md
+  - darkmatter/fixes/2026-07-20-dm-mega-merge/resolution-record.md
+  - docs/testing-strategy.md
+  - prompts/_implement/implement-review-findings-plan.md
+  - prompts/_implement/review-findings-plan.md
+  - sniff/docs/sniff-library-architecture.md
+  - sniff/lib/README.md
+packages:
+  - claudine
+  - claudine-cli
+  - darkmatter
+  - darkmatter-cli
+  - dmls
+  - sniff
+  - sniff-cli
+yolo: "false"
+reviewed: true
+reviewed_by: codex/default
+reviewed_on: 2026-07-21
 ---
 
 # Execution Plan: Darkmatter and More-Is-More Integration Merge
@@ -18,704 +488,687 @@ yolo: "true"
 
 ## Pinned Inputs
 
-These revisions are the validity envelope for the entire plan. If any of them
-move, work MUST stop and the merge base, branch deltas, shared-path inventory,
-and `git merge-tree` preview MUST be regenerated before any further resolution
-edits.
+These immutable object IDs are the validity envelope for the plan:
 
 | Input | Revision |
 |---|---|
 | Merge base | `d672388dd0fed4196295e7f21514cac6fa59f0ae` |
-| `darkmatter` head | `14dd391f45206d58383ba9d84adbf53c65520534` |
-| `more-is-more` head | `0584d8297f57f5eb30b52d03b1241ba55184bb44` |
+| `darkmatter` parent | `14dd391f45206d58383ba9d84adbf53c65520534` |
+| `more-is-more` parent | `0584d8297f57f5eb30b52d03b1241ba55184bb44` |
 
-## Expected Package-Area Scope
+Moving branch names do not change these pins. Stop only if an object is missing,
+the computed merge base differs, or an operator explicitly requests different
+source commits. An intentional repin invalidates the branch deltas, overlap
+inventory, conflict preview, scope record, and this plan until they are
+regenerated and reviewed.
 
-Per spec R2.4, recorded with `sniff repo packages`:
+## Candidate Scope, Not Final Gate Scope
 
-| Area | Reason in scope |
-|---|---|
-| `biscuit-file` | Shared spans and the source-first YAML analysis/repair foundation |
-| `sniff` | Git discovery, worktrees, conflict prediction, remotes, providers, credentials |
-| `darkmatter` (`darkmatter`, `darkmatter-cli`, `dmls`) | Compose, expressions, schemas, cleanup, references, CLI, and DMLS |
-| `claudine` (`claudine`, `claudine-cli`) | Downstream traversal/validation of container expressions and semantic schema values |
-| `biscuit-terminal` | Shared terminal discovery/caching and the real-terminal Darkmatter harness boundary |
+Package and package-area scope are different records. The minimum candidate
+package-area scope from spec R2 is:
 
-## Cross-Cutting Rules (apply to every phase)
+| Package area | Candidate packages | Reason |
+|---|---|---|
+| `biscuit-file` | `biscuit-file`, `biscuit-file-cli` | YAML source analysis and repair authority |
+| `sniff` | `sniff`, `sniff-cli` | Git, worktree, remote, provider, and credential authority |
+| `darkmatter` | `darkmatter`, `darkmatter-cli` | Compose, expressions, schemas, cleanup, references, and CLI |
+| `darkmatter/dmls` | `dmls` | Passive consumers of expression, schema, and graph products |
+| `claudine` | Discovered area members affected by the final graph | Container-expression and semantic-schema downstream behavior |
 
-- **R1 isolation**: Integration happens only in the disposable clean worktree.
-  Source worktrees and refs are read-only until handoff.
-- **R2 change intelligence**: Run `sniff repo packages` once to record scope;
-  run GitNexus `impact({target, direction: "upstream"})` before editing any
-  affected symbol; surface HIGH/CRITICAL risk before proceeding.
-- **R5 authority boundaries**: No second parser, validator, formatter, remote
-  executor, Git implementation, or terminal harness may be introduced for an
-  already-owned concern.
-- **R6 no whole-side resolution**: Whole-file `ours`/`theirs` is forbidden for
-  production files unless a path-level audit proves one side is intentionally
-  identical/obsolete and the resolution record contains that proof.
-- **R9 evidence integrity**: Existing benchmark samples, fixture hashes, review
-  records, and historical evidence MUST NOT be rewritten merely because the
-  branches merged.
-- **R10 cross-platform**: Code and tests remain designed for macOS, Windows,
-  and Linux. Native non-macOS execution is NEVER a completion gate.
-- **R11 resource isolation**: One validation owner; package-area gates run
-  serially; real-terminal tests stay serialized; never run workspace-wide Cargo
-  gates or unscoped root lifecycle recipes; never run `cargo fmt` in write mode.
-- **Comment quality / formatting**: Match surrounding style by hand. Do not
-  introduce stray reformats — they poison branch↔`main` merges.
+`biscuit-terminal` is an unchanged upstream boundary, not an unconditional gate
+area. Its trees at both pins must be identical. Add its area gates only if the
+actual merge changes that tree or the final Sniff/GitNexus evidence expands
+scope to it. Darkmatter's own Level 2 suite remains mandatory for the terminal
+integration seam.
 
-## Resolution Record (open throughout the plan)
+This table is only a starting point. Phase 0 records packages, package areas,
+workspace members, and dependency edges separately. Phase 5 freezes the final
+gate scope after the merged symbol set is known. A package or area may be
+removed only with both Sniff dependency evidence and GitNexus impact evidence.
 
-Maintain one entry per conflict and per auto-merged shared production path. Each
-entry MUST include:
+## Evidence Storage and Control-Artifact Disposition
 
-- path and conflict type;
-- behavior contributed by `darkmatter`;
-- behavior contributed by `more-is-more`;
-- chosen merged structure and why it preserves the authority boundary;
-- symbols and flows identified by GitNexus impact analysis, when applicable;
-- focused tests or inspections used as evidence;
-- any follow-up that is explicitly outside merge completion.
+The reviewed spec and its inputs include dirty or newly added source-worktree
+content that is not present in both pinned commits. This creates a bootstrap
+constraint: the integration worktree must be clean when the merge starts, so
+the preflight record cannot initially live inside it.
 
-Suggested location: `darkmatter/fixes/2026-07-20-dm-mega-merge/resolution-record.md`
-(one entry appended per resolved path; never edit a closed entry).
+Use two evidence locations:
 
-The ten required entries (six conflicts + four auto-merge audits):
+1. **External preflight ledger** — create a dedicated path outside every Git
+   worktree with `mktemp -d`; record its exact absolute path and retain it
+   through handoff. Phase 0 writes a preflight manifest there; Phase 1 freezes
+   and hashes it before conflict edits. Later raw logs may be added as separate
+   files without changing that manifest.
+2. **Authoritative integration record** — after the no-commit merge starts,
+   create
+   `darkmatter/fixes/2026-07-20-dm-mega-merge/resolution-record.md` in the
+   integration worktree. Import a concise Phase 0 summary and record the
+   external ledger path plus the immutable manifest's content hash. The
+   specification itself authorizes this new evidence artifact.
 
-1. `.claude/skills/darkmatter/SKILL.md` (conflict; hash regenerated in Phase 5)
-2. `.claudine/memory/commits.md` (conflict)
-3. `CLAUDE.md` (conflict; GitNexus count refreshed in Phase 5)
-4. `darkmatter/cli/tests/level2_code_block_styling.rs` (conflict)
-5. `darkmatter/cli/tests/level2_errors.rs` (conflict)
-6. `darkmatter/features/2026-07-15-performance-followup/review-8.md` (modify/delete)
-7. `darkmatter/lib/Cargo.toml` (auto-merge audit)
-8. `darkmatter/lib/src/markdown/schemas/mod.rs` (auto-merge audit)
-9. `darkmatter/lib/src/markdown/schemas/validate.rs` (auto-merge audit)
-10. `darkmatter/cli/src/commands/compose.rs` (auto-merge audit)
+Before Phase 1, every existing control artifact must have an explicit
+disposition in the external ledger:
 
-Any newly overlapping path discovered after a refreshed preview MUST be added
-to the same record before work continues.
+- `external-only`: readable evidence, never added to the integration index; or
+- `authorized-documentation-delta`: copied only after conflict resolution,
+  verified against its frozen working-content hash, and separately identified
+  in the staged-diff audit.
+
+Do not infer authorization from the artifact being staged, modified, or
+untracked in a source worktree. A missing disposition blocks final handoff, not
+the read-only preflight.
+
+## Cross-Cutting Controls
+
+- Set `GIT_TERMINAL_PROMPT=0` for every Git command. All Git operations are
+  one-shot and non-interactive.
+- One operator owns the integration index and all edits. Read-only audits may
+  be prepared independently, but concurrent edits or staging in the same
+  worktree are forbidden.
+- One validation owner runs all build/test/lint commands from the integration
+  worktree. No other worktree may run competing Rust or terminal gates.
+- Whole-file `ours`/`theirs` resolution is forbidden for production files. It
+  is allowed elsewhere only after a path-level audit proves one side is
+  intentionally identical or obsolete and records that proof.
+- Process discovery is read-only. Stop a process only when it is attributable
+  to this integration and stopping it is separately authorized. Otherwise
+  wait, isolate the target directory, or report the deferred gate.
+- Record and export one dedicated `CARGO_TARGET_DIR`, `CARGO_BUILD_JOBS`, and
+  `NEXTEST_TEST_THREADS` budget. Also record `BISCUIT_L2_THREADS` wherever an
+  area recipe uses owned-pane Level 2 concurrency.
+- Invoke real-terminal tests only through the owning area's `just test-l2`
+  recipe. Preserve the recipe's shared-pane or owned-pane policy; never run
+  Level 2 tests directly through Nextest or concurrently from another
+  worktree.
+- Focused Level 1 Rust tests use Nextest. `cargo test` is forbidden. Final
+  gates use the affected package area's `just build`, `just test`,
+  `just test-l2`, and `just lint` recipes.
+- Never use a bare root Cargo build/check/test, `--workspace`, an unscoped root
+  lifecycle recipe, or write-mode `cargo fmt`/`rustfmt`.
+- Keep edits surgical and match surrounding formatting by hand. Any behavior
+  change includes a pass over its docs and comments; do not mix unrelated
+  cleanup or stale-comment narration into the merge.
+- Every Cargo inspection or execution uses the existing lockfile. A
+  `Cargo.lock` content change is a failure until explicitly explained and
+  reviewed.
+- Remote/provider acceptance tests are loopback-fixture-only. Sanitize ambient
+  provider-token and credential-helper influence without recording secret
+  values; record only the names of variables/config channels neutralized.
+- Generated metadata is refreshed once, after all gates and corrective edits:
+  Darkmatter skill hash first, GitNexus index/counts second.
+- Any test or gate failure returns to the owning resolution phase. Do not patch
+  forward in Phase 5, 6, or 7 without updating impact/scope evidence and
+  invalidating any later evidence already collected.
+
+## Resolution Record Contract
+
+Maintain one path-resolution entry for each of the ten shared net-change paths:
+
+1. `.claude/skills/darkmatter/SKILL.md` — textual conflict;
+2. `.claudine/memory/commits.md` — textual conflict;
+3. `CLAUDE.md` — textual conflict;
+4. `darkmatter/cli/tests/level2_code_block_styling.rs` — textual conflict;
+5. `darkmatter/cli/tests/level2_errors.rs` — textual conflict;
+6. `darkmatter/features/2026-07-15-performance-followup/review-8.md` — modify/delete;
+7. `darkmatter/lib/Cargo.toml` — auto-merge audit;
+8. `darkmatter/lib/src/markdown/schemas/mod.rs` — auto-merge audit;
+9. `darkmatter/lib/src/markdown/schemas/validate.rs` — auto-merge audit;
+10. `darkmatter/cli/src/commands/compose.rs` — auto-merge audit.
+
+Each entry records the conflict/audit type, both parent contributions, chosen
+merged structure, governing requirement, authority boundary, GitNexus symbols
+and flows where applicable, focused evidence IDs, and deferred follow-up. New
+overlaps, conflicts, or snapshot changes get entries before work continues.
+
+Path decisions are append-only after closure. Later test results live in a
+separate evidence ledger section and refer back to the path entry by ID.
 
 ---
 
-## Phase 1 — Freeze Source State and Provision Integration Worktree
+## Phase 0 — Freeze Inputs, Scope Evidence, and Provision a Clean Worktree
 
-**Goal**: Establish a clean, recoverable foundation for the merge. Capture
-pinned revisions, inventory source-worktree state, halt interfering processes,
-and create the disposable integration worktree from the pinned `darkmatter`
-head. (Maps to spec Phase 0 / R1.)
+**Goal**: Establish immutable inputs, recoverability, exact source-worktree
+state, a clean integration worktree, and pre-edit impact evidence without
+changing either source worktree. (Spec Phase 0; R1, R2, R11, R12.)
 
 **Depends on**: nothing.
 
-**Validation checkpoint**: Source worktrees are unchanged; the integration tree
-is clean; pinned inputs are recoverable by name; the conflict inventory is
-current; one validation owner is recorded.
+**Checkpoint**: Both source worktrees are unchanged; all pins and the merge
+base are proven; backup refs exist; the integration worktree is clean at the
+pinned `darkmatter` parent; the external ledger contains scope, resource, and
+control-artifact evidence.
 
-- [ ] Designate a single validation owner for the duration of the integration.
-  Record the owner identity and the host budget for `CARGO_BUILD_JOBS` and
-  `NEXTEST_TEST_THREADS` in `resolution-record.md`.
-- [ ] Confirm the three pinned revisions still equal the SHAs in the spec's
-  "Pinned Inputs" table:
-  - [ ] merge base `d672388dd0fed4196295e7f21514cac6fa59f0ae`;
-  - [ ] `darkmatter` head `14dd391f45206d58383ba9d84adbf53c65520534`;
-  - [ ] `more-is-more` head `0584d8297f57f5eb30b52d03b1241ba55184bb44`.
-- [ ] If any pinned ref moved, STOP and regenerate merge base, branch deltas,
-  shared-path inventory, and `git merge-tree` preview before any further work.
-- [ ] Run `git status --short` in both source worktrees
-  (`/Users/ken/.claudine/worktrees/rusty-biscuit/darkmatter` and
-  `/Users/ken/.claudine/worktrees/rusty-biscuit/more-is-more`) and save the
-  output to `resolution-record.md`. The `darkmatter` worktree currently has a
-  modified `CLAUDE.md`, untracked `.claude/settings.local.json`, and the
-  untracked merge report directory — these MUST NOT enter any merge commit.
-- [ ] Halt every interfering Cargo, rustc, linker, Nextest, Criterion, and
-  terminal-harness process across all related worktrees before proceeding.
-- [ ] Capture pre-merge fixture hashes and retained benchmark artifact
-  identities (per conflict-report "Additional Risk Reduction") so silent
-  rewrites are detectable after the merge.
-- [ ] Record the package-area scope with `sniff repo packages` and save the
-  output to `resolution-record.md`.
-- [ ] Capture pre-edit GitNexus impact data for the symbols in the four
-  auto-merged production paths (Phase 3 targets) and the high-risk directories
-  in spec R8. For each symbol, record direct callers, affected execution
-  flows, and risk level. Surface any HIGH/CRITICAL risk in
-  `resolution-record.md` before that symbol is edited.
-- [ ] Create lightweight backup refs for both pinned heads, for example:
-  - [ ] `git branch backup/dm-mega-merge/darkmatter 14dd391f45206d58383ba9d84adbf53c65520534`;
-  - [ ] `git branch backup/dm-mega-merge/more-is-more 0584d8297f57f5eb30b52d03b1241ba55184bb44`.
-- [ ] Create a dedicated clean integration worktree and branch from the pinned
-  `darkmatter` head. Suggested path:
-  `/Users/ken/.claudine/worktrees/rusty-biscuit/dm-mega-merge` on branch
-  `dm-mega-merge`. Confirm `git -C <integration> status` is clean and that
-  `git -C <integration> rev-parse HEAD` equals the pinned `darkmatter` SHA.
-- [ ] Record the integration worktree path, branch name, and clean status in
-  `resolution-record.md`.
+- [x] Create the external preflight directory with `mktemp -d`, record its
+  absolute path, designate the single integration/validation owner, and name
+  the immutable preflight manifest that will be hashed before Phase 1 edits.
+- [x] With `GIT_TERMINAL_PROMPT=0`, prove each pin is a commit using
+  `git cat-file -e <sha>^{commit}` and record `git show -s --format=fuller` for
+  each object.
+- [x] Run `git merge-base <darkmatter-pin> <more-is-more-pin>` and require the
+  exact pinned merge base. Record `git rev-list --left-right --count` as a
+  corroborating branch-delta check.
+- [x] Recompute the ten-path intersection from the two merge-base deltas and
+  run the read-only three-tree `git merge-tree <base> <ours> <theirs>` preview.
+  Require the expected ten shared paths and six predicted conflicts. Do not use
+  a preview mode that writes a tree object.
+- [x] Compare the `biscuit-terminal` subtree object at both pins and require
+  byte-identical trees; otherwise add the area to candidate scope and update
+  the conflict/overlap audit before proceeding.
+- [x] For the spec and every listed input, record:
+  - [x] absolute path and `git status --short -- <path>`;
+  - [x] HEAD blob ID when present;
+  - [x] index blob ID when present; and
+  - [x] exact working-content ID from `git hash-object --no-filters <path>`.
+- [x] Record an `external-only` or `authorized-documentation-delta`
+  disposition for each control artifact. Stop before Phase 1 if the operator
+  has not made this decision.
+- [x] Record byte-for-byte `git status --short` output for both source
+  worktrees and an identity hash for every dirty/untracked file that must be
+  preserved. Do not rely on a prose list of today's known dirty files.
+- [x] Inventory potentially interfering Cargo, rustc, linker, Nextest,
+  Criterion, and terminal-harness processes. Record PID/command/worktree
+  attribution without secrets. Apply the process rule above; do not issue a
+  blanket termination command.
+- [x] Record the relevant host capacity with Sniff and choose conservative,
+  fixed values for `CARGO_BUILD_JOBS`, `NEXTEST_TEST_THREADS`, and any
+  `BISCUIT_L2_THREADS` override.
+- [x] Record discovery separately from the repository root:
+  - [x] `sniff repo packages --json`;
+  - [x] `sniff repo package-areas --json`;
+  - [x] `sniff repo package-dependencies --json`; and
+  - [x] `cargo metadata --locked --no-deps --format-version 1`.
+- [x] Summarize the workspace member count and affected manifest paths from
+  Cargo metadata; never hardcode the member count or infer membership from
+  directory names. Record the `Cargo.lock` content ID before inspection.
+- [x] Freeze the retained benchmark artifacts, performance evidence, fixture
+  hashes, snapshots, and review-chain files named by the source feature specs.
+  Record content identities rather than copying them into the integration
+  worktree.
+- [x] Verify the GitNexus indexes used for both pinned parents name the exact
+  pinned commits. Use `query`/`context` to resolve ambiguous symbols to UIDs,
+  then record upstream `impact` with `includeTests: true` for the affected
+  public functions/types in the four auto-merged production paths and the R8
+  seam directories. Record direct callers, processes, modules, risk, and both
+  parent perspectives where a symbol exists on only one parent.
+- [x] Surface every HIGH/CRITICAL impact result to the authorizing operator
+  before Phase 2 edits and attach a focused-regression obligation. If a later
+  edit touches an unrecorded symbol, run impact for that UID before editing it.
+- [x] Create backup refs without overwriting an existing different target.
+  If a proposed ref exists, proceed only after proving it already names the
+  same pin; otherwise choose a new name.
+- [x] Choose a new integration branch name and worktree path. If either exists,
+  do not delete or reuse it automatically; prove it is the intended clean
+  object or choose a collision-free name.
+- [x] Create the integration worktree from the exact `darkmatter` pin and
+  require `git status --porcelain` to be empty and `HEAD` to equal that pin.
+- [x] Create a dedicated Cargo target directory with `mktemp -d`, record the
+  absolute path, and retain it through handoff.
 
 ---
 
-## Phase 2 — Create the Unresolved Integration State
+## Phase 1 — Create and Inventory the No-Commit Merge
 
-**Goal**: Perform the merge without committing, compare actual conflicts to the
-predicted six, and freeze a pre-resolution snapshot. Every unmerged path MUST
-be mapped to a requirement before any conflict marker is edited. (Maps to spec
-Phase 1.)
+**Goal**: Enter the unresolved merge state, verify actual conflicts against the
+preview, and bootstrap the authoritative integration record before editing any
+conflict. (Spec Phase 1; R1, R6, R12.)
+
+**Depends on**: Phase 0.
+
+**Checkpoint**: `HEAD` and `MERGE_HEAD` prove the intended parents; every
+unmerged path is mapped to a requirement; no conflict marker has been edited;
+the resolution record contains the frozen preflight summary.
+
+- [x] From the clean integration worktree run, with
+  `GIT_TERMINAL_PROMPT=0`,
+  `git merge --no-commit --no-ff 0584d8297f57f5eb30b52d03b1241ba55184bb44`.
+  Do not commit.
+- [x] Record `git status --short`, `git diff --name-only --diff-filter=U`, and
+  `git ls-files -u` in the external ledger. Do not create ad hoc status files
+  inside the integration worktree.
+- [x] Require the six predicted conflicts, including the Review 8
+  modify/delete case. If the set differs, stop, update the inventory, and
+  explain whether the discrepancy invalidates the preview.
+- [x] Prove `HEAD` is the pinned `darkmatter` parent and `MERGE_HEAD` is the
+  pinned `more-is-more` parent.
+- [x] Freeze the external preflight manifest and compute its content identity;
+  subsequent raw logs use separate files.
+- [x] Create `resolution-record.md` in the integration worktree, summarize
+  Phase 0, and record the external ledger path and immutable-manifest hash.
+- [x] Create a stub record for all ten shared paths plus any unexpected path.
+  Do not edit conflict content until every unmerged path has a governing
+  requirement.
+
+---
+
+## Phase 2 — Resolve and Audit Production Authority Seams
+
+**Goal**: Semantically audit the four auto-merged production paths and the
+cross-file unions before resolving tests or documentation. (Spec Phase 2; R5,
+R7, R8.)
 
 **Depends on**: Phase 1.
 
-**Validation checkpoint**: Every unmerged path is understood and mapped to a
-requirement; the pre-resolution status and unmerged-path list are persisted in
-the merge record.
+**Checkpoint**: All production seams preserve both parents' behavior; locked
+metadata succeeds without lockfile drift; any corrective production edit is
+staged and linked to pre-edit impact evidence.
 
-- [ ] From the integration worktree, run
-  `git merge --no-commit --no-ff 0584d8297f57f5eb30b52d03b1241ba55184bb44`.
-  Do not commit. Do not abort unless Phase 1 recovery is required.
-- [ ] Capture the live conflict inventory:
-  - [ ] `git status --short > <integration>/pre-resolution-status.txt`;
-  - [ ] `git diff --name-only --diff-filter=U > <integration>/unmerged-paths.txt`.
-- [ ] Compare the actual conflicts with the six predicted paths from
-  conflict-report §"Predicted Mechanical Conflicts":
-  - [ ] `.claude/skills/darkmatter/SKILL.md`;
-  - [ ] `.claudine/memory/commits.md`;
-  - [ ] `CLAUDE.md`;
-  - [ ] `darkmatter/cli/tests/level2_code_block_styling.rs`;
-  - [ ] `darkmatter/cli/tests/level2_errors.rs`;
-  - [ ] `darkmatter/features/2026-07-15-performance-followup/review-8.md`
-    (modify/delete).
-- [ ] If any unexpected conflict, modify/delete case, or newly overlapping
-  path appears, STOP and update the conflict inventory and resolution record
-  before continuing. Regenerate the `git merge-tree` preview if the
-  discrepancy suggests the source trees have shifted.
-- [ ] For each unmerged path, create a stub entry in `resolution-record.md`
-  containing: path, conflict type, the contributing branch behaviors (per
-  conflict-report), and the spec requirement(s) that govern resolution.
-- [ ] Confirm that `git -C <integration> log -1 --pretty=%H` still equals the
-  pinned `darkmatter` head (no commit should have been created).
+### 2a — `darkmatter/lib/Cargo.toml`
+
+- [x] Confirm `sniff` retains the `remote` feature, `git2` remains dev-only,
+  and `clean_hot_paths` remains a benchmark target.
+- [x] Confirm no second production Git implementation was introduced.
+- [x] Run `cargo metadata --locked --no-deps --format-version 1` from the repo
+  root and verify the `Cargo.lock` content ID is unchanged.
+
+### 2b — `darkmatter/lib/src/markdown/schemas/mod.rs`
+
+- [x] Use GitNexus UIDs rather than ambiguous names for the clean facade,
+  `effective_for_with_override`, raw-validation entry points,
+  `SchemaReference`, and source-aware parser/cursor/span exports.
+- [x] Preserve the extracted test-module layout, clean-analysis exports,
+  schema override/raw-validation seams, deterministic ordering, bounded schema
+  references, and every DMLS source-aware export.
+- [x] Do not restore the removed inline god-test module.
+
+### 2c — `darkmatter/lib/src/markdown/schemas/validate.rs`
+
+- [x] Preserve helper visibility required by schema-clean analysis.
+- [x] Preserve the URL-scheme, `type-definition`, and `schema` custom
+  validator registrations.
+- [x] Keep raw and coercing validation as distinct testable paths.
+
+### 2d — `darkmatter/cli/src/commands/compose.rs`
+
+- [x] Preserve the shared `env_disables_baseline_schema` rule used by clean.
+- [x] Preserve removal of obsolete approval-error bindings.
+- [x] Preserve focused provider/approval error classification and rendering.
+
+### 2e — Directory-level propagation audit
+
+- [x] `markdown/compose/context`: demand-driven `ctx.branch`, `ctx.worktree`,
+  and `ctx.merge_conflicts`; shared repository discovery; independent
+  degradation.
+- [x] `markdown/compose/expression`: structured literals, postfix indexing,
+  indexed-file functions, and runtime-policy propagation through root and
+  nested compose paths.
+- [x] `markdown/schemas`: one grammar/AST authority, clean analysis,
+  references/cycles/depth, nominal validators, source products, recursion
+  limit, serializer/descriptors, and base `$schema: schema` declaration.
+- [x] DMLS graph/overlay/providers/diagnostics: catalog-driven passive
+  behavior only; no shell, network, repository mutation, or composition.
+- [x] Darkmatter clean/compose CLI: baseline-disable parity, output behavior,
+  idempotency, and save/stdout equivalence.
+- [x] Sniff Git/remote: caller-anchored direction-correct read-only conflict
+  prediction; preferred remote/provider/flavor/credential authority.
+- [x] Claudine lifecycle/classification/rendering: traversal and validation of
+  container expressions and nominal schema values.
+- [x] Check propagation across frontmatter, body, `$()` branches, nested
+  subtrees, CLI commands, and passive DMLS projections.
+
+### 2f — Closeout
+
+- [x] For every corrective edit, update behavior docs/comments in scope and
+  stage the reviewed path with `git add -- <path>`. Auto-merged paths that need
+  no edit remain staged by the merge.
+- [x] Scan changed production text for conflict markers and investigate every
+  match; do not use a repository-wide scan that mistakes committed fixtures
+  for unresolved conflicts.
+- [x] Re-run locked metadata and the lockfile identity check.
+- [x] Close the four production path records with planned focused evidence
+  IDs. Test results are appended later in the evidence ledger.
 
 ---
 
-## Phase 3 — Resolve Production Authority Seams
+## Phase 3 — Resolve Test Conflicts and Audit Harness Topology
 
-**Goal**: Resolve every production-code conflict and every auto-merged shared
-production path by meaning, then audit the directory-level semantic unions.
-Production code MUST be clean and metadata-valid before any test or
-documentation work proceeds. (Maps to spec Phase 2 / R5 / R7 / R8.)
+**Goal**: Resolve the two Level 2 test conflicts around the centralized helper
+without restoring obsolete harness code. (Spec Phase 3; R3.4, R6.)
 
 **Depends on**: Phase 2.
 
-**Validation checkpoint**: No conflict markers remain in production code;
-`cargo metadata --no-deps --format-version 1` succeeds and confirms the
-intended package/features/dev-dependency shape; the authority-boundary audit
-(R5) is complete for every seam; every Phase 3 path has a closed
-`resolution-record.md` entry.
+**Checkpoint**: Both conflicted test paths are marker-free and prepared for the
+operator's separate staging step; no duplicate terminal harness/parser/
+validator/formatter authority was restored; focused test commands are
+identified, with the L1 helper-integrity selector executed in this phase.
 
-> **Parallelizable** (within this phase): the four production paths are
-> textually independent and MAY be resolved in separate worktree sessions by
-> different operators, as long as only one operator runs `cargo metadata` and
-> the final directory audit. The directory-level R8 audits are also
-> parallelizable by directory. Do NOT parallelize across worktrees running
-> build/test/lint gates (R11).
-
-### 3a — `darkmatter/lib/Cargo.toml` (auto-merge audit)
-
-- [ ] Read the merged manifest and confirm all three independent changes are
-  present:
-  - [ ] `sniff` with the `remote` feature for provider functionality;
-  - [ ] `git2` as a **dev-only** merge-prediction oracle (not in `dependencies`);
-  - [ ] the `clean_hot_paths` benchmark target.
-- [ ] Run `cargo metadata --no-deps --format-version 1` and confirm it
-  succeeds and that the package/features/dev-dependency shape matches
-  expectations. Save the command's exit status in `resolution-record.md`.
-- [ ] Confirm Sniff's pure-Rust Git implementation remains the production
-  authority — `git2` MUST NOT have entered production dependencies.
-
-### 3b — `darkmatter/lib/src/markdown/schemas/mod.rs` (auto-merge audit; highest silent-merge risk)
-
-- [ ] Run GitNexus `impact({target: "<affected symbol>", direction: "upstream"})`
-  for each of: the `clean` analysis facade, `effective_for_with_override`,
-  raw-validation entry points, `SchemaReference`, and the source-aware cursor
-  and parser exports. Record results in `resolution-record.md` and surface any
-  HIGH/CRITICAL risk before editing.
-- [ ] Confirm the merged module preserves **all** of:
-  - [ ] the extracted test-module layout (do not restore the removed god-file);
-  - [ ] the public `clean` analysis exports and schema override / raw-validation
-    seams from `darkmatter`;
-  - [ ] `SchemaReference` classification and bounded reference resolution from
-    `more-is-more`;
-  - [ ] all source-aware cursor, declaration, value, span, and parser exports
-    needed by DMLS;
-  - [ ] the `PartialOrd`/`Ord` behavior used for deterministic clean
-    diagnostics; and
-  - [ ] the invalid-frontmatter `clean` facade, `effective_for_with_override`,
-    raw validation, and ordered problem codes contributed by `darkmatter`.
-- [ ] If any export, registration, or ordering is missing, restore it
-  additively (do not choose a side); record the symbol(s) and invariant(s)
-  preserved in `resolution-record.md`.
-
-### 3c — `darkmatter/lib/src/markdown/schemas/validate.rs` (auto-merge audit)
-
-- [ ] Confirm the `pub(super)` helper visibility required by schema-clean
-  analysis (from `darkmatter`) is retained.
-- [ ] Confirm the URL-scheme keyword and both `type-definition` and `schema`
-  custom validator registrations (from `more-is-more`) are present.
-- [ ] Verify the merged validator builder separately exercises raw and
-  coercing validation paths so a schema-proven clean repair is not hidden by
-  coercion.
-- [ ] Append a closed entry to `resolution-record.md`.
-
-### 3d — `darkmatter/cli/src/commands/compose.rs` (auto-merge audit)
-
-- [ ] Confirm the merged file retains the shared `env_disables_baseline_schema`
-  baseline-disable rule used by clean (from `darkmatter`).
-- [ ] Confirm the merged file retains the removal of obsolete approval-error
-  bindings (from `more-is-more`).
-- [ ] Confirm focused provider/approval error classification and rendering is
-  intact.
-- [ ] Append a closed entry to `resolution-record.md`.
-
-### 3e — Directory-level semantic audits (R8)
-
-For each directory union, confirm new state and policy objects propagate
-through every intended entry point (nested compose subtrees, frontmatter,
-body, shell expressions, CLI commands, DMLS passive projections):
-
-- [ ] `darkmatter/lib/src/markdown/compose/context` — confirm `ctx.branch`,
-  `ctx.worktree`, `ctx.merge_conflicts` are demand-driven, share repository
-  discovery, and degrade independently (R4.3).
-- [ ] `darkmatter/lib/src/markdown/compose/expression` — confirm array/object
-  literals, indexed-file functions, and postfix indexing are intact (R4.1,
-  R4.2).
-- [ ] `darkmatter/lib/src/markdown/schemas` (especially `clean`, `simplified`,
-  `reference`, `resolve`, `format`, `validate`) — confirm shared grammar/AST
-  authority, descriptors, serializer, portable carrier domain, custom
-  validators, array postfix support, shared recursion limit, and base
-  `$schema: schema` declaration (R4.9, R4.10).
-- [ ] `darkmatter/dmls/src/{overlay,providers,diagnostics}` and the graph
-  substrate — confirm DMLS remains catalog-driven and passive: no shell, no
-  network, no repository mutation, no compose execution (R4.8).
-- [ ] `darkmatter/cli/src/commands/clean*` and `commands/compose.rs` — confirm
-  clean/compose parity, idempotency, and the baseline-disable rule (R3.4).
-- [ ] `sniff/lib/src/filesystem/git` and `sniff/lib/src/remote` — confirm
-  conflict prediction remains caller-repository anchored, committed-tip based,
-  deterministic, and free of HEAD/ref/worktree/live-index/object-database
-  mutation; confirm preferred-remote selection and provider/flavor discovery
-  are Sniff-owned (R4.4, R4.5).
-- [ ] Claudine lifecycle, validation, classification, and rendering paths —
-  confirm Claudine continues to traverse, validate, classify, and render
-  container expressions and semantic schema values (R4.12).
-
-### 3f — Phase 3 closeout
-
-- [ ] From the integration worktree, run
-  `rg -n '^<<<<<<< |^>>>>>>> |^=======$' darkmatter/lib darkmatter/cli/src darkmatter/dmls/src`
-  and confirm zero matches in production code.
-- [ ] Run `cargo metadata --no-deps --format-version 1` one more time and
-  confirm it succeeds.
-- [ ] Confirm every Phase 3 path has a closed `resolution-record.md` entry
-  with the required fields.
+- [x] Resolve `level2_code_block_styling.rs` using the centralized
+  `tests/common/level2.rs` helper.
+  - [x] Do not restore the local tmux harness, sentinel loop, fixture writer,
+    or `run_md_in_tmux` helper.
+  - [x] Port only unique incoming build-shim or terminal-discovery coverage
+    not already represented by the shared helper.
+  - [x] Preserve the area recipe's serialization/resource policy.
+- [x] Resolve `level2_errors.rs` with one canonically ordered `md_shim` import
+  and the current shared build shim.
+- [x] Prepare each resolved test path for explicit staging. Per the operator's
+  no-staging instruction, the working files are marker-free and byte-identical
+  to the selected parent blobs, while their unmerged index entries are an
+  explicitly deferred handoff item.
+- [x] Audit auto-merged tests for schema/clean, expressions/context,
+  references, DMLS, Sniff Git/remote/credentials, and Claudine downstream
+  behavior. Map existing test binaries/cases to every Phase 5 seam.
+- [x] Confirm no duplicate tmux harness, YAML parser/validator, formatter, Git
+  implementation, terminal discovery, or remote executor was restored.
+- [x] Close the two test-conflict records with their focused evidence IDs.
 
 ---
 
-## Phase 4 — Resolve Tests and Focused Harness Behavior
+## Phase 4 — Resolve Documentation and Policy; Defer Generated Values
 
-**Goal**: Resolve the two Level 2 test conflicts around the centralized shared
-helper and audit auto-merged tests for accidental duplication of the harness,
-parser, validator, or formatter. (Maps to spec Phase 3 / R3.4.)
+**Goal**: Resolve the remaining conflicts and support-file unions, while
+deferring derived hashes/counts until all testing and corrective edits are
+complete. (Spec Phase 4; R6, R9.)
 
-**Depends on**: Phase 3 (tests reference resolved production code).
+**Depends on**: Phase 3.
 
-**Validation checkpoint**: Focused tests compile far enough to confirm imports,
-feature flags, and test-harness topology before broad package-area gates; no
-duplicate tmux harness, parser, validator, or formatter was restored; the two
-test-file `resolution-record.md` entries are closed.
+**Checkpoint**: Every remaining conflict has marker-free working content
+prepared for the operator's separate staging step; changed text has no
+unexplained conflict markers; policy and review history are coherent; skill
+hash and GitNexus counts are explicitly marked pending final refresh.
 
-- [ ] Run GitNexus impact analysis for any helper symbols referenced by the
-  test files (e.g., the shared `common::level2` module, `md_shim`) and record
-  the results.
-- [ ] Resolve `darkmatter/cli/tests/level2_code_block_styling.rs`:
-  - [ ] Use the `darkmatter` structural direction: keep the centralized helper
-    in `tests/common/level2.rs` and the shared-harness imports.
-  - [ ] Do NOT reintroduce the local tmux harness, sentinel loop, fixture
-    writer, or `run_md_in_tmux` helper from `more-is-more`.
-  - [ ] Port any unique incoming Cargo build-shim coverage and
-    terminal-discovery coverage that is not already represented in the
-    centralized helper.
-  - [ ] Preserve serialization of real-terminal tests.
-- [ ] Resolve `darkmatter/cli/tests/level2_errors.rs`:
-  - [ ] Keep exactly one `md_shim` import in the canonical surrounding order.
-  - [ ] Confirm the tests use the current shared helper and build shim rather
-    than any obsolete local path.
-- [ ] Audit auto-merged tests in:
-  - [ ] schema, clean, and validate suites;
-  - [ ] expression, context, and indexed-file suites;
-  - [ ] DMLS overlay, providers, diagnostics, and session suites;
-  - [ ] Sniff Git, conflict prediction, remote, and credential suites;
-  - [ ] Claudine traversal, validation, classification, and rendering suites.
-- [ ] Confirm no local duplicate tmux harness, parser, validator, formatter,
-  Git implementation, or terminal discovery was restored anywhere in
-  `darkmatter/`, `dmls/`, `sniff/`, `claudine/`, or `biscuit-terminal/`.
-  Record the negative finding in `resolution-record.md`.
-- [ ] Close the two test-file entries in `resolution-record.md`.
+### 4a — Darkmatter skill
 
----
+- [x] Merge both bodies semantically: cleanup/reference/invalid-frontmatter
+  guidance from `darkmatter`; Git context/literals/providers/meta-schema
+  guidance from `more-is-more`.
+- [x] Reconcile contradictions against the Phase 2 merged code and update
+  `last_updated`.
+- [x] Prepare the resolved path for explicit staging with the Darkmatter-parent
+  hash recorded as temporary and pending; per the operator's no-staging
+  instruction, do not claim that value describes the merged body.
 
-## Phase 5 — Resolve Documentation, Policy, and Generated Metadata
+### 4b — Commit guidance
 
-**Goal**: Resolve the remaining three predicted conflicts (skill, commit
-guidance, review chain) and refresh generated metadata **once** from the
-resolved tree. Generated artifacts describe the merged tree, not either source
-branch. (Maps to spec Phase 4 / R6 / R9.)
+- [x] Preserve non-interactive signing/pinentry safety, the prohibition on
+  bypassing hooks, and `--only` plus `-F -` argument ordering.
+- [x] Prepare the marker-free resolved path for the operator's separate staging
+  step.
 
-**Depends on**: Phase 3 (production code resolved) and Phase 4 (tests
-resolved) so generated counts reflect real behavior.
+### 4c — Performance review chain
 
-**Validation checkpoint**: `rg` finds no unresolved conflict markers anywhere
-in the integration worktree; `git diff --check` passes; the review chain is
-internally consistent; generated metadata (skill hash, GitNexus counts)
-describes the merged tree.
+- [x] Keep the `darkmatter` Review 8 rather than accepting deletion.
+- [x] Restore and verify Review 7 -> 8 -> 9 -> 10 links.
+- [x] Preserve the open quiet-host evidence status.
+- [x] Prepare Review 8 and the intentional link repairs for the operator's
+  separate staging step.
 
-> **Ordering constraint**: The skill body MUST be final before its hash is
-> recomputed; the source tree MUST be final before GitNexus is refreshed.
-> These two refreshes are the last actions in Phase 5.
+### 4d — `CLAUDE.md` and repository support files
 
-### 5a — Skill content merge
+- [x] Resolve the count conflict with a clearly recorded temporary parent
+  value; final merged-tree counts are written only in Phase 7.
+- [x] Preserve both parents' non-generated guidance without importing dirty
+  source-worktree edits.
+- [x] Review workflow, testing-strategy, review-schema, prompt, skill, and
+  public-doc unions for reduced OS coverage, duplicate jobs, or weakened
+  process rules.
+- [x] Verify historical fixture hashes, benchmark samples, reviews, and open
+  invalid-frontmatter evidence gaps were not rewritten or relabeled.
+- [x] Prepare every reviewed resolution/support-file edit for the operator's
+  separate staging step.
 
-- [ ] Open `.claude/skills/darkmatter/SKILL.md` and resolve the textual
-  conflict (currently limited to frontmatter `hash` and `last_updated`).
-- [ ] Retain both branches' non-duplicated guidance:
-  - [ ] `darkmatter` body: corrected cleanup/list behavior, fresh vs. checked
-    reference-graph validation, invalid-frontmatter analysis, later package
-    architecture;
-  - [ ] `more-is-more` body: Git context capture, conflict prediction,
-    expression literals/functions, remote providers, meta-schema semantics.
-- [ ] Read the merged body end-to-end and reconcile contradictions against
-  the merged code (Phase 3 outcomes are authoritative).
-- [ ] Update `last_updated` to the integration date.
-- [ ] Leave the `hash` field as-is until 5e.
+### 4e — Closeout
 
-### 5b — Commit guidance merge
-
-- [ ] Resolve `.claudine/memory/commits.md`:
-  - [ ] Keep the `darkmatter` non-interactive signing/pinentry safety
-    guidance as a bullet.
-  - [ ] Keep the `more-is-more` prohibition on bypassing repository hooks as
-    a separate bullet.
-  - [ ] Preserve the incoming `--only` plus `-F -` argument-order guidance
-    that auto-merges elsewhere in the file.
-- [ ] Confirm neither rule is weakened by the consolidation.
-
-### 5c — Review chain repair
-
-- [ ] Resolve the `review-8.md` modify/delete conflict by **keeping** the
-  `darkmatter` version. Do not accept the deletion.
-- [ ] Restore the Review 7 → 8 → 9 → 10 chain:
-  - [ ] Audit `review-7.md` (auto-merged) and restore its `next: review-8.md`
-    pointer if `more-is-more` removed it.
-  - [ ] Verify `review-8.md`'s `next:` pointer reaches `review-9.md`.
-  - [ ] Verify `review-9.md`'s `next:` pointer reaches `review-10.md`.
-  - [ ] Verify `review-10.md` has no `next:` pointer (or an explicit terminal
-    marker).
-- [ ] Confirm the performance-followup review chain still states its
-  quiet-host evidence is **open** (R9.5). Do not relabel the gap as closed.
-
-### 5d — Repository support files review
-
-- [ ] Review root workflow changes for accidental duplicate jobs or reduced
-  OS coverage (R9.1).
-- [ ] Review the testing-strategy, review-schema, prompt, skill, and
-  commit-guidance unions.
-- [ ] Confirm existing benchmark samples, fixture hashes, review records, and
-  historical evidence were not rewritten merely because the branches merged
-  (R9.2).
-- [ ] Confirm carried-forward evidence gaps (performance-followup quiet-host,
-  invalid-frontmatter timing/native runtime) remain visible and unlabeled as
-  closed (R9.5, R9.6).
-
-### 5e — Refresh generated metadata (LAST in Phase 5)
-
-- [ ] Recompute the Darkmatter skill Markdown-aware hash from the final body
-  using `md hash .claude/skills/darkmatter/SKILL.md` (or the library
-  equivalent) and write it into the file's frontmatter `hash` field.
-- [ ] Refresh GitNexus once from the resolved source tree:
-  - [ ] `node .gitnexus/run.cjs analyze` (or `npx gitnexus analyze` if no
-    runner is present);
-  - [ ] record the post-merge symbol/relationship counts;
-  - [ ] update `CLAUDE.md` with the refreshed GitNexus counts (resolving the
-    `CLAUDE.md` conflict by replacing both stale counts with the merged-tree
-    count).
-- [ ] Inspect every snapshot delta in the integration tree. Tie each changed
-  snapshot to an intentional merged behavior (R9.4). Revert or document any
-  snapshot that cannot be tied to a named acceptance criterion.
-
-### 5f — Phase 5 closeout
-
-- [ ] From the integration worktree, run
-  `rg -n '^<<<<<<< |^>>>>>>> |^=======$'` and confirm zero matches across the
-  whole tree.
-- [ ] Run `git diff --check` and confirm it passes.
-- [ ] Confirm every Phase 5 path has a closed `resolution-record.md` entry.
+- [x] Verify every unmerged index path has marker-free resolved working
+  content. Per the operator's no-staging instruction, retain the six index
+  entries for the separate staging step rather than requiring
+  `git ls-files -u` to be empty in this session.
+- [x] Scan only changed text files for marker triples and investigate every
+  match, with explicit allowance for intentional conflict fixtures.
+- [x] Run `git diff --check` and locked Cargo metadata; verify no lockfile
+  change.
+- [x] Record every path prepared for separate staging in this phase and keep
+  the skill-hash and GitNexus-count entries open until Phase 7.
 
 ---
 
-## Phase 6 — Focused Convergence Tests
+## Phase 5 — Freeze Scope and Run Focused Convergence Evidence
 
-**Goal**: Run the smallest deterministic tests first so any failure stays
-attributable to a single seam. Each seam MUST have focused passing evidence
-before the broader package-area gates begin. (Maps to spec Phase 5 / R3 / R4 /
-verification matrix.)
+**Goal**: Convert the semantic audit into exact, attributable focused tests,
+then freeze the package/package-area scope for final gates. (Spec Phase 5; R2,
+R3, R4.)
 
-**Depends on**: Phase 5 (clean tree, generated metadata refreshed).
+**Depends on**: Phase 4.
 
-**Validation checkpoint**: Every convergence seam listed below has at least
-one focused passing test on record. Any failure MUST be diagnosed against the
-`resolution-record.md` entry for the affected seam before broader gates run.
+**Checkpoint**: Every semantic seam has focused passing evidence; the final
+gate scope and any reductions are recorded with both Sniff and GitNexus
+evidence; no generated metadata has been refreshed yet.
 
-> **Parallelization**: Within a single integration worktree, focused library
-> unit tests MAY be run concurrently with each other via nextest's default
-> thread pool. Real-terminal tests MUST stay serialized. Do NOT run focused
-> tests from a second worktree concurrently (R11).
-
-- [ ] **Schema clean + meta-schema**: schema exports; nominal validators;
-  raw and coercing validation separately; references / cycles / depth;
-  source projection; DMLS schema consumers.
-- [ ] **Compose + providers**: structured literals; indexed-file endpoints;
-  demand-driven Git context (`ctx.branch`, `ctx.worktree`, `ctx.merge_conflicts`);
-  remote-runtime propagation; fatal focused provider errors; exact-host
-  deny-by-default policy.
-- [ ] **Git safety**: `git2` and pure-Rust Git parity fixtures; conflict
-  prediction direction sensitivity; before/after repository-state assertions
-  proving no mutation of HEAD, refs, index, worktree, or object database.
-- [ ] **Reference validation**: fresh path skips re-verification;
-  `FileTree::ensure_built` skips compatibility/dependency rereads; caller-
-  supplied graphs remain fail-closed and reject stale or mismatched
-  descendants; `PreparedHeadingSnapshot` keeps fragment validation coherent.
-- [ ] **Cleanup + DMLS formatting**: default / preserve / fixed-width list
-  modes (ordered, unordered, task, nested, blockquoted); opaque mixed shell,
-  page, and directive blocks; idempotency; library / compose inline-post /
-  CLI stdout / CLI `--save` / DMLS formatting parity.
-- [ ] **Sniff remote/provider**: preferred-remote selection; `branch_exists_on_remote`;
-  `remote_vendor`; `pr`, `pr_list`, `cicd`, `cicd_list`; provider-aware
-  credential isolation; Wiremock-only provider tests.
-- [ ] **DMLS passive behavior**: no-side-effects suite; completion; hover;
-  diagnostics; document links; LSP session behavior; last-good recovery.
-- [ ] **Claudine downstream**: container traversal; semantic-schema
-  classification, validation, lifecycle, and rendering; CLI context
-  formatting for the new nominal schema types.
-- [ ] **Terminal boundary**: single terminal discovery; centralized Level 2
-  harness; build shim; stable code-block rendering.
-- [ ] **Invalid frontmatter**: ratified repair matrix (A/S1–S4 normalization
-  and quoting; B report-only findings; C safety/spans; D file/stdin/`--save`/
-  verbose/JSON/zero-work; E LF/CRLF/CR/BOM/UTF-8/final-newline forms; F
-  pinned YAML Test Suite, mutation/property, parse-count invariants).
-- [ ] For each focused suite, record the nextest filter used and the pass /
-  fail count in `resolution-record.md`.
-
----
-
-## Phase 7 — Scoped macOS Package-Area Gates
-
-**Goal**: Run one affected package area at a time using its own `just`
-recipes, with exact package selectors where supported. Build, Level 1, Level
-2, and lint gates MUST pass serially on the available macOS host. (Maps to
-spec Phase 6 / R2 / R11.)
-
-**Depends on**: Phase 6 (focused tests already green for every seam).
-
-**Validation checkpoint**: Every area retained by R2 has passing `just build`,
-`just test`, `just test-l2`, and `just lint` evidence in
-`resolution-record.md`, with the recorded host budget held constant across
-runs.
-
-> **Serial only** (R11): never run two package areas concurrently; never run
-> gates from a second worktree; cap `CARGO_BUILD_JOBS` and
-> `NEXTEST_TEST_THREADS` to the recorded host budget; never use a bare root
-> `cargo build`/`check`/`test`, `--workspace`, or an unscoped root lifecycle
-> recipe; real-terminal Level 2 tests keep their existing serialization.
-
-Run the areas in this order (chosen to surface failures near the changed
-authorities first):
-
-### 7a — `biscuit-file` area
-
-- [ ] `cd biscuit-file` (or use the exact package selector) and run, in order:
-  - [ ] `just build`;
-  - [ ] `just test`;
-  - [ ] `just test-l2`;
-  - [ ] `just lint`.
-- [ ] Record the gate results in `resolution-record.md`. If R2 evidence
-  supports removing `biscuit-file-cli` from the gate scope, document the
-  reduction with both sniff and GitNexus evidence.
-
-### 7b — `sniff` area
-
-- [ ] `cd sniff` and run, in order:
-  - [ ] `just build`;
-  - [ ] `just test`;
-  - [ ] `just test-l2`;
-  - [ ] `just lint`.
-- [ ] Record the gate results in `resolution-record.md`.
-
-### 7c — Darkmatter area (`darkmatter`, `darkmatter-cli`, `dmls`)
-
-- [ ] Run each gate across the three Darkmatter packages, in order:
-  - [ ] `just build`;
-  - [ ] `just test` (Level 1);
-  - [ ] `just test-l2` (Level 2, including real-terminal coverage with
-    existing serialization);
-  - [ ] `just lint`.
-- [ ] Use exact package selectors where the recipe supports a narrower
-  recorded scope (e.g., `-p darkmatter`, `-p darkmatter-cli`, `-p dmls`).
-- [ ] Record the gate results in `resolution-record.md`.
-
-### 7d — Claudine area (`claudine`, `claudine-cli`)
-
-- [ ] `cd claudine` and run, in order:
-  - [ ] `just build`;
-  - [ ] `just test`;
-  - [ ] `just test-l2`;
-  - [ ] `just lint`.
-- [ ] Record the gate results in `resolution-record.md`.
-
-### 7e — `biscuit-terminal` area + Darkmatter real-terminal Level 2
-
-- [ ] `cd biscuit-terminal` and run, in order:
-  - [ ] `just build`;
-  - [ ] `just test`;
-  - [ ] `just test-l2`;
-  - [ ] `just lint`.
-- [ ] Re-confirm Darkmatter's real-terminal Level 2 coverage still passes
-  against the shared terminal implementation (single discovery, stable
-  code-block rendering).
-- [ ] Record the gate results in `resolution-record.md`.
-
-### 7f — Scope reduction audit
-
-- [ ] For every package removed from the gate scope, document that both
-  sniff discovery and GitNexus impact evidence support the reduction (R2.5).
-  Otherwise, restore the package to the scope and run its gates.
+- [x] Build a focused-test manifest before running tests. Each row records
+  package, test binary/case or area recipe, tier, exact command, environment
+  budget, expected invariant, and resolution-record evidence ID.
+- [x] Use exact Nextest selectors for Level 1 tests. Invoke every Level 2 case
+  only through the owning area's `just test-l2`; record recipe, backend,
+  passed/skipped counts, and skip reasons instead of inventing a raw Nextest
+  filter.
+- [x] Run the schema/meta-schema seam first: exports; raw vs. coercing
+  validation; nominal keyword registration; references/cycles/depth; source
+  projection; deterministic clean ordering; DMLS schema consumers.
+- [x] Run invalid-frontmatter after meta-schema: ratified repair/report-only
+  matrix; spans/delimiters/line endings/BOM/UTF-8; JSON envelope; flags and
+  trigger isolation; fenced-body protection; pinned YAML Test Suite,
+  mutation/property guards, zero-work, and parse-count invariants.
+- [x] Run compose/provider seams: literals/postfix indexing; indexed-file
+  endpoints; demand-driven Git context; nested/frontmatter/body/`$()` runtime
+  propagation; fatal provider errors; deny-by-default exact-host policy.
+- [x] Run Sniff Git/remote seams: git2 parity oracle; direction-sensitive
+  conflict prediction; before/after repository-state proof; preferred remotes;
+  provider queries/filter/bounds/order; credential isolation; loopback-only
+  fixtures.
+- [x] Run reference trust seams: fresh paths skip redundant verification;
+  `FileTree::ensure_built`; stale/mismatched prebuilt rejection; changed-child
+  behavior; `PreparedHeadingSnapshot` coherence.
+- [x] Run cleanup/formatting seams: default/preserve/fixed-width list matrix;
+  Unicode widths and hanging prefixes; opaque directives/shell/code/table/HTML
+  boundaries; idempotency; library/compose/CLI stdout/CLI save/DMLS parity.
+- [x] Run DMLS passive suites: no side effects, completion, hover,
+  diagnostics, links, graph integration, LSP sessions, and last-good recovery.
+- [x] Run Claudine downstream suites: container traversal and nominal-schema
+  classification, validation, lifecycle, rendering, and CLI formatting.
+- [x] Run retained performance/compatibility mechanism guards without claiming
+  new benchmark evidence: directory-hash membership, no-NTP Darkmatter
+  capture, terminal-query caching, shell ordering/timeouts, graph ownership,
+  recursion limits, and the redundant-walk mechanism/no-regression guards.
+- [x] Run the Darkmatter terminal seam through `just test-l2`: centralized
+  helper, build shim, single terminal discovery, stable code-block rendering.
+- [x] After focused tests, rerun Sniff package/dependency discovery against the
+  integration tree and reconcile it with the recorded impact results. Freeze
+  exact packages, package areas, area recipes, and conditional boundaries for
+  Phase 6.
+- [x] If any test fails, diagnose and return to Phase 2, 3, or 4. Run impact
+  before a new symbol edit, update the resolution entry, rerun affected focused
+  tests, and re-freeze scope.
 
 ---
 
-## Phase 8 — Final Audit and Handoff
+## Phase 6 — Run Scoped macOS Area Gates Serially
 
-**Goal**: Prove the merged result is ready for an explicitly authorized
-commit. Both source refs and worktrees MUST remain recoverable. The merge
-report makes no unsupported performance, platform, or production-readiness
-claim. (Maps to spec Phase 7 and the completion criteria.)
+**Goal**: Pass build, Level 1, Level 2, and lint gates for the frozen affected
+scope with one owner and one isolated target directory. (Spec Phase 6; R2,
+R10, R11.)
 
-**Depends on**: Phase 7 (all gates green).
+**Depends on**: Phase 5.
 
-**Validation checkpoint**: GitNexus change detection matches the recorded
-scope; the final status and staged diff contain only intended integrated
-work; all ten shared paths have closed resolution entries; all carried-forward
-evidence gaps are still documented as open; a concise merge report is
-produced and the integration result is ready for an explicitly authorized
-commit.
+**Checkpoint**: Every retained package area has passing recorded gates; any
+inapplicable canonical recipe reports its intentional no-op; source and lockfile
+content remain unchanged except for reviewed corrective edits.
 
-- [ ] Run GitNexus `detect_changes({scope: "compare", base_ref: "main"})`
-  from the integration worktree and compare the affected symbols and execution
-  flows with the recorded Phase 1 scope. Investigate any drift.
-- [ ] Inspect `git -C <integration> status` and confirm it shows only intended
-  changes (no source-worktree-local files, no local settings, no generated
-  junk, no bulk snapshot update).
-- [ ] Inspect the complete `git -C <integration> diff` and the staged diff
-  end-to-end.
-- [ ] Confirm all ten shared paths have closed resolution/audit entries in
-  `resolution-record.md` (six conflicts + four auto-merge audits).
-- [ ] Confirm no unrelated source-worktree file, local setting, generated
-  junk, or wholesale snapshot update is present.
-- [ ] Confirm all carried-forward evidence gaps are still documented and
-  have not been mislabeled as closed:
-  - [ ] performance-followup quiet-host captures (acceptance criteria 5 and
-    6) remain open;
-  - [ ] invalid-frontmatter common-case timing and native Linux/Windows
-    runtime evidence remain visible.
-- [ ] Walk the spec's completion criteria (15 items) and record pass/fail
-  for each in `resolution-record.md`.
-- [ ] Produce a concise merge report at
-  `darkmatter/fixes/2026-07-20-dm-mega-merge/merge-report.md` covering:
-  - [ ] pinned inputs (restate the three SHAs);
-  - [ ] actual conflicts vs. predicted (Phase 2 inventory);
-  - [ ] resolutions and auto-merge audits (link to `resolution-record.md`);
-  - [ ] focused convergence evidence (Phase 6);
-  - [ ] package-area gate results (Phase 7, with host budget);
-  - [ ] generated metadata refreshed (skill hash, GitNexus counts, snapshots);
-  - [ ] any non-blocking follow-up (quiet-host captures, invalid-frontmatter
-    timing/native runtime);
-  - [ ] explicit statement that no Level 3 evidence is used or required and
-    that native Windows/Linux execution is not a completion gate.
-- [ ] Confirm both source refs (`darkmatter@14dd391f...`,
-  `more-is-more@0584d82...`) still equal their pinned SHAs and that the
-  backup refs from Phase 1 are still present.
-- [ ] Confirm the integration worktree's HEAD is unchanged from the pinned
-  `darkmatter` head (no commit yet) and that the working tree contains only
-  the intended integrated diff, ready for an explicitly authorized `git
-  commit`.
-- [ ] Stop. Do NOT commit, tag, push, or update either source branch. Hand
-  off the integration worktree path, branch name, and merge report to the
-  authorizing operator.
+For every command record working directory, exact command, selected area,
+`CARGO_TARGET_DIR`, job/thread settings, exit status, pass/fail/skip counts, and
+log location. Pass `--locked` through every recipe that accepts trailing Cargo
+arguments. For a no-argument recipe, verify the lockfile identity immediately
+before and after. Run areas in dependency/authority order:
+
+1. [x] `biscuit-file`: `just build`, `just test`, `just test-l2`, `just lint`.
+   Record the canonical Level 2 no-op as such.
+2. [x] `sniff`: `just build`, `just test`, `just test-l2`, `just lint`.
+3. [x] `darkmatter`: `just build`, `just test`, `just test-l2`, `just lint`.
+   Recheck the merged justfile first; the pinned recipe covers `darkmatter`,
+   `darkmatter-cli`, and `dmls`, so do not duplicate a separate DMLS gate unless
+   the merged recipe no longer does.
+4. [x] `claudine`: `just build`, `just test`, `just test-l2`, `just lint` for
+   all members enumerated by its merged area recipe.
+5. [x] `biscuit-terminal`, only if Phase 5 scope evidence requires it:
+   `just build`, `just test`, `just test-l2`, `just lint`.
+   Phase 5 evidence did not activate this conditional area.
+
+Do not pass a cargo `-p` argument to a multi-invocation area recipe and assume
+it narrows every invocation. Use a narrower route only when the merged justfile
+explicitly exposes and documents one; otherwise run the full affected area.
+
+After each area:
+
+- [x] verify `Cargo.lock`, snapshots, fixtures, baselines, and authored docs
+  did not change unexpectedly;
+- [x] verify no competing source-worktree process appeared; and
+- [x] on failure, return to the owning phase rather than continuing to the next
+  area.
+
+Native Windows/Linux runs, Level 3 tests, quiet-host benchmarks, and
+invalid-frontmatter timing captures are not completion gates. Review the merged
+code/tests/CI for path separators, line endings, executable discovery,
+credentials, shell assumptions, and `cfg` coverage, and keep existing platform
+evidence intact.
 
 ---
 
-## Dependency Graph
+## Phase 7 — Refresh Derived Metadata Once, Audit the Result, and Hand Off
 
-```
-Phase 1 (Freeze + integration worktree)
-   │
-   ▼
-Phase 2 (Merge --no-commit + conflict inventory)
-   │
-   ▼
-Phase 3 (Resolve production authority seams) ──► 3a / 3b / 3c / 3d parallel;
-   │                                              3e directory audits parallel;
-   │                                              3f closeout serial
-   ▼
-Phase 4 (Resolve tests + harness)
-   │
-   ▼
-Phase 5 (Resolve docs/policy/generated metadata) ──► 5a-5d parallel;
-   │                                                  5e refresh LAST;
-   │                                                  5f closeout serial
-   ▼
-Phase 6 (Focused convergence tests)
-   │
-   ▼
-Phase 7 (Scoped macOS package-area gates) ──► 7a / 7b / 7c / 7d / 7e serial
-   │
-   ▼
-Phase 8 (Final audit + handoff)
+**Goal**: Generate metadata from the final tested tree, prove the intended
+two-parent no-commit topology and scope, produce the final report, and leave the
+result unstaged and uncommitted under the implementation prompt's explicit
+no-staging override. (Spec Phase 7; R9, R12.)
+
+**Depends on**: Phase 6.
+
+**Checkpoint**: The skill hash matches the tested tree; change intelligence
+matches the frozen scope; intended working-tree resolutions are marker-free;
+the unresolved index and stale GitNexus counts are explicitly recorded as
+handoff blockers; source worktrees are unchanged; no file is staged.
+
+### 7a — Final generated metadata
+
+- [x] Confirm no code, test, or authored skill-body edit remains pending.
+- [x] From the integration repository root run the merged CLI with the lockfile:
+  `cargo run --locked -p darkmatter-cli --bin md -- hash .claude/skills/darkmatter/SKILL.md --save`.
+- [x] Verify immediately by replacing `--save` with `--diff` and require exit
+  status 0. Review the intended skill frontmatter delta.
+- [x] Record the intended skill frontmatter delta without staging it, as
+  required by the implementation prompt.
+- [x] Attempt the bounded GitNexus refresh from the integration worktree and
+  record the command, indexed commit/worktree, timeout, partial generated paths,
+  and the stale-index disposition.
+- [x] Retain and label the temporary `CLAUDE.md` counts rather than inventing
+  merged-tree counts from an incomplete refresh; review the complete file and
+  leave it unstaged.
+
+### 7b — Change intelligence and three-way preservation
+
+- [x] Run GitNexus `detect_changes` with `scope: "all"` and the explicit
+  integration worktree path so staged/unstaged merge changes are covered.
+- [x] Run the repository-required
+  `detect_changes({scope: "compare", base_ref: "main", worktree: <integration>})`.
+  Reconcile affected symbols/processes/modules with the frozen Phase 5 scope.
+- [x] Compare the working result separately with:
+  - [x] pinned `darkmatter` parent (incoming integration delta);
+  - [x] pinned `more-is-more` parent (preservation of later Darkmatter work);
+  - [x] pinned merge base; and
+  - [x] `main` (repository-wide change-detection contract).
+- [x] Repeat the four comparisons against the final unstaged working result;
+  staging is prohibited by the implementation prompt.
+- [x] Investigate every path/symbol outside the recorded scope and every
+  expected contribution missing from either-parent comparisons.
+
+### 7c — Final report and index audit
+
+- [x] Create `merge-report.md` with pins, actual conflicts, path resolutions,
+  focused evidence, area gates and budgets, generated metadata, control-
+  artifact dispositions, and carried-forward gaps. State explicitly that no
+  Level 3 or native Windows/Linux result is required or claimed.
+- [x] Leave the final resolution record, report, and authorized documentation
+  delta unstaged, and record that no `external-only` artifact entered the
+  integration worktree.
+- [x] Require `git diff --check` to pass and locked Cargo metadata plus the
+  original `Cargo.lock` identity to hold.
+- [x] Record the six expected unresolved index paths and verify their resolved
+  working-tree contents are marker-free; clearing the index would require the
+  prohibited staging operation.
+- [x] Scan changed text for conflict markers with intentional fixtures
+  accounted for. Review every snapshot delta individually.
+- [x] Inspect all three views end-to-end:
+  - [x] `git diff` (documented unstaged handoff content is intentionally
+    retained);
+  - [x] `git diff --cached` (records the incomplete merge index without adding
+    entries); and
+  - [x] `git status --short` (reviewed working-tree and index state only).
+- [x] Walk every specification completion criterion and record pass/fail plus
+  evidence ID.
+- [x] Prove `HEAD`, `MERGE_HEAD`, and the computed merge base still equal the
+  three pins. Prove both backup refs remain.
+- [x] Re-run source-worktree status and frozen dirty-file identity checks.
+- [x] Require Phase 0 byte-for-byte identity after excluding only the explicitly
+  authorized phase-plan progress delta.
+- [x] Confirm the quiet-host performance-followup gap and invalid-frontmatter
+  timing/native-platform gaps remain open and honestly labeled.
+- [x] Hand off the integration path, branch, target directory, external ledger,
+  resolution record, and merge report. Do not commit, tag, push, delete a
+  worktree, or update either source branch.
+
+---
+
+## Failure Loop
+
+```text
+Phase 0  freeze/provision
+   -> Phase 1  no-commit merge/inventory
+   -> Phase 2  production seams
+   -> Phase 3  tests/harness topology
+   -> Phase 4  docs/policy (derived values pending)
+   -> Phase 5  focused tests + final scope
+   -> Phase 6  serial area gates
+   -> Phase 7  one metadata refresh + final audit
+
+Any failure or corrective edit
+   -> return to the owning Phase 2/3/4 task
+   -> update impact and resolution evidence
+   -> rerun affected Phase 5 focused tests
+   -> rerun affected and downstream Phase 6 gates
+   -> perform Phase 7 only after the tree is final again
 ```
 
-## Parallelization Notes
+There is no parallel editing lane. Nextest and the area recipes may use their
+own bounded internal concurrency, but index mutation, area gates, generated
+metadata, and final audit remain serial.
 
-- **Phase 3 (3a–3d)**: the four production paths are textually independent
-  and MAY be resolved in parallel sessions, as long as only one session runs
-  `cargo metadata` and the final directory audit (3e). The directory audits
-  in 3e are also parallelizable by directory.
-- **Phase 5 (5a–5d)**: the skill, commit-guidance, review-chain, and
-  support-file resolutions are independent and MAY proceed in parallel. The
-  generated-metadata refresh (5e) is strictly last because it MUST read from
-  the final source tree.
-- **Phase 6**: focused library unit tests within a single integration worktree
-  MAY run concurrently via nextest's default thread pool. Real-terminal tests
-  and any L2 suites MUST stay serialized (R11). Never run gates from a second
-  worktree.
-- **Phase 7**: strict serial by area. The suggested ordering surfaces
-  failures near the changed authorities first.
-- **Phase 8**: strictly serial; no parallel work allowed during final audit.
+## Completion Criteria
 
-## Out-of-Scope Reminders (per spec §Non-goals)
+The result is ready for separate commit authorization only when:
 
-- No redesign or extension of any merged feature.
-- No refactor of adjacent code merely to make the merge look cleaner.
-- No change to public APIs, CLI schemas, serialized shapes, diagnostics, exit
-  codes, or feature acceptance criteria beyond what the two pinned branches
-  already do.
-- No replacement of Sniff's Git/provider authority, `biscuit-file`'s YAML
-  authority, or Darkmatter's expression/schema authority.
-- No closure of the performance-followup quiet-host evidence gap.
-- No closure of the invalid-frontmatter timing / native runtime gaps.
-- No Level 3 testing.
-- No native Windows/Linux hardware requirement.
-- No workspace-wide Cargo gates and no unscoped root lifecycle recipes.
-- No `cargo fmt` or `rustfmt` in write mode.
-- No modification, rebase, force-update, or deletion of either source branch.
+1. All three pinned objects and the computed merge base are proven.
+2. Both source worktrees, dirty files, source refs, and backup refs remain
+   intact.
+3. `HEAD`/`MERGE_HEAD` prove the intended no-commit two-parent topology.
+4. All six conflicts and ten shared paths have requirement-linked records.
+5. R3/R4 behavior and every R5 authority boundary have focused evidence.
+6. No unmerged index entry or unexplained marker remains.
+7. Locked metadata succeeds and `Cargo.lock` is byte-identical.
+8. The final Sniff/GitNexus-derived gate scope is recorded, including every
+   downstream consumer of changed public types.
+9. Focused tests pass through Nextest-backed or owning area commands.
+10. Every retained area passes build, Level 1, Level 2, and lint gates on the
+    macOS host; intentional no-op tiers are recorded.
+11. Cross-platform design/CI evidence is preserved without requiring native
+    Windows/Linux execution.
+12. No Level 3 result is used.
+13. Skill hash and GitNexus counts describe the final tested tree.
+14. GitNexus `all` and `compare main` results plus comparisons with both
+    parents match the recorded scope.
+15. The staged diff contains only source-parent integration, reviewed conflict
+    resolutions, generated metadata, required evidence artifacts, and
+    separately authorized control-artifact deltas.
+16. Historical performance/platform gaps remain visible and non-blocking.
+17. `resolution-record.md` and `merge-report.md` are complete, and no commit,
+    tag, push, source-branch update, or unsupported readiness claim was made.
+
+Compilation alone is insufficient; completion requires preservation evidence
+for behavior, safety, passivity, history, ownership, and repository state.
