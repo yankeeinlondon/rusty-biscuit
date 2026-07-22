@@ -864,3 +864,13 @@ Phase 1 (ratify + inventory + characterize)   ← blocks everything
 | Reverse-engineering resolver detail from `Display` to fill new catalog fields | 3 | Spec-mandated: unavailable fields are `null`; file-resolution feature fills them |
 | Scope creep into retry/routing policy | 4 | D10: split any routing/retry discovery into a separate spec |
 | Option B preferred after all | 1 | Hard stop at Phase 1 Task 1 — Option B is a cross-area `biscuit-terminal` change needing its own spec |
+
+## Mega-merge Phase 6 audit
+
+Audited candidate: `df13f68dd7ad3ef22ef7e324dbdc213ed75afcd6`.
+Fresh macOS L1 and package-area lint gates passed, including the diagnostic
+transport/source guards. The full L2 gate is blocked by
+`level2_lifecycle_retry_to_an_unavailable_provider_matches_direct_selection`,
+which failed deterministically before its retry comparison. Required Linux,
+native Windows, and attended L3 evidence is not attached. This feature remains
+active; the candidate does not satisfy mega-merge closeout.

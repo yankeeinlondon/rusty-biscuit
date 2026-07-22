@@ -45,3 +45,16 @@ git worktree add -b claudine-mega-merge-integration-20260721-phase1 /Users/ken/.
 git merge-base --is-ancestor 72a5843af470ba75c1ae6f6e1ccf16ba10a427eb HEAD
 git config rerere.enabled true
 ```
+
+## Phase 6 candidate audit
+
+| Role | Ref or object | SHA | Status |
+|---|---|---|---|
+| Audited integration candidate | `refs/heads/claudine-mega-merge-integration-20260721-phase1` | `df13f68dd7ad3ef22ef7e324dbdc213ed75afcd6` | immutable audit object; acceptance blocked |
+| Current `claudine` | `refs/heads/claudine` | `72a5843af470ba75c1ae6f6e1ccf16ba10a427eb` | still matches freeze |
+| Frozen foundation | `refs/heads/error-prop-and-file-resolution` | `43c23c6535cf6e52a35dbb06ea6f4ccce0c88e97` | still matches freeze; not an ancestor of candidate |
+| Frozen proxy | `refs/heads/proxy-with` | `e348486c810969abe87a6b7209979034f5454b07` | still matches freeze; not an ancestor of candidate |
+
+No Phase 5 evidence-commit SHA exists: required acceptance rows are not all
+green and the execution request prohibits staging or committing. No ref was
+fast-forwarded and the freeze remains open.

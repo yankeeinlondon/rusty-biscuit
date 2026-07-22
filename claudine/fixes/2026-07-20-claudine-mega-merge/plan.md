@@ -1,7 +1,7 @@
 ---
 total_phases: 6
 created: 2026-07-21
-phase: 5
+phase: 6
 agent: "opencode/zai-coding-plan/glm-5.2"
 yolo: "false"
 reviewed: true
@@ -166,10 +166,78 @@ docs_created_during_phase_5:
   - claudine/fixes/2026-07-20-claudine-mega-merge/phase5-gates.md
   - claudine/fixes/2026-07-20-claudine-mega-merge/phase5-test-map.md
 skills_files_updated_during_phase_5: []
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+  - claudine/features/2026-07-11-sequence-plus/plan.md
+  - claudine/features/2026-07-13-error-propogation/plan.md
+  - claudine/features/2026-07-13-file-resolution/plan.md
+  - claudine/features/2026-07-13-proxy-with/plan.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/acceptance-ledger.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/plan.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/sha-ledger.md
+docs_created_during_phase_6:
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/final-audit-detect.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/phase6-gates.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/phase6-test-map.md
+skills_files_updated_during_phase_6: []
+packages_during_phase_6: []
 packages:
   - claudine
   - claudine-cli
   - darkmatter
+source_code:
+  - .config/nextest.toml
+  - .github/workflows/claudine-tests.yml
+  - biscuit-file/cli/tests/cli_tests.rs
+  - biscuit-file/lib/Cargo.toml
+  - biscuit-file/lib/src/**/*.rs
+  - biscuit-file/lib/tests/**/*.rs
+  - biscuit-test-harness/Cargo.toml
+  - biscuit-test-harness/src/**/*.rs
+  - claudine/cli/Cargo.toml
+  - claudine/cli/src/**/*.rs
+  - claudine/cli/tests/**/*.rs
+  - claudine/contract/src/**/*.rs
+  - claudine/docs/providers/dispatch-inventory.json
+  - claudine/gen/tests/**/*
+  - claudine/justfile
+  - claudine/lib/Cargo.toml
+  - claudine/lib/benches/**/*.rs
+  - claudine/lib/src/**/*.rs
+  - claudine/lib/tests/**/*.rs
+  - claudine/rendezvous/daemon/src/**/*.rs
+  - claudine/reviews/_completed/2026-07-14-module-assessment/generated-artifact-baseline.json
+  - darkmatter/lib/src/**/*.rs
+  - darkmatter/lib/tests/**/*.rs
+  - just/devops.just
+  - scripts/check-error-transport.allow
+  - scripts/check-error-transport.sh
+  - scripts/check-lifecycle-doc-facets.sh
+documentation:
+  - .claude/skills/biscuit-file/references/file-references.md
+  - .claude/skills/biscuit-test-harness/SKILL.md
+  - .claude/skills/claudine/*.md
+  - .claudine/memory/commits.md
+  - .claudine/non-interactive.md
+  - CLAUDE.md
+  - biscuit-file/docs/**/*.md
+  - biscuit-test-harness/README.md
+  - claudine/docs/**/*.md
+  - claudine/features/2026-07-11-sequence-plus/**/*.md
+  - claudine/features/2026-07-13-error-propogation/**/*.md
+  - claudine/features/2026-07-13-file-resolution/**/*.md
+  - claudine/features/2026-07-13-proxy-with/**/*.md
+  - claudine/features/_completed/2026-06-14-auto-complete/*.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/baselines/**/*.txt
+  - claudine/fixes/2026-07-20-claudine-mega-merge/**/*.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/marker-baseline.txt
+  - claudine/fixes/2026-07-20-claudine-mega-merge/merge-previews/**/*.txt
+  - claudine/fixes/2026-07-20-claudine-mega-merge/phase1-gates/*.txt
+  - claudine/fixes/2026-07-20-claudine-mega-merge/user-owned-worktree.patch
+  - claudine/fixes/_unscheduled/1-windows-compose-interrupt-guard/spec.md
+  - darkmatter/docs/**/*.md
+  - prompts/**/*.md
+  - ~/features/2026-07-20-router-fixture/log.md
 ---
 
 # Claudine Mega-Merge Execution Plan
@@ -476,24 +544,24 @@ Spec mapping: spec Phase 5. Goal: the completion definition from spec §"Complet
 
 ### Tasks
 
-- [ ] From a clean merged checkout, run GitNexus `detect_changes({scope: "compare", base_ref: "main"})`. Review unexpected affected symbols, execution flows, deleted guards, and duplicate execution paths. Save the report to `impact/final-audit-detect.md`.
-- [ ] Review the final `git diff` for unintended production, test, generated, and documentation changes.
-- [ ] Verify generators and drift/source-scan guards pass from the clean merged checkout (not a stale worktree).
-- [ ] Repeat full L1, L2, and lint gates from the clean checkout. Record fresh results.
-- [ ] Attach native macOS evidence per ledger row requiring it.
+- [x] From a clean merged checkout, run GitNexus `detect_changes({scope: "compare", base_ref: "main"})`. Review unexpected affected symbols, execution flows, deleted guards, and duplicate execution paths. Save the report to `impact/final-audit-detect.md`. (The report is CRITICAL due to the expected broad integration surface; it also records the structural merge-ancestry blocker.)
+- [x] Review the final `git diff` for unintended production, test, generated, and documentation changes. (Reviewed against `main`; `git diff --check` exposed pre-existing whitespace defects in the immutable candidate, recorded as a closeout blocker rather than rewritten after acceptance evidence.)
+- [x] Verify generators and drift/source-scan guards pass from the clean merged checkout (not a stale worktree). (`claudine-gen check` passed; 61 focused dispatch, composition-seam, error-transport, test-placement, harness-call-site, and shipped-prompt corpus/drift tests passed from detached candidate `df13f68dd`.)
+- [ ] Repeat full L1, L2, and lint gates from the clean checkout. Record fresh results. (`just test` and `just lint` passed; `just test-l2 --no-fail-fast` failed 1 of 228 tests, and the failure reproduced 4/4 in isolation. See `phase6-gates.md`.)
+- [ ] Attach native macOS evidence per ledger row requiring it. (Fresh native macOS evidence is recorded in `phase6-gates.md`, but the failed L2 row prevents the required macOS matrix from being accepted.)
 - [ ] Attach native Linux evidence per ledger row requiring it (including the dedicated Linux L2 CI job).
 - [ ] Attach native Windows runtime evidence per ledger row requiring it (distinct from `just check-windows`).
-- [ ] Update all four source feature records (`2026-07-13-error-propogation`, `2026-07-13-file-resolution`, `2026-07-11-sequence-plus`, `2026-07-13-proxy-with`) and this mega-merge fix record with the acceptance-candidate SHA and fresh results.
+- [x] Update all four source feature records (`2026-07-13-error-propogation`, `2026-07-13-file-resolution`, `2026-07-11-sequence-plus`, `2026-07-13-proxy-with`) and this mega-merge fix record with the acceptance-candidate SHA and fresh results. (All five records name `df13f68dd7ad3ef22ef7e324dbdc213ed75afcd6` and preserve its blocked status.)
 - [ ] Verify completion definition from spec §"Completion Definition":
     - [ ] `claudine` contains both feature histories through reviewed merge commits.
     - [ ] All mandatory invariants (I1–I12) and the responsibility map hold in final source.
-    - [ ] No duplicate legacy execution path or private resolution grammar remains.
-    - [ ] Every conflict and semantic hotspot has a recorded resolution rationale.
-    - [ ] All four feature specifications are mapped to fresh merged-code evidence.
+    - [x] No duplicate legacy execution path or private resolution grammar remains. (Focused dispatch/composition/source guards passed.)
+    - [x] Every conflict and semantic hotspot has a recorded resolution rationale. (`conflict-checklist.md` and the Phase 2–4 audit records remain complete.)
+    - [x] All four feature specifications are mapped to fresh merged-code evidence. (`phase6-test-map.md` re-anchors the Phase 2–5 mappings to the candidate.)
     - [ ] Every required L1 and L2 test reached its assertion and passed.
     - [ ] Required L3 and native Windows evidence is attached and passed.
-    - [ ] Package-area lints, drift guards, generators, source scans, and test-placement checks pass.
-    - [ ] Documentation and skills describe the merged behavior.
+    - [x] Package-area lints, drift guards, generators, source scans, and test-placement checks pass. (Fresh generator, 61 focused guard, and full lint runs passed.)
+    - [x] Documentation and skills describe the merged behavior. (The behavior documentation and Claudine skill were updated in earlier phases; Phase 6 introduced no behavior requiring another skill change.)
     - [ ] A clean-checkout final audit finds no conflict markers, stale generated data, unexpected changes, or unowned acceptance rows.
 - [ ] Move the four source feature records and this mega-merge fix record to their `_completed/` directories only after every required ledger row is `passed`. If the owner accepts residual debt, record its scope, consequence, mitigation, and follow-up, but leave the affected records active; accepted debt does not satisfy completion.
 - [ ] Record the Phase 5 evidence-commit SHA in `sha-ledger.md`. After the record updates/moves, run `git diff --check`, anchored worktree/index marker scans, documentation/link guards, and GitNexus `detect_changes({scope: "compare", base_ref: "main"})`. Review the staged diff, then create the documentation-only closeout commit; its own SHA is the resulting branch tip and is not self-recorded.

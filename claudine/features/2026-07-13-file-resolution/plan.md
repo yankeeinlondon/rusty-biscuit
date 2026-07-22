@@ -555,3 +555,12 @@ proven by the dedicated L2 fixture.
 - **Phases 2–4:** strictly sequential (each builds on the last); several tasks parallel *within* each phase
 - **Phases 5, 6, 7:** fully parallel with each other once Checkpoint 4 passes — disjoint packages/files. This is the widest fan-out in the plan
 - **Phase 8:** L2 suites parallel per package; docs/timeline tasks parallel with test work
+
+## Mega-merge Phase 6 audit
+
+Audited candidate: `df13f68dd7ad3ef22ef7e324dbdc213ed75afcd6`.
+Fresh macOS L1, generator/drift, file-resolution seam, and package-area lint
+gates passed. The full L2 gate has one deterministic lifecycle retry failure,
+and required Linux and native Windows evidence is not attached. The frozen
+foundation feature tip is not an ancestor of the candidate, so this feature
+remains active and is not accepted as merged history.

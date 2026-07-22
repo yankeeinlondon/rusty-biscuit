@@ -2152,3 +2152,12 @@ Parallelizable:
 | L2 matrix is large and tmux-driven | Slow, flaky under load | Use `just test-l2`; do not compare across runs without a drift bracket. |
 | A live provider makes the headline regression nondeterministic | Credentials, quotas, model changes, and network availability | Use the fake provider in CI; retain the shipped Codex command only as a manual smoke test. |
 | Scope creep into `defer` | `Defer` is a parsed-but-unimplemented verb | Explicit non-goal. Do not implement or serialize a handoff. |
+
+## Mega-merge Phase 6 audit
+
+Audited candidate: `df13f68dd7ad3ef22ef7e324dbdc213ed75afcd6`.
+Fresh macOS L1, proxy/composition seam guards, generator/drift checks, and
+package-area lint gates passed. The full L2 gate is blocked by the deterministic
+unavailable-provider retry failure, and required Linux, native Windows, and
+attended L3 evidence is not attached. The frozen proxy feature tip is not an
+ancestor of the candidate, so this feature remains active.

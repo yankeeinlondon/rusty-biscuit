@@ -5,6 +5,19 @@ row must be re-anchored to the immutable merged acceptance-candidate SHA and
 changed to one of the specification's evidence statuses before closeout. Only
 `passed` satisfies a required row.
 
+## Phase 6 candidate audit
+
+The immutable candidate audited on native macOS is
+`df13f68dd7ad3ef22ef7e324dbdc213ed75afcd6`. Fresh L1, generator/drift,
+focused seam/source guards, and lint passed. L2 did not: 227 of 228 tests
+passed, and
+`level2_lifecycle_retry_to_an_unavailable_provider_matches_direct_selection`
+failed on all four full-suite attempts and all four isolated attempts. The
+candidate also lacks both frozen feature tips as ancestors. Therefore no
+`open` or `blocked` row below is promoted to `passed`; Linux, native Windows,
+and attended L3 rows remain unexecuted. See `phase6-test-map.md` and
+`phase6-gates.md`.
+
 ## Owning sources
 
 | Workstream | Frozen source |
