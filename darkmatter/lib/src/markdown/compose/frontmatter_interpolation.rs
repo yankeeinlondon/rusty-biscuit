@@ -1037,6 +1037,16 @@ fn collect_variable_roots(expr: &Expr, refs: &mut Vec<String>) {
                 collect_variable_roots(arg, refs);
             }
         }
+        Expr::ArrayLiteral(items) => {
+            for item in items {
+                collect_variable_roots(item, refs);
+            }
+        }
+        Expr::ObjectLiteral(entries) => {
+            for (_, value) in entries {
+                collect_variable_roots(value, refs);
+            }
+        }
     }
 }
 

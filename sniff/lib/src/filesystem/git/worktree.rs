@@ -50,22 +50,24 @@ pub fn get_current_worktree_name(cwd: &Path) -> Result<Option<String>, Box<dyn E
         return Ok(None);
     };
 
+    Ok(current_worktree_name(&repo))
+}
+
+pub(crate) fn current_worktree_name(repo: &gix::Repository) -> Option<String> {
     // Not a linked worktree — either the main repo or a bare repo. A linked
     // worktree has a per-worktree git dir distinct from the common dir.
-    if !is_linked_worktree(&repo) {
-        return Ok(None);
+    if !is_linked_worktree(repo) {
+        return None;
     }
 
-    let Some(workdir) = repo.workdir() else {
-        return Ok(None);
-    };
+    let workdir = repo.workdir()?;
 
     // Canonicalize first: gix may report a relative workdir (no `file_name`).
     let canonical = std::fs::canonicalize(workdir).unwrap_or_else(|_| workdir.to_path_buf());
-    Ok(canonical
+    canonical
         .file_name()
         .and_then(|n| n.to_str())
-        .map(String::from))
+        .map(String::from)
 }
 
 /// True when `repo` is a linked worktree rather than the main worktree.
@@ -111,6 +113,9 @@ pub fn get_current_worktree_info(cwd: &Path) -> Result<Option<(String, String)>,
 /// The returned list includes the main worktree plus any linked worktrees.
 /// Entries are sorted alphabetically by worktree name. Exactly one entry
 /// is marked as `is_current` by comparing canonicalized paths.
+/// Stale linked-worktree registrations whose checkout targets are absent are
+/// omitted without changing the requested repository. Existing targets that do
+/// not open as repositories are reported as errors.
 ///
 /// Returns `Ok(None)` when `base_dir` is not inside a git repository.
 ///
@@ -182,11 +187,22 @@ pub fn list_worktrees(base_dir: &Path) -> Result<Option<Vec<WorktreeEntry>>, Box
         let path = proxy
             .base()
             .map_err(|e| SniffError::git("worktree_base", e))?;
+        if !path.is_absolute() {
+            return Err(Box::new(SniffError::git(
+                "worktree_base",
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "registered worktree path is not absolute",
+                ),
+            )));
+        }
         let canonical = std::fs::canonicalize(&path).unwrap_or(path);
 
         // Open the worktree as its own repository to read HEAD.
         let (branch, is_detached) = {
-            let wt_repo = super::open::trusted_open(&canonical)?;
+            let Some(wt_repo) = super::open::trusted_open_registered_worktree(&canonical)? else {
+                continue;
+            };
             resolve_branch_and_detached(&wt_repo)
         };
 
@@ -375,6 +391,46 @@ mod tests {
             names,
             vec![main_name, "wt-a", "wt-b"],
             "main + linked worktrees sorted alphabetically"
+        );
+    }
+
+    #[test]
+    fn list_worktrees_omits_stale_linked_registration() {
+        let (dir, repo) = setup_repo();
+        let worktree_path = dir.path().join("stale-wt");
+        repo.worktree("stale-wt", &worktree_path, None).unwrap();
+
+        std::fs::remove_dir_all(&worktree_path).expect("remove linked checkout");
+        assert!(
+            dir.path()
+                .join(".git")
+                .join("worktrees")
+                .join("stale-wt")
+                .exists(),
+            "registration should remain after checkout removal"
+        );
+
+        let worktrees = list_worktrees(dir.path())
+            .expect("listing should tolerate stale registrations")
+            .expect("main repository should remain discoverable");
+        assert_eq!(worktrees.len(), 1, "only the main worktree should remain");
+        assert_eq!(worktrees[0].path, std::fs::canonicalize(dir.path()).unwrap());
+    }
+
+    #[test]
+    fn list_worktrees_propagates_corrupt_linked_checkout() {
+        let (dir, repo) = setup_repo();
+        let worktree_path = dir.path().join("corrupt-wt");
+        repo.worktree("corrupt-wt", &worktree_path, None)
+            .unwrap();
+
+        fs::remove_file(worktree_path.join(".git")).expect("remove linked checkout .git file");
+        assert!(worktree_path.exists(), "linked checkout target should remain");
+
+        let result = list_worktrees(dir.path());
+        assert!(
+            result.is_err(),
+            "existing corrupt linked checkout must surface an error, got {result:?}"
         );
     }
 

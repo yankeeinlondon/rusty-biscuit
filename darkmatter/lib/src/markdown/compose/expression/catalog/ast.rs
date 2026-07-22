@@ -34,9 +34,15 @@ pub(crate) struct CatalogParam {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CatalogReturn {
-    pub ty: DataType,
+    pub value: CatalogReturnValue,
     pub array: bool,
     pub fallible: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CatalogReturnValue {
+    Data(DataType),
+    Enum(Vec<String>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

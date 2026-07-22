@@ -399,6 +399,14 @@ fn late_binding_root_in_expr(expr: &Expr) -> Option<String> {
             late_binding_root_in_expr(base).or_else(|| late_binding_root_in_expr(index))
         }
         Expr::FunctionCall { args, .. } => args.iter().find_map(late_binding_root_in_expr),
+        // Container literals are scanned element-by-element so a late-binding
+        // reference cannot hide inside `[err.msg]` or `{ reason: err.msg }`.
+        // Object keys are authored text, not expressions, so only values are
+        // walked.
+        Expr::ArrayLiteral(elements) => elements.iter().find_map(late_binding_root_in_expr),
+        Expr::ObjectLiteral(entries) => entries
+            .iter()
+            .find_map(|(_, value)| late_binding_root_in_expr(value)),
         Expr::Fallback { primary, fallback } => {
             late_binding_root_in_expr(primary).or_else(|| late_binding_root_in_expr(fallback))
         }
@@ -1104,6 +1112,35 @@ iteration: \"{{ file_exists('design.md') ? 2 : 1 }}\"\n\
             resolved_start_shell_command(&config),
             "echo false",
             "without the fallback the launch-only spec.md is unreachable",
+        );
+    }
+
+    #[test]
+    fn late_binding_root_is_found_inside_an_array_literal() {
+        // A late-binding reference buried in a container literal must still
+        // be rejected: shell commands resolve at pre-flight, before `err`
+        // exists. A no-op arm would return `None` and let it through.
+        assert_eq!(
+            first_late_binding_root("echo {{ [err.msg] }}"),
+            Some("err".to_string())
+        );
+    }
+
+    #[test]
+    fn late_binding_root_is_found_inside_an_object_literal_value() {
+        assert_eq!(
+            first_late_binding_root("echo {{ { reason: timing.total_ms } }}"),
+            Some("timing".to_string())
+        );
+    }
+
+    #[test]
+    fn container_literal_of_early_binding_values_has_no_late_binding_root() {
+        // The recursion must not over-report: `doc.*` is exempt and an
+        // object *key* named `err` is authored text, not a reference.
+        assert_eq!(
+            first_late_binding_root("echo {{ { err: doc.err } }}"),
+            None,
         );
     }
 }

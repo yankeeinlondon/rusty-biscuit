@@ -1,6 +1,9 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use sniff::filesystem::docs::{self as sniff_docs, MarkdownMeta};
 use sniff::filesystem::git::{FileStatus, GitRepo};
 use sniff::filesystem::repo::{self as sniff_repo, Package, RepoInfo};
@@ -9,6 +12,9 @@ use sniff::os::{self, OsInfo};
 use sniff::request::OsRequest;
 
 use super::{ContextGroup, ContextMergeDiagnostic};
+
+#[cfg(test)]
+static GIT_DISCOVERY_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 /// Intermediate struct holding all raw sniff results.
 ///
@@ -26,6 +32,9 @@ pub(super) struct ContextCapture {
     pub(super) repo_name: Option<String>,
     /// Whether a git repo was found at all.
     pub(super) has_git: bool,
+    pub(super) git_branch: Option<String>,
+    pub(super) git_worktree: Option<String>,
+    pub(super) merge_conflicts: Vec<PathBuf>,
     pub(super) repo_info: Option<RepoInfo>,
     pub(super) docs: Option<Vec<MarkdownMeta>>,
     pub(super) os_info: Option<OsInfo>,
@@ -50,16 +59,7 @@ impl ContextCapture {
         let mut diagnostics = Vec::new();
         let mut timings = Vec::new();
 
-        let need_git = groups.iter().any(|g| {
-            matches!(
-                g,
-                ContextGroup::Repo
-                    | ContextGroup::FileChanges
-                    | ContextGroup::Languages
-                    | ContextGroup::Documents
-            )
-        });
-        let need_file_changes = groups.contains(&ContextGroup::FileChanges);
+        let need_git_group = groups.contains(&ContextGroup::Git);
         let need_repo = groups.iter().any(|g| {
             matches!(
                 g,
@@ -69,6 +69,8 @@ impl ContextCapture {
                     | ContextGroup::Documents
             )
         });
+        let need_git = need_git_group || need_repo;
+        let need_file_changes = groups.contains(&ContextGroup::FileChanges);
         let need_docs = groups.contains(&ContextGroup::Documents);
         let need_os = groups.contains(&ContextGroup::Os);
         let need_hw = groups.contains(&ContextGroup::Hardware);
@@ -77,6 +79,8 @@ impl ContextCapture {
         // ── Git discovery (near-instant — just finds .git) ───────────
         let t = Instant::now();
         let git_handle = if need_git {
+            #[cfg(test)]
+            GIT_DISCOVERY_COUNT.fetch_add(1, Ordering::Relaxed);
             match GitRepo::discover(base_dir) {
                 Ok(handle) => handle,
                 Err(e) => {
@@ -91,13 +95,51 @@ impl ContextCapture {
             None
         };
         let has_git = git_handle.is_some();
-        let repo_root = git_handle.as_ref().map(|h| h.repo_root().to_path_buf());
-        let (_org, repo_name) = git_handle
+        // A bare repository's `repo_root` is its git directory, not a checkout.
+        // Repo-structure and document scans must not walk it, so they degrade to
+        // no root while the Git group's HEAD-derived fields stay valid.
+        let repo_root = git_handle
             .as_ref()
-            .map(|h| h.org_and_repo())
-            .unwrap_or((None, None));
+            .filter(|h| !h.is_bare())
+            .map(|h| h.repo_root().to_path_buf());
+        let (_org, repo_name) = if need_repo {
+            git_handle
+                .as_ref()
+                .map(|h| h.org_and_repo())
+                .unwrap_or((None, None))
+        } else {
+            (None, None)
+        };
         if need_git {
             timings.push(("git".into(), t.elapsed()));
+        }
+
+        let (mut git_branch, mut git_worktree, mut merge_conflicts) =
+            (None, None, Vec::new());
+        if need_git_group
+            && let Some(repo) = git_handle.as_ref()
+        {
+            match repo.try_current_branch() {
+                Ok(value) => git_branch = value,
+                Err(error) => diagnostics.push(ContextMergeDiagnostic::PartialRuntimeCapture {
+                    area: "git",
+                    detail: format!("branch: {error}"),
+                }),
+            }
+            match repo.try_current_worktree_name() {
+                Ok(value) => git_worktree = value,
+                Err(error) => diagnostics.push(ContextMergeDiagnostic::PartialRuntimeCapture {
+                    area: "git",
+                    detail: format!("worktree: {error}"),
+                }),
+            }
+            match repo.merge_conflicts() {
+                Ok(value) => merge_conflicts = value,
+                Err(error) => diagnostics.push(ContextMergeDiagnostic::PartialRuntimeCapture {
+                    area: "git",
+                    detail: format!("merge_conflicts: {error}"),
+                }),
+            }
         }
 
         // ── All remaining probes run in parallel ─────────────────────
@@ -334,6 +376,9 @@ impl ContextCapture {
             repo_root,
             repo_name,
             has_git,
+            git_branch,
+            git_worktree,
+            merge_conflicts,
             repo_info,
             docs,
             os_info,
@@ -359,6 +404,9 @@ impl ContextCapture {
             repo_root: Some(repo_root),
             repo_name: None,
             has_git: true,
+            git_branch: None,
+            git_worktree: None,
+            merge_conflicts: Vec::new(),
             repo_info,
             docs: None,
             os_info: None,
@@ -424,5 +472,24 @@ pub(super) fn test_repo_info(root: PathBuf, is_monorepo: bool, packages: Option<
         optional_dependencies: None,
         packages,
         ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn git_group_performs_one_trusted_discovery_for_all_fields() {
+        let outside = tempfile::tempdir().expect("temporary non-repository directory");
+        GIT_DISCOVERY_COUNT.store(0, Ordering::Relaxed);
+
+        let capture = ContextCapture::new(outside.path(), &[ContextGroup::Git]);
+
+        assert_eq!(GIT_DISCOVERY_COUNT.load(Ordering::Relaxed), 1);
+        assert_eq!(capture.git_branch, None);
+        assert_eq!(capture.git_worktree, None);
+        assert!(capture.merge_conflicts.is_empty());
+        assert!(capture.diagnostics.is_empty());
     }
 }

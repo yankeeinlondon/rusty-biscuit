@@ -2404,7 +2404,7 @@ mod tests {
         use std::collections::HashSet;
         use std::path::PathBuf;
 
-        fn temp_git_repo() -> (tempfile::TempDir, PathBuf) {
+        pub(super) fn temp_git_repo() -> (tempfile::TempDir, PathBuf) {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().to_path_buf();
             let repo = git2::Repository::init(&path).unwrap();
@@ -3018,6 +3018,7 @@ mod tests {
 
         #[test]
         fn aggregate_structure_child_includes_monorepo_topology() {
+            let (_temp, path) = super::aggregate::temp_git_repo();
             let repo = repo_with_layers();
             let result = result_with_repo(repo);
             let identity = RepoIdentity {
@@ -3028,8 +3029,8 @@ mod tests {
                 package_count: Some(2),
             };
 
-            let value =
-                build_aggregate_value(&result, None, &identity).expect("aggregate should build");
+            let value = build_aggregate_value(&result, Some(&path), &identity)
+                .expect("aggregate should build");
 
             assert!(
                 value["structure"]["monorepo_standards"].is_array(),

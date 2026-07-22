@@ -42,16 +42,20 @@
 //! ```
 
 mod bitbucket;
+mod focused;
 mod gitea;
 mod github;
 mod gitlab;
 mod provider;
+mod provider_url;
 mod types;
 mod url_parser;
+mod web_link;
 
 use async_trait::async_trait;
 
 pub use bitbucket::*;
+pub use focused::*;
 pub use gitea::*;
 pub use github::*;
 pub use gitlab::*;

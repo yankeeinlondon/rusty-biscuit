@@ -26,7 +26,7 @@ use tracing::{info, instrument, trace};
 
 impl Markdown {
     /// Internal pipeline runner.
-    pub(crate) fn run_compose_pipeline(&mut self, options: ComposeOptions) -> MarkdownResult<ComposeReport> {
+    pub(crate) fn run_compose_pipeline(&mut self, mut options: ComposeOptions) -> MarkdownResult<ComposeReport> {
         // Resolve persistent cache root if configured
         let persistent_root = options.cache_root.as_ref().map(|root| {
             cache::FileStore::resolve_cache_root(Some(root), options.cache_namespace.as_deref())
@@ -36,6 +36,7 @@ impl Markdown {
         // walk and this pass fetch each URL once); otherwise build one whose
         // persistent store is shared with the local compose artifact cache.
         let remote_fetch = options.remote_fetch_runtime();
+        options.remote_fetch = Some(remote_fetch.clone());
 
         let mut runtime = shell_expansion::types::PipelineRuntime::with_remote_fetch(
             options.max_transclusion_depth,

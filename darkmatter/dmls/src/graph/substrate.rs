@@ -523,11 +523,14 @@ fn is_schema_file_value(value: &str) -> bool {
 fn inline_schema_file_keys(ast: &FrontmatterAst) -> HashSet<String> {
     ast.entries()
         .iter()
-        .filter(|entry| {
-            entry.depth == 1
-                && entry.dotted.starts_with("$schema.")
-                && entry.kind == FmValueKind::Scalar
+        .enumerate()
+        // Structural parentage, not a dotted prefix: a top-level key literally
+        // spelled `$schema.foo` is not a child of `$schema`.
+        .filter(|(index, entry)| {
+            entry.kind == FmValueKind::Scalar
+                && ast.key_path_at(*index).as_slice() == ["$schema", entry.key.as_str()]
         })
+        .map(|(_, entry)| entry)
         .filter(|entry| entry.scalar.as_deref().is_some_and(is_file_type_string))
         .map(|entry| entry.key.clone())
         .collect()

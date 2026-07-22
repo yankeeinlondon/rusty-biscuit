@@ -4,6 +4,7 @@ mod agent;
 mod changes;
 mod datetime;
 mod docs;
+mod git;
 mod groups;
 mod host;
 mod languages;
@@ -56,6 +57,10 @@ pub(crate) fn capture_runtime_context_for_groups(
 
     if groups.contains(&ContextGroup::DateTime) {
         datetime::populate_datetime(&mut values);
+    }
+
+    if groups.contains(&ContextGroup::Git) {
+        git::populate_git(&cap, &mut values);
     }
 
     if groups.contains(&ContextGroup::Repo) {

@@ -281,6 +281,14 @@ pub enum SimplifiedType {
     /// (parse-only, never evaluated). The third content-format string type
     /// alongside [`SimplifiedType::Yaml`] and [`SimplifiedType::Json`].
     Expression,
+    /// One complete SimplifiedSchema property definition. Its YAML carrier may
+    /// be a string type expression, mapping object definition, or non-empty
+    /// property union sequence; semantic validation is parse-only.
+    TypeDefinition,
+    /// One complete `$schema` declaration. Its YAML carrier may be a local
+    /// reference string, inline mapping, or non-empty root union sequence;
+    /// semantic validation is parse-only.
+    Schema,
     /// Anything.
     Any,
 }
@@ -306,6 +314,8 @@ impl SimplifiedType {
             SimplifiedType::Json => "json",
             SimplifiedType::Literal => "literal",
             SimplifiedType::Expression => "expression",
+            SimplifiedType::TypeDefinition => "type-definition",
+            SimplifiedType::Schema => "schema",
             SimplifiedType::Any => "any",
         }
     }
@@ -330,6 +340,8 @@ impl SimplifiedType {
             "json" => SimplifiedType::Json,
             "literal" => SimplifiedType::Literal,
             "expression" => SimplifiedType::Expression,
+            "type-definition" => SimplifiedType::TypeDefinition,
+            "schema" => SimplifiedType::Schema,
             "any" => SimplifiedType::Any,
             _ => return None,
         })
@@ -529,6 +541,8 @@ mod tests {
             SimplifiedType::Json,
             SimplifiedType::Literal,
             SimplifiedType::Expression,
+            SimplifiedType::TypeDefinition,
+            SimplifiedType::Schema,
             SimplifiedType::Any,
         ] {
             let kw = ty.as_keyword();

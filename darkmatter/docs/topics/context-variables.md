@@ -32,6 +32,7 @@ Variables are organized into capture groups. The expensive I/O for each group ru
 | Group | Expensive I/O | Properties |
 |-------|--------------|------------|
 | **DateTime** | `Local::now()` / `Utc::now()` syscalls (near-zero) | `now`, `now_utc`, `today`, `yesterday`, `tomorrow`, all `_utc` date variants, `day`, `day_abbr`, `day_utc`, `day_abbr_utc`, `year`, `year_utc`, `month`, `month_name`, `month_name_abbr`, `day_of_month`, `day_of_month_suffixed`, `time`, `time_military`, `time_utc`, `time_military_utc`, `timezone`, `timezone_offset`, `timezone_iana`, week boundaries, `season`, `timestamp`, `timestamp_ms` |
+| **Git** | One `GitRepo::discover` plus branch, worktree, and index-stage reads | `branch`, `worktree`, `merge_conflicts` |
 | **Repo** | `GitRepo::discover` + `detect_repo_structure` | `repo`, `repo_root`, `is_monorepo`, `package_root`, `package_area_root`, `packages`, `package_areas`, `current_package`, `current_package_area`, `area`, `area_description`, `area_root`, `current_packages`, `depends_on`, `used_by` |
 | **FileChanges** | `GitRepo::file_changes()` | `dirty_files`, `dirty_source_code_files`, `staged_files`, `untracked_files`, `dirty_packages`, `dirty_package_areas`, `staged_packages`, `staged_package_areas`, `current_package_has_*`, `current_package_area_has_*` |
 | **Languages** | Reads from already-captured repo info (no additional I/O) | `programming_languages_in_repo`, `programming_language`, `package_manager` |
@@ -116,6 +117,9 @@ failure message prints the up-to-date block to paste back.
 
 - **ctx.repo** — `string` _(optional)_ — Repository name from the preferred remote URL, or null when unavailable.
 - **ctx.repo\_root** — `string` _(optional)_ — Absolute repository root path, or null when unavailable.
+- _Git_
+  - **ctx.branch** — `string` _(optional)_ — Current local Git branch name, or null outside a repository or at detached HEAD.
+  - **ctx.worktree** — `string` _(optional)_ — Current linked Git worktree name, or null in the main worktree or outside a repository.
 - **ctx.is\_monorepo** — `boolean` — Whether the current repository is a monorepo.
 - _Packages_
   - **ctx.package\_root** — `string` _(optional)_ — Absolute current package root path, or null when unavailable.
@@ -128,21 +132,23 @@ failure message prints the up-to-date block to paste back.
   - **ctx.area** — `string` — Scoped area name.
   - **ctx.area\_description** — `string` — Human-readable scoped area description.
   - **ctx.area\_root** — `string` — Absolute scoped area root path.
-  - **ctx.current\_packages** — `string[]` _(optional)_ — Packages under the current directory.
-  - **ctx.depends\_on** — `object[]` _(optional)_ — Workspace-internal package dependencies. Each item is an object with a `package` (string) field and a `dependencies` (string[]) field listing the packages it depends on.
-  - **ctx.used\_by** — `object[]` _(optional)_ — Workspace-internal package reverse dependencies. Each item is an object with a `package` (string) field and a `users` (string[]) field listing the packages that depend on it.
+  - **ctx.current\_packages** — `string[]` — Packages under the current directory.
+  - **ctx.depends\_on** — `object[]` — Workspace-internal package dependencies. Each item is an object with a `package` (string) field and a `dependencies` (string[]) field listing the packages it depends on.
+  - **ctx.used\_by** — `object[]` — Workspace-internal package reverse dependencies. Each item is an object with a `package` (string) field and a `users` (string[]) field listing the packages that depend on it.
 
 **File Changes**
 
-- **ctx.dirty\_files** — `string[]` _(optional)_ — Dirty file paths.
-- **ctx.dirty\_source\_code\_files** — `string[]` _(optional)_ — Dirty source-code file paths.
-- **ctx.staged\_files** — `string[]` _(optional)_ — Staged file paths.
-- **ctx.untracked\_files** — `string[]` _(optional)_ — Untracked file paths.
+- **ctx.dirty\_files** — `string[]` — Dirty file paths.
+- _Conflicts_
+  - **ctx.merge\_conflicts** — `string[]` — Repository-relative paths currently in an unresolved Git index state.
+- **ctx.dirty\_source\_code\_files** — `string[]` — Dirty source-code file paths.
+- **ctx.staged\_files** — `string[]` — Staged file paths.
+- **ctx.untracked\_files** — `string[]` — Untracked file paths.
 - _Packages_
-  - **ctx.dirty\_packages** — `string[]` _(optional)_ — Dirty package names.
-  - **ctx.dirty\_package\_areas** — `string[]` _(optional)_ — Dirty package area names.
-  - **ctx.staged\_packages** — `string[]` _(optional)_ — Staged package names.
-  - **ctx.staged\_package\_areas** — `string[]` _(optional)_ — Staged package area names.
+  - **ctx.dirty\_packages** — `string[]` — Dirty package names.
+  - **ctx.dirty\_package\_areas** — `string[]` — Dirty package area names.
+  - **ctx.staged\_packages** — `string[]` — Staged package names.
+  - **ctx.staged\_package\_areas** — `string[]` — Staged package area names.
 - _Flags_
   - **ctx.current\_package\_has\_staged\_files** — `boolean` — Whether the current package has staged files.
   - **ctx.current\_package\_area\_has\_staged\_files** — `boolean` — Whether the current package area has staged files.
@@ -157,9 +163,9 @@ failure message prints the up-to-date block to paste back.
 
 **Documents**
 
-- **ctx.docs\_readme** — `string[]` _(optional)_ — README paths, scope-filtered.
-- **ctx.docs\_blast\_radius** — `string[]` _(optional)_ — Docs with blast_radius frontmatter, scope-filtered.
-- **ctx.docs\_drift** — `string[]` _(optional)_ — Docs at risk of drift from source changes.
+- **ctx.docs\_readme** — `string[]` — README paths, scope-filtered.
+- **ctx.docs\_blast\_radius** — `string[]` — Docs with blast_radius frontmatter, scope-filtered.
+- **ctx.docs\_drift** — `string[]` — Docs at risk of drift from source changes.
 - **ctx.docs\_skill** — `string` _(optional)_ — Repo-relative path to the best matching skill file, or null when unavailable.
 
 **Operating System**

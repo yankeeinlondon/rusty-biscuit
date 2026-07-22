@@ -1017,9 +1017,21 @@ pub fn detect_merge_conflicts(repo: &gix::Repository) -> Vec<PathBuf> {
 /// An index-read failure propagates as [`SniffError::Git`] rather than being
 /// reported as "no conflicts".
 pub(crate) fn detect_merge_conflicts_fallible(repo: &gix::Repository) -> Result<Vec<PathBuf>> {
-    let index = repo
-        .index_or_empty()
-        .map_err(|e| crate::SniffError::git("index", e))?;
+    // Malformed index bytes are external input. Some truncated forms panic in
+    // gix's decoder, so keep that upstream bug behind Sniff's fallible API.
+    let index = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        repo.index_or_empty()
+            .map_err(|error| crate::SniffError::git("index", error))
+    }))
+        .map_err(|_| {
+            crate::SniffError::git(
+                "index",
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Git index decoder panicked on malformed input",
+                ),
+            )
+        })??;
 
     let mut conflicted = Vec::new();
     let mut seen = HashSet::new();

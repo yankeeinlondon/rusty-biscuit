@@ -208,10 +208,9 @@ fn parse_property(line: &str) -> Option<(&str, &str)> {
     // Try '=' first, then ':'
     let (key, value) = if let Some(pos) = line.find('=') {
         (&line[..pos], &line[pos + 1..])
-    } else if let Some(pos) = line.find(':') {
-        (&line[..pos], &line[pos + 1..])
     } else {
-        return None;
+        let pos = line.find(':')?;
+        (&line[..pos], &line[pos + 1..])
     };
 
     Some((key.trim(), value.trim()))

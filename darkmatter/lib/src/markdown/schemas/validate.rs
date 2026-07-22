@@ -7,9 +7,10 @@
 //! - **Validator construction** — wires up Darkmatter's custom formats
 //!   ([`format::DARKMATTER_FILE_FORMAT`],
 //!   [`format::DARKMATTER_FILE_REFERENCE_FORMAT`]) and the
-//!   [`format::DARKMATTER_URL_SCHEME_KEYWORD`] keyword on top of Draft
-//!   2020-12. (`match(...)` is suggestion metadata only and has no validation
-//!   keyword.)
+//!   [`format::DARKMATTER_URL_SCHEME_KEYWORD`],
+//!   [`format::DARKMATTER_TYPE_DEFINITION_KEYWORD`], and
+//!   [`format::DARKMATTER_SCHEMA_KEYWORD`] keywords on top of Draft 2020-12.
+//!   (`match(...)` is suggestion metadata only and has no validation keyword.)
 //! - **Caching** — compiling a `Validator` is several milliseconds of work;
 //!   the [`ValidatorCache`] hashes the canonicalised schema bytes and reuses
 //!   compiled validators across calls. The default bound (64 entries) is
@@ -284,6 +285,14 @@ pub(super) fn build_validator(
         .with_keyword(
             format::DARKMATTER_URL_SCHEME_KEYWORD,
             format::url_scheme_keyword_factory,
+        )
+        .with_keyword(
+            format::DARKMATTER_TYPE_DEFINITION_KEYWORD,
+            format::type_definition_keyword_factory,
+        )
+        .with_keyword(
+            format::DARKMATTER_SCHEMA_KEYWORD,
+            format::schema_keyword_factory,
         );
     opts.build(schema)
         .map_err(|err| SchemaError::BuildValidator {

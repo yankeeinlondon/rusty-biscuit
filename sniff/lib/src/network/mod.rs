@@ -711,7 +711,7 @@ fn parse_linux_proc_default_route_interface(output: &str) -> Option<String> {
             Ok(flags) => flags,
             Err(_) => continue,
         };
-        if flags & libc::RTF_UP as u16 == 0 {
+        if flags & libc::RTF_UP == 0 {
             continue;
         }
 

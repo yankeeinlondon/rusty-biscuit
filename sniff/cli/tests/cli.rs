@@ -155,7 +155,9 @@ fn test_no_subcommand_shows_help() {
 #[test]
 fn test_no_subcommand_with_json_outputs_json() {
     // Without a subcommand but with --json, the output should be JSON
+    let (_dir, path) = create_test_repo();
     cargo_bin_cmd!("sniff")
+        .current_dir(&path)
         .arg("--json")
         .assert()
         .success()
@@ -296,12 +298,18 @@ fn repo_name_json_is_leaf_only() {
 // `sniff repo --json` aggregate tests (scope-complete-json plan, Phase 2)
 // ============================================================================
 
-#[test]
-fn repo_aggregate_json_is_valid_object() {
-    let output = cargo_bin_cmd!("sniff")
+fn repo_aggregate_json_output() -> std::process::Output {
+    let (_dir, path) = create_test_repo();
+    cargo_bin_cmd!("sniff")
+        .current_dir(path)
         .args(["repo", "--json"])
         .output()
-        .expect("run sniff repo --json");
+        .expect("run sniff repo --json")
+}
+
+#[test]
+fn repo_aggregate_json_is_valid_object() {
+    let output = repo_aggregate_json_output();
 
     assert!(
         output.status.success(),
@@ -319,10 +327,7 @@ fn repo_aggregate_json_is_valid_object() {
 
 #[test]
 fn repo_aggregate_json_excludes_network_and_parameterized_keys() {
-    let output = cargo_bin_cmd!("sniff")
-        .args(["repo", "--json"])
-        .output()
-        .expect("run sniff repo --json");
+    let output = repo_aggregate_json_output();
 
     let json_str = std::str::from_utf8(&output.stdout).expect("utf8");
     let json: serde_json::Value = serde_json::from_str(json_str).expect("valid json");
@@ -338,10 +343,7 @@ fn repo_aggregate_json_excludes_network_and_parameterized_keys() {
 
 #[test]
 fn repo_aggregate_json_not_partial() {
-    let output = cargo_bin_cmd!("sniff")
-        .args(["repo", "--json"])
-        .output()
-        .expect("run sniff repo --json");
+    let output = repo_aggregate_json_output();
 
     let json_str = std::str::from_utf8(&output.stdout).expect("utf8");
     let json: serde_json::Value = serde_json::from_str(json_str).expect("valid json");
@@ -385,10 +387,7 @@ fn repo_aggregate_json_not_partial() {
 
 #[test]
 fn repo_aggregate_json_uses_snake_case_and_drops_old_kebab_keys() {
-    let output = cargo_bin_cmd!("sniff")
-        .args(["repo", "--json"])
-        .output()
-        .expect("run sniff repo --json");
+    let output = repo_aggregate_json_output();
 
     let json_str = std::str::from_utf8(&output.stdout).expect("utf8");
     let json: serde_json::Value = serde_json::from_str(json_str).expect("valid json");
@@ -433,10 +432,7 @@ fn repo_aggregate_json_uses_snake_case_and_drops_old_kebab_keys() {
 
 #[test]
 fn repo_aggregate_json_context_groups_cwd_relative_facts() {
-    let output = cargo_bin_cmd!("sniff")
-        .args(["repo", "--json"])
-        .output()
-        .expect("run sniff repo --json");
+    let output = repo_aggregate_json_output();
 
     let json_str = std::str::from_utf8(&output.stdout).expect("utf8");
     let json: serde_json::Value = serde_json::from_str(json_str).expect("valid json");
@@ -465,10 +461,7 @@ fn repo_aggregate_json_context_groups_cwd_relative_facts() {
 
 #[test]
 fn repo_json_output_is_valid_json_on_stdout_with_clean_stderr() {
-    let output = cargo_bin_cmd!("sniff")
-        .args(["repo", "--json"])
-        .output()
-        .expect("run sniff repo --json");
+    let output = repo_aggregate_json_output();
 
     assert!(
         output.status.success(),
@@ -489,7 +482,9 @@ fn repo_json_output_is_valid_json_on_stdout_with_clean_stderr() {
 
 #[test]
 fn repo_structure_json_output_is_valid_json_on_stdout_with_clean_stderr() {
+    let (_dir, path) = create_test_repo();
     let output = cargo_bin_cmd!("sniff")
+        .current_dir(&path)
         .args(["repo", "structure", "--json"])
         .output()
         .expect("run sniff repo structure --json");
@@ -513,10 +508,7 @@ fn repo_structure_json_output_is_valid_json_on_stdout_with_clean_stderr() {
 
 #[test]
 fn repo_aggregate_json_scope_buckets_have_stable_shape() {
-    let output = cargo_bin_cmd!("sniff")
-        .args(["repo", "--json"])
-        .output()
-        .expect("run sniff repo --json");
+    let output = repo_aggregate_json_output();
 
     let json_str = std::str::from_utf8(&output.stdout).expect("utf8");
     let json: serde_json::Value = serde_json::from_str(json_str).expect("valid json");
@@ -538,10 +530,7 @@ fn repo_aggregate_json_scope_buckets_have_stable_shape() {
 
 #[test]
 fn repo_aggregate_json_does_not_duplicate_full_package_catalogs() {
-    let output = cargo_bin_cmd!("sniff")
-        .args(["repo", "--json"])
-        .output()
-        .expect("run sniff repo --json");
+    let output = repo_aggregate_json_output();
 
     let json_str = std::str::from_utf8(&output.stdout).expect("utf8");
     let json: serde_json::Value = serde_json::from_str(json_str).expect("valid json");
@@ -569,10 +558,7 @@ fn repo_aggregate_json_does_not_duplicate_full_package_catalogs() {
 /// which tracked git-history growth rather than catalog duplication.
 #[test]
 fn repo_aggregate_json_never_re_embeds_the_full_package_catalog() {
-    let output = cargo_bin_cmd!("sniff")
-        .args(["repo", "--json"])
-        .output()
-        .expect("run sniff repo --json");
+    let output = repo_aggregate_json_output();
     let json: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("valid json");
 
@@ -626,10 +612,7 @@ fn repo_aggregate_json_is_offline() {
     // by ensuring the output completes successfully and does not contain the
     // excluded network-primary keys; the spec excludes `remote`, `pr`, and
     // `hash` from the aggregate.
-    let output = cargo_bin_cmd!("sniff")
-        .args(["repo", "--json"])
-        .output()
-        .expect("run sniff repo --json");
+    let output = repo_aggregate_json_output();
 
     assert!(
         output.status.success(),
@@ -1080,7 +1063,9 @@ fn repo_default_verbose_is_rich_oneliner() {
 
 #[test]
 fn test_base_flag_before_subcommand() {
+    let (_dir, path) = create_test_repo();
     cargo_bin_cmd!("sniff")
+        .current_dir(&path)
         .args(["-b", ".", "filesystem"])
         .assert()
         .success();
@@ -1088,7 +1073,9 @@ fn test_base_flag_before_subcommand() {
 
 #[test]
 fn test_base_flag_after_subcommand_is_accepted() {
+    let (_dir, path) = create_test_repo();
     cargo_bin_cmd!("sniff")
+        .current_dir(&path)
         .args(["filesystem", "-b", "."])
         .assert()
         .success();
@@ -1284,7 +1271,9 @@ fn test_network_subcommand_json_output() {
 
 #[test]
 fn test_filesystem_subcommand_text_output() {
+    let (_dir, path) = create_test_repo();
     cargo_bin_cmd!("sniff")
+        .current_dir(&path)
         .arg("filesystem")
         .assert()
         .success()
@@ -1293,7 +1282,9 @@ fn test_filesystem_subcommand_text_output() {
 
 #[test]
 fn test_filesystem_subcommand_json_output() {
+    let (_dir, path) = create_test_repo();
     let output = cargo_bin_cmd!("sniff")
+        .current_dir(&path)
         .args(["filesystem", "--json"])
         .assert()
         .success()
@@ -1474,7 +1465,9 @@ fn test_storage_subcommand_json_output() {
 
 #[test]
 fn test_git_status_subcommand_text_output() {
+    let (_dir, path) = create_test_repo();
     cargo_bin_cmd!("sniff")
+        .current_dir(&path)
         .args(["repo", "git-status"])
         .assert()
         .success()
@@ -1486,7 +1479,9 @@ fn test_git_status_subcommand_text_output() {
 #[test]
 fn test_git_status_subcommand_with_history_flag() {
     // Test that the --history flag is accepted
+    let (_dir, path) = create_test_repo();
     cargo_bin_cmd!("sniff")
+        .current_dir(&path)
         .args(["repo", "git-status", "--history", "3"])
         .assert()
         .success()
@@ -1495,7 +1490,9 @@ fn test_git_status_subcommand_with_history_flag() {
 
 #[test]
 fn test_git_status_subcommand_compact_output() {
+    let (_dir, path) = create_test_repo();
     cargo_bin_cmd!("sniff")
+        .current_dir(&path)
         .args(["repo", "git-status", "--compact"])
         .assert()
         .success()
@@ -1505,7 +1502,9 @@ fn test_git_status_subcommand_compact_output() {
 
 #[test]
 fn test_git_status_subcommand_json_output() {
+    let (_dir, path) = create_test_repo();
     let output = cargo_bin_cmd!("sniff")
+        .current_dir(&path)
         .args(["repo", "git-status", "--json"])
         .assert()
         .success()
@@ -1561,7 +1560,9 @@ fn test_repo_subcommand_text_output() {
 
 #[test]
 fn test_repo_subcommand_json_output() {
+    let (_dir, path) = create_test_repo();
     let output = cargo_bin_cmd!("sniff")
+        .current_dir(&path)
         .args(["repo", "--json"])
         .assert()
         .success()
@@ -3165,7 +3166,9 @@ fn test_git_status_json_is_git_info() {
     // Verify JSON output is a `GitInfo` object — not the full `RepoInfo`
     // blob. The top-level `repo_root` field is unique to `GitInfo`'s shape
     // (RepoInfo serializes its root field as `root`).
+    let (_dir, path) = create_test_repo();
     cargo_bin_cmd!("sniff")
+        .current_dir(&path)
         .args(["repo", "git-status", "--json"])
         .assert()
         .success()
@@ -3686,7 +3689,9 @@ fn test_plain_with_json_ignores_plain() {
 
 #[test]
 fn test_repo_git_status_subcommand() {
+    let (_dir, path) = create_test_repo();
     cargo_bin_cmd!("sniff")
+        .current_dir(&path)
         .args(["repo", "git-status"])
         .assert()
         .success();

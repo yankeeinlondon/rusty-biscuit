@@ -1,4 +1,3 @@
-kind: schema
 $schema:
     created: datetime -> an ISO8601 representation of the date and time this review was created (using host's timezone)
     agent: "string -> a string representation of agent and model: `${agent}/${model}`"

@@ -101,7 +101,7 @@ feature layer.
 | Code | Meaning |
 |------|---------|
 | `dm.frontmatter.yaml_parse` | The frontmatter YAML could not be parsed. |
-| `dm.schema.invalid_schema_shape` | The `$schema` value is not a valid schema shape. |
+| `dm.schema.invalid_schema_shape` | The `$schema` value is not a valid schema shape. In a standalone schema document this also covers a rejected **outer** declaration — an empty root union, an illegal union arm, or an invalid whole-file reference — ranged at that value or arm. |
 | `dm.schema.prepare` | The schema could not be resolved, merged, or compiled. |
 | `dm.schema.type_mismatch` | A value did not match its declared type. |
 | `dm.schema.constraint` | A non-type constraint failed (range, length, pattern, enum, …). |
@@ -110,7 +110,7 @@ feature layer.
 | `dm.schema.deprecated_key` | A deprecated key is present. |
 | `dm.schema.invalid_file_reference` | A `file(...)`-typed value failed to parse, resolve, or match a file. |
 | `dm.schema.invalid_suggestion` | A `suggest(...)` candidate is invalid metadata for its target schema (type, range, integer, length, not-empty, or pattern violation, or unrepresentable number syntax). **Warning.** |
-| `dm.schema.document_malformed` | A recognized standalone SimplifiedSchema envelope is malformed (missing or non-mapping `types`, unsupported tagged-envelope keys, or an invalid payload). Ranged over the whole schema document. |
+| `dm.schema.document_malformed` | A recognized standalone SimplifiedSchema envelope is malformed (missing or non-mapping `types`, unsupported tagged-envelope keys, or an invalid payload) and no more precise declaration or definition diagnostic claims the failure. Ranged over the whole schema document. |
 | `dm.style.unknown_key` | A `style:` key the style schema does not recognize. |
 | `dm.style.deprecated_key` | A deprecated `style:` key (a canonical replacement exists). |
 

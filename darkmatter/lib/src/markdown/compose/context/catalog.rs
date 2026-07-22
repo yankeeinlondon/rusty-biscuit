@@ -157,6 +157,8 @@ const CONTEXT_VARIABLE_GROUPING: &[(&str, &str, &str)] = &[
     // ── Repository ──────────────────────────────────────────────────
     ("repo", "Repository", ""),
     ("repo_root", "Repository", ""),
+    ("branch", "Repository", "Git"),
+    ("worktree", "Repository", "Git"),
     ("is_monorepo", "Repository", ""),
     ("package_root", "Repository", "Packages"),
     ("package_area_root", "Repository", "Packages"),
@@ -172,6 +174,7 @@ const CONTEXT_VARIABLE_GROUPING: &[(&str, &str, &str)] = &[
     ("used_by", "Repository", "Scope"),
     // ── File Changes ────────────────────────────────────────────────
     ("dirty_files", "File Changes", ""),
+    ("merge_conflicts", "File Changes", "Conflicts"),
     ("dirty_source_code_files", "File Changes", ""),
     ("staged_files", "File Changes", ""),
     ("untracked_files", "File Changes", ""),
@@ -272,10 +275,12 @@ fn project_one(index: usize, name: &str, def: &PropertyDef) -> ContextVariableDe
     let required = atom
         .constraints
         .iter()
+        .chain(&atom.array_constraints)
         .any(|c| matches!(c, Constraint::Required));
     let generated = atom
         .constraints
         .iter()
+        .chain(&atom.array_constraints)
         .any(|c| matches!(c, Constraint::Generated));
     let integer = atom
         .constraints
@@ -452,10 +457,12 @@ mod tests {
             let expected_required = atom
                 .constraints
                 .iter()
+                .chain(&atom.array_constraints)
                 .any(|c| matches!(c, Constraint::Required));
             let expected_generated = atom
                 .constraints
                 .iter()
+                .chain(&atom.array_constraints)
                 .any(|c| matches!(c, Constraint::Generated));
             assert_eq!(d.required, expected_required, "ctx.{name} required flag");
             assert_eq!(d.generated, expected_generated, "ctx.{name} generated flag");

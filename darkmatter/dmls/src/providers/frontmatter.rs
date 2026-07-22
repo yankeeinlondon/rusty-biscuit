@@ -11,11 +11,15 @@
 //! `textEdit` and no snippets (Zed-safe).
 
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use darkmatter::markdown::schemas::{
-    Constraint, DecodedScalar, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema,
-    SimplifiedType, TypeExpr, darkmatter_base_schema, decode_scalar,
+    Constraint, DecodedScalar, JsonPointer, PropertyAtom, PropertyDef, SchemaArm, SchemaCursor,
+    SchemaCursorRole, SchemaDeclaration, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr,
+    darkmatter_base_schema, decode_scalar, locate_schema_declaration_cursor,
+    locate_type_definition_cursor, parse_property_definition, parse_schema_declaration,
+    parse_schema_declaration_with_source, schema_constraint_descriptors, schema_type_descriptors,
     select_literal_discriminant_arm, suggestions_for_def,
 };
 use serde_json::Value;
@@ -28,7 +32,10 @@ use lsp_types::{
 
 use super::DocumentContext;
 use crate::graph::normalize_join;
-use crate::overlay::{FmEntry, FmValueKind, FrontmatterAst, expressions};
+use crate::overlay::{
+    FmEntry, FmValueKind, FrontmatterAst, SchemaAuthoringState, doc_links, expressions,
+};
+use crate::overlay::schema::{FrontmatterSchemaValue, MetaSchemaKind, semantic_type_regions};
 use crate::workspace::file_path_to_uri;
 
 /// Frontmatter/schema diagnostics (delegated to the diagnostics module).
@@ -40,7 +47,22 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
 
 /// Completion inside the frontmatter block: schema keys, enum values, boolish
 /// scaffolds, file paths, `style.*` keys, and `suggest(...)` candidates.
+///
+/// Semantic meta-type candidates are **merged** with the ordinary schema-driven
+/// ones rather than replacing them. A property typed
+/// `[type-definition, enum(foo, bar)]` activates semantic authoring on one arm
+/// only, so short-circuiting there would silently discard every sibling arm's
+/// candidates. Semantic items lead so the pure-`type-definition` ordering is
+/// unchanged, and `dedup_completions` keeps first-seen order.
 pub fn completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem> {
+    let mut items = meta_schema_completion(ctx, offset).unwrap_or_default();
+    items.extend(schema_completion(ctx, offset));
+    dedup_completions(items)
+}
+
+/// The ordinary (non-semantic) frontmatter completion candidates: schema keys,
+/// enum values, boolish scaffolds, file paths, `style.*` keys, and suggestions.
+fn schema_completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem> {
     let Some(ast) = overlay_ast(ctx) else {
         return Vec::new();
     };
@@ -51,12 +73,10 @@ pub fn completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem> {
     let indent = prefix.len() - prefix.trim_start().len();
     let trimmed = prefix.trim_start();
 
-    match trimmed.find(':') {
-        Some(colon) => {
-            let key = trimmed[..colon].trim().to_string();
-            let value_partial = trimmed[colon + 1..].trim_start();
-            let ancestors = enclosing_path(ctx.text, line_start, indent);
-            value_completions(ctx, offset, &ancestors, &key, value_partial)
+    match value_cursor(ctx, offset, line_start, trimmed) {
+        Some((key, value_partial)) => {
+            let ancestors = enclosing_path(ctx, offset, line_start, indent);
+            value_completions(ctx, offset, &ancestors, &key, &value_partial)
         }
         None if indent == 0 => top_level_key_completions(ctx, ast, offset, trimmed),
         None => {
@@ -66,6 +86,477 @@ pub fn completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem> {
             nested_key_completions(ctx, ast, offset, line_start, indent, trimmed)
         }
     }
+}
+
+/// Completion for values interpreted as SimplifiedSchema authoring syntax.
+///
+/// Activation (which values carry a semantic meta-type at all) comes from the
+/// overlay's typed [`SchemaAuthoringState`]. Everything past that — what the
+/// cursor is in the middle of authoring, and the range a text edit may replace
+/// — comes from the shared tolerant parser-state authority
+/// ([`locate_type_definition_cursor`] / [`locate_schema_declaration_cursor`]),
+/// never from searching the value text for a delimiter.
+fn meta_schema_completion(ctx: &DocumentContext, offset: usize) -> Option<Vec<CompletionItem>> {
+    let overlay = ctx.overlay?;
+    let (value_start, kinds) = match flow_cursor(ctx, offset) {
+        Some((value_start, ancestors, key)) => {
+            (value_start, meta_schema_kinds_for_line(overlay, &ancestors, &key, false)?)
+        }
+        None => block_cursor(ctx, overlay, offset)?,
+    };
+
+    let value_source = ctx.text.get(value_start..)?;
+    let mut items = Vec::new();
+    for kind in kinds {
+        let state = match kind {
+            MetaSchemaKind::TypeDefinition => {
+                locate_type_definition_cursor(value_source, value_start, offset)
+            }
+            MetaSchemaKind::Schema => {
+                locate_schema_declaration_cursor(value_source, value_start, offset)
+            }
+        };
+        // A cursor the grammar cannot speak to (inside a `-> description`)
+        // deliberately offers nothing rather than guessing.
+        let Some(state) = state else { continue };
+        let start = state.token_span.start;
+        match kind {
+            MetaSchemaKind::TypeDefinition => {
+                items.extend(type_definition_completions(ctx, start, offset, &state));
+            }
+            MetaSchemaKind::Schema => {
+                items.extend(schema_value_completions(ctx, start, offset, &state.token));
+            }
+        }
+    }
+    Some(dedup_completions(items))
+}
+
+/// The `(value_start, meta-schema kinds)` a block-presented cursor resolves to.
+///
+/// Standalone documents consult the shared source map first, which covers both
+/// implicit and explicit mapping pairs. Frontmatter and incomplete source then
+/// fall back to an implicit `key:` value or a `- ` sequence item.
+fn block_cursor(
+    ctx: &DocumentContext,
+    overlay: &crate::overlay::DocumentOverlay,
+    offset: usize,
+) -> Option<(usize, Vec<MetaSchemaKind>)> {
+    if let SchemaAuthoringState::Standalone { model: Some(model), .. } =
+        &overlay.schema_authoring
+        && let Some(schema) = model.schema()
+        && let Some(region) = semantic_type_regions(schema, &model.source_map)
+            .into_iter()
+            .find(|region| {
+                region.definition_span.start <= offset && offset <= region.definition_span.end
+            })
+    {
+        return Some((region.definition_span.start, vec![region.kind]));
+    }
+
+    let (line_start, prefix) = line_prefix(ctx.text, offset);
+    let indent = prefix.len() - prefix.trim_start().len();
+    let trimmed = prefix.trim_start();
+    let ancestors = enclosing_path(ctx, offset, line_start, indent);
+
+    if let Some((key, partial)) = value_cursor(ctx, offset, line_start, trimmed) {
+        let kinds = meta_schema_kinds_for_line(overlay, &ancestors, &key, false)?;
+        Some((semantic_value_start(ctx, offset, line_start, partial.len()), kinds))
+    } else if let Some(after_dash) = trimmed.strip_prefix("- ") {
+        let kinds = meta_schema_kinds_for_line(overlay, &ancestors, "", true)?;
+        Some((offset - after_dash.len(), kinds))
+    } else if trimmed == "-" {
+        let kinds = meta_schema_kinds_for_line(overlay, &ancestors, "", true)?;
+        Some((offset, kinds))
+    } else {
+        None
+    }
+}
+
+/// The `(value_start, ancestors, key)` a cursor inside a flow collection
+/// resolves to, or `None` in ordinary block context.
+///
+/// [`schema::flow_value_cursor`] answers only *within* the flow collection; the
+/// block ancestry above its opening delimiter still comes from the block
+/// helpers, so `types:\n  entry: {title: string}` reports the full
+/// `types → entry → title` path rather than a bare `title`.
+fn flow_cursor(ctx: &DocumentContext, offset: usize) -> Option<(usize, Vec<String>, String)> {
+    // A body offset is never frontmatter authoring: braces in prose must not
+    // reach the semantic router. A standalone schema document has no AST and is
+    // authoring everywhere.
+    if overlay_ast(ctx).is_some_and(|ast| !ast.contains_offset(offset)) {
+        return None;
+    }
+    let cursor = crate::overlay::schema::flow_value_cursor(ctx.text, offset)?;
+    let (line_start, prefix) = line_prefix(ctx.text, cursor.root_start);
+    let indent = prefix.len() - prefix.trim_start().len();
+    let mut ancestors = enclosing_path(ctx, cursor.root_start, line_start, indent);
+    if let Some((key, _)) = value_cursor(ctx, cursor.root_start, line_start, prefix.trim_start()) {
+        ancestors.push(key);
+    }
+    ancestors.extend(cursor.ancestors);
+    Some((cursor.value_start, ancestors, cursor.key))
+}
+
+/// The document byte offset where a `key:` line's value begins.
+///
+/// The frontmatter AST's value span is authoritative whenever the buffer's YAML
+/// still parses; a value being typed into a not-yet-parseable buffer (an open
+/// `{`, a half-written flow sequence) has no entry, so the start implied by
+/// `partial_len` (the already-typed value text before the cursor) is the
+/// fallback.
+fn semantic_value_start(
+    ctx: &DocumentContext,
+    offset: usize,
+    line_start: usize,
+    partial_len: usize,
+) -> usize {
+    let fallback = offset - partial_len;
+    overlay_ast(ctx)
+        .and_then(|ast| ast.key_entry_on_line(line_start, offset))
+        .filter(|entry| still_placed(ctx, entry))
+        .filter(|entry| entry.value_span.start <= offset && entry.value_span.start >= fallback)
+        .map(|entry| entry.value_span.start)
+        .unwrap_or(fallback)
+}
+
+fn meta_schema_kinds_for_line(
+    overlay: &crate::overlay::DocumentOverlay,
+    ancestors: &[String],
+    key: &str,
+    sequence_item: bool,
+) -> Option<Vec<MetaSchemaKind>> {
+    match &overlay.schema_authoring {
+        SchemaAuthoringState::Standalone { envelope, .. } => {
+            let payload = match envelope {
+                darkmatter::markdown::schemas::StandaloneSchemaEnvelope::Pure => "$schema",
+                darkmatter::markdown::schemas::StandaloneSchemaEnvelope::Tagged => "types",
+            };
+            // A pure standalone document's whole payload may be a scalar
+            // reference (`$schema: ./other.yaml`), whose value sits on the
+            // top-level `$schema` line itself — a line `enclosing_path`
+            // correctly reports as having no ancestors.
+            if payload == "$schema" && !sequence_item && key == "$schema" && ancestors.is_empty() {
+                return Some(vec![MetaSchemaKind::Schema]);
+            }
+            if ancestors.first().map(String::as_str) != Some(payload) {
+                return None;
+            }
+            if sequence_item && ancestors.len() == 1 && payload == "$schema" {
+                Some(vec![MetaSchemaKind::Schema])
+            } else {
+                Some(vec![MetaSchemaKind::TypeDefinition])
+            }
+        }
+        SchemaAuthoringState::Frontmatter(values) => {
+            if key == "$schema" && ancestors.is_empty() {
+                return Some(vec![MetaSchemaKind::Schema]);
+            }
+            if ancestors.first().map(String::as_str) == Some("$schema") {
+                return if sequence_item && ancestors.len() == 1 {
+                    Some(vec![MetaSchemaKind::Schema])
+                } else {
+                    Some(vec![MetaSchemaKind::TypeDefinition])
+                };
+            }
+
+            let mut path: Vec<&str> = ancestors.iter().map(String::as_str).collect();
+            if !sequence_item && !key.is_empty() {
+                path.push(key);
+            }
+            semantic_owner_kinds(values, &path)
+        }
+        SchemaAuthoringState::Inactive => None,
+    }
+}
+
+/// The meta-schema grammar activated at one structural frontmatter key path by
+/// the longest recorded semantic owner covering it.
+///
+/// `path` is matched against each recorded pointer segment-by-segment. Both
+/// sides must be decoded: a recorded pointer is RFC 6901-encoded (`/a~1b`), an
+/// authored key is not, and only the whole path — not its first segment — can
+/// address a nested value like `/parameter/type`.
+///
+/// Shared by completion and hover so both activate over exactly the same
+/// region: hovering inside a `schema`-typed property must describe the same
+/// definitions completion offers there.
+fn semantic_owner_kinds(
+    values: &[FrontmatterSchemaValue],
+    path: &[&str],
+) -> Option<Vec<MetaSchemaKind>> {
+    if path.is_empty() {
+        return None;
+    }
+    let (owner_len, owner) = values
+        .iter()
+        .filter_map(|value| {
+            let pointer = JsonPointer::parse(&value.pointer);
+            let segments = pointer.segments();
+            (!segments.is_empty()
+                && segments.len() <= path.len()
+                && segments
+                    .iter()
+                    .zip(path)
+                    .all(|(recorded, authored)| recorded.as_str() == *authored))
+            .then_some((segments.len(), value))
+        })
+        .max_by_key(|(len, _)| *len)?;
+    // A strict ancestor means the cursor sits *inside* that owner's definition,
+    // where every nested entry is one complete type definition regardless of
+    // the owner's own kind.
+    if owner_len < path.len() {
+        return Some(vec![MetaSchemaKind::TypeDefinition]);
+    }
+    Some(owner.kinds.clone())
+}
+
+/// Completion for a cursor inside a `type-definition` value, dispatched on the
+/// structural role the shared parser-state authority reports.
+fn type_definition_completions(
+    ctx: &DocumentContext,
+    start: usize,
+    offset: usize,
+    state: &SchemaCursor,
+) -> Vec<CompletionItem> {
+    let partial = state.token.as_str();
+    match &state.role {
+        SchemaCursorRole::Constraint { subject, array_level } => {
+            return constraint_completions(
+                ctx,
+                start,
+                offset,
+                partial,
+                subject.as_deref(),
+                *array_level,
+            );
+        }
+        // A constraint's arguments are author-supplied values (a regex body, a
+        // glob, an enum member); the catalog has nothing to offer there.
+        SchemaCursorRole::Argument { .. } => return Vec::new(),
+        // An inline object's keys are the author's own property names.
+        SchemaCursorRole::InlineObjectKey => return Vec::new(),
+        // The file half of `Name@reference` names a schema file, not a type
+        // keyword — the catalog must not leak into it.
+        SchemaCursorRole::ImportReference { .. } => return Vec::new(),
+        SchemaCursorRole::Type => {}
+    }
+
+    let mut items = Vec::new();
+    for descriptor in schema_type_descriptors() {
+        if descriptor.keyword.starts_with(partial)
+            && let Some(completion) = item(
+                ctx,
+                start,
+                offset,
+                descriptor.keyword,
+                descriptor.keyword,
+                CompletionItemKind::TYPE_PARAMETER,
+                Some(descriptor.description.to_string()),
+            )
+        {
+            items.push(completion);
+        }
+        let array = format!("{}[]", descriptor.keyword);
+        if array.starts_with(partial)
+            && let Some(completion) = item(
+                ctx,
+                start,
+                offset,
+                &array,
+                &array,
+                CompletionItemKind::TYPE_PARAMETER,
+                Some(format!("Array of {} values", descriptor.keyword)),
+            )
+        {
+            items.push(completion);
+        }
+    }
+    for scaffold in ["{}", "[]", "Name@./types.yaml"] {
+        if scaffold.starts_with(partial)
+            && let Some(completion) = item(
+                ctx,
+                start,
+                offset,
+                scaffold,
+                scaffold,
+                CompletionItemKind::SNIPPET,
+                Some("SimplifiedSchema definition scaffold".to_string()),
+            )
+        {
+            items.push(completion);
+        }
+    }
+    for name in passive_namespace_names(ctx) {
+        let imported = format!("{name}@this");
+        if imported.starts_with(partial)
+            && let Some(completion) = item(
+                ctx,
+                start,
+                offset,
+                &imported,
+                &imported,
+                CompletionItemKind::REFERENCE,
+                Some("Named type from the current passive schema namespace".to_string()),
+            )
+        {
+            items.push(completion);
+        }
+    }
+    items
+}
+
+/// Constraint-keyword completion for a cursor inside a `(…)` list.
+///
+/// Which constraints are legal depends on the list's level, which only the
+/// parser can decide: an item-level list is bounded by the subject type's
+/// `accepted_constraints`, while the postfix `[](…)` list carries the separate
+/// array surface ([`SchemaConstraintDescriptor::accepts_array_level`]). A
+/// subject the catalog does not know (a half-typed keyword, an import name)
+/// offers nothing.
+fn constraint_completions(
+    ctx: &DocumentContext,
+    start: usize,
+    offset: usize,
+    partial: &str,
+    subject: Option<&str>,
+    array_level: bool,
+) -> Vec<CompletionItem> {
+    let item_descriptor = if array_level {
+        None
+    } else {
+        let Some(descriptor) = subject.and_then(|subject| {
+            schema_type_descriptors()
+                .iter()
+                .find(|descriptor| descriptor.keyword == subject)
+        }) else {
+            return Vec::new();
+        };
+        Some(descriptor)
+    };
+    schema_constraint_descriptors()
+        .iter()
+        .filter(|constraint| !constraint.keyword.starts_with('<'))
+        .filter(|constraint| match item_descriptor {
+            Some(descriptor) => accepts_constraint(descriptor, constraint.keyword),
+            None => constraint.accepts_array_level(),
+        })
+        .filter(|constraint| constraint.keyword.starts_with(partial))
+        .filter_map(|constraint| {
+            let insert = match constraint.keyword {
+                "default" => "default()".to_string(),
+                _ if constraint.form.contains('(') => constraint.form.to_string(),
+                keyword => keyword.to_string(),
+            };
+            item(
+                ctx,
+                start,
+                offset,
+                constraint.keyword,
+                &insert,
+                CompletionItemKind::PROPERTY,
+                Some(constraint.description.to_string()),
+            )
+        })
+        .collect()
+}
+
+/// Whether a type descriptor's published item-level constraint list names
+/// `keyword`.
+///
+/// The list is prose (`"eager, match(glob, ...), default, required"`), so each
+/// entry is compared as a whole keyword rather than as a substring — otherwise
+/// `match`'s own argument list would make unrelated keywords appear accepted.
+fn accepts_constraint(
+    descriptor: &darkmatter::markdown::schemas::SchemaTypeDescriptor,
+    keyword: &str,
+) -> bool {
+    descriptor
+        .accepted_constraints
+        .split([',', ';'])
+        .filter_map(|entry| entry.trim().split('(').next())
+        .any(|entry| entry.trim() == keyword)
+}
+
+fn passive_namespace_names(ctx: &DocumentContext) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    let Some(overlay) = ctx.overlay else {
+        return names;
+    };
+    let schema = match &overlay.schema_authoring {
+        // A whole-file reference document is active but declares no inline
+        // properties, so it contributes no passive namespace names.
+        SchemaAuthoringState::Standalone { model: Some(model), .. } => model.schema(),
+        SchemaAuthoringState::Frontmatter(_) => None,
+        _ => None,
+    };
+    if let Some(schema) = schema {
+        collect_schema_property_names(schema, &mut names);
+        return names;
+    }
+
+    let Some(schema_entry) = overlay.ast.as_deref().and_then(FrontmatterAst::schema_entry) else {
+        return names;
+    };
+    if let Some(ast) = overlay.ast.as_deref() {
+        for entry in ast.entries() {
+            if entry.depth == 1 && entry.pointer.starts_with("/$schema/") {
+                names.insert(entry.key.clone());
+            }
+        }
+        if !names.is_empty() {
+            return names;
+        }
+    }
+    let Some(source) = ctx.text.get(schema_entry.value_span.clone()) else {
+        return names;
+    };
+    let source = dedent_spanned_yaml(source, source_column(ctx.text, schema_entry.value_span.start));
+    let Ok(yaml) = serde_yaml_ng::from_str(&source) else {
+        return names;
+    };
+    if let Ok(SchemaDeclaration::Schema(schema)) = parse_schema_declaration(&yaml) {
+        collect_schema_property_names(&schema, &mut names);
+    }
+    names
+}
+
+fn collect_schema_property_names(schema: &SimplifiedSchema, names: &mut BTreeSet<String>) {
+    match schema {
+        SimplifiedSchema::Single(shape) => names.extend(shape.properties.keys().cloned()),
+        SimplifiedSchema::Union(arms) => {
+            for arm in arms {
+                if let SchemaArm::Inline(shape) = arm {
+                    names.extend(shape.properties.keys().cloned());
+                }
+            }
+        }
+    }
+}
+
+fn schema_value_completions(
+    ctx: &DocumentContext,
+    start: usize,
+    offset: usize,
+    partial: &str,
+) -> Vec<CompletionItem> {
+    let mut items = file_path_completions(ctx, offset, partial);
+    for scaffold in ["{}", "[]", "./schema.yaml"] {
+        if scaffold.starts_with(partial)
+            && let Some(completion) = item(
+                ctx,
+                start,
+                offset,
+                scaffold,
+                scaffold,
+                CompletionItemKind::FILE,
+                Some("Schema declaration scaffold".to_string()),
+            )
+        {
+            items.push(completion);
+        }
+    }
+    items
 }
 
 /// Top-level schema keys not yet present, filtered by the typed prefix.
@@ -92,7 +583,7 @@ fn nested_key_completions(
     indent: usize,
     partial: &str,
 ) -> Vec<CompletionItem> {
-    let ancestors = enclosing_path(ctx.text, line_start, indent);
+    let ancestors = enclosing_path(ctx, offset, line_start, indent);
     let ancestor_refs: Vec<&str> = ancestors.iter().map(String::as_str).collect();
     let shape = known_shape(ctx);
     if let Some(nested) = nested_shape_for_completion(ctx, &shape, &ancestor_refs) {
@@ -136,15 +627,16 @@ fn shape_key_completions(
 }
 
 /// The already-authored direct child keys of the mapping at `ancestors`, so
-/// completion can exclude them. The dotted-prefix guard keeps a same-named
-/// mapping elsewhere in the tree (e.g. under `$schema`) from leaking in.
+/// completion can exclude them.
+///
+/// Parent identity is structural, so a same-named mapping elsewhere in the tree
+/// (e.g. under `$schema`) cannot leak in and a key containing `.` is reported
+/// as itself rather than as two nested segments.
 fn present_child_keys<'a>(ast: &'a FrontmatterAst, ancestors: &[String]) -> Vec<&'a str> {
-    let depth = ancestors.len();
-    let prefix = format!("{}.", ancestors.join("."));
-    ast.entries()
-        .iter()
-        .filter(|entry| entry.depth == depth)
-        .filter_map(|entry| entry.dotted.strip_prefix(&prefix).filter(|rest| !rest.contains('.')))
+    let path: Vec<&str> = ancestors.iter().map(String::as_str).collect();
+    ast.children_of_key_path(&path)
+        .into_iter()
+        .map(|entry| entry.key.as_str())
         .collect()
 }
 
@@ -340,7 +832,7 @@ fn expr_completion_item(
         documentation: candidate.documentation.map(|value| {
             Documentation::MarkupContent(MarkupContent {
                 kind: MarkupKind::Markdown,
-                value,
+                value: doc_links::resolve(&value, ctx.path).into_owned(),
             })
         }),
         text_edit: Some(CompletionTextEdit::Edit(TextEdit {
@@ -407,11 +899,11 @@ pub(crate) fn expression_values<'a>(
 ) -> Vec<ExpressionValue<'a>> {
     let shape = known_shape(ctx);
     let mut out = Vec::new();
-    for entry in ast.entries() {
+    for (index, entry) in ast.entries().iter().enumerate() {
         if entry.kind != FmValueKind::Scalar {
             continue;
         }
-        let path: Vec<&str> = entry.dotted.split('.').collect();
+        let path = ast.key_path_at(index);
         let Some(def) = def_at_path_ctx(ctx, &shape, &path) else {
             continue;
         };
@@ -532,7 +1024,7 @@ fn block_array_suggestions(
     } else {
         return None;
     };
-    let ancestors = enclosing_path(ctx.text, line_start, indent);
+    let ancestors = enclosing_path(ctx, offset, line_start, indent);
     let path: Vec<&str> = ancestors.iter().map(String::as_str).collect();
     let item_start = line_start + indent + marker_len;
     suggestion_completions(ctx, &path, item_start, offset, after_dash)
@@ -581,6 +1073,9 @@ fn style_key_completions(ctx: &DocumentContext, offset: usize, partial: &str) ->
 /// Hover on a frontmatter key: schema type/constraints/default/description, or
 /// a `ctx.*` generated-key annotation.
 pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
+    if let Some(hover) = meta_schema_hover(ctx, offset) {
+        return Some(hover);
+    }
     let ast = overlay_ast(ctx)?;
     if !ast.contains_offset(offset) {
         return None;
@@ -594,18 +1089,153 @@ pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     }
 
     let entry = ast.entry_at_offset(offset)?;
+    let path = ast.key_path(entry);
 
-    if entry.dotted == "ctx" || entry.dotted.starts_with("ctx.") {
+    if path.first() == Some(&"ctx") {
         return ctx_hover(ctx, entry);
     }
-    schema_hover(ctx, entry)
+    schema_hover(ctx, &path, entry)
+}
+
+fn meta_schema_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
+    let overlay = ctx.overlay?;
+
+    if let Some(hover) = frontmatter_definition_hover(ctx, overlay, offset) {
+        return Some(hover);
+    }
+
+    if let SchemaAuthoringState::Standalone { model: Some(model), .. } =
+        &overlay.schema_authoring
+        && let Some(schema) = model.schema()
+        && let Some(region) = semantic_type_regions(schema, &model.source_map)
+            .into_iter()
+            .find(|region| {
+                region.key_span.contains(&offset) || region.definition_span.contains(&offset)
+            })
+    {
+        return markup_hover(
+            ctx,
+            region.key_span,
+            meta_schema_definition_hover_body(&region.name, &region.definition),
+        );
+    }
+
+    let ast = overlay.ast.as_deref()?;
+    let schema_entry = ast.schema_entry()?;
+    let source = ctx.text.get(schema_entry.value_span.clone())?;
+    let source = dedent_spanned_yaml(
+        source,
+        source_column(ctx.text, schema_entry.value_span.start),
+    );
+    let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&source).ok()?;
+    let parsed = parse_schema_declaration_with_source(
+        &yaml,
+        &source,
+        schema_entry.value_span.start,
+    )
+    .ok()?;
+    let SchemaDeclaration::Schema(schema) = parsed.value else {
+        return None;
+    };
+    let region = semantic_type_regions(&schema, &parsed.source_map)
+        .into_iter()
+        .find(|region| {
+            region.key_span.contains(&offset) || region.definition_span.contains(&offset)
+        })?;
+    markup_hover(
+        ctx,
+        region.key_span,
+        meta_schema_definition_hover_body(&region.name, &region.definition),
+    )
+}
+
+/// Hover for one complete type definition authored in Markdown frontmatter,
+/// routed through the same semantic-owner activation completion uses.
+///
+/// Entries under the reserved `$schema` key are deliberately left to the
+/// declaration reparse in [`meta_schema_hover`]: that path also covers pattern
+/// keys and cursors that fall inside a definition the frontmatter AST records
+/// no entry for.
+fn frontmatter_definition_hover(
+    ctx: &DocumentContext,
+    overlay: &crate::overlay::DocumentOverlay,
+    offset: usize,
+) -> Option<Hover> {
+    let SchemaAuthoringState::Frontmatter(values) = &overlay.schema_authoring else {
+        return None;
+    };
+    let entry = overlay.ast.as_deref()?.entry_at_offset(offset)?;
+    let pointer = JsonPointer::parse(&entry.pointer);
+    let path: Vec<&str> = pointer.segments().iter().map(String::as_str).collect();
+    if path.first() == Some(&"$schema") {
+        return None;
+    }
+    if !semantic_owner_kinds(values, &path)?.contains(&MetaSchemaKind::TypeDefinition) {
+        return None;
+    }
+    let source = ctx.text.get(entry.value_span.clone())?;
+    let source = dedent_spanned_yaml(source, source_column(ctx.text, entry.value_span.start));
+    let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&source).ok()?;
+    let definition = parse_property_definition(&entry.key, &yaml).ok()?;
+    markup_hover(
+        ctx,
+        entry.key_span.clone(),
+        meta_schema_definition_hover_body(&entry.key, &definition),
+    )
+}
+
+fn source_column(text: &str, offset: usize) -> usize {
+    text[..offset].rsplit_once('\n').map_or(offset, |(_, line)| line.len())
+}
+
+fn dedent_spanned_yaml(source: &str, indent: usize) -> String {
+    let mut normalized = String::with_capacity(source.len());
+    for (index, line) in source.lines().enumerate() {
+        if index > 0 {
+            normalized.push('\n');
+        }
+        normalized.push_str(if index == 0 {
+            line
+        } else {
+            line.strip_prefix(&" ".repeat(indent)).unwrap_or(line)
+        });
+    }
+    if source.ends_with('\n') {
+        normalized.push('\n');
+    }
+    normalized
+}
+
+fn meta_schema_definition_hover_body(key: &str, def: &PropertyDef) -> String {
+    let mut denoted = Vec::new();
+    for atom in atoms_of(def) {
+        let mut name = match &atom.ty {
+            TypeExpr::Primitive(ty) => ty.as_keyword().to_string(),
+            TypeExpr::InlineObject(_) => "object".to_string(),
+            TypeExpr::Imported { name, reference } => format!("{name}@{reference}"),
+        };
+        if atom.is_array {
+            name.push_str("[]");
+        }
+        if !denoted.contains(&name) {
+            denoted.push(name);
+        }
+    }
+    let mut lines = vec![
+        format!("**`{key}`**"),
+        "Type: **type-definition**".to_string(),
+        format!("Declares: **{}**", denoted.join(" | ")),
+    ];
+    if is_required(def) {
+        lines.push("Required".to_string());
+    }
+    lines.join("\n\n")
 }
 
 /// Hover content for a schema-declared property, at any nesting depth.
-fn schema_hover(ctx: &DocumentContext, entry: &FmEntry) -> Option<Hover> {
+fn schema_hover(ctx: &DocumentContext, path: &[&str], entry: &FmEntry) -> Option<Hover> {
     let shape = known_shape(ctx);
-    let path: Vec<&str> = entry.dotted.split('.').collect();
-    let def = def_at_path_ctx(ctx, &shape, &path)?;
+    let def = def_at_path_ctx(ctx, &shape, path)?;
     let body = schema_hover_body(&entry.key, &def)?;
     markup_hover(ctx, entry.key_span.clone(), body)
 }
@@ -740,14 +1370,14 @@ fn nav_targets(ctx: &DocumentContext, ast: &FrontmatterAst) -> Vec<(SourceSpan, 
 
     // `file(...)`-typed scalar values at any depth: a top-level key is a
     // single-segment path, a nested one resolves through the schema's inline
-    // objects. Splitting `dotted` on `.` mirrors the completion/hover path. Any
-    // union arm being a `file` type makes the value a navigable reference.
+    // objects. Any union arm being a `file` type makes the value a navigable
+    // reference.
     let shape = known_shape(ctx);
-    for entry in ast.entries() {
+    for (index, entry) in ast.entries().iter().enumerate() {
         if entry.kind != FmValueKind::Scalar {
             continue;
         }
-        let path: Vec<&str> = entry.dotted.split('.').collect();
+        let path = ast.key_path_at(index);
         if def_at_path_ctx(ctx, &shape, &path).is_some_and(|def| file_atom(&def).is_some())
             && let Some(value) = &entry.scalar
             && is_schema_file_value(value)
@@ -1227,10 +1857,84 @@ fn line_prefix(text: &str, offset: usize) -> (usize, &str) {
     (line_start, &text[line_start..offset])
 }
 
+/// The chain of ancestor keys enclosing the cursor, outermost first. Empty for
+/// a top-level line.
+///
+/// The frontmatter AST is the authority whenever it describes the *current*
+/// buffer: its containment is structural and its key segments are decoded, so a
+/// quoted ancestor (`"$schema"`) matches the reserved `$schema` path and an
+/// ancestor whose key contains `:` or `.` survives intact. This also costs no
+/// reverse line scan.
+///
+/// A cursor no authored mapping encloses (a blank line being opened), and an
+/// entry a last-good tree no longer places correctly, fall back to the
+/// indentation walk in [`enclosing_path_by_indent`].
+fn enclosing_path(
+    ctx: &DocumentContext,
+    offset: usize,
+    line_start: usize,
+    indent: usize,
+) -> Vec<String> {
+    if let Some(ast) = overlay_ast(ctx) {
+        match ast.container_at_offset(offset, line_start) {
+            Some(container) if still_placed(ctx, container) => {
+                return ast.key_path(container).into_iter().map(str::to_string).collect();
+            }
+            // No enclosing mapping at column 0 is a real answer, not a gap.
+            None if indent == 0 => return Vec::new(),
+            _ => {}
+        }
+    }
+    enclosing_path_by_indent(ctx.text, line_start, indent)
+}
+
+/// Whether `entry`'s key token is still exactly where the tree says it is.
+///
+/// A last-good tree describes an *earlier* buffer, so a blanket "is it stale"
+/// veto would surrender every structural answer the moment one key is mid-edit.
+/// Re-reading the key token at its recorded span turns staleness into a
+/// per-entry question instead: a malformed edit elsewhere in the block leaves
+/// the line being authored structurally owned, and a span that has genuinely
+/// moved is rejected rather than trusted.
+fn still_placed(ctx: &DocumentContext, entry: &FmEntry) -> bool {
+    ctx.text
+        .get(entry.key_span.clone())
+        .and_then(decode_scalar)
+        .is_some_and(|decoded| decoded.decoded() == entry.key)
+}
+
+/// The `(key, value-partial)` pair when the cursor sits in a value position.
+///
+/// Structural first: an authored entry yields the entire *decoded* key, so
+/// `"build.target": …` is one key and `"host: port": …` is not split at its
+/// embedded colon. The lexical `key:` split is the fallback for a cursor no
+/// still-placed entry describes — most often a key part-way through being
+/// typed, which leaves the buffer unparseable.
+fn value_cursor(
+    ctx: &DocumentContext,
+    offset: usize,
+    line_start: usize,
+    trimmed: &str,
+) -> Option<(String, String)> {
+    if let Some(entry) = overlay_ast(ctx)
+        .and_then(|ast| ast.key_entry_on_line(line_start, offset))
+        .filter(|entry| still_placed(ctx, entry))
+        && let Some(rest) = ctx.text.get(entry.key_span.end..offset)
+        && let Some((_, partial)) = rest.split_once(':')
+    {
+        return Some((entry.key.clone(), partial.trim_start().to_string()));
+    }
+    let colon = trimmed.find(':')?;
+    Some((
+        trimmed[..colon].trim().to_string(),
+        trimmed[colon + 1..].trim_start().to_string(),
+    ))
+}
+
 /// The full chain of ancestor keys above `line_start`, outermost first, for a
 /// line at column `indent` — one key per strictly-decreasing indent level, so
 /// nested inline-object mappings resolve. Empty for a top-level line.
-fn enclosing_path(text: &str, line_start: usize, indent: usize) -> Vec<String> {
+fn enclosing_path_by_indent(text: &str, line_start: usize, indent: usize) -> Vec<String> {
     let mut path = Vec::new();
     let mut needed = indent;
     for line in text[..line_start].lines().rev() {
@@ -1337,7 +2041,7 @@ fn markup_hover(ctx: &DocumentContext, span: SourceSpan, value: String) -> Optio
     Some(Hover {
         contents: HoverContents::Markup(MarkupContent {
             kind: MarkupKind::Markdown,
-            value,
+            value: doc_links::resolve(&value, ctx.path).into_owned(),
         }),
         range,
     })
@@ -2520,6 +3224,129 @@ mod tests {
     }
 
     #[test]
+    fn meta_schema_hover_renders_every_denoted_arm_and_constraints() {
+        let mut string = PropertyAtom::bare(SimplifiedType::String);
+        string.constraints.push(Constraint::Required);
+        let mut nested = SchemaShape::new();
+        nested.properties.insert(
+            "bar".to_string(),
+            PropertyDef::Single(PropertyAtom::bare(SimplifiedType::String)),
+        );
+        let def = PropertyDef::Union(vec![string, PropertyAtom::bare_inline_object(nested)]);
+
+        let body = meta_schema_definition_hover_body("foo", &def);
+
+        assert!(body.contains("Type: **type-definition**"), "{body}");
+        assert!(body.contains("Declares: **string | object**"), "{body}");
+        assert!(body.contains("Required"), "{body}");
+    }
+
+    #[test]
+    fn meta_schema_completion_catalog_is_descriptor_driven() {
+        let text = "---\n$schema:\n  title: type-definition\ntitle: \n---\n\nbody\n";
+        with_ctx(text, |ctx| {
+            let offset = text.find("title: \n").unwrap() + "title: ".len();
+            let items = completion(ctx, offset);
+            let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
+            for descriptor in schema_type_descriptors() {
+                assert!(
+                    labels.contains(&descriptor.keyword),
+                    "descriptor `{}` is offered: {items:#?}",
+                    descriptor.keyword
+                );
+            }
+            for scaffold in ["{}", "[]", "Name@./types.yaml"] {
+                assert!(labels.contains(&scaffold), "scaffold `{scaffold}` is offered: {items:#?}");
+            }
+        });
+
+        let text = "---\n$schema:\n  title: str\n---\n\nbody\n";
+        with_ctx(text, |ctx| {
+            let offset = text.find("str").unwrap() + "str".len();
+            let items = completion(ctx, offset);
+            let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
+            assert!(labels.contains(&"string"), "type keyword completion: {items:#?}");
+            assert!(labels.contains(&"string[]"), "array scaffold completion: {items:#?}");
+        });
+
+        let text = "---\n$schema:\n  title: string(re\n---\n\nbody\n";
+        with_ctx(text, |ctx| {
+            let offset = text.find("string(re").unwrap() + "string(re".len();
+            let items = completion(ctx, offset);
+            assert!(
+                items.iter().any(|item| item.label == "required"),
+                "the selected string type offers its valid required constraint: {items:#?}"
+            );
+            assert!(
+                items.iter().all(|item| item.label != "integer"),
+                "number-only constraints must not leak into string parser state: {items:#?}"
+            );
+        });
+
+        let text = "---\n$schema:\n  definitions: type-definition[]\ndefinitions:\n  - sch\n---\n\nbody\n";
+        with_ctx(text, |ctx| {
+            let offset = text.find("- sch").unwrap() + "- sch".len();
+            let items = completion(ctx, offset);
+            assert!(
+                items.iter().any(|item| item.label == "schema"),
+                "an outer semantic-array item delegates to scalar definition completion: {items:#?}"
+            );
+        });
+
+        let text = "---\n$schema:\n  title: type-definition\ntitle: 'str'\n---\n\nbody\n";
+        with_ctx(text, |ctx| {
+            let offset = text.find("'str").unwrap() + "'str".len();
+            let items = completion(ctx, offset);
+            let string = items
+                .iter()
+                .find(|item| item.label == "string")
+                .expect("quoted scalar completion");
+            let Some(CompletionTextEdit::Edit(edit)) = &string.text_edit else {
+                panic!("quoted completion has eager edit");
+            };
+            assert_eq!(edit.new_text, "string");
+            assert_eq!(edit.range.start.character, 8, "the opening quote is preserved");
+        });
+
+        let text = "---\n$schema: \n---\n\nbody\n";
+        with_ctx(text, |ctx| {
+            let offset = text.find("$schema: ").unwrap() + "$schema: ".len();
+            let labels: Vec<String> = completion(ctx, offset)
+                .into_iter()
+                .map(|item| item.label)
+                .collect();
+            for scaffold in ["{}", "[]", "./schema.yaml"] {
+                assert!(labels.iter().any(|label| label == scaffold), "outer `{scaffold}` scaffold: {labels:?}");
+            }
+        });
+
+        let text = "---\n$schema:\n  Base: string\n  alias: Ba\n---\n\nbody\n";
+        with_ctx(text, |ctx| {
+            let offset = text.find("alias: Ba").unwrap() + "alias: Ba".len();
+            let labels: Vec<String> = completion(ctx, offset)
+                .into_iter()
+                .map(|item| item.label)
+                .collect();
+            assert!(
+                labels.iter().any(|label| label == "Base@this"),
+                "the current parsed schema is a passive named-type namespace: {labels:?}"
+            );
+        });
+
+        let text = "---\n$schema:\n  declarations: schema[]\ndeclarations:\n  - cus\n---\n\nbody\n";
+        with_ctx_docs(text, &[("/w/custom.yaml", "$schema:\n  title: string\n")], |ctx| {
+            let offset = text.find("- cus").unwrap() + "- cus".len();
+            let items = completion(ctx, offset);
+            assert!(
+                items.iter().any(|item| {
+                    item.label == "custom.yaml" && item.kind == Some(CompletionItemKind::FILE)
+                }),
+                "a schema-array item reuses passive file-path completion: {items:#?}"
+            );
+        });
+    }
+
+    #[test]
     fn test_line_prefix() {
         let text = "---\ntitle: X\n---\n";
         // offset at end of "title: X"
@@ -2530,16 +3357,28 @@ mod tests {
     }
 
     #[test]
-    fn test_enclosing_path_builds_full_ancestor_chain() {
+    fn test_enclosing_path_by_indent_builds_full_ancestor_chain() {
         let text = "---\nstyle:\n  page:\n    ";
         // A line indented under `page:` (indent 4) has ancestors `style` →
         // `page`, outermost first.
-        assert_eq!(enclosing_path(text, text.len(), 4), vec!["style", "page"]);
+        assert_eq!(enclosing_path_by_indent(text, text.len(), 4), vec!["style", "page"]);
         // A line under `style:` (indent 2) has just `style`.
         let under_style = "---\nstyle:\n".len();
-        assert_eq!(enclosing_path(text, under_style + 2, 2), vec!["style"]);
+        assert_eq!(enclosing_path_by_indent(text, under_style + 2, 2), vec!["style"]);
         // A top-level line (indent 0) has no ancestors.
-        assert!(enclosing_path(text, under_style, 0).is_empty());
+        assert!(enclosing_path_by_indent(text, under_style, 0).is_empty());
+    }
+
+    #[test]
+    fn test_key_path_survives_dot_and_colon_in_keys() {
+        // The structural key chain never splits an authored key: `build.target`
+        // is one segment, and a quoted key carrying `:` keeps its colon.
+        let text = "---\n\"build.target\": x\nouter:\n  \"host: port\": y\n---\n";
+        let ast = FrontmatterAst::parse(text).unwrap().ast.unwrap();
+        let dotted = ast.entry_by_key_path(&["build.target"]).unwrap();
+        assert_eq!(dotted.key, "build.target");
+        let nested = ast.entry_by_key_path(&["outer", "host: port"]).unwrap();
+        assert_eq!(ast.key_path(nested), vec!["outer", "host: port"]);
     }
 
     fn nested_fixture() -> SchemaShape {

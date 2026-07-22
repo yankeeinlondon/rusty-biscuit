@@ -2,7 +2,7 @@
 # This is the authored source of truth for the darkmatter base schema; the
 # library loads it via include_str! and the docs transclude it verbatim.
 $schema:
-    "$schema": "any -> Declares an inline schema, referenced schema file, root union, or raw JSON Schema for this document. Document schemas override baseline properties on conflict."
+    "$schema": "schema -> Declares an inline SimplifiedSchema mapping, referenced schema file, or root union for this document. Raw JSON Schema is supported through referenced files only. Document schemas override baseline properties on conflict."
 
     title: "string -> Human-readable document title. Used by markdown_title(), reports, diagnostics, and downstream tools that need a display name."
     description: "string -> Human-readable document summary. Used by reports and diagnostics when identifying a document."
@@ -170,6 +170,8 @@ $schema:
         dow_abbr: "string(generated; required) -> Alias for day_abbr."
         repo: "string(generated) -> Repository name from the preferred remote URL, or null when unavailable."
         repo_root: "string(generated) -> Absolute repository root path, or null when unavailable."
+        branch: "string(generated) -> Current local Git branch name, or null outside a repository or at detached HEAD."
+        worktree: "string(generated) -> Current linked Git worktree name, or null in the main worktree or outside a repository."
         is_monorepo: "boolean(generated; required) -> Whether the current repository is a monorepo."
         package_root: "string(generated) -> Absolute current package root path, or null when unavailable."
         package_area_root: "string(generated) -> Absolute current package area root path, or null when unavailable."
@@ -184,6 +186,7 @@ $schema:
         depends_on: "object[](generated; required) -> Workspace-internal package dependencies. Each item is an object with a `package` (string) field and a `dependencies` (string[]) field listing the packages it depends on."
         used_by: "object[](generated; required) -> Workspace-internal package reverse dependencies. Each item is an object with a `package` (string) field and a `users` (string[]) field listing the packages that depend on it."
         dirty_files: "string[](generated; required) -> Dirty file paths."
+        merge_conflicts: "string[](generated; required) -> Repository-relative paths currently in an unresolved Git index state."
         dirty_source_code_files: "string[](generated; required) -> Dirty source-code file paths."
         staged_files: "string[](generated; required) -> Staged file paths."
         untracked_files: "string[](generated; required) -> Untracked file paths."

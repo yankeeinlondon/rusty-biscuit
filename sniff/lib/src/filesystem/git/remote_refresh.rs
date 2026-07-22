@@ -702,6 +702,12 @@ fn get_remote_branches(repo: &gix::Repository, remote_name: &str) -> Option<Vec<
 /// default for [`GitRequest::full()`] and keeps enumeration fast on checkouts
 /// with many linked worktrees.
 ///
+/// Registered worktrees whose checkout target is absent are omitted. Git
+/// intentionally retains these stale registrations until they are pruned, and
+/// they do not invalidate discovery of the repository containing
+/// `current_worktree_path`. An existing target that does not open as a
+/// repository is corrupt and fails the request.
+///
 /// `current_worktree_path` should be the canonical (or at least absolute) path
 /// to the worktree the calling process is running inside. `None` means "no
 /// current worktree" (e.g. the caller is outside any git worktree).
@@ -725,14 +731,23 @@ pub(crate) fn get_worktrees(
     let current_canonical = current_worktree_path.and_then(|p| std::fs::canonicalize(p).ok());
 
     // Collect (name, worktree path) pairs up front — cheap sequential work —
-    // before the per-worktree analysis fans out. Trust, permission, I/O, and
-    // corruption failures are propagated rather than silently dropped.
+    // before the per-worktree analysis fans out. Registry metadata failures
+    // are distinct from a valid registration whose checkout has gone stale.
     let mut worktree_paths: Vec<(String, PathBuf)> = Vec::new();
     for proxy in proxies {
         let name = proxy.id().to_str_lossy().into_owned();
         let path = proxy
             .base()
             .map_err(|e| SniffError::git("worktree_base", e))?;
+        if !path.is_absolute() {
+            return Err(SniffError::git(
+                "worktree_base",
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "registered worktree path is not absolute",
+                ),
+            ));
+        }
         worktree_paths.push((name, path));
     }
 
@@ -741,11 +756,16 @@ pub(crate) fn get_worktrees(
     // rather than reopening the base repo N times.
     let base_sync = repo.clone().into_sync();
 
-    let results: crate::Result<Vec<(String, WorktreeInfo)>> = worktree_paths
+    let results: crate::Result<Vec<Option<(String, WorktreeInfo)>>> = worktree_paths
         .par_iter()
         .map(|(name, worktree_path)| {
             let base = base_sync.to_thread_local();
-            let mut worktree_repo = super::open::trusted_open(worktree_path)?;
+            let mut worktree_repo = match super::open::trusted_open_registered_worktree(
+                worktree_path,
+            )? {
+                Some(repo) => repo,
+                None => return Ok(None),
+            };
             super::open::configure_cache(&mut worktree_repo);
 
             let branch = worktree_repo
@@ -792,7 +812,10 @@ pub(crate) fn get_worktrees(
                     false
                 } else {
                     match (wt_head, base_oid) {
-                        (Some(wt), Some(base_id)) => has_merge_conflicts(&base, wt, base_id)?,
+                        (Some(wt), Some(base_id)) => {
+                            !super::merge_conflicts::merge_conflicts_between(&base, wt, base_id)?
+                                .is_empty()
+                        }
                         _ => false,
                     }
                 }
@@ -811,7 +834,7 @@ pub(crate) fn get_worktrees(
                 (false, 0)
             };
 
-            Ok((
+            Ok(Some((
                 branch.clone(),
                 WorktreeInfo {
                     branch,
@@ -826,29 +849,11 @@ pub(crate) fn get_worktrees(
                     changed_files,
                     is_current,
                 },
-            ))
+            )))
         })
         .collect();
 
-    Ok(results?.into_iter().collect())
-}
-
-/// Merge the worktree tip into the base in memory (no repository writes) and
-/// report whether the merge has unresolved conflicts — the gix equivalent of
-/// git2's `merge_commits` + `Index::has_conflicts`.
-fn has_merge_conflicts(
-    repo: &gix::Repository,
-    ours: gix::ObjectId,
-    theirs: gix::ObjectId,
-) -> crate::Result<bool> {
-    let labels = gix::merge::blob::builtin_driver::text::Labels::default();
-    repo.merge_commits(ours, theirs, labels, gix::merge::commit::Options::default())
-        .map(|outcome| {
-            outcome
-                .tree_merge
-                .has_unresolved_conflicts(gix::merge::tree::TreatAsUnresolved::git())
-        })
-        .map_err(|e| SniffError::git("merge", e))
+    Ok(results?.into_iter().flatten().collect())
 }
 
 #[cfg(test)]
@@ -1204,7 +1209,13 @@ mod tests {
             .has_conflicts();
         assert!(git2_conflict, "git2 oracle: ours/theirs should conflict");
         assert!(
-            has_merge_conflicts(&gix_repo, to_gix(ours), to_gix(theirs)).unwrap(),
+            !crate::filesystem::git::merge_conflicts::merge_conflicts_between(
+                &gix_repo,
+                to_gix(ours),
+                to_gix(theirs),
+            )
+            .unwrap()
+            .is_empty(),
             "gix probe must agree: ours/theirs conflict"
         );
 
@@ -1222,7 +1233,13 @@ mod tests {
             "git2 oracle: ours/clean should not conflict"
         );
         assert!(
-            !has_merge_conflicts(&gix_repo, to_gix(ours), to_gix(clean)).unwrap(),
+            crate::filesystem::git::merge_conflicts::merge_conflicts_between(
+                &gix_repo,
+                to_gix(ours),
+                to_gix(clean),
+            )
+            .unwrap()
+            .is_empty(),
             "gix probe must agree: ours/clean is conflict-free"
         );
     }
@@ -1626,7 +1643,7 @@ mod tests {
         let ours = commit_detached(&repo, "test.txt", "ours\n", "ours", &[base]);
         let theirs = commit_detached(&repo, "test.txt", "theirs\n", "theirs", &[base]);
 
-        // Corrupt one of the tip objects so merge_commits cannot read it.
+        // Corrupt one of the tip objects so the merge probe cannot read it.
         let obj_hex = ours.to_string();
         let obj_path = dir
             .path()
@@ -1648,7 +1665,11 @@ mod tests {
         std::fs::write(&obj_path, b"garbage").unwrap();
 
         let gix_repo = gix::open(dir.path()).unwrap();
-        let result = has_merge_conflicts(&gix_repo, to_gix(ours), to_gix(theirs));
+        let result = crate::filesystem::git::merge_conflicts::merge_conflicts_between(
+            &gix_repo,
+            to_gix(ours),
+            to_gix(theirs),
+        );
         assert!(
             result.is_err(),
             "corrupt object must cause merge-conflict probe to return an error, not false"

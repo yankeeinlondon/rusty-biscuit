@@ -1,24 +1,7 @@
 ---
-prompt: |-
-    The `gitoxide` crate in Rust is written in pure Rust and is rapidly gathering adoption. It is often far faster than 'git2' (the traditional choice) and 
-
-    Your task is to do a deep dive into the `gitoxide` crate. Your research should be
-    able to answer the following questions and cover the various topics:
-
-    - Key URLS (docs, repo, etc.)
-    - Functional overview
-    - Architectural overview
-    - Version history with dates and key changes for each release
-    - Use Cases: for each use case give 2-3 variant examples of different variants of how this crate might achieve this operation. What gotchas are there, if any, are there for this operation? How expensive is this operation from a CPU and timing standpoint?
-        - git status
-        - git log
-        - git branch
-        - git tag --list
-        - git remote 
-        - git grep
-        - git blame
-        - add others too
-last_updated: 2026-06-06
+prompt: "The `gitoxide` crate in Rust is written in pure Rust and is rapidly gathering adoption. It is often far faster than 'git2' (the traditional choice) and \n\nYour task is to do a deep dive into the `gitoxide` crate. Your research should be\nable to answer the following questions and cover the various topics:\n\n- Key URLS (docs, repo, etc.)\n- Functional overview\n- Architectural overview\n- Version history with dates and key changes for each release\n- Use Cases: for each use case give 2-3 variant examples of different variants of how this crate might achieve this operation. What gotchas are there, if any, are there for this operation? How expensive is this operation from a CPU and timing standpoint?\n    - git status\n    - git log\n    - git branch\n    - git tag --list\n    - git remote \n    - git grep\n    - git blame\n    - add others too"
+last_updated: 2026-07-18
+hash: c03cd691e18d1140-adf6181332f59a01
 ---
 > **Naming note (read first).** The GitHub project is **`gitoxide`** (org [`GitoxideLabs`](https://github.com/GitoxideLabs/gitoxide)), but it publishes **two distinct crate streams** that move at different speeds and have *different version numbers*:
 > 
@@ -283,7 +266,7 @@ for entry in blame.iter() {
 ### Others (brief)
 
 - **`git diff` (tree↔tree / blob↔blob):** `repo.diff_tree_to_tree(...)`, or `diff::resource_cache()` for rapid in‑memory diffs. **`gix diff tree|file`** CLI exists (0.42+). Cost ∝ changed entries + (if line‑level) hunks.
-- **`git merge`:** `repo.merge_trees(...)`, `repo.merge_commits(...)`, `repo.merge_file(...)` (3‑way, feature `merge`); `merge_base(one, two)` / `merge_bases_many(...)` for merge bases. CLI: `gix merge tree|commits|file` (0.39–0.40). Cost: tree merge O(entries); line merge O(file size).
+- **`git merge`:** `repo.merge_trees(...)`, `repo.merge_commits(...)`, `repo.merge_file(...)` (3‑way, feature `merge`); `merge_base(one, two)` / `merge_bases_many(...)` for merge bases. CLI: `gix merge tree|commits|file` (0.39–0.40). For a hermetic committed-tip prediction, do not assume the high-level commit facade is isolated: the pinned `gix` resource cache may consult the live index for attributes, persist synthesized virtual-base objects, or honor configured drivers/filters. Enable `Repository::with_object_memory()` before merging, build the temporary index and attribute stack from the captured `ours` tree, use `gix::merge::plumbing::commit`, materialize unresolved stages into an in-memory index, and reject applicable external drivers, filters, or renormalization. Cost: tree merge O(entries); line merge O(file size).
 - **`git clone`/`git fetch`:** `gix::prepare_clone(url, path)` / `prepare_clone_bare(...)`; or `Remote::fetch`. **Requires** a network feature. Cost: network + pack receive + index + (optional) checkout.
 - **`git ls-tree`/`ls-files`:** `repo.head_tree()?.iter()`; `repo.index()?` for the staged set. Cost: O(entries).
 - **`git rev-parse`:** `repo.rev_parse("HEAD~2")?` / `rev_parse_single(...)`. Cheap (graph/ref lookups only).

@@ -35,8 +35,8 @@ pub use git::{
     detect_git_with_request, detect_merge_conflicts, get_commit_by_sha, get_commit_files,
     get_commits_for_branch, get_commits_for_path, get_recent_commits_by_count,
     get_recent_commits_by_date, get_recent_commits_by_duration, get_recent_commits_by_hash,
-    get_recent_commits_in_range, merge_conflicts_at, parse_period, preferred_remote_url,
-    remote_url, repo_root,
+    get_recent_commits_in_range, merge_conflicts_at, merge_conflicts_with_branch_at, parse_period,
+    preferred_remote_url, remote_url, repo_root,
 };
 pub use just::{JustRecipe, JustRecipeParam, JustfileInfo, detect_justfiles};
 pub use languages::{LanguageBreakdown, LanguageStats, detect_languages};
@@ -104,8 +104,10 @@ pub fn detect_filesystem_with_request(
         None => None,
     };
     let shared_root = match &discovered_git {
-        Some(handle) => handle.repo_root().to_path_buf(),
-        None => root.to_path_buf(),
+        // A bare repository's `repo_root` is its git directory. Walking that as
+        // a source tree would inventory git internals, so keep the caller's root.
+        Some(handle) if !handle.is_bare() => handle.repo_root().to_path_buf(),
+        _ => root.to_path_buf(),
     };
 
     std::thread::scope(|scope| {

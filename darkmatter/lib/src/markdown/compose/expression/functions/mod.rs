@@ -29,11 +29,16 @@ use crate::markdown::Markdown;
 use crate::markdown::schemas::DarkmatterSchemas;
 
 mod args;
+mod cicd;
 mod collections;
 mod dates;
+pub(in crate::markdown::compose) mod escape;
+mod git;
 mod markdown_docs;
 mod paths;
 mod predicates;
+pub(in crate::markdown::compose) mod provider;
+mod pull_requests;
 mod skills;
 mod strings;
 mod terminal;
@@ -170,6 +175,9 @@ const BINDING_GROUPS: &[&[FunctionBinding]] = &[
     strings::BINDINGS,
     terminal::BINDINGS,
     dates::BINDINGS,
+    git::BINDINGS,
+    pull_requests::BINDINGS,
+    cicd::BINDINGS,
     paths::BINDINGS,
     skills::BINDINGS,
     markdown_docs::BINDINGS,
@@ -1834,6 +1842,97 @@ pub fn decrement_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Resul
     Ok(Value::String(make_portable_relative(&out, &ctx.base_dir)))
 }
 
+#[derive(Clone, Copy)]
+enum IndexEndpoint {
+    First,
+    Last,
+}
+
+fn find_index_endpoint(
+    name: &'static str,
+    args: &[Value],
+    ctx: &ResolutionContext,
+    endpoint: IndexEndpoint,
+) -> Result<Value, ExpressionError> {
+    require_args_expr(name, args, 1)?;
+    if any_null(args) {
+        return Ok(Value::Null);
+    }
+    let input = resolve_path_arg(name, &args[0], ctx)?;
+    let Some(parent) = input.parent() else {
+        return Ok(Value::String(make_portable_relative(&input, &ctx.base_dir)));
+    };
+    let filename = input
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let input_stem = file_stem(&filename);
+    let input_extension = file_extension(&filename);
+    let family_base = indexed_stem_info(&input_stem)
+        .map(|(base, _, _)| base)
+        .unwrap_or(input_stem);
+
+    let entries = match std::fs::read_dir(parent) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Value::String(make_portable_relative(&input, &ctx.base_dir)));
+        }
+        Err(error) => {
+            return Err(expression_other(
+                name,
+                format!("failed to scan {}: {error}", parent.display()),
+            ));
+        }
+    };
+    let mut candidates = Vec::<(Option<u64>, String)>::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            expression_other(name, format!("failed to read {}: {error}", parent.display()))
+        })?;
+        let actual_name = entry.file_name().to_string_lossy().into_owned();
+        if file_extension(&actual_name) != input_extension {
+            continue;
+        }
+        let stem = file_stem(&actual_name);
+        let ordinal = if stem == family_base {
+            None
+        } else if let Some((base, index, _)) = indexed_stem_info(&stem) {
+            if base != family_base {
+                continue;
+            }
+            Some(index)
+        } else {
+            continue;
+        };
+        candidates.push((ordinal, actual_name));
+    }
+    candidates.sort();
+    let selected = match endpoint {
+        IndexEndpoint::First => candidates.first(),
+        IndexEndpoint::Last => candidates.last(),
+    };
+    let chosen = selected
+        .map(|(_, filename)| parent.join(filename))
+        .unwrap_or(input);
+    Ok(Value::String(make_portable_relative(&chosen, &ctx.base_dir)))
+}
+
+/// Returns the lowest-indexed existing member of a file's index family.
+pub fn find_first_index_fn(
+    args: &[Value],
+    ctx: &ResolutionContext,
+) -> Result<Value, ExpressionError> {
+    find_index_endpoint("find_first_index", args, ctx, IndexEndpoint::First)
+}
+
+/// Returns the highest-indexed existing member of a file's index family.
+pub fn find_last_index_fn(
+    args: &[Value],
+    ctx: &ResolutionContext,
+) -> Result<Value, ExpressionError> {
+    find_index_endpoint("find_last_index", args, ctx, IndexEndpoint::Last)
+}
+
 /// `basename(file) -> string` — the final path component including extension.
 pub fn basename_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
     require_args_expr("basename", args, 1)?;
@@ -2520,7 +2619,7 @@ pub(crate) fn lazy_arity_eligibility(
     })
 }
 
-/// Context-aware dispatch for filesystem/document functions.
+/// Context-aware dispatch for filesystem, document, and repository functions.
 ///
 /// ## Returns
 ///
@@ -2554,7 +2653,7 @@ pub fn dispatch_fs(
 /// Returns `true` when `name` matches a canonical name or alias in
 /// the context-aware registration set.
 ///
-/// Lets the evaluator distinguish a known filesystem function that fell
+/// Lets the evaluator distinguish a known context-aware function that fell
 /// through dispatch only because no document resolution context was available
 /// from a genuinely unrecognized symbol.
 pub fn is_fs_function(name: &str) -> bool {

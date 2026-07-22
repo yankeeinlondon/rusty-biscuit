@@ -80,10 +80,12 @@ pub mod semantics;
 pub use ast::{BinaryOp, Expr, SpannedExpr, SpannedExprKind};
 pub use catalog::{
     expression_function_descriptors, generate_expression_function_table,
-    DataType, ExpressionFunctionDescriptor, ParamType, ReturnType,
+    DataType, ExpressionFunctionDescriptor, ParamType, ReturnType, ReturnValueType,
 };
 pub use ctx::CtxLookup;
-pub use error::{ArityBound, ExpressionError, FileRefFailure, FileReferenceDiagnostic};
+pub use error::{
+    ArityBound, ExpressionError, FileRefFailure, FileReferenceDiagnostic, ProviderFailureKind,
+};
 pub use file_suggestions::{collect_sibling_candidates, suggest_sibling_files};
 pub(crate) use path_projection::{make_portable_relative, make_relative};
 pub use resolve_ctx::ResolutionContext;
@@ -202,10 +204,8 @@ pub trait EvaluationLookup {
         }
     }
 
-    /// Returns the document-relative resolution context that the seven
-    /// read-side functions (`file_exists`, `frontmatter`, `markdown_title`,
-    /// `markdown_body_empty`, `validate_schema`, `absolute`, `relative`)
-    /// resolve their path arguments against.
+    /// Returns the resolution context for read-side filesystem, document, and
+    /// repository functions.
     ///
     /// The default `None` is the **opt-out / test** case: a lookup that has no
     /// document anchor (or a unit test that does not exercise read-side
@@ -416,6 +416,16 @@ pub fn evaluate<L: EvaluationLookup>(expr: &Expr, lookup: &L) -> Result<Value, E
             Ok(Value::Number(num))
         }
         Expr::BoolLiteral(b) => Ok(Value::Bool(*b)),
+        Expr::ArrayLiteral(items) => items
+            .iter()
+            .map(|item| evaluate(item, lookup))
+            .collect::<Result<Vec<_>, _>>()
+            .map(Value::Array),
+        Expr::ObjectLiteral(entries) => entries
+            .iter()
+            .map(|(key, value)| Ok((key.clone(), evaluate(value, lookup)?)))
+            .collect::<Result<serde_json::Map<_, _>, ExpressionError>>()
+            .map(Value::Object),
         Expr::Paren(inner) => evaluate(inner, lookup),
         Expr::UnaryNot(inner) => {
             let value = evaluate(inner, lookup)?;

@@ -98,7 +98,7 @@ biscuit-terminal = { path = "../../biscuit-terminal/lib", features = ["image"] }
 biscuit-hash = { path = "../../biscuit-hash/lib" }
 
 # System detection (OS, hardware, repo, docs)
-sniff = { path = "../../sniff/lib" }
+sniff = { path = "../../sniff/lib", features = ["remote"] }
 serde_yaml_ng = "0.10"
 
 # Unicode Script lookup for cleanup's join-separator decision (spaceless scripts
@@ -128,6 +128,8 @@ insta = "1.41"
 serial_test = "3.0"
 # Only used to `init` a throwaway repo in transclusion tests; pure-Rust, no libgit2.
 gix = { version = "=0.84.0", default-features = false, features = ["sha1"] }
+# Builds committed branch-tip fixtures for `predict_conflicts()` integration tests.
+git2 = "0.20.3"
 proptest = "1.6"
 criterion = { version = "0.5", features = ["html_reports"] }
 biscuit-test-harness = { path = "../../biscuit-test-harness" }

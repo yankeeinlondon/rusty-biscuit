@@ -166,6 +166,10 @@ pub(crate) fn run_harness_loop(
 }
 
 #[allow(unused_assignments)]
+#[allow(
+    clippy::result_large_err,
+    reason = "proxy preflight preserves the shared typed CompositionError until lifecycle routing"
+)]
 fn run_harness_loop_inner(ctx: HarnessLoopCtx<'_, '_>) -> Result<LoopStep> {
     let HarnessLoopCtx {
         provider,
@@ -265,8 +269,9 @@ fn run_harness_loop_inner(ctx: HarnessLoopCtx<'_, '_>) -> Result<LoopStep> {
         // re-materialize compose below expands them — otherwise a whitelisted
         // command still trips `NotPreApproved`. Skipped when a seed prompt is
         // already staged (the original prepared prompt was preflighted upstream).
-        if proxy_tracking.pending && initial_materialized.is_none() {
-            if let Err(e) = info_span!(
+        if proxy_tracking.pending
+            && initial_materialized.is_none()
+            && let Err(e) = info_span!(
                 "harness_proxy_target_preflight",
                 attempt,
                 source_path = %prompt_state.source_path.display(),
@@ -277,34 +282,34 @@ fn run_harness_loop_inner(ctx: HarnessLoopCtx<'_, '_>) -> Result<LoopStep> {
                     harness_context.shell_options(),
                     child_cwd,
                 )
-            }) {
-                // A denial is a composition-preflight blocked path: route through
-                // the stack-aware runner so `blocked`/`finalize` fire, matching the
-                // primary pre-flight's shell-audit handling.
-                let err_info =
-                    LifecycleErrorInfo::from_action_failure("shell_approval", e.to_string());
-                let empty = MaterializedHarnessPrompt {
-                    frontmatter: serde_json::Value::Null,
-                    prompt: String::new(),
-                    env_overrides: Vec::new(),
-                    inline_closure_plan: None,
-                    live_frontmatter: MaterializedHarnessPrompt::live_cell_from(
-                        &serde_json::Value::Null,
-                    ),
-                };
-                return Err(emit_blocked_finalize_with_err(
-                    lifecycle_guard,
-                    &empty,
-                    &prompt_state.source_path,
-                    repo_root,
-                    term,
-                    &effect_engine,
-                    &err_info,
-                    loop_start,
-                )
-                .map(color_eyre::eyre::Report::from)
-                .unwrap_or_else(|| eyre!("{e}")));
-            }
+            })
+        {
+            // A denial is a composition-preflight blocked path: route through
+            // the stack-aware runner so `blocked`/`finalize` fire, matching the
+            // primary pre-flight's shell-audit handling.
+            let err_info =
+                LifecycleErrorInfo::from_action_failure("shell_approval", e.to_string());
+            let empty = MaterializedHarnessPrompt {
+                frontmatter: serde_json::Value::Null,
+                prompt: String::new(),
+                env_overrides: Vec::new(),
+                inline_closure_plan: None,
+                live_frontmatter: MaterializedHarnessPrompt::live_cell_from(
+                    &serde_json::Value::Null,
+                ),
+            };
+            return Err(emit_blocked_finalize_with_err(
+                lifecycle_guard,
+                &empty,
+                &prompt_state.source_path,
+                repo_root,
+                term,
+                &effect_engine,
+                &err_info,
+                loop_start,
+            )
+            .map(color_eyre::eyre::Report::from)
+            .unwrap_or_else(|| eyre!("{e}")));
         }
         let materialized = if let Some(seed) = initial_materialized.take() {
             seed

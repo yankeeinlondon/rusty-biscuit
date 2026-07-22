@@ -69,6 +69,8 @@ pub mod code {
     pub const FM_YAML_PARSE: &str = "dm.frontmatter.yaml_parse";
     /// The `$schema` value is not a valid schema shape.
     pub const SCHEMA_INVALID_SHAPE: &str = "dm.schema.invalid_schema_shape";
+    /// A semantic `type-definition` value does not parse as one property definition.
+    pub const SCHEMA_INVALID_TYPE_DEFINITION: &str = "dm.schema.invalid_type_definition";
     /// The schema could not be resolved, merged, or compiled.
     pub const SCHEMA_PREPARE: &str = "dm.schema.prepare";
     /// A value did not match its declared type.

@@ -115,6 +115,10 @@ fn rematerialize_compose_options(
 /// after the approval handler is frozen — an un-whitelisted, un-cached command)
 /// as a [`CompositionError`] so the caller routes it through the standard
 /// `blocked`/`finalize` path.
+#[allow(
+    clippy::result_large_err,
+    reason = "the caller needs the shared typed CompositionError for lifecycle routing"
+)]
 pub(crate) fn preflight_proxy_target(
     state: &mut HarnessPromptState,
     approval_options: &claudine::harness::ShellApprovalOptions,
