@@ -145,20 +145,28 @@ copying its historical checkmark.
 
 ## Mandatory combined seams
 
+Phase 5 executed every mapped seam assertion available on the macOS host. The
+L1 and Claudine L2 suites passed, including the new combined `MM-S10` test.
+Rows remain `blocked` because this worktree has no immutable acceptance
+candidate (the execution request prohibits staging/committing) and the
+required Linux, native Windows, or attended L3 portions have not run. See
+`phase5-test-map.md` for the exact requirement-to-test mapping and
+`phase5-gates.md` for results and blockers.
+
 | ID | Contract | Concrete planned test | Tier | Platform | Owner | Status | Candidate | Evidence |
 |---|---|---|---|---|---|---|---|---|
-| MM-S01 | Repository-first proxy target; missing detail parity across terminal/`err.*`/snapshot | `level2_mega_merge_s01_bare_proxy_resolution_diagnostic_parity` | L2 | macOS + Linux | Diagnostics + coordinator | open | — | spec seam 1 |
-| MM-S02 | Explicit relative stays source-local; child context re-anchors | `mega_merge_s02_explicit_proxy_child_context_no_fallback` | L1 | Unix + Windows paths | File resolution | open | — | spec seam 2 |
-| MM-S03 | Overlay into sequence step with target loop runs step once and preserves JIT/output | `level2_mega_merge_s03_proxy_with_sequence_loop_containment` | L2 | macOS + Linux | Sequence + coordinator | open | — | spec seam 3 |
-| MM-S04 | Proxied schema failure matches direct with exact owed events | `level2_mega_merge_s04_schema_failure_route_and_event_parity` | L2 | macOS + Linux | Schema + lifecycle | open | — | spec seam 4 |
-| MM-S05 | Initialize/terminal handoff failures retain event, closure, diagnostic identity | `level2_mega_merge_s05_handoff_failure_phase_identity` | L2 | macOS + Linux | Lifecycle coordinator | open | — | spec seam 5 |
-| MM-S06 | Overlay survives retry/resume/immediate loop but not downstream proxy | `level2_mega_merge_s06_overlay_refresh_and_hop_lifetime` | L2 | macOS + Linux | Overlay lifetime | open | — | spec seam 6 |
-| MM-S07 | Launch changes rebuild and incompatible resume is typed | `level2_mega_merge_s07_launch_rebuild_and_resume_incompatibility` | L2/native | all | Launch/session plan | open | — | spec seam 7 |
-| MM-S08 | Compatibility key derives from exact spawned launch bundle | `mega_merge_s08_session_key_equals_spawned_bundle` | L1 | all | Launch/session plan | open | — | spec seam 8 |
-| MM-S09 | Sequence preflight approves exact post-handoff shell bytes | `mega_merge_s09_sequence_handoff_approved_bytes_equal_executed` | L1 process integration | all | Sequence + preflight | open | — | spec seam 9 |
-| MM-S10 | Parallel proxied failure keeps task attribution/order/settlement/merge/teardown | `level2_mega_merge_s10_parallel_proxy_failure_task_integrity` | L2/native | all | Sequence tasks | open | — | spec seam 10 |
-| MM-S11 | Cross-repo authoring context changes while child CWD stays fixed | `level2_mega_merge_s11_cross_repo_context_vs_child_cwd` | L2/native | all | Context + launch plan | open | — | spec seam 11 |
-| MM-S12 | Dry-run reports intent without traversal, lifecycle, side effects, mutation, or disclosure | `level2_mega_merge_s12_dry_run_is_static_and_redacted` | L2 | macOS + Linux | Coordinator + CLI | open | — | spec seam 12 |
+| MM-S01 | Repository-first proxy target; missing detail parity across terminal/`err.*`/snapshot | mapped tests in `phase5-test-map.md` | L1/L2 | macOS + Linux | Diagnostics + coordinator | blocked | worktree @ `5e4dba1` + uncommitted changes | macOS passed; Linux and immutable candidate pending (`phase5-gates.md`) |
+| MM-S02 | Explicit relative stays source-local; child context re-anchors | mapped tests in `phase5-test-map.md` | L1/L2 | Unix + Windows paths | File resolution | blocked | worktree @ `5e4dba1` + uncommitted changes | path variants passed; immutable candidate pending (`phase5-gates.md`) |
+| MM-S03 | Overlay into sequence step with target loop runs step once and preserves JIT/output | mapped tests in `phase5-test-map.md` | L1/L2 | macOS + Linux | Sequence + coordinator | blocked | worktree @ `5e4dba1` + uncommitted changes | macOS passed; Linux and immutable candidate pending (`phase5-gates.md`) |
+| MM-S04 | Proxied schema failure matches direct with exact owed events | mapped tests in `phase5-test-map.md` | L1/L2 | macOS + Linux | Schema + lifecycle | blocked | worktree @ `5e4dba1` + uncommitted changes | macOS passed; Linux and immutable candidate pending (`phase5-gates.md`) |
+| MM-S05 | Initialize/terminal handoff failures retain event, closure, diagnostic identity | mapped tests in `phase5-test-map.md` | L1/L2 | macOS + Linux | Lifecycle coordinator | blocked | worktree @ `5e4dba1` + uncommitted changes | macOS passed; Linux and immutable candidate pending (`phase5-gates.md`) |
+| MM-S06 | Overlay survives retry/resume/immediate loop but not downstream proxy | mapped tests in `phase5-test-map.md` | L1/L2 | macOS + Linux | Overlay lifetime | blocked | worktree @ `5e4dba1` + uncommitted changes | macOS passed; Linux and immutable candidate pending (`phase5-gates.md`) |
+| MM-S07 | Launch changes rebuild and incompatible resume is typed | mapped tests in `phase5-test-map.md` | L1/L2/native | all | Launch/session plan | blocked | worktree @ `5e4dba1` + uncommitted changes | macOS passed; Linux/Windows native and immutable candidate pending (`phase5-gates.md`) |
+| MM-S08 | Compatibility key derives from exact spawned launch bundle | mapped tests in `phase5-test-map.md` | L1 | all | Launch/session plan | blocked | worktree @ `5e4dba1` + uncommitted changes | macOS passed; Linux/Windows and immutable candidate pending (`phase5-gates.md`) |
+| MM-S09 | Sequence preflight approves exact post-handoff shell bytes | mapped tests in `phase5-test-map.md` | L1/L2 process integration | all | Sequence + preflight | blocked | worktree @ `5e4dba1` + uncommitted changes | macOS passed; Linux/Windows and immutable candidate pending (`phase5-gates.md`) |
+| MM-S10 | Parallel proxied failure keeps task attribution/order/settlement/merge/teardown | `level2_mega_merge_s10_parallel_proxy_failure_task_integrity` plus mapped support | L1/L2/native | all | Sequence tasks | blocked | worktree @ `5e4dba1` + uncommitted changes | macOS L2 passed; Linux/Windows native, L3, and immutable candidate pending (`phase5-gates.md`) |
+| MM-S11 | Cross-repo authoring context changes while child CWD stays fixed | mapped tests in `phase5-test-map.md` | L1/L2/native | all | Context + launch plan | blocked | worktree @ `5e4dba1` + uncommitted changes | macOS passed; Linux/Windows native and immutable candidate pending (`phase5-gates.md`) |
+| MM-S12 | Dry-run reports intent without traversal, lifecycle, side effects, mutation, or disclosure | mapped tests in `phase5-test-map.md` | L1/L2 | macOS + Linux | Coordinator + CLI | blocked | worktree @ `5e4dba1` + uncommitted changes | macOS passed; Linux and immutable candidate pending (`phase5-gates.md`) |
 
 ## Phase 1 test-design mapping
 

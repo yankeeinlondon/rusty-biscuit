@@ -560,10 +560,14 @@ fn run_proxy_in_tmux_with_set(staged: &Staged, setters: &str, done_marker: &str)
         home = staged.workspace.path().display(),
         path = augmented_path(&staged.bin_dir).to_string_lossy(),
     );
+    let invocation_path = staged
+        .md_file
+        .strip_prefix(staged.workspace.path())
+        .unwrap_or(&staged.md_file);
     let cmd = format!(
         "cd {ws} && {env_prefix}{claudine} compose --goose {md} {setters} ; echo {sentinel}",
         ws = staged.workspace.path().display(),
-        md = staged.md_file.display(),
+        md = invocation_path.display(),
     );
     harness
         .send_command_with_env(&cmd, &[])
@@ -4092,12 +4096,11 @@ fn level2_lifecycle_initialize_proxy_cycle_guarded() {
         "target initialize must run before the back-proxy; got {lines:?}; pane:\n{pane}"
     );
     assert!(
-        pane.contains("CompositionError")
-            && pane.contains("composition failed")
-            && pane.contains("lifecycle `proxy` hand-off")
-            && pane.contains("forms a cycle or exceeds the proxy hop limit")
-            && pane.contains("active chain"),
-        "the typed LifecycleProxyCycle block must surface in the terminal; pane:\n{pane}"
+        pane.contains("CompositionError: proxy chain forms a cycle")
+            && pane.contains("hands off to")
+            && pane.contains("Active chain")
+            && pane.contains("hop limit of 16"),
+        "the typed cycle diagnostic must surface its reason, active chain, and bound; pane:\n{pane}"
     );
 }
 
@@ -4622,10 +4625,14 @@ fn run_until_settled_with_params(
         home = staged.workspace.path().display(),
         path = augmented_path(&staged.bin_dir).to_string_lossy(),
     );
+    let invocation_path = staged
+        .md_file
+        .strip_prefix(staged.workspace.path())
+        .unwrap_or(&staged.md_file);
     let cmd = format!(
         "cd {ws} && {env_prefix}{claudine} compose {flags} {md} {params} ; echo {sentinel}",
         ws = staged.workspace.path().display(),
-        md = staged.md_file.display(),
+        md = invocation_path.display(),
     );
     harness
         .send_command_with_env(&cmd, &[])

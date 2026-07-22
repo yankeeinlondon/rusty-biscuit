@@ -536,8 +536,8 @@ fn level2_initialize_proxy_renders_status_block_in_tmux() {
     );
     assert_eq!(
         staged.events(),
-        vec!["initialize"],
-        "the resolution failure aborts before `start`, so no terminal event may fire"
+        vec!["initialize", "finalize"],
+        "the resolution failure aborts before `start`, but the source still receives its owed `finalize`"
     );
     assert_eq!(
         capture.emission_count(),

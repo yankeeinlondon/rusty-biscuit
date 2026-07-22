@@ -37,7 +37,7 @@ use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::schemas::{
     Constraint, DarkmatterSchemas, EffectiveSchema, PropertyAtom, PropertyDef, SchemaError,
     SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr, ValidationProblem,
-    ValidationProblemKind,
+    ValidationProblemCode, ValidationProblemKind,
 };
 
 use super::error::{
@@ -469,11 +469,33 @@ pub fn pre_validate_schema(
         });
     }
 
+    let caller_resolved_eager_files: std::collections::HashSet<_> = file_ref_fallback_dir
+        .zip(set_overrides.as_ref().and_then(serde_json::Value::as_object))
+        .map(|(fallback, overrides)| {
+            report
+                .problems
+                .iter()
+                .filter(|problem| {
+                    matches!(problem.code, ValidationProblemCode::InvalidFileReference)
+                })
+                .filter_map(|problem| top_level_pointer_segment(&problem.path))
+                .filter(|property| {
+                    overrides.get(property).is_some_and(|value| {
+                        file_override_resolves_from(value, fallback)
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
     // Filter problems composition-tolerantly: drop Invalid/Type verdicts
     // whose raw value contains template syntax, because Darkmatter may
-    // resolve them to valid values during composition. Missing verdicts
-    // are composition-independent (no template can conjure a key that is
-    // absent from both raw frontmatter and overrides).
+    // resolve them to valid values during composition. A caller-originated
+    // eager file likewise keeps its launch-area provenance only in canonical
+    // preparation, but only after the literal reference resolves there. An
+    // unresolved partial must remain visible so the CLI can offer completion.
+    // Missing verdicts are composition-independent (no template or provenance
+    // can conjure a key absent from both raw frontmatter and overrides).
     let instance_map = instance.as_object();
     let composition_independent: Vec<_> = report
         .problems
@@ -481,7 +503,14 @@ pub fn pre_validate_schema(
         .filter(|p| match p.kind {
             ValidationProblemKind::Missing => true,
             ValidationProblemKind::Type | ValidationProblemKind::Invalid => {
-                let raw = top_level_pointer_segment(&p.path)
+                let property = top_level_pointer_segment(&p.path);
+                if property
+                    .as_ref()
+                    .is_some_and(|name| caller_resolved_eager_files.contains(name))
+                {
+                    return false;
+                }
+                let raw = property
                     .as_deref()
                     .and_then(|name| instance_map.and_then(|m| m.get(name)));
                 !value_needs_composition(raw)
@@ -747,6 +776,18 @@ pub fn drop_invalid_optionals(
     }
 
     (source, set_overrides, dropped)
+}
+
+fn file_override_resolves_from(value: &serde_json::Value, base: &std::path::Path) -> bool {
+    match value {
+        serde_json::Value::String(raw) => biscuit_file::FileReference::new(raw)
+            .and_then(|reference| reference.resolve_from(base))
+            .is_ok_and(|resolved| resolved.is_some()),
+        serde_json::Value::Array(values) => {
+            !values.is_empty() && values.iter().all(|value| file_override_resolves_from(value, base))
+        }
+        _ => false,
+    }
 }
 
 /// Returns `true` when `value` contains a Darkmatter template marker

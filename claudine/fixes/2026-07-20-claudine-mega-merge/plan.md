@@ -1,7 +1,7 @@
 ---
 total_phases: 6
 created: 2026-07-21
-phase: 4
+phase: 5
 agent: "opencode/zai-coding-plan/glm-5.2"
 yolo: "false"
 reviewed: true
@@ -152,10 +152,24 @@ skills_files_updated_during_phase_4:
   - .claude/skills/claudine/architecture.md
   - .claude/skills/claudine/cli-reference.md
   - .claude/skills/claudine/linking-strategy.md
+source_files_during_phase_5:
+  - claudine/cli/tests/level2_lifecycle_control.rs
+  - claudine/cli/tests/level2_sequence_task_stream_capture.rs
+  - claudine/cli/tests/level2_typed_error_render_capture.rs
+  - claudine/lib/src/composition/schema/mod.rs
+  - claudine/lib/src/composition/schema/tests.rs
+  - darkmatter/lib/src/markdown/compose/schema_validation.rs
+docs_updated_during_phase_5:
+  - claudine/fixes/2026-07-20-claudine-mega-merge/acceptance-ledger.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/plan.md
+docs_created_during_phase_5:
+  - claudine/fixes/2026-07-20-claudine-mega-merge/phase5-gates.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/phase5-test-map.md
+skills_files_updated_during_phase_5: []
 packages:
   - claudine
   - claudine-cli
-  - claudine-gen
+  - darkmatter
 ---
 
 # Claudine Mega-Merge Execution Plan
@@ -404,27 +418,27 @@ candidate, and rerun the affected matrix.
 
 ### Tasks
 
-- [ ] Biscuit File gates *(parallelizable with: other package-area gates below)*:
-    - [ ] `cd biscuit-file && just test`
-    - [ ] `cd biscuit-file && just test-l2`
-    - [ ] `cd biscuit-file && just lint`
-- [ ] Darkmatter gates *(parallelizable)*:
-    - [ ] `cd darkmatter && just test`
+- [x] Biscuit File gates *(parallelizable with: other package-area gates below)*:
+    - [x] `cd biscuit-file && just test`
+    - [x] `cd biscuit-file && just test-l2`
+    - [x] `cd biscuit-file && just lint`
+- [ ] Darkmatter gates *(parallelizable; the library L2 suite passed, while 11 CLI tests remain blocked by this host's `md` lookup and Apple Terminal backend)*:
+    - [x] `cd darkmatter && just test`
     - [ ] `cd darkmatter && just test-l2`
-    - [ ] `cd darkmatter && just lint`
-- [ ] Biscuit Test Harness gates *(parallelizable)*:
-    - [ ] From the repository root: `just test biscuit-test-harness`
-    - [ ] From the repository root: `just _lint biscuit-test-harness`
-- [ ] Rendezvous gates *(parallelizable)*:
-    - [ ] `cd claudine/rendezvous && just check`
-    - [ ] `cd claudine/rendezvous && just test`
-    - [ ] `cd claudine/rendezvous && just lint`
-- [ ] Claudine gates (sequential after the package-area gates above):
-    - [ ] `cd claudine && just test`
-    - [ ] `cd claudine && just test-l2 --no-fail-fast`
-    - [ ] `cd claudine && just lint`
-    - [ ] `cd claudine && just check-windows` (recorded as `compile-only`, NOT runtime evidence — I12, R11)
-- [ ] Execute the 12 mandatory combined seam rows at the tier/platform assigned in Phase 1. They may live in several focused test binaries; the requirement is one stable `MM-Sxx` row per interaction and fresh merged-tree evidence, not one oversized test process:
+    - [x] `cd darkmatter && just lint`
+- [x] Biscuit Test Harness gates *(parallelizable)*:
+    - [x] From the repository root: `just test biscuit-test-harness`
+    - [x] From the repository root: `just _lint biscuit-test-harness`
+- [x] Rendezvous gates *(parallelizable)*:
+    - [x] `cd claudine/rendezvous && just check`
+    - [x] `cd claudine/rendezvous && just test`
+    - [x] `cd claudine/rendezvous && just lint`
+- [x] Claudine gates (sequential after the package-area gates above):
+    - [x] `cd claudine && just test`
+    - [x] `cd claudine && just test-l2 --no-fail-fast`
+    - [x] `cd claudine && just lint`
+    - [x] `cd claudine && just check-windows` (recorded as `compile-only`, NOT runtime evidence — I12, R11)
+- [ ] Execute the 12 mandatory combined seam rows at the tier/platform assigned in Phase 1. They may live in several focused test binaries; the requirement is one stable `MM-Sxx` row per interaction and fresh merged-tree evidence, not one oversized test process. (All local macOS assertions passed; an immutable candidate and the assigned external Linux/Windows/native evidence remain unavailable.)
     - [ ] `MM-S01` — A bare proxy target resolves repository-first; a missing target exposes the ordered candidate/probe diagnostic identically in terminal, `err.*`, and snapshot output.
     - [ ] `MM-S02` — An explicit-relative proxy target stays source-local without fallback; nested references derive from the target source/repository.
     - [ ] `MM-S03` — A `proxy.with` overlay enters a Sequence Plus step whose target owns a loop; the step runs once, the loop completes, and JIT state/output remain visible.
@@ -437,13 +451,13 @@ candidate, and rerun the affected matrix.
     - [ ] `MM-S10` — A proxied-target failure inside a parallel group retains task attribution and stdout/stderr order, settles all children, merges state deterministically, and tears down descendants.
     - [ ] `MM-S11` — A target in another repository re-anchors authoring/nested resolution while the provider keeps the invocation-fixed child CWD; diagnostics distinguish the two contexts.
     - [ ] `MM-S12` — Dry-run reports static selection intent without lifecycle execution, dynamic proxy traversal, environment/MCP side effects, document mutation, or overlay disclosure.
-- [ ] Capture L2 terminal evidence (plain / color / OSC 8 / concurrent task failure) through `just test-l2` only. Backend failures recorded separately from feature failures (R10).
-- [ ] Schedule and run guarded L3 keyboard/process-interruption tests through attended/native or designated CI workflows only. Their opt-in and platform requirements remain visible in the ledger.
-- [ ] Run required Linux L1 behavior and lints in CI against the acceptance-candidate SHA; run Windows L1 rows in CI where supported. Record native execution separately from cross-checks.
-- [ ] Run the dedicated Linux tmux-backed L2 CI job (`.github/workflows/claudine-tests.yml`). It MUST reach assertions; a tmux setup failure is `blocked`, not a pass (R10, I12).
-- [ ] Attach passing native Windows runtime evidence for Windows-specific terminal, named-pipe, console-control, HOME, and descendant-termination claims. `just check-windows` alone is `compile-only` and never satisfies a runtime row (R11, I12).
-- [ ] Update every acceptance-ledger row touched in this phase with acceptance-candidate SHA, tier, platform, status, and evidence pointer.
-- [ ] After every required row passes, record the acceptance-candidate SHA in `sha-ledger.md`, stage only the evidence/ledger updates, run `git diff --check`, the anchored marker scans, and GitNexus `detect_changes({scope: "compare", base_ref: "main"})`, then create a documentation-only evidence commit. Capture that commit's SHA for the Phase 6 closeout record; do not attempt to make a commit self-reference its own SHA.
+- [x] Capture L2 terminal evidence (plain / color / OSC 8 / concurrent task failure) through `just test-l2` only. Backend failures recorded separately from feature failures (R10).
+- [ ] Schedule and run guarded L3 keyboard/process-interruption tests through attended/native or designated CI workflows only. Their opt-in and platform requirements remain visible in the ledger. (Blocked in this non-interactive session.)
+- [ ] Run required Linux L1 behavior and lints in CI against the acceptance-candidate SHA; run Windows L1 rows in CI where supported. Record native execution separately from cross-checks. (Requires external CI and an immutable candidate.)
+- [ ] Run the dedicated Linux tmux-backed L2 CI job (`.github/workflows/claudine-tests.yml`). It MUST reach assertions; a tmux setup failure is `blocked`, not a pass (R10, I12). (Requires an external Linux runner.)
+- [ ] Attach passing native Windows runtime evidence for Windows-specific terminal, named-pipe, console-control, HOME, and descendant-termination claims. `just check-windows` alone is `compile-only` and never satisfies a runtime row (R11, I12). (Requires a native Windows runner.)
+- [x] Update every acceptance-ledger row touched in this phase with acceptance-candidate SHA, tier, platform, status, and evidence pointer. (The seam rows identify the uncommitted worktree base and remain `blocked`; no immutable acceptance-candidate SHA exists because this execution prohibits staging/committing.)
+- [ ] After every required row passes, record the acceptance-candidate SHA in `sha-ledger.md`, stage only the evidence/ledger updates, run `git diff --check`, the anchored marker scans, and GitNexus `detect_changes({scope: "compare", base_ref: "main"})`, then create a documentation-only evidence commit. Capture that commit's SHA for the Phase 6 closeout record; do not attempt to make a commit self-reference its own SHA. (Intentionally not performed: required external rows remain blocked and this task prohibits staging or committing.)
 
 ### Validation Checkpoint (Phase 5 exit)
 

@@ -185,6 +185,39 @@ sequence:
 Body.
 ";
 
+/// A parallel group whose prompt documents both hand off through `proxy`.
+///
+/// The first target fails schema validation before provider launch. The second
+/// target succeeds, and the later reader proves that the failed group settled
+/// before the sequence continued and that declaration-ordered state merge
+/// remained sequence-owned across both handoffs.
+const PARALLEL_PROXY_FAILURE_DOC: &str = "\
+---
+fail_fast: false
+shared: initial
+sequence:
+  - name: proxy-group
+    group:
+      name: bundle
+      execution: parallel
+      tasks:
+        - name: failing-proxy
+          prompt: one.md
+          setup:
+            - action:
+                - set: [shared, from-failing]
+        - name: surviving-proxy
+          prompt: two.md
+          setup:
+            - action:
+                - set: [shared, from-survivor]
+  - name: verify-merge
+    prompt: reader.md
+---
+
+Body.
+";
+
 /// A single prompt task whose provider holds a partial Markdown block, then
 /// stays alive well past the idle-flush window.
 const IDLE_FLUSH_DOC: &str = "\
@@ -213,6 +246,23 @@ const CLAUDE_STREAM_STUB: &str = r#"#!/bin/sh
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"stub-1","model":"stub-model"}'
 printf '%s\n' '{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"weighing-options"}}'
 printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"body-payload"}]}}'
+printf '%s\n' '{"type":"tool_use","name":"Bash","input":{"command":"stub-tool-call"}}'
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"done"}'
+exit 0
+"#;
+
+/// The same semantic shapes with deliberate spacing between channels.
+///
+/// Separate stdout/stderr reader tasks cannot impose an order on writes that
+/// happen in the same scheduler slice. The spacing makes the provider's
+/// observable reasoning → body → tool order unambiguous at the real-terminal
+/// merge boundary exercised by MM-S10.
+const CLAUDE_ORDERED_STREAM_STUB: &str = r#"#!/bin/sh
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"stub-ordered","model":"stub-model"}'
+printf '%s\n' '{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"weighing-options"}}'
+sleep 0.3
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"body-payload"}]}}'
+sleep 0.3
 printf '%s\n' '{"type":"tool_use","name":"Bash","input":{"command":"stub-tool-call"}}'
 printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"done"}'
 exit 0
@@ -773,6 +823,98 @@ fn level2_parallel_prompt_streams_keep_task_attribution_in_tmux() {
             "`{task}` has no named outcome footer.\nregion:\n{plain}"
         );
     }
+}
+
+/// **MM-S10.** A target failure reached through `proxy` remains attributed to
+/// its parallel task, while its sibling settles normally and the containing
+/// sequence performs its declaration-ordered state merge before continuing.
+/// Provider stdout and stderr markers from the surviving task remain on its
+/// attributed stream, and status markers retain their order after the terminal
+/// merges both channels. Assistant Markdown may flush after a later status
+/// event, so no unsupported cross-channel total order is asserted.
+#[test]
+#[serial(level2_terminal)]
+fn level2_mega_merge_s10_parallel_proxy_failure_task_integrity() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
+    let staged = stage_prompt(
+        "claudine-l2-parallel-proxy-failure",
+        PARALLEL_PROXY_FAILURE_DOC,
+        CLAUDE_ORDERED_STREAM_STUB,
+    );
+    let root = staged.workspace.path();
+    write(
+        &root.join("one.md"),
+        "---\ninitialize:\n  stack:\n    - action: {proxy: '@failed-target.md'}\n---\n\nFirst router.\n",
+    );
+    write(
+        &root.join("two.md"),
+        "---\ninitialize:\n  stack:\n    - action: {proxy: '@success-target.md'}\n---\n\nSecond router.\n",
+    );
+    write(
+        &root.join("failed-target.md"),
+        "---\n$schema:\n  count: 'number(required)'\n---\n\nThis target must not launch.\n",
+    );
+    write(
+        &root.join("success-target.md"),
+        "---\ntitle: successful proxied target\n---\n\nSuccessful target.\n",
+    );
+    write(
+        &root.join("reader.md"),
+        "---\nstart:\n  info: 'shared is {{ shared }}'\n---\n\nRead merged state.\n",
+    );
+
+    let capture = run_in_pane(&mut harness, &staged, 120, 160, &[]);
+    assert_ne!(
+        capture.exit_code, 0,
+        "the failed proxied target must fail the containing group.\nplain:\n{}",
+        capture.frame.plain
+    );
+
+    let plain = framed_region(&capture.frame.plain).join("\n");
+    for (task, outcome) in [("failing-proxy", "failed"), ("surviving-proxy", "succeeded")] {
+        assert!(
+            plain.lines().any(|line| line.contains(task) && line.contains(outcome)),
+            "`{task}` must settle with `{outcome}` under its own attribution.\nregion:\n{plain}"
+        );
+    }
+    assert!(
+        plain.contains("step 2/2 succeeded"),
+        "the post-group verification step must settle successfully.\nregion:\n{plain}"
+    );
+    assert!(
+        plain.contains("shared is from-survivor"),
+        "the later-declared surviving task must win the deterministic state merge, \
+         and the next step must observe it.\nregion:\n{plain}"
+    );
+    assert_eq!(
+        plain.matches("body-payload").count(),
+        2,
+        "only the surviving proxy target and the post-group reader may launch; \
+         the schema-invalid target must not.\nregion:\n{plain}"
+    );
+
+    let raw_lines = framed_region_raw(&capture.frame.raw, PREFLIGHT_DONE_MARKER);
+    let survivor_header = raw_lines
+        .iter()
+        .find(|line| line.contains('▶') && line.contains("surviving-proxy"))
+        .expect("surviving proxy header");
+    let survivor_bar = bar_color(survivor_header).expect("surviving proxy colored bar");
+    let marker_position = |marker: &str| {
+        raw_lines
+            .iter()
+            .position(|line| line.contains(marker) && bar_color(line).as_deref() == Some(&survivor_bar))
+            .unwrap_or_else(|| panic!("`{marker}` missing from the surviving task's stream"))
+    };
+    let reasoning = marker_position("weighing-options");
+    let _body = marker_position("body-payload");
+    let tool = marker_position("stub-tool-call");
+    assert!(
+        reasoning < tool,
+        "the terminal must preserve order within the surviving provider's status \
+         stream; positions were reasoning={reasoning}, tool={tool}"
+    );
 }
 
 /// A held Markdown block surfaced by the idle flush must still carry its task's

@@ -221,6 +221,19 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
             {
                 return false;
             }
+            // Caller-originated eager files were resolved against their
+            // invocation-fixed launch context above. A target document may
+            // live across a repository boundary, where rechecking that
+            // absolute value as document-authored can only produce a
+            // contradictory provenance failure.
+            if matches!(
+                p.code,
+                crate::markdown::schemas::ValidationProblemCode::InvalidFileReference
+            ) && top_level_pointer_segment(&p.path)
+                .is_some_and(|name| caller_file_overrides.contains_key(&name))
+            {
+                return false;
+            }
             if !defer_shell_pending {
                 return true;
             }
@@ -294,7 +307,11 @@ fn resolve_eager_caller_file_overrides(
     let context = options
         .file_resolution_context
         .as_ref()
-        .map(|context| context.for_base(fallback))
+        // The launch area is invocation state already accepted by the caller,
+        // and may be outside a proxied target's repository. The target's own
+        // references keep its normal authoring context; only caller-originated
+        // overrides cross back to this captured boundary.
+        .map(|context| context.for_trusted_external_base(fallback))
         .unwrap_or_else(|| biscuit_file::FileResolutionContext::new(fallback));
     let mut resolved = serde_json::Map::new();
     for (key, value) in overrides {
@@ -1498,6 +1515,40 @@ mod tests {
             composed.frontmatter().as_map().get("spec"),
             Some(&serde_json::json!(resolved.to_string_lossy())),
         );
+    }
+
+    #[test]
+    fn eager_file_set_override_keeps_launch_area_across_target_repository_boundary() {
+        let dir = tempfile::tempdir().unwrap();
+        let launch_repo = dir.path().join("launch-repo");
+        let target_repo = dir.path().join("target-repo");
+        std::fs::create_dir_all(launch_repo.join(".git")).unwrap();
+        std::fs::create_dir_all(target_repo.join(".git")).unwrap();
+        let resolved = launch_repo.join("spec.md");
+        std::fs::write(&resolved, "# Spec\n").unwrap();
+        let doc_path = target_repo.join("prompt.md");
+
+        for schema in ["file(required;eager)", "'file(required;eager)'"] {
+            let md = md_with_schema_and_source(
+                &format!("$schema:\n  spec: {schema}\nspec: authored.md\n"),
+                &doc_path,
+            );
+            let target_context = biscuit_file::FileResolutionContext::new(&target_repo)
+                .with_repository_root(&target_repo)
+                .with_source_path(&doc_path);
+            let options = ComposeOptions::new()
+                .with_source_file(&doc_path)
+                .with_file_resolution_context(target_context)
+                .with_file_ref_fallback_dir(&launch_repo)
+                .with_set_overrides(serde_json::json!({ "spec": "spec.md" }));
+
+            let (composed, _) = md.compose_with(options).unwrap();
+            assert_eq!(
+                composed.frontmatter().as_map().get("spec"),
+                Some(&serde_json::json!(resolved.to_string_lossy())),
+                "caller-originated `spec.md` must stay anchored to the launch area for {schema}",
+            );
+        }
     }
 
     #[test]

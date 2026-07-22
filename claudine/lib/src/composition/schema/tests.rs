@@ -1554,6 +1554,82 @@ fn pre_validate_schema_rejects_launch_only_file() {
     );
 }
 
+/// A launch-only eager file supplied by the caller is invocation input, not a
+/// document-authored reference. Pre-validation leaves its final resolution to
+/// canonical preparation, which retains the caller's launch-area provenance.
+#[test]
+#[serial_test::serial(schema_validation_cwd)]
+fn pre_validate_schema_defers_caller_eager_file_to_canonical_preparation() {
+    let doc_dir = TempDir::new().unwrap();
+    let launch_dir = TempDir::new().unwrap();
+    let unrelated = TempDir::new().unwrap();
+    fs::write(launch_dir.path().join("spec.md"), "# Spec\n").unwrap();
+
+    for schema in ["file(required;eager)", "'file(required;eager)'"] {
+        let source = make_source_in(
+            doc_dir.path(),
+            &format!("---\n$schema:\n  spec: {schema}\n---\nbody\n"),
+        );
+        let overrides = serde_json::json!({ "spec": "spec.md" });
+
+        let _cwd = CwdGuard::enter(unrelated.path());
+        let pre = pre_validate_schema(&source, Some(&overrides), Some(launch_dir.path()))
+            .expect("caller-originated `spec.md` must reach canonical preparation");
+        assert_eq!(pre.set_overrides, Some(overrides));
+    }
+}
+
+/// A captured launch directory alone does not turn a non-resolving caller
+/// value into a deferred file. Partial values must still reach the typed
+/// interactive-resolution path, including both accepted `file[]` forms.
+#[test]
+fn pre_validate_schema_keeps_unresolved_caller_file_partials_interactive() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("everywhere-spec.md"), "# Spec\n").unwrap();
+
+    for (schema, overrides, property, is_array) in [
+        (
+            "spec: 'file(required;match(**/*spec*.md);eager)'",
+            serde_json::json!({ "spec": "everywhere" }),
+            "spec",
+            false,
+        ),
+        (
+            "attachments: 'file(required;match(**/*spec*.md);eager)[]'",
+            serde_json::json!({ "attachments": "everywhere" }),
+            "attachments",
+            true,
+        ),
+        (
+            "attachments: 'file(required;match(**/*spec*.md);eager)[]'",
+            serde_json::json!({ "attachments": ["everywhere"] }),
+            "attachments",
+            true,
+        ),
+    ] {
+        let source = make_source(
+            &dir,
+            &format!("---\n$schema:\n  {schema}\n---\nbody\n"),
+        );
+
+        let err = pre_validate_schema(&source, Some(&overrides), Some(dir.path()))
+            .expect_err("the exact `everywhere` partial must remain interactive");
+        match err {
+            CompositionError::UnresolvedFileReference {
+                property: actual_property,
+                provided,
+                is_array: actual_is_array,
+                ..
+            } => {
+                assert_eq!(actual_property, property);
+                assert_eq!(provided, "everywhere");
+                assert_eq!(actual_is_array, is_array);
+            }
+            other => panic!("expected UnresolvedFileReference, got {other:?}"),
+        }
+    }
+}
+
 /// Captured launch metadata does not displace the source-local candidate when
 /// no repository candidate exists.
 #[test]
