@@ -6,7 +6,7 @@ use crate::markdown::compose::util::{
 };
 use crate::markdown::compose::{ComposeSource, TransclusionOptions};
 use crate::markdown::compose::context::options::SourceDerivation;
-use biscuit_file::{FileReference, FileReferenceKind};
+use biscuit_file::{FileReference, FileReferenceError, FileReferenceKind};
 use biscuit_terminal::errors::SourceContext;
 use std::path::{Path, PathBuf};
 use tracing::{debug, instrument, trace};
@@ -21,17 +21,27 @@ pub(crate) fn resolve_target(
     line: usize,
     ctx: SourceContext,
 ) -> Result<ResolvedTarget, TransclusionError> {
+    let file_ref = FileReference::new(raw_target)?;
+    resolve_parsed_target(kind, &file_ref, options, source, line, ctx)
+}
+
+/// Resolves an already-parsed directive target into a canonical local path or URL.
+#[instrument(skip_all, fields(target = %file_ref.raw(), kind = ?kind))]
+pub(crate) fn resolve_parsed_target(
+    kind: DirectiveKind,
+    file_ref: &FileReference,
+    options: &TransclusionOptions,
+    source: &ComposeSource,
+    line: usize,
+    ctx: SourceContext,
+) -> Result<ResolvedTarget, TransclusionError> {
     debug!("transclusion: resolving target");
-    match kind {
-        DirectiveKind::Url => resolve_url_target(raw_target, options),
-        // `::file`/`::code` accept HTTP(S) targets too; route those to the URL
-        // resolver so remote transclusion works through the same directives as
-        // local paths.
-        DirectiveKind::File | DirectiveKind::Code if is_url_like(raw_target) => {
-            resolve_url_target(raw_target, options)
+    match (kind, file_ref.class().kind) {
+        (DirectiveKind::Url, _) | (_, FileReferenceKind::Url) => {
+            resolve_url_target(file_ref.raw(), options)
         }
-        DirectiveKind::File | DirectiveKind::Code => {
-            let path = resolve_path(raw_target, kind, options, source, line, ctx)?;
+        (DirectiveKind::File | DirectiveKind::Code, _) => {
+            let path = resolve_file_reference(file_ref, kind, options, source, line, ctx)?;
             validate_local_target(kind, &path, options)?;
             Ok(ResolvedTarget::File {
                 id: path.to_string_lossy().to_string(),
@@ -82,14 +92,27 @@ pub(crate) fn resolve_path(
     ctx: SourceContext,
 ) -> Result<PathBuf, TransclusionError> {
     trace!(raw_target = %raw_target, "transclusion: resolving path");
-    if raw_target.starts_with("http://") || raw_target.starts_with("https://") {
+    let file_ref = FileReference::new(raw_target)?;
+    resolve_file_reference(&file_ref, kind, options, source, line, ctx)
+}
+
+fn resolve_file_reference(
+    file_ref: &FileReference,
+    kind: DirectiveKind,
+    options: &TransclusionOptions,
+    source: &ComposeSource,
+    line: usize,
+    ctx: SourceContext,
+) -> Result<PathBuf, TransclusionError> {
+    let raw_target = file_ref.raw();
+    if file_ref.class().kind == FileReferenceKind::Url {
         return Err(TransclusionError::UnsupportedReferenceType {
             reference: raw_target.to_string(),
         });
     }
 
     // `@`-magic requires repo-root resolution to be enabled.
-    if raw_target.starts_with('@') && !options.resolve_repo_root {
+    if file_ref.class().kind == FileReferenceKind::Magic && !options.resolve_repo_root {
         return Err(TransclusionError::InvalidReference {
             ctx: Box::new(ctx),
             reference: raw_target.to_string(),
@@ -97,18 +120,6 @@ pub(crate) fn resolve_path(
             directive_kind: kind,
         });
     }
-
-    // Normalize @/ to @ — FileReference strips only the leading @, so @/foo
-    // would leave /foo (absolute) which breaks the magic-root join.
-    let normalized;
-    let ref_input = if let Some(rest) = raw_target.strip_prefix("@/") {
-        normalized = format!("@{rest}");
-        normalized.as_str()
-    } else {
-        raw_target
-    };
-
-    let file_ref = FileReference::new(ref_input)?;
 
     // Absolute, home, and URL references do not need a document base; every
     // other kind (explicit/implicit relative, magic, package, vault) resolves
@@ -227,56 +238,48 @@ fn is_markdown_path(path: &Path) -> bool {
     matches!(ext.to_ascii_lowercase().as_str(), "md" | "markdown")
 }
 
-/// Attempts to infer whether a reference string is URL-like.
-pub fn is_url_like(reference: &str) -> bool {
-    reference.starts_with("http://") || reference.starts_with("https://")
+/// Classification of a frontmatter prologue or epilogue value.
+#[derive(Debug)]
+pub(crate) enum FrontmatterReference {
+    /// Markdown content that should be emitted without file resolution.
+    Inline,
+    /// A syntactically valid file reference.
+    Parsed(FileReference),
+    /// A reference-shaped value rejected by the shared parser.
+    ParseError(FileReferenceError),
 }
 
-/// Returns `true` if the reference looks like a filesystem path rather than
-/// inline string content.  A reference is path-like when it contains a path
-/// separator (`/` or `\`), starts with a file-reference prefix (`@`, `~`,
-/// `!`, `%`), uses `vault:` syntax, or contains `{{` env-var interpolation.
-pub fn is_file_like_reference(reference: &str) -> bool {
-    // Multi-line content is inline markdown, never a file path.
-    if reference.contains('\n') {
-        return false;
+/// Classifies a frontmatter prologue or epilogue value without suppressing
+/// errors from the shared file-reference parser.
+pub(crate) fn classify_frontmatter_reference(reference: &str) -> FrontmatterReference {
+    if reference.is_empty() || reference.contains('\n') || reference.contains("](") {
+        return FrontmatterReference::Inline;
     }
 
-    // Markdown link syntax (`](`) indicates inline content, not a path.
-    if reference.contains("](") {
-        return false;
+    let file_ref = match FileReference::new(reference) {
+        Ok(file_ref) => file_ref,
+        Err(error) => return FrontmatterReference::ParseError(error),
+    };
+    if file_ref.class().kind != FileReferenceKind::ImplicitRelative {
+        return FrontmatterReference::Parsed(file_ref);
     }
 
-    if reference.contains('/')
-        || reference.contains('\\')
-        || reference.starts_with('@')
-        || reference.starts_with('~')
-        || reference.starts_with('!')
-        || reference.starts_with('%')
-        || reference.starts_with("vault:")
-        || reference.contains("{{")
-    {
-        return true;
+    if reference.contains('/') || reference.contains('\\') || reference.contains("{{") {
+        return FrontmatterReference::Parsed(file_ref);
     }
 
     // Bare filenames like "intro.md" should be treated as file-like for
     // frontmatter transclusion classification.
-    std::path::Path::new(reference)
+    if std::path::Path::new(reference)
         .extension()
         .and_then(|ext| ext.to_str())
         .map(|ext| !ext.is_empty() && !reference.chars().any(char::is_whitespace))
         .unwrap_or(false)
-}
-
-/// Attempts to normalize relative reference tokens before parsing.
-pub fn normalize_reference_token(raw: &str) -> String {
-    if raw.starts_with('@') {
-        // Collapse @./foo and @foo into @/foo for stable semantics.
-        let trimmed = raw.trim_start_matches('@').trim_start_matches('/');
-        return format!("@/{trimmed}");
+    {
+        FrontmatterReference::Parsed(file_ref)
+    } else {
+        FrontmatterReference::Inline
     }
-
-    raw.to_string()
 }
 
 #[cfg(test)]
@@ -467,30 +470,51 @@ mod tests {
     }
 
     #[test]
-    fn classifies_file_like_references() {
-        assert!(is_file_like_reference("./intro.md"));
-        assert!(is_file_like_reference("../shared/header.md"));
-        assert!(is_file_like_reference("@/docs/intro.md"));
-        assert!(is_file_like_reference("~/notes/intro.md"));
-        assert!(is_file_like_reference("/absolute/path.md"));
-        assert!(is_file_like_reference("intro.md"));
-        assert!(is_file_like_reference("!README.md"));
-        assert!(is_file_like_reference("%@docs/spec.md"));
-        assert!(is_file_like_reference("vault:notes/today.md"));
-        assert!(is_file_like_reference("{{CONFIG_DIR}}/app.toml"));
-        assert!(!is_file_like_reference("Just some text content"));
-        assert!(!is_file_like_reference("**Bold** markdown"));
-        assert!(!is_file_like_reference(""));
+    fn classifies_frontmatter_references() {
+        for reference in [
+            "./intro.md",
+            "../shared/header.md",
+            "@/docs/intro.md",
+            "~/notes/intro.md",
+            "/absolute/path.md",
+            "intro.md",
+            "!README.md",
+            "%@docs/spec.md",
+            "vault:notes/today.md",
+            "{{CONFIG_DIR}}/app.toml",
+            "HTTPS://example.com/intro.md",
+        ] {
+            assert!(matches!(
+                classify_frontmatter_reference(reference),
+                FrontmatterReference::Parsed(_)
+            ));
+        }
+        for reference in ["Just some text content", "**Bold** markdown", ""] {
+            assert!(matches!(
+                classify_frontmatter_reference(reference),
+                FrontmatterReference::Inline
+            ));
+        }
 
         // Inline content containing markdown links or newlines must not be
         // misidentified as file paths.
-        assert!(!is_file_like_reference(
-            "---\n\n- No [animals](./animals.md) were hurt"
-        ));
-        assert!(!is_file_like_reference(
-            "See [other](./other.md) for details"
-        ));
-        assert!(!is_file_like_reference("Line one\nLine two"));
+        for reference in [
+            "---\n\n- No [animals](./animals.md) were hurt",
+            "See [other](./other.md) for details",
+            "Line one\nLine two",
+        ] {
+            assert!(matches!(
+                classify_frontmatter_reference(reference),
+                FrontmatterReference::Inline
+            ));
+        }
+
+        for reference in ["@//escape.md", "%@//escape.md", "~alice/secret.md"] {
+            assert!(matches!(
+                classify_frontmatter_reference(reference),
+                FrontmatterReference::ParseError(_)
+            ));
+        }
     }
 
     #[test]
@@ -554,5 +578,43 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(err, TransclusionError::UnsupportedFileType { .. }));
+    }
+
+    #[test]
+    fn file_and_code_directives_route_uppercase_https_through_remote_resolution() {
+        let mut options = default_options();
+        options.allow_remote = true;
+
+        for kind in [DirectiveKind::File, DirectiveKind::Code] {
+            let resolved = resolve_target(
+                kind,
+                "HTTPS://example.com/asset.md",
+                &options,
+                &ComposeSource::Unknown,
+                1,
+                dummy_ctx(""),
+            )
+            .unwrap();
+
+            let ResolvedTarget::Url { url, .. } = resolved else {
+                panic!("{kind:?} uppercase HTTPS target was not routed remotely");
+            };
+            assert_eq!(url.as_str(), "https://example.com/asset.md");
+        }
+    }
+
+    #[test]
+    fn mixed_case_https_still_honors_remote_execution_policy() {
+        let err = resolve_target(
+            DirectiveKind::File,
+            "hTtPs://example.com/blocked.md",
+            &default_options(),
+            &ComposeSource::Unknown,
+            1,
+            dummy_ctx(""),
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, TransclusionError::UrlExecutionDisabled { .. }));
     }
 }

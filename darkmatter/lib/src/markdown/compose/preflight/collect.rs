@@ -330,10 +330,9 @@ fn collect_recursive(
 
         // No `when=` evaluation: a false-condition transclusion still
         // contributes its commands to the approval set.
-        let target = transclusion::normalize_reference_token(&directive.raw_target);
         let resolved = match transclusion::resolve_target(
             directive.kind,
-            &target,
+            &directive.raw_target,
             &transclusion_opts,
             &options.source,
             directive.line,
@@ -392,19 +391,17 @@ fn collect_recursive(
     let mut children: Vec<super::PreflightGraphNode> =
         edges.iter().map(|e| e.child.clone()).collect();
     for reference in refs.prologue.iter().chain(refs.epilogue.iter()) {
-        if !transclusion::is_url_like(reference) && !transclusion::is_file_like_reference(reference) {
-            continue;
-        }
-
-        let kind = if transclusion::is_url_like(reference) {
-            transclusion::DirectiveKind::Url
-        } else {
-            transclusion::DirectiveKind::File
+        let file_ref = match transclusion::classify_frontmatter_reference(reference) {
+            transclusion::FrontmatterReference::Inline => continue,
+            transclusion::FrontmatterReference::Parsed(file_ref) => file_ref,
+            transclusion::FrontmatterReference::ParseError(error) => {
+                return Err(transclusion::TransclusionError::from(error).into());
+            }
         };
 
-        let resolved = match transclusion::resolve_target(
-            kind,
-            reference,
+        let resolved = match transclusion::resolve_parsed_target(
+            transclusion::DirectiveKind::File,
+            &file_ref,
             &transclusion_opts,
             &options.source,
             0,
@@ -1647,6 +1644,49 @@ out: \"$(flag ? {{cmd_name}} hi : '')\"
         assert!(
             raw.contains(&"echo remote-body-2"),
             "remote child body command 2 missing from approval set: {raw:?}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn mixed_case_http_file_target_participates_in_preflight() {
+        use crate::markdown::compose::remote::RemoteReadConfig;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/mixed-child.md"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                "# Remote child\n::shell echo mixed-case-remote\n",
+            ))
+            .mount(&server)
+            .await;
+
+        let remote_url = server.uri().replacen("http://", "HtTp://", 1);
+        let temp_dir = TempDir::new().unwrap();
+        let root_path = temp_dir.path().join("root.md");
+        std::fs::write(
+            &root_path,
+            format!("# Root\n::file {remote_url}/mixed-child.md\n"),
+        )
+        .unwrap();
+
+        let md = Markdown::try_from(root_path.as_path()).unwrap();
+        let config = RemoteReadConfig {
+            allowed_hosts: vec!["127.0.0.1".into()],
+            ..Default::default()
+        };
+        let options = ComposeOptions::new()
+            .with_source_file(&root_path)
+            .with_allow_remote_transclusion(true)
+            .with_remote_read_config(config);
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.raw_command == "echo mixed-case-remote"),
+            "mixed-case HTTP ::file child must participate in preflight: {entries:?}"
         );
     }
 

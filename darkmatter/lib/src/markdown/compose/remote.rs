@@ -7,6 +7,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
+use biscuit_file::{FileReference, FileReferenceKind};
 use thiserror::Error;
 
 use crate::markdown::compose::ComposeSource;
@@ -235,9 +236,8 @@ impl RemoteUrlCatalog {
 
 /// Scans parsed block directives for URL targets.
 ///
-/// Looks for directives whose `raw_target` starts with `http://` or
-/// `https://` and maps them to the appropriate [`RemoteUrlConsumer`] based
-/// on directive kind.
+/// Uses [`FileReference`] classification to find URL targets and maps them to
+/// the appropriate [`RemoteUrlConsumer`] based on directive kind.
 pub fn discover_remote_urls_from_directives(
     directives: &[BlockDirective],
     source: &ComposeSource,
@@ -249,8 +249,11 @@ pub fn discover_remote_urls_from_directives(
 
     directives
         .iter()
-        .filter(|d| is_http_url(&d.raw_target))
         .filter_map(|d| {
+            let file_ref = FileReference::new(&d.raw_target).ok()?;
+            if file_ref.class().kind != FileReferenceKind::Url {
+                return None;
+            }
             validate_url_for_remote_read(&d.raw_target).ok().map(|url| {
                 let consumer = match d.kind {
                     crate::markdown::compose::transclusion::DirectiveKind::File
@@ -377,10 +380,6 @@ pub fn check_remote_read_allowed(
     }
 }
 
-fn is_http_url(s: &str) -> bool {
-    s.starts_with("http://") || s.starts_with("https://")
-}
-
 /// Recursively walks a parsed expression, registering a remote URL for every
 /// exact-identifier [`REMOTE_READ_FUNCTIONS`] call whose first argument is a
 /// string-literal `http(s)` URL. Recurses into all sub-expressions so calls
@@ -497,6 +496,22 @@ mod tests {
         let results = discover_remote_urls_from_directives(&directives, &file_source());
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].consumer, RemoteUrlConsumer::TransclusionCode);
+    }
+
+    #[test]
+    fn discovers_file_and_code_targets_with_case_insensitive_http_schemes() {
+        let directives = vec![
+            make_directive(DirectiveKind::File, "hTtP://example.com/doc.md", 5),
+            make_directive(DirectiveKind::Code, "HTTPS://example.com/snippet.rs", 10),
+        ];
+
+        let results = discover_remote_urls_from_directives(&directives, &file_source());
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].url.as_str(), "http://example.com/doc.md");
+        assert_eq!(results[0].consumer, RemoteUrlConsumer::TransclusionFile);
+        assert_eq!(results[1].url.as_str(), "https://example.com/snippet.rs");
+        assert_eq!(results[1].consumer, RemoteUrlConsumer::TransclusionCode);
     }
 
     #[test]
