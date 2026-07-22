@@ -222,7 +222,8 @@ pub(super) fn is_eager_file_problem(shape: Option<&SchemaShape>, problem: &Valid
 /// Map a [`PropertyAtom`] to an [`InteractiveShape`] for CLI prompting.
 ///
 /// Returns `None` when the atom describes a shape that cannot be
-/// collected via a single TUI widget (e.g. `object`, `any`).
+/// collected via a single TUI widget (e.g. `object`, `any`, or a semantic
+/// definition artifact).
 pub(super) fn interactive_shape_for_atom(atom: &PropertyAtom) -> Option<InteractiveShape> {
     match &atom.ty {
         TypeExpr::Primitive(SimplifiedType::Enum) => {
@@ -308,7 +309,13 @@ pub(super) fn interactive_shape_for_atom(atom: &PropertyAtom) -> Option<Interact
         }
         // A `literal(...)` is a fixed `const` with exactly one valid value, so
         // there is nothing to prompt for.
-        TypeExpr::Primitive(SimplifiedType::Object | SimplifiedType::Any | SimplifiedType::Literal)
+        TypeExpr::Primitive(
+            SimplifiedType::Object
+            | SimplifiedType::Any
+            | SimplifiedType::Literal
+            | SimplifiedType::TypeDefinition
+            | SimplifiedType::Schema,
+        )
         | TypeExpr::InlineObject(_)
         | TypeExpr::Imported { .. } => None,
     }
@@ -570,4 +577,21 @@ pub fn build_schema_status_report(
         has_invalid_optional,
         raw_json_schema: false,
     }))
+}
+
+#[cfg(test)]
+mod semantic_type_tests {
+    use super::*;
+
+    #[test]
+    fn semantic_schema_types_are_not_single_widget_values() {
+        for ty in [SimplifiedType::TypeDefinition, SimplifiedType::Schema] {
+            let scalar = PropertyAtom::bare(ty);
+            let mut array = PropertyAtom::bare(ty);
+            array.is_array = true;
+
+            assert_eq!(interactive_shape_for_atom(&scalar), None);
+            assert_eq!(interactive_shape_for_atom(&array), None);
+        }
+    }
 }

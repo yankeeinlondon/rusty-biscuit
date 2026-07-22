@@ -17,9 +17,9 @@
 //!   Draft 2020-12 JSON Schema.
 //! - [`simplified`] — YAML-shape layer over `serde_yaml_ng::Value`.
 //! - [`format`] — custom format validators (`darkmatter-file` eager,
-//!   `darkmatter-file-reference` lazy) and the `x-darkmatter-url-scheme`
-//!   keyword validator. (`match(...)` is suggestion metadata only — never a
-//!   validation keyword.)
+//!   `darkmatter-file-reference` lazy) plus URL-scheme and passive semantic
+//!   meta-type keyword validators. (`match(...)` is suggestion metadata only —
+//!   never a validation keyword.)
 //! - [`validate`] — `Validator` construction + LRU [`ValidatorCache`].
 //! - [`rewrite`] — eager-`file` value normalization: rewrites a present
 //!   `file(eager)`-typed value to its repo-relative resolved path after
@@ -58,6 +58,7 @@ pub mod discriminant;
 pub mod errors;
 pub mod example;
 pub mod format;
+mod reference;
 pub mod resolve;
 pub mod rewrite;
 pub mod simplified;
@@ -91,12 +92,21 @@ pub use completion::{CompletionKind, CompletionSuggestion};
 pub use detect::{DetectOptions, detect_from_document, detect_schema, schema_to_yaml};
 pub use discriminant::select_literal_discriminant_arm;
 pub use errors::SchemaError;
+pub use reference::{SchemaReference, SchemaReferenceKind, classify_schema_reference};
 pub use rewrite::NormalizationOutcome;
 pub use simplified::{
-    Constraint, DRAFT_2020_12, DecodedScalar, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
-    SimplifiedSchema, SimplifiedType, SuggestionItem, SuggestionLintProblem, SuggestionLintReason,
-    SuggestionQuery, TypeExpr, decode_scalar, decode_scalar_at, lint_suggestions,
-    suggestions_for_def, suggestions_for_path,
+    Constraint, DRAFT_2020_12, DecodedScalar, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef,
+    SchemaArm,
+    SchemaCursor, SchemaCursorRole, SchemaDeclaration, SchemaShape, SchemaSourceMap,
+    SchemaSourcePath, SchemaSourcePathSegment,
+    SchemaSpanKind, SchemaValueEntry, SchemaValueKind, SchemaValueNode, SimplifiedSchema,
+    SimplifiedType, SourceAware, SuggestionItem,
+    SuggestionLintProblem, SuggestionLintReason, SuggestionQuery, TypeExpr, decode_scalar,
+    decode_partial_scalar_at, decode_scalar_at, is_union_arm_path, lint_suggestions,
+    locate_schema_declaration_cursor, locate_schema_value, locate_type_definition_cursor,
+    parse_property_definition,
+    parse_property_definition_with_source, parse_schema_declaration,
+    parse_schema_declaration_with_source, suggestions_for_def, suggestions_for_path,
     StandaloneSchemaDocument, StandaloneSchemaEnvelope, parse_standalone_schema_document,
     parse_yaml_schema, to_json_schema,
 };

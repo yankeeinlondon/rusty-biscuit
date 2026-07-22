@@ -29,7 +29,10 @@
 use globset::Glob;
 use serde_json::Value;
 
-use crate::markdown::schemas::simplified::{Constraint, PropertyAtom, SimplifiedType, TypeExpr};
+use crate::markdown::schemas::simplified::{
+    Constraint, PropertyAtom, SimplifiedType, TypeExpr, parse_property_definition,
+    parse_schema_declaration,
+};
 
 use super::grammar::MatchExpr;
 
@@ -286,6 +289,12 @@ fn primitive_matches(ty: SimplifiedType, value: &Value) -> bool {
         // the `LiteralValue` equality constraint in `constraint_holds`.
         SimplifiedType::Literal => true,
         SimplifiedType::Object => value.is_object(),
+        SimplifiedType::TypeDefinition => serde_yaml_ng::to_value(value)
+            .ok()
+            .is_some_and(|yaml| parse_property_definition("<trigger>", &yaml).is_ok()),
+        SimplifiedType::Schema => serde_yaml_ng::to_value(value)
+            .ok()
+            .is_some_and(|yaml| parse_schema_declaration(&yaml).is_ok()),
         SimplifiedType::Any => true,
     }
 }

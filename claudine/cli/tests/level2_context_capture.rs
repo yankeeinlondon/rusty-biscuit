@@ -652,12 +652,12 @@ fn level2_context_expressions_caps_at_140_in_wide_tmux() {
 #[serial(level2_terminal)]
 fn level2_context_expressions_list_reserves_right_margin_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
-    // At 65 columns the `--expressions` report wraps to ~413 lines. The only
+    // At 65 columns the `--expressions` report wraps to ~772 lines. The only
     // `- ` list is the modes consequence list, the 7th of 9 sections; the
     // Functions catalog below it must not push that list above the captured
-    // pane (`capture-pane` has no scrollback). 480 rows fit the full report
+    // pane (`capture-pane` has no scrollback). 820 rows fit the full report
     // with headroom for the prompt echo and footer.
-    let frame = capture_context(&["--expressions"], 65, 480);
+    let frame = capture_context(&["--expressions"], 65, 820);
 
     assert_list_lines_reserve_right_margin(&frame, 65);
 }

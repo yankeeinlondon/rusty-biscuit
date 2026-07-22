@@ -54,7 +54,7 @@ which = { version = "8.0.0", default-features = false, features = ["real-sys"] }
 [features]
 default = []
 metrics = ["dep:metrics"]
-network = ["dep:reqwest", "dep:tokio", "dep:futures", "reqwest/rustls"]
+network = ["dep:reqwest", "dep:tokio", "dep:futures", "reqwest/rustls", "biscuit-file/fetch"]
 remote = ["network"]
 
 [target.'cfg(target_os = "macos")'.dependencies]

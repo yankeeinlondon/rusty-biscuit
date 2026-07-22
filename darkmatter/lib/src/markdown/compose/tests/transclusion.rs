@@ -1195,15 +1195,9 @@ mod remote_transclusion_tests {
         assert_eq!(text, "S: draft\n");
     }
 
-    /// Decision B: the frontmatter *surface* is local-filesystem only. A
-    /// remote URL argument to a read-side function written in a frontmatter
-    /// value must fail loudly rather than performing a network read — even
-    /// when the run otherwise allows the host for body/transclusion fetches.
-    /// The value here is a whole-value `{{ … }}`, which is executable state,
-    /// so the evaluation error aborts composition regardless of fail_fast —
-    /// the loud failure can never leave the raw template unsubstituted.
+    /// Frontmatter and body remote reads use one authorized single-flight slot.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn frontmatter_value_remote_url_fails_loudly() {
+    async fn frontmatter_and_body_remote_reads_have_parity_and_single_flight() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/doc.md"))
@@ -1217,31 +1211,30 @@ mod remote_transclusion_tests {
 
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("root.md");
-        // The expression lives in a frontmatter value, not the body.
         let content = format!(
-            "---\nstatus: '{{{{ frontmatter(\"{url}\", \"status\") }}}}'\n---\n# H1\n"
+            "---\nstatus: '{{{{ frontmatter(\"{url}\", \"status\") }}}}'\n---\nS: {{{{ frontmatter(\"{url}\", \"status\") }}}}\n"
         );
         std::fs::write(&root, &content).unwrap();
 
-        let err = compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
+        let (composed, _) = compose_with_remote(
+            &content,
+            &root,
+            &server,
+            vec!["127.0.0.1".into()],
+        )
             .await
-            .expect_err("a whole-value remote-URL read in frontmatter must abort composition");
-
-        // The loud failure names the key, the local-only diagnostic, and the URL.
-        let msg = err.to_string();
-        assert!(msg.contains("status"), "error must name the key, got: {msg}");
-        assert!(
-            msg.contains("remote reads are not enabled"),
-            "expected a local-only frontmatter diagnostic, got: {msg}"
+            .unwrap();
+        assert_eq!(
+            composed.frontmatter().as_map().get("status"),
+            Some(&serde_json::Value::String("draft".to_string()))
         );
-        assert!(msg.contains(&url), "error must name the URL, got: {msg}");
+        assert_eq!(composed.content(), "S: draft");
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
     }
 
-    /// Decision B also applies to `file_exists()`: a remote URL argument in
-    /// a whole-value `{{ … }}` frontmatter value must abort composition rather
-    /// than silently reporting the URL as absent or leaking the raw template.
+    /// `file_exists()` has the same authorized behavior in frontmatter.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn frontmatter_file_exists_remote_url_fails_loudly() {
+    async fn frontmatter_file_exists_remote_url_succeeds_when_authorized() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/doc.md"))
@@ -1257,29 +1250,23 @@ mod remote_transclusion_tests {
         );
         std::fs::write(&root, &content).unwrap();
 
-        let err = compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
+        let (composed, _) = compose_with_remote(
+            &content,
+            &root,
+            &server,
+            vec!["127.0.0.1".into()],
+        )
             .await
-            .expect_err("a whole-value remote-URL file_exists in frontmatter must abort composition");
-
-        let msg = err.to_string();
-        // The receiving key is captured as structured scope, not Display prose.
-        let MarkdownError::Interpolation { key, .. } = &err else {
-            panic!("expected Interpolation error, got: {err:?}");
-        };
-        assert_eq!(key.as_deref(), Some("present"), "error must capture the key");
-        assert!(
-            msg.contains("local-only"),
-            "expected a local-only frontmatter diagnostic for file_exists, got: {msg}"
+            .unwrap();
+        assert_eq!(
+            composed.frontmatter().as_map().get("present"),
+            Some(&serde_json::Value::Bool(true))
         );
-        assert!(msg.contains(&url), "error must name the URL, got: {msg}");
     }
 
-    /// Decision B covers the `$()` shell-ternary condition surface too: a
-    /// read-side function call in the condition is evaluated with the
-    /// local-only frontmatter context, so a remote URL argument errors
-    /// before any branch is selected or executed.
+    /// `$()` ternary conditions receive the same authorized remote runtime.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn frontmatter_shell_ternary_remote_url_condition_fails_loudly() {
+    async fn frontmatter_shell_ternary_remote_url_condition_succeeds() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/doc.md"))
@@ -1311,16 +1298,10 @@ mod remote_transclusion_tests {
             .with_pre_approved_commands(approved)
             .disable(ComposeOperation::Cleanup)
             .disable(ComposeOperation::Normalization);
-        let result = md.compose_with(options);
-
-        assert!(
-            result.is_err(),
-            "expected compose to fail because the ternary condition uses a remote URL in local-only frontmatter"
-        );
-        let err = result.unwrap_err().to_string();
-        assert!(
-            err.contains("local-only") && err.contains(&url),
-            "expected helpful local-only diagnostic, got: {err}"
+        let (composed, _) = md.compose_with(options).unwrap();
+        assert_eq!(
+            composed.frontmatter().as_map().get("result"),
+            Some(&serde_json::Value::String("yes".to_string()))
         );
     }
 
@@ -2299,4 +2280,3 @@ mod file_links_compose {
         assert_eq!(report.transclusions_applied, 2);
     }
 }
-

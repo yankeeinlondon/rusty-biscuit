@@ -10,6 +10,7 @@
 //! `serde_yaml_ng::Value` and produces a [`SimplifiedSchema`].
 
 pub mod convert;
+mod cursor;
 pub mod grammar;
 mod lint;
 pub mod query;
@@ -20,10 +21,19 @@ pub mod types;
 pub mod yaml_scalar;
 
 pub use convert::{DRAFT_2020_12, to_json_schema};
+pub use cursor::{
+    SchemaCursor, SchemaCursorRole, is_union_arm_path, locate_schema_declaration_cursor,
+    locate_type_definition_cursor,
+};
 pub use lint::{SuggestionLintProblem, SuggestionLintReason, lint_suggestions};
 pub use query::{SuggestionItem, SuggestionQuery, suggestions_for_def, suggestions_for_path};
 pub use serialize::serialize_property_atom;
-pub use source::{parse_yaml_schema_with_source, project_suggestion_spans};
+pub use source::{
+    SchemaSourceMap, SchemaSourcePath, SchemaSourcePathSegment, SchemaSpanKind, SchemaValueEntry,
+    SchemaValueKind, SchemaValueNode, SourceAware, locate_schema_value,
+    parse_property_definition_with_source, parse_schema_declaration_with_source,
+    parse_yaml_schema_with_source, project_suggestion_spans,
+};
 pub use standalone::{
     StandaloneSchemaDocument, StandaloneSchemaEnvelope, parse_standalone_schema_document,
 };
@@ -31,12 +41,49 @@ pub use types::{
     Constraint, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
     SimplifiedSchema, SimplifiedType, SuggestionCandidate, TypeExpr,
 };
-pub use yaml_scalar::{DecodedScalar, decode_scalar, decode_scalar_at};
+pub use yaml_scalar::{
+    DecodedScalar, decode_partial_scalar_at, decode_scalar, decode_scalar_at,
+};
 
 use indexmap::IndexMap;
 use serde_yaml_ng::Value as YamlValue;
 
-use crate::markdown::schemas::errors::SchemaError;
+use crate::markdown::schemas::{
+    errors::SchemaError,
+    reference::{SchemaReference, classify_schema_reference},
+};
+
+/// The passive semantic product of one complete `$schema` declaration.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SchemaDeclaration {
+    /// An inline mapping or non-empty root union parsed as SimplifiedSchema.
+    Schema(SimplifiedSchema),
+    /// One syntax-checked local file reference.
+    Reference(SchemaReference),
+}
+
+/// Parses and classifies one complete `$schema` declaration without resolving
+/// references or reading external state.
+///
+/// ## Errors
+///
+/// Returns a structured [`SchemaError`] for unsupported declaration shapes,
+/// malformed local references, remote references, or invalid inline schema
+/// grammar.
+pub fn parse_schema_declaration(value: &YamlValue) -> Result<SchemaDeclaration, SchemaError> {
+    if let YamlValue::String(reference) = value {
+        return Ok(SchemaDeclaration::Reference(classify_schema_reference(reference)?));
+    }
+    let schema = parse_yaml_schema(value)?;
+    if let SimplifiedSchema::Union(arms) = &schema {
+        for arm in arms {
+            if let SchemaArm::FileRef(reference) = arm {
+                classify_schema_reference(reference)?;
+            }
+        }
+    }
+    Ok(SchemaDeclaration::Schema(schema))
+}
 
 /// Parses a `$schema` value (already extracted from frontmatter) into a
 /// [`SimplifiedSchema`].
@@ -57,14 +104,16 @@ use crate::markdown::schemas::errors::SchemaError;
 pub fn parse_yaml_schema(value: &YamlValue) -> Result<SimplifiedSchema, SchemaError> {
     match value {
         YamlValue::Mapping(_) => Ok(SimplifiedSchema::Single(parse_schema_shape(
-            "<root>", value,
+            "<root>", value, 0,
         )?)),
         YamlValue::Sequence(items) => {
             let mut arms = Vec::with_capacity(items.len());
             for (idx, item) in items.iter().enumerate() {
                 let label = format!("<arm[{idx}]>");
                 let arm = match item {
-                    YamlValue::Mapping(_) => SchemaArm::Inline(parse_schema_shape(&label, item)?),
+                    YamlValue::Mapping(_) => {
+                        SchemaArm::Inline(parse_schema_shape(&label, item, 0)?)
+                    }
                     YamlValue::String(s) => SchemaArm::FileRef(s.clone()),
                     other => {
                         return Err(SchemaError::Grammar {
@@ -99,7 +148,28 @@ pub fn parse_yaml_schema(value: &YamlValue) -> Result<SimplifiedSchema, SchemaEr
     }
 }
 
-fn parse_schema_shape(context: &str, value: &YamlValue) -> Result<SchemaShape, SchemaError> {
+/// Parses one property definition through the same YAML-shape and string
+/// grammar used by [`parse_yaml_schema`].
+///
+/// This function is passive: it parses the supplied value without resolving
+/// imports or file references and without reading external state.
+///
+/// ## Errors
+///
+/// Returns [`SchemaError::Grammar`] when `value` is not a valid scalar,
+/// mapping, or non-empty union property definition.
+pub fn parse_property_definition(
+    property: &str,
+    value: &YamlValue,
+) -> Result<PropertyDef, SchemaError> {
+    parse_property_definition_at_depth(property, value, 0)
+}
+
+fn parse_schema_shape(
+    context: &str,
+    value: &YamlValue,
+    nested_object_depth: usize,
+) -> Result<SchemaShape, SchemaError> {
     let map = value.as_mapping().ok_or_else(|| SchemaError::Grammar {
         property: context.to_string(),
         message: "expected a mapping of property names to type expressions".into(),
@@ -133,11 +203,11 @@ fn parse_schema_shape(context: &str, value: &YamlValue) -> Result<SchemaShape, S
                     span: 0..0,
                 }
             })?;
-            let def = parse_property_def(key_str, val)?;
+            let def = parse_property_definition_at_depth(key_str, val, nested_object_depth)?;
             pattern_keys.push(types::PatternKeyDef { key: pattern, def });
             continue;
         }
-        let def = parse_property_def(key_str, val)?;
+        let def = parse_property_definition_at_depth(key_str, val, nested_object_depth)?;
         properties.insert(key_str.to_string(), def);
     }
     Ok(SchemaShape {
@@ -228,18 +298,25 @@ fn constraints_flag(context: &str, key: &str, value: &YamlValue) -> Result<(), S
     }
 }
 
-fn parse_property_def(name: &str, value: &YamlValue) -> Result<PropertyDef, SchemaError> {
+fn parse_property_definition_at_depth(
+    name: &str,
+    value: &YamlValue,
+    nested_object_depth: usize,
+) -> Result<PropertyDef, SchemaError> {
     match value {
         YamlValue::String(s) => Ok(PropertyDef::Single(grammar::parse_type_expr(name, s)?)),
         // A YAML mapping at a property position lowers to an inline object
-        // shape: each entry's value is recursively parsed through
-        // `parse_property_def`, so nested mappings, sequence unions, and
+        // shape: each entry's value is recursively parsed through the same
+        // property-definition entry point, so nested mappings, sequence unions, and
         // string type expressions all work. A mapping without an explicit
         // `type:` key is an object shape, not a future long-form descriptor
         // (spec §"Nested Object Syntax Requirement" rule 6).
         YamlValue::Mapping(_) => {
-            let shape = parse_schema_shape(name, value)?;
-            Ok(PropertyDef::Single(PropertyAtom::bare_inline_object(shape)))
+            Ok(PropertyDef::Single(parse_mapping_atom(
+                name,
+                value,
+                nested_object_depth,
+            )?))
         }
         YamlValue::Sequence(items) => {
             let mut arms = Vec::with_capacity(items.len());
@@ -253,8 +330,11 @@ fn parse_property_def(name: &str, value: &YamlValue) -> Result<PropertyDef, Sche
                     // nested mapping object shapes (spec rule 4).
                     YamlValue::Mapping(_) => {
                         let label = format!("{name}[{idx}]");
-                        let shape = parse_schema_shape(&label, item)?;
-                        arms.push(PropertyAtom::bare_inline_object(shape));
+                        arms.push(parse_mapping_atom(
+                            &label,
+                            item,
+                            nested_object_depth,
+                        )?);
                     }
                     other => {
                         return Err(SchemaError::Grammar {
@@ -302,6 +382,25 @@ fn parse_property_def(name: &str, value: &YamlValue) -> Result<PropertyDef, Sche
             span: 0..0,
         }),
     }
+}
+
+fn parse_mapping_atom(
+    context: &str,
+    value: &YamlValue,
+    nested_object_depth: usize,
+) -> Result<PropertyAtom, SchemaError> {
+    if nested_object_depth >= grammar::MAX_INLINE_OBJECT_DEPTH {
+        return Err(SchemaError::Grammar {
+            property: context.to_string(),
+            message: format!(
+                "schema objects may not nest more than {} levels deep",
+                grammar::MAX_INLINE_OBJECT_DEPTH,
+            ),
+            span: 0..0,
+        });
+    }
+    let shape = parse_schema_shape(context, value, nested_object_depth + 1)?;
+    Ok(PropertyAtom::bare_inline_object(shape))
 }
 
 fn describe_yaml(value: &YamlValue) -> &'static str {

@@ -62,6 +62,7 @@ use super::{
     lexer::lex_spanned,
 };
 use crate::markdown::span::Spanned;
+use std::collections::HashSet;
 use std::fmt;
 
 #[cfg(test)]
@@ -544,12 +545,93 @@ impl<'a> Parser<'a> {
                 let span = current.span.start..close.span.end;
                 Ok(SpannedExpr::new(SpannedExprKind::Paren(Box::new(expr)), span))
             }
+            Token::LBracket => self.parse_array_literal(current.span.start),
+            Token::LBrace => self.parse_object_literal(current.span.start),
             _ => Err(ParseError::unexpected(
                 "expression",
                 self.current(),
                 self.position(),
             )),
         }
+    }
+
+    fn parse_array_literal(&mut self, start: usize) -> Result<SpannedExpr, ParseError> {
+        self.advance();
+        let mut items = Vec::new();
+        if !matches!(self.current(), Token::RBracket) {
+            loop {
+                items.push(self.parse_expression()?);
+                if !matches!(self.current(), Token::Comma) {
+                    break;
+                }
+                self.advance();
+                if matches!(self.current(), Token::RBracket) {
+                    return Err(ParseError::new(
+                        "trailing commas are not supported",
+                        self.position(),
+                    ));
+                }
+            }
+        }
+        let close = self.expect(&Token::RBracket, "']'")?;
+        Ok(SpannedExpr::new(
+            SpannedExprKind::ArrayLiteral(items),
+            start..close.span.end,
+        ))
+    }
+
+    fn parse_object_literal(&mut self, start: usize) -> Result<SpannedExpr, ParseError> {
+        self.advance();
+        let mut entries = Vec::new();
+        let mut keys = HashSet::new();
+        if !matches!(self.current(), Token::RBrace) {
+            loop {
+                let key_token = self.advance();
+                let (key, key_span) = match key_token.value {
+                    Token::Variable(key)
+                        if !key.contains('.')
+                            && key
+                                .chars()
+                                .next()
+                                .is_some_and(|first| first.is_ascii_alphabetic() || first == '_') =>
+                    {
+                        (key, key_token.span)
+                    }
+                    Token::StringLiteral(key) => (key, key_token.span),
+                    found => {
+                        return Err(ParseError::unexpected(
+                            "object key",
+                            &found,
+                            key_token.span.start,
+                        ));
+                    }
+                };
+                if !keys.insert(key.clone()) {
+                    return Err(ParseError::new(
+                        format!("duplicate object key {key:?}"),
+                        key_span.start,
+                    ));
+                }
+                self.expect(&Token::Colon, "':'")?;
+                let value = self.parse_expression()?;
+                entries.push((Spanned::new(key, key_span), value));
+                if !matches!(self.current(), Token::Comma) {
+                    break;
+                }
+                self.advance();
+                if matches!(self.current(), Token::RBrace) {
+                    return Err(ParseError::new(
+                        "trailing commas are not supported",
+                        self.position(),
+                    ));
+                }
+            }
+        }
+        let close = self.expect(&Token::RBrace, "'}'")?;
+        Ok(SpannedExpr::new(
+            SpannedExprKind::ObjectLiteral(entries),
+            start..close.span.end,
+        ))
     }
 
     /// Parses a function call: `name "(" args? ")"`

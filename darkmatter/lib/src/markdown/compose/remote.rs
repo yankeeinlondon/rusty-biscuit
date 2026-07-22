@@ -447,6 +447,8 @@ fn expr_children(expr: &Expr) -> Vec<&Expr> {
         } => vec![condition.as_ref(), then_branch.as_ref(), else_branch.as_ref()],
         Expr::Comparison { left, right, .. } => vec![left.as_ref(), right.as_ref()],
         Expr::FunctionCall { args, .. } => args.iter().collect(),
+        Expr::ArrayLiteral(items) => items.iter().collect(),
+        Expr::ObjectLiteral(entries) => entries.iter().map(|(_, value)| value).collect(),
     }
 }
 
@@ -573,6 +575,15 @@ mod tests {
         let results = discover_remote_urls_from_expressions(content, &file_source());
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].consumer, RemoteUrlConsumer::ExpressionFunction);
+        assert_eq!(results[0].url.as_str(), "https://example.com/api.md");
+    }
+
+    #[test]
+    fn discover_from_expression_literal_children() {
+        let content =
+            "{{ length({ source: [frontmatter(\"https://example.com/api.md\")] }) }}";
+        let results = discover_remote_urls_from_expressions(content, &file_source());
+        assert_eq!(results.len(), 1);
         assert_eq!(results[0].url.as_str(), "https://example.com/api.md");
     }
 

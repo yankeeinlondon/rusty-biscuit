@@ -77,27 +77,56 @@ pub fn decode_scalar(raw: &str) -> Option<DecodedScalar> {
 /// sequence can advance). `None` when `raw` does not begin with a scalar.
 pub fn decode_scalar_at(raw: &str, base: usize) -> Option<(DecodedScalar, usize)> {
     match raw.as_bytes().first().copied()? {
-        b'\'' => decode_single_quoted(raw, base),
-        b'"' => decode_double_quoted(raw, base),
+        b'\'' => decode_single_quoted(raw, base, false),
+        b'"' => decode_double_quoted(raw, base, false),
         _ => {
             let content = raw.trim_end();
             if content.is_empty() {
                 return None;
             }
-            let mut map = Vec::with_capacity(content.len() + 1);
-            map.extend(base..=base + content.len());
-            Some((
-                DecodedScalar {
-                    decoded: content.to_string(),
-                    decoded_to_raw: map,
-                },
-                content.len(),
-            ))
+            Some((plain_scalar(content, base), content.len()))
         }
     }
 }
 
-fn decode_single_quoted(raw: &str, base: usize) -> Option<(DecodedScalar, usize)> {
+/// Decodes the leading scalar of `raw` the way [`decode_scalar_at`] does, but
+/// accepts text that is still being authored.
+///
+/// A quoted scalar whose closing quote has not been typed yet decodes to
+/// everything authored so far instead of failing, an empty input decodes to an
+/// empty scalar, and a plain scalar keeps its trailing whitespace so a caller
+/// can tell `min` from `min ` at the cursor. The decoded-to-authored map is
+/// exact in every case, so a caller may still project spans through quoting,
+/// escapes, and multibyte content.
+///
+/// ## Notes
+///
+/// This is the tolerant half of the projection seam: interactive callers ask
+/// what a value means while it is mid-edit, when [`decode_scalar_at`] can only
+/// answer `None`.
+pub fn decode_partial_scalar_at(raw: &str, base: usize) -> (DecodedScalar, usize) {
+    match raw.as_bytes().first().copied() {
+        Some(b'\'') => decode_single_quoted(raw, base, true),
+        Some(b'"') => decode_double_quoted(raw, base, true),
+        _ => Some((plain_scalar(raw, base), raw.len())),
+    }
+    .unwrap_or_else(|| (plain_scalar("", base), 0))
+}
+
+fn plain_scalar(content: &str, base: usize) -> DecodedScalar {
+    let mut map = Vec::with_capacity(content.len() + 1);
+    map.extend(base..=base + content.len());
+    DecodedScalar {
+        decoded: content.to_string(),
+        decoded_to_raw: map,
+    }
+}
+
+fn decode_single_quoted(
+    raw: &str,
+    base: usize,
+    tolerant: bool,
+) -> Option<(DecodedScalar, usize)> {
     let mut decoded = String::new();
     let mut map = vec![base + 1];
     let mut cursor = 1;
@@ -113,10 +142,14 @@ fn decode_single_quoted(raw: &str, base: usize) -> Option<(DecodedScalar, usize)
             push_mapped(&mut decoded, &mut map, &ch.to_string(), base + cursor);
         }
     }
-    None
+    tolerant.then_some((DecodedScalar { decoded, decoded_to_raw: map }, cursor))
 }
 
-fn decode_double_quoted(raw: &str, base: usize) -> Option<(DecodedScalar, usize)> {
+fn decode_double_quoted(
+    raw: &str,
+    base: usize,
+    tolerant: bool,
+) -> Option<(DecodedScalar, usize)> {
     let mut decoded = String::new();
     let mut map = vec![base + 1];
     let mut cursor = 1;
@@ -126,7 +159,12 @@ fn decode_double_quoted(raw: &str, base: usize) -> Option<(DecodedScalar, usize)
                 return Some((DecodedScalar { decoded, decoded_to_raw: map }, cursor + 1));
             }
             b'\\' => {
-                let (value, consumed) = decode_yaml_escape(&raw[cursor..])?;
+                // A half-typed escape (`"\` or `"\u00`) has no value yet; the
+                // tolerant caller keeps what decoded cleanly before it.
+                let Some((value, consumed)) = decode_yaml_escape(&raw[cursor..]) else {
+                    return tolerant
+                        .then_some((DecodedScalar { decoded, decoded_to_raw: map }, cursor));
+                };
                 cursor += consumed;
                 push_mapped(&mut decoded, &mut map, &value, base + cursor);
             }
@@ -137,7 +175,7 @@ fn decode_double_quoted(raw: &str, base: usize) -> Option<(DecodedScalar, usize)
             }
         }
     }
-    None
+    tolerant.then_some((DecodedScalar { decoded, decoded_to_raw: map }, cursor))
 }
 
 fn decode_yaml_escape(raw: &str) -> Option<(String, usize)> {

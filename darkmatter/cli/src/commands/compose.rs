@@ -483,7 +483,6 @@ pub fn run_compose(
                 ShellExpansionError::ApprovalRequired {
                     command,
                     whitelist_path,
-                    origin: _,
                     ..
                 } => {
                     let executable = command.split_whitespace().next().unwrap_or(&command);
@@ -725,7 +724,6 @@ fn preflight_approval_error(
         ShellExpansionError::ApprovalRequired {
             command,
             whitelist_path,
-            origin: _,
             ..
         } => {
             let executable = command.split_whitespace().next().unwrap_or(&command);

@@ -208,6 +208,35 @@ by construction instead of accreting per-area and per-incident.
 - **Build cache**: the reusable workflow enables `kache` (GitHub Actions cache
   backend) on the Linux/macOS legs; Windows is unsupported by kache and uses
   `Swatinem/rust-cache` only.
+- **Soft legs report but do not gate**: `_area-ci.yml`'s `soft-os` input
+  (default `["windows-latest"]`) marks a test leg `continue-on-error`. This is
+  how a platform is lit up before its latent cross-platform backlog is burned
+  down. Read Windows *test* results accordingly — they are evidence, not a gate,
+  until the leg is deliberately promoted to a required check.
+
+### Feature-gated surfaces
+
+`cargo check --all-targets` resolves only a package's **default** features, so
+code behind an off-by-default `cfg` compiles on no platform unless a step names
+the feature. When a feature gates real code, add it to that area's
+cross-platform compile check — otherwise the matrix stays green precisely
+because it never builds the code in question.
+
+The live case is `sniff`'s `remote` (which implies `network`), gating the
+provider client and its Wiremock test, bench, and example targets:
+
+- `test.yml`'s `sniff-cross-platform` job runs a second
+  `cargo check -p sniff --all-targets --features remote` alongside the
+  default-feature check, and `cd sniff && just test` runs the `sniff` half with
+  `--features remote`, so the provider suites are executed — not merely
+  compiled — on macOS, Linux, and Windows.
+- Downstream areas reach the same surface through their dependency edges rather
+  than through a flag: `darkmatter/lib` declares
+  `sniff = { features = ["remote"] }`, so the Darkmatter Linux and Windows legs
+  already build the provider source. `claudine` reaches it transitively via
+  `darkmatter` and carries a macOS/Windows compile-check leg in
+  `claudine-tests.yml` (compile-only — its CLI tests rely on POSIX PATH stubs
+  and its Windows Ctrl+C handling is a known gap).
 
 ### Retired / folded workflows
 

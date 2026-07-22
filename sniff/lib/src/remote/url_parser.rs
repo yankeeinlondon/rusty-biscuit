@@ -89,14 +89,13 @@ fn try_parse_ssh(url: &str) -> Option<ParsedRemoteUrl> {
 
         // Split host and path
         // Handle optional port: ssh://git@github.com:22/owner/repo
-        let (host, path) = if let Some(slash_pos) = without_user.find('/') {
+        let (host, path) = {
+            let slash_pos = without_user.find('/')?;
             let host_part = &without_user[..slash_pos];
             // Remove port if present (e.g., "github.com:22" -> "github.com")
             let host = host_part.split(':').next().unwrap_or(host_part);
             let path = &without_user[slash_pos + 1..];
             (host, path)
-        } else {
-            return None;
         };
 
         return parse_host_and_path(host, path);

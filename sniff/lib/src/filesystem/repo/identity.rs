@@ -90,6 +90,11 @@ pub fn detect_repo_identity(dir: &Path) -> Result<RepoIdentity> {
 /// Returns [`SniffError::NotARepository`] if the handle points at a path with
 /// no working directory (bare repositories are not supported here).
 pub fn detect_repo_identity_with_repo(git_repo: &GitRepo) -> Result<RepoIdentity> {
+    if git_repo.is_bare() {
+        return Err(SniffError::NotARepository(
+            git_repo.repo_root().to_path_buf(),
+        ));
+    }
     let root = git_repo.repo_root();
     let monorepo = detect_repo_structure(root)?;
     let (is_monorepo, package_count) = match monorepo {

@@ -431,7 +431,10 @@ impl GitHostingProvider {
         if host == "bitbucket.org" || host == "www.bitbucket.org" {
             return Self::Bitbucket;
         }
-        if host == "dev.azure.com" || host.ends_with(".visualstudio.com") {
+        if host == "dev.azure.com"
+            || host == "ssh.dev.azure.com"
+            || host.ends_with(".visualstudio.com")
+        {
             return Self::AzureDevOps;
         }
         if (host.starts_with("git-codecommit.") || host.contains("codecommit"))
@@ -510,7 +513,12 @@ pub struct GitRepo {
     /// Wrapped in [`RefCell`] so object-cache sizing (a mutating operation on
     /// the gix handle) can be deferred to the first object-intensive call.
     gix: RefCell<gix::Repository>,
+    /// Working directory root, or the git directory when the repository is
+    /// bare. Callers that require a real working tree must check
+    /// [`GitRepo::is_bare`] first.
     repo_root: PathBuf,
+    /// Whether the repository has no working directory.
+    is_bare: bool,
     /// Path to this repository's git directory (the `.git` dir or, for a linked
     /// worktree, its per-worktree git directory).
     git_dir: PathBuf,
@@ -588,6 +596,10 @@ impl GitRepo {
     ///
     /// `Ok(None)` when `path` is not inside a git repository.
     ///
+    /// A bare repository discovers successfully: ref, HEAD, and object queries
+    /// are all valid there. Only working-tree- and index-dependent queries
+    /// degrade — see [`GitRepo::is_bare`].
+    ///
     /// ## Errors
     ///
     /// Trust/ownership, permission, I/O, and corruption failures surface as
@@ -598,15 +610,19 @@ impl GitRepo {
             debug!("not a git repository");
             return Ok(None);
         };
-        let repo_root = gix
-            .workdir()
-            .ok_or_else(|| SniffError::NotARepository(path.to_path_buf()))?
-            .to_path_buf();
         let git_dir = gix.git_dir().to_path_buf();
         let common_dir = gix.common_dir().to_path_buf();
+        // A bare repository has no workdir; fall back to the git directory so
+        // `repo_root` stays infallible. Same precedent as
+        // `merge_conflicts::committed_attribute_stack`.
+        let (repo_root, is_bare) = match gix.workdir() {
+            Some(workdir) => (workdir.to_path_buf(), false),
+            None => (git_dir.clone(), true),
+        };
         Ok(Some(Self {
             gix: RefCell::new(gix),
             repo_root,
+            is_bare,
             git_dir,
             common_dir,
             ref_decorations: RefCell::new(None),
@@ -616,8 +632,22 @@ impl GitRepo {
     }
 
     /// Absolute path to the repository working directory.
+    ///
+    /// For a bare repository this is the git directory, not a working tree.
+    /// Callers that walk this path as a source tree must first check
+    /// [`Self::is_bare`].
     pub fn repo_root(&self) -> &Path {
         &self.repo_root
+    }
+
+    /// Whether the repository is bare (has no working directory).
+    ///
+    /// Ref, HEAD, and commit queries remain valid on a bare repository.
+    /// Working-tree and index queries do not: [`Self::try_current_worktree_name`]
+    /// yields `None` and [`Self::merge_conflicts`] yields an empty list, since
+    /// a bare repository has no checkout and no index to conflict in.
+    pub fn is_bare(&self) -> bool {
+        self.is_bare
     }
 
     /// Path to this repository's git directory (the `.git` dir or, for a linked
@@ -679,6 +709,21 @@ impl GitRepo {
         };
         let full = name.as_bstr().to_str_lossy();
         Ok(full.strip_prefix("refs/heads/").map(str::to_string))
+    }
+
+    /// Current linked-worktree name, or `None` in the main worktree.
+    pub fn try_current_worktree_name(&self) -> Result<Option<String>> {
+        Ok(super::worktree::current_worktree_name(&self.gix.borrow()))
+    }
+
+    /// Repository-relative paths currently at non-zero index stages.
+    ///
+    /// A bare repository has no index, so the result is always empty.
+    pub fn merge_conflicts(&self) -> Result<Vec<PathBuf>> {
+        if self.is_bare {
+            return Ok(Vec::new());
+        }
+        super::status::detect_merge_conflicts_fallible(&self.gix.borrow())
     }
 
     /// Whether the working directory is a linked worktree.
@@ -1397,32 +1442,20 @@ fn parse_org_repo(url: &str) -> (Option<String>, Option<String>) {
     }
 }
 
-/// Selects the preferred remote from a list of remotes.
+/// Selects the preferred remote from an already-collected remote list.
 ///
-/// Preference order:
-/// 1. `origin` (always preferred)
-/// 2. First alphabetically, excluding `upstream`
-/// 3. `upstream` as last resort (only if it's the sole remote)
+/// Ordering is delegated to [`super::remote_resolver::select_preferred_remote`]
+/// so this aggregate projection and `resolve_remote_at` can never disagree
+/// about which remote a repository prefers. Remotes without a usable URL are
+/// excluded before selection, matching the resolver.
 fn preferred_remote(remotes: &[RemoteInfo]) -> Option<&RemoteInfo> {
-    if remotes.is_empty() {
-        return None;
-    }
-
-    // Prefer "origin"
-    if let Some(origin) = remotes.iter().find(|r| r.name == "origin") {
-        return Some(origin);
-    }
-
-    // First non-upstream remote alphabetically
-    let mut candidates: Vec<_> = remotes.iter().filter(|r| r.name != "upstream").collect();
-    candidates.sort_by(|a, b| a.name.cmp(&b.name));
-
-    if let Some(first) = candidates.first() {
-        return Some(first);
-    }
-
-    // Fall back to upstream if it's the only remote
-    remotes.first()
+    let usable = remotes
+        .iter()
+        .filter(|remote| remote.url.as_deref().is_some_and(|url| !url.trim().is_empty()))
+        .collect::<Vec<_>>();
+    let selected =
+        super::remote_resolver::select_preferred_remote(usable.iter().map(|r| r.name.as_str()))?;
+    usable.into_iter().find(|remote| remote.name == selected)
 }
 
 #[cfg(test)]

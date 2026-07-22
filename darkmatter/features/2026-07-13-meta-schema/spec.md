@@ -1,7 +1,7 @@
 ---
 status: ready for planning and implementation
 reviewed: true
-review_iterations: 1
+review_iterations: 14
 reviewed_by: codex/default
 reviewed_on: 2026-07-14
 rulings: "`type-definition` and `schema` semantic types ruled by Ken 2026-07-13"
@@ -252,6 +252,17 @@ array-level constraints remain available on the postfix surface.
   adds outer declaration/file-reference spans. DMLS consumes these maps for
   hover, completion context, and diagnostics; it must not search decoded text
   to reconstruct ranges.
+
+The v1 source-aware presentation grammar is closed at plain, single-quoted,
+and double-quoted scalars; block and flow sequences; implicit scalar-key block
+and flow mappings; explicit scalar-key block mapping pairs at mapping roots and
+in compact block-sequence items; and the mapping-value anchors/scalar aliases
+used by the shipped corpus. It is not a general YAML concrete-syntax tree.
+Tags, block scalars, complex keys, explicit flow-mapping keys, directives, and
+other unlisted presentations are outside the source-map and DMLS contract even
+when `serde_yaml_ng` can produce a semantic value for them. Expanding this
+boundary requires a separately specified feature and is not an open acceptance
+criterion for this feature.
 
 The exact public type and function names are planning decisions. There must be
 one grammar authority with semantic-only and source-aware entry points, not a
@@ -721,10 +732,14 @@ accepts only a closed subset of bare names rather than arbitrary definitions.
    semantic values; a union-valued item uses a nested sequence. Item and array
    constraints retain the established postfix semantics.
 7. The public passive parsers are the shared authority for schema authoring,
-   custom-keyword validation, and DMLS. Their source-aware companions return
-   the same semantic AST plus structural sidecar spans. Parser-parity and span-
-   projection tests prove representative definitions cannot diverge across
-   plain/double/single-quoted YAML, CRLF, UTF-8, nested mappings, and unions.
+   custom-keyword validation, and DMLS. Within the frozen v1 source-aware
+   presentation grammar, their source-aware companions return the same semantic
+   AST plus structural sidecar spans. Parser-parity and span-projection tests
+   cover plain/double/single-quoted YAML, CRLF, UTF-8, nested mappings, unions,
+   mapping-value anchors/scalar aliases, and implicit or explicit scalar-key
+   block mappings, including compact mapping items in block sequences. A
+   source-free parse of an unlisted YAML presentation does not expand the
+   source-map or DMLS contract.
 8. The Darkmatter base schema declares `$schema: schema`; existing valid inline,
    referenced, root-union, and referenced-raw-JSON documents continue to
    prepare successfully, while DMLS hover displays `Type: schema` instead of
@@ -749,6 +764,149 @@ accepts only a closed subset of bare names rather than arbitrary definitions.
     imports named `schema` or `type-definition` continue to parse.
 13. L1 and L2 coverage passes through `just test` and `just test-l2`; the
     implementation remains portable across macOS, Windows, and Linux.
+    Review cycle 9 restored the canonical Level-2 gate to 90/90 by restaging
+    the three terminal-mode tests below on tmux; no scope exception is needed.
+
+### AC13 Level-2 gate closure
+
+**Status: RESOLVED — the canonical gate is green and no exception is needed.**
+
+Review cycle 9 restaged the three affected tests on a focused tmux runner,
+where OSC-11 is unanswered and the staged `COLORFGBG` value remains
+authoritative. Their existing luma and foreground assertions were not changed:
+
+- `level2_code_block_inverts_to_light_in_dark_terminal`
+- `level2_default_code_block_inverts_background_and_foreground`
+- `level2_code_block_clears_inherited_dim_before_theme_colors`
+
+The final canonical `just test-l2 --no-fail-fast` run passed Darkmatter 18/18,
+Darkmatter CLI 69/69, and DMLS 3/3 — 90/90 total. The focused runner continues
+to execute the Cargo-built `md` through the compile-time `CARGO_BIN_EXE_md`
+shim, and hosts without tmux skip through the standard Level-2 gate.
+
+#### Historical pre-repair diagnosis
+
+Before review cycle 9, `just test` was green while `just test-l2` was red on
+exactly three tests, all in
+`darkmatter/cli/tests/level2_code_block_styling.rs`:
+
+- `level2_code_block_inverts_to_light_in_dark_terminal`
+- `level2_default_code_block_inverts_background_and_foreground`
+- `level2_code_block_clears_inherited_dim_before_theme_colors`
+
+The proposed exception covered **these three named tests only**. It was never
+ratified and is now obsolete because the tests and the full gate pass.
+
+**Why they were outside meta-schema execution paths.** This feature changes
+schema parsing, lowering, validation, and DMLS semantic paths. Before the
+review-cycle-9 test repair, `git diff main...HEAD` reported zero changes under
+`darkmatter/lib/src/markdown/render/`, and
+`darkmatter/cli/tests/level2_code_block_styling.rs` was byte-identical to
+`main`. The three failures reproduced on `main` and were pre-existing.
+
+Corrected 2026-07-20 (review-4 implementation): this paragraph previously also
+claimed zero changes under `darkmatter/lib/src/markdown/highlighting/`. That is
+no longer accurate — the unrelated perf commit `864521fae` ("borrow syntax
+themes and write escapes directly") touches `highlighting/{mod,prose,themes}.rs`
+on this branch. It is not a meta-schema change and it is not the cause: the
+observed failure is a *dark* panel (luma 44) where a light one is required,
+i.e. the terminal was detected light despite `COLORFGBG='15;0'`. That is the
+staging mechanism described below, not a theme-resolution regression.
+
+**Why they are a test-staging defect, not a product defect.** All three assert
+the same contract — a dark terminal must render a light (inverted) code panel —
+and all three stage that terminal with `COLORFGBG='15;0'` under the **WezTerm**
+harness. That staging no longer works. `query_osc_color_with_timeout`
+(`biscuit-terminal/lib/src/discovery/osc_queries/query.rs`) attempts a live
+OSC-11 query first for `TerminalApp::Wezterm` when no multiplexer is present,
+and returns on success — so `COLORFGBG` is never consulted in a WezTerm pane.
+Under tmux the OSC query is skipped and `COLORFGBG` is honored. The same file
+already documents this for the mirror direction and abandoned its
+light-terminal test for exactly this reason; the dark direction has since
+become invalid the same way.
+
+**Evidence the contract itself is green.** The inversion rule is verified at
+two independent levels that both pass:
+
+- L1: `resolve_for_surface_inverts_default_dark_terminal_to_light_panel` and
+  `resolve_for_surface_inverts_default_light_terminal_to_dark_panel`
+  (`darkmatter/lib/src/markdown/highlighting/resolve.rs`).
+- L2 under the tmux harness, with exact OneHalf RGB assertions in both
+  directions: `level2_schema_about_dark_terminal_uses_light_code_theme` and
+  `level2_schema_about_light_terminal_uses_dark_code_theme`.
+- L2 in the library tier: `level2_page_code_panel_is_contiguous_inverted_rectangle`.
+
+**Evidence the meta-schema-relevant L2 slices pass** (2026-07-19, this host):
+
+- Darkmatter library L2 — 18/18 passed.
+- `schema about` CLI L2 — 3/3 passed.
+- DMLS L2 — 3/3 passed.
+- Canonical `just test-l2`, `--no-fail-fast`: library 18/18; CLI 66/69;
+  DMLS 3/3 (run separately — the canonical run aborts in the CLI tier before
+  reaching it). Total 87/90, with the only 3 failures being those named above.
+
+**Reconfirmed after the `level2_errors` repair** (2026-07-20, review-6
+implementation): library 18/18, CLI 66/69, DMLS 3/3 — total 87/90, unchanged.
+The 8 `level2_errors` tests now execute `CARGO_BIN_EXE_md`, and the exception's
+scope is once again exactly coextensive with the remaining failure set: the
+three named code-block tests and no others. Each L2 tier is run through
+`just _test_l2 <crate>` because the CLI tier's failure aborts the canonical
+recipe before it reaches DMLS. Note that `just test-l2 -- --no-fail-fast` is
+rejected by the harness; the flag must be passed bare as
+`just test-l2 --no-fail-fast`. Under heavy host load (load average >25) the
+library tier can produce a spurious single-test failure that clears on rerun at
+lower load; verify `uptime` before treating an L2 failure as real.
+
+**Reconfirmed again after the review-7 DMLS hover/activation work** (2026-07-20,
+review-7 implementation): library 18/18, CLI 66/69, DMLS 3/3 — total 87/90,
+unchanged for the second consecutive cycle. The failure set is still exactly the
+three named code-block tests. That cycle changed only DMLS hover routing,
+pattern-key region projection, and the standalone envelope recognizer, and added
+five L1 tests (dmls 616 → 621), so the L2 total holding steady is the expected
+result rather than evidence of anything new. Host load averaged 36–95 across the
+three tiers; the three failures remained deterministic value mismatches
+(`got luma 44`), not timeouts, so load does not explain them.
+
+**Reconfirmed a third time after the review-8 DMLS hardening work** (2026-07-20,
+review-8 implementation): library 18/18, CLI 66/69, DMLS 3/3 — total 87/90,
+unchanged for the third consecutive cycle, with the failure set still exactly the
+three named code-block tests. That cycle hardened the standalone envelope
+recognizer against escaped quotes, removed an `expect_err` panic, taught semantic
+completion to locate a cursor structurally inside flow mappings, and made
+activated standalone schema regions win hover arbitration over the Markdown
+substrate — adding four L1 tests (dmls 621 → 625) and touching no rendering code,
+so a steady L2 total is again the expected result. Host load averaged 157 during
+this run; the three failures remained deterministic value mismatches rather than
+timeouts, so load does not explain them.
+
+**Repair implemented in review cycle 9.** The three tests use a focused tmux
+runner local to `level2_code_block_styling.rs`. The shared
+`run_md_env` / `run_md_after_shell_prefix` helpers and the remainder of the
+69-test CLI Level-2 corpus remain on WezTerm, avoiding the broad helper port
+that earlier reviews rejected as disproportionate.
+
+**Previously noted as a latent hazard — repaired 2026-07-20 (review-6
+implementation).** `darkmatter/cli/tests/level2_errors.rs` ran `md compose` as a
+bare command through the pane `PATH` (lines 98, 135, 180) instead of the
+`md_shim` that `common/level2.rs` adopted so Level 2 can never pass against a
+stale host-installed `md`. The file was the only `level2_*` test file in
+`darkmatter/cli/tests/` with no `mod common;` declaration, so it had no access
+to the shared helper.
+
+The hazard was active, not latent, and it failed in the more dangerous
+direction: a stale `md` (2026-07-14, predating this branch's meta-schema
+commits) was on the host `PATH`, so all 8 tests passed **green while verifying
+the wrong binary**. Its output happened to be byte-identical to the workspace
+binary across the four fixtures checked, which is why the drift survived
+undetected. Review 6 observed the opposite symptom — `bash: md: command not
+found` — on a host with no installed `md`; both symptoms are the same defect.
+
+The three command builders now route through `md_shim()`, inheriting its
+symlink → hard-link → copy fallback ladder and the `assert_shim_resolves_to_built`
+integrity check. Non-vacuity was proven by temporarily neutering a rendered
+error headline in `darkmatter/lib/src/markdown/errors/blocks.rs` and confirming
+2 of the 8 tests went red — a break the pre-repair tests would have passed
+through unchanged.
 
 ## Ruled Design Questions
 
@@ -779,3 +937,8 @@ accepts only a closed subset of bare names rather than arbitrary definitions.
   depth limit (2026-07-14 review).** `MAX_INLINE_OBJECT_DEPTH` applies to both
   string-form inline objects and YAML-native mapping definitions. Semantic
   validation must not expose a less-bounded recursive path.
+- **Q8 — Does source-aware parity imply support for every valid YAML
+  presentation?** **Ruled no (2026-07-20 closure).** Parity applies within the
+  frozen v1 presentation grammar stated in the parser-surface contract and
+  AC7. Compact explicit scalar-key mapping items are the final included form.
+  Any further presentation expands scope and requires a separate feature.

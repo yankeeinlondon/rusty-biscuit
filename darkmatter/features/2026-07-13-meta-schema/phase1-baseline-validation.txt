@@ -1,0 +1,18 @@
+Phase 1 pre-change baseline
+Captured: 2026-07-18
+Command: ./target/debug/md schema validate /tmp/meta-schema-phase1-any.md --format json --no-trigger-schemas
+Fixture:
+---
+$schema:
+  payload: any
+payload:
+  nested: true
+  count: 2
+---
+
+# Baseline
+
+Output:
+{"file":"/tmp/meta-schema-phase1-any.md","problems":[],"schema":null,"valid":true}
+
+

@@ -22,7 +22,10 @@ use std::sync::{Arc, LazyLock};
 use jsonschema::Validator;
 use serde_json::{Map, Value};
 
-use super::format::{DARKMATTER_JSON_FORMAT, DARKMATTER_YAML_FORMAT};
+use super::format::{
+    DARKMATTER_JSON_FORMAT, DARKMATTER_SCHEMA_KEYWORD, DARKMATTER_TYPE_DEFINITION_KEYWORD,
+    DARKMATTER_YAML_FORMAT,
+};
 use super::simplified::convert::{BOOLISH_VALUES, NUMBERLIKE_PATTERN};
 use super::validate::{self, ValidatorCache, error_top_level_key};
 
@@ -154,6 +157,12 @@ pub fn coercion_target(property_schema: &Value) -> Option<CoercionTarget> {
     }
 
     let obj = property_schema.as_object()?;
+
+    if obj.contains_key(DARKMATTER_TYPE_DEFINITION_KEYWORD)
+        || obj.contains_key(DARKMATTER_SCHEMA_KEYWORD)
+    {
+        return None;
+    }
 
     // A `literal(x)` fragment is a bare `{"const": <value>}` with no `type`
     // key. A non-string const reuses the scalar conversions with an equality
@@ -2033,5 +2042,24 @@ mod tests {
         assert!(outcome.value["frontmatter"].is_string());
         // Non-mutating: the original instance still holds the native mapping.
         assert_eq!(instance, json!({ "frontmatter": { "title": "Foo" } }));
+    }
+
+    #[test]
+    fn semantic_keyword_fragments_are_explicit_no_ops() {
+        for keyword in [
+            "x-darkmatter-type-definition",
+            "x-darkmatter-schema",
+        ] {
+            let mut scalar = serde_json::Map::new();
+            scalar.insert("type".into(), json!(["string", "object", "array"]));
+            scalar.insert(keyword.into(), Value::Bool(true));
+            let scalar = Value::Object(scalar);
+            assert_eq!(coercion_target(&scalar), None);
+
+            let array = json!({ "type": "array", "items": scalar });
+            assert_eq!(coercion_target(&array), None);
+            let instance = json!(["string", { "title": "string(required)" }]);
+            assert_eq!(coerce_value_against_schema(&array, &instance), instance);
+        }
     }
 }

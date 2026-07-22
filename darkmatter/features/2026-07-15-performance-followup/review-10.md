@@ -7,7 +7,7 @@ spec: 2026-07-15-performance-followup/spec.md
 implemented: false
 description: "A **feature** review of `2026-07-15-performance-followup/spec.md`"
 feature: 2026-07-15-performance-followup/review-10.md
-previous: 2026-07-15-performance-followup/review-09.md
+previous: 2026-07-15-performance-followup/review-9.md
 ---
 
 # Review 10 — Performance Follow-up

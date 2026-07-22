@@ -80,8 +80,8 @@ mod tests {
 
     #[test]
     fn detect_area_errors_when_not_in_repo() {
-        let tmp = std::env::temp_dir();
-        let err = detect_area(&tmp).expect_err("temp dir should not be a repo");
+        let tmp = tempfile::tempdir().expect("isolated temp directory");
+        let err = detect_area(tmp.path()).expect_err("temp dir should not be a repo");
         // Accept either NotInRepo or NotMonorepo depending on host setup;
         // the contract is "fails when no monorepo present".
         assert!(

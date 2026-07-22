@@ -13,6 +13,8 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::schemas::{
     PositionMap, SchemaError, SchemaOriginKind, SuggestionLintProblem, SuggestionLintReason,
     ValidationOptions, ValidationProblem, ValidationProblemCode, ValidationReport,
+    SchemaValueKind, SchemaValueNode, classify_schema_reference, locate_schema_value,
+    parse_property_definition, parse_schema_declaration, parse_yaml_schema,
 };
 use darkmatter::style::{self, StyleWarningKind};
 use lsp_types::{
@@ -20,7 +22,10 @@ use lsp_types::{
 };
 
 use crate::diagnostics::codes::{code, source};
-use crate::overlay::{FrontmatterAst, SchemaBundle, SchemaOutcome, SuggestionState};
+use crate::overlay::{
+    FrontmatterAst, SchemaAuthoringState, SchemaBundle, SchemaOutcome, SuggestionState,
+};
+use crate::overlay::schema::MetaSchemaKind;
 use crate::providers::DocumentContext;
 use crate::source_map::SourceMap;
 use crate::workspace::file_path_to_uri;
@@ -105,16 +110,31 @@ fn schema_prepare_diagnostic(
     error: &SchemaError,
     out: &mut Vec<Diagnostic>,
 ) {
-    let span = ast
+    let fallback_span = ast
         .and_then(|ast| ast.schema_entry().map(|entry| entry.value_span.clone()))
         .or_else(|| ast.map(FrontmatterAst::block_span));
+    let (code_value, message, span) = match error {
+        SchemaError::Grammar { property, .. } if property != "<root>" => {
+            let span = ast
+                .and_then(|ast| ast.entry_by_key_path(&["$schema", property]))
+                .map(|entry| entry.value_span.clone())
+                .or_else(|| fallback_span.clone());
+            (code::SCHEMA_INVALID_TYPE_DEFINITION, error.to_string(), span)
+        }
+        SchemaError::FrontmatterShape { message } => {
+            (code::SCHEMA_INVALID_SHAPE, message.clone(), fallback_span.clone())
+        }
+        SchemaError::RemoteUnsupported { .. } => {
+            (code::SCHEMA_INVALID_SHAPE, error.to_string(), fallback_span.clone())
+        }
+        SchemaError::Grammar { .. } => {
+            (code::SCHEMA_INVALID_SHAPE, error.to_string(), fallback_span.clone())
+        }
+        other => (code::SCHEMA_PREPARE, other.to_string(), fallback_span.clone()),
+    };
     let range = span
         .and_then(|span| ctx.source_map.byte_range_to_lsp(span))
         .unwrap_or_else(zero_range);
-    let (code_value, message) = match error {
-        SchemaError::FrontmatterShape { message } => (code::SCHEMA_INVALID_SHAPE, message.clone()),
-        other => (code::SCHEMA_PREPARE, other.to_string()),
-    };
     out.push(diagnostic(range, DiagnosticSeverity::ERROR, source::SCHEMA, code_value, message));
 }
 
@@ -139,7 +159,35 @@ fn schema_problem_diagnostics(
         .map(|value| value.entry.pointer.as_str())
         .collect();
 
+    let mut specialized_paths = semantic_authored_diagnostics(ctx, ast, bundle, report, out);
     for problem in &report.problems {
+        let Some(kind) = semantic_problem_kind(problem) else {
+            continue;
+        };
+        if !specialized_paths.insert(problem.path.clone()) {
+            continue;
+        }
+        let Some(range) = semantic_problem_range(ctx, ast, problem, kind) else {
+            continue;
+        };
+        let mut specialized = diagnostic(
+            range,
+            DiagnosticSeverity::ERROR,
+            source::SCHEMA,
+            match kind {
+                SemanticProblemKind::TypeDefinition => code::SCHEMA_INVALID_TYPE_DEFINITION,
+                SemanticProblemKind::Schema => code::SCHEMA_INVALID_SHAPE,
+            },
+            problem.message.clone(),
+        );
+        specialized.related_information = schema_origin_related(ctx, bundle, problem);
+        out.push(specialized);
+    }
+
+    for problem in &report.problems {
+        if specialized_paths.contains(&problem.path) {
+            continue;
+        }
         let Some((code_value, severity)) = classify(problem.code, ctx.config.schema.strict) else {
             continue;
         };
@@ -171,6 +219,295 @@ fn schema_problem_diagnostics(
     // per-value diagnostic. `report.pending` stays populated but unconsumed.
 }
 
+/// The instance paths the effective schema rejects outright.
+///
+/// A union-typed property is validated as a whole, so a problem recorded at its
+/// path proves that **every** effective arm rejected the authored value. Both
+/// specialized passes below (semantic meta-types and expressions) gate on this
+/// before replacing the generic problem with their own dedicated code: an arm
+/// that validly accepts the value leaves the path absent, and a specialized
+/// diagnostic there would be a false positive on a valid document.
+///
+/// ## Notes
+///
+/// Activation is deliberately broader than rejection — a property typed
+/// `[type-definition, string]` records the semantic kind even though only one
+/// arm carries it — which is precisely why the gate is needed.
+fn union_rejected_paths(report: &ValidationReport) -> std::collections::HashSet<&str> {
+    report.problems.iter().map(|problem| problem.path.as_str()).collect()
+}
+
+fn semantic_authored_diagnostics(
+    ctx: &DocumentContext,
+    ast: &FrontmatterAst,
+    bundle: &SchemaBundle,
+    report: &ValidationReport,
+    out: &mut Vec<Diagnostic>,
+) -> std::collections::HashSet<String> {
+    let mut diagnosed = std::collections::HashSet::new();
+    let Some(overlay) = ctx.overlay else {
+        return diagnosed;
+    };
+    if overlay.stale {
+        return diagnosed;
+    }
+    let SchemaAuthoringState::Frontmatter(values) = &overlay.schema_authoring else {
+        return diagnosed;
+    };
+    let union_rejected = union_rejected_paths(report);
+
+    for value in values {
+        if value.pointer == "/$schema" {
+            continue;
+        }
+        if !union_rejected.contains(value.pointer.as_str()) {
+            // A sibling arm accepts this value, so the union validates.
+            continue;
+        }
+        let Some(entry) = ast.entry_by_pointer(&value.pointer) else {
+            continue;
+        };
+        let value_span = complete_flow_value_span(ctx.text, entry.value_span.clone());
+        let Some(raw) = ctx.text.get(value_span.clone()) else {
+            continue;
+        };
+        let raw = dedent_entry_yaml(raw, source_column(ctx.text, value_span.start));
+        let Ok(yaml) = serde_yaml_ng::from_str(&raw) else {
+            continue;
+        };
+
+        let mut failures = Vec::new();
+        let mut accepted = false;
+        for kind in &value.kinds {
+            let result = match kind {
+                MetaSchemaKind::TypeDefinition => {
+                    parse_property_definition(&entry.key, &yaml).map(|_| ())
+                }
+                MetaSchemaKind::Schema => parse_schema_declaration(&yaml).map(|_| ()),
+            };
+            match result {
+                Ok(()) => {
+                    accepted = true;
+                    break;
+                }
+                Err(error) => failures.push((*kind, error)),
+            }
+        }
+        if accepted {
+            continue;
+        }
+        let Some((kind, error)) = failures.into_iter().next() else {
+            continue;
+        };
+        let fallback_span = match &error {
+            SchemaError::Grammar { property, .. }
+                if property != "<root>" && property != &entry.key =>
+            {
+                nested_property_value_span(ast, ctx.text, entry, property)
+                    .unwrap_or_else(|| value_span.clone())
+            }
+            _ => value_span.clone(),
+        };
+        let span = if kind == MetaSchemaKind::TypeDefinition {
+            smallest_invalid_definition_span(ctx.text, entry).unwrap_or(fallback_span)
+        } else {
+            fallback_span
+        };
+        let Some(range) = ctx.source_map.byte_range_to_lsp(span) else {
+            continue;
+        };
+        let mut specialized = diagnostic(
+            range,
+            DiagnosticSeverity::ERROR,
+            source::SCHEMA,
+            match kind {
+                MetaSchemaKind::TypeDefinition => code::SCHEMA_INVALID_TYPE_DEFINITION,
+                MetaSchemaKind::Schema => code::SCHEMA_INVALID_SHAPE,
+            },
+            error.to_string(),
+        );
+        if let Some(problem) = report.problems.iter().find(|problem| problem.path == value.pointer) {
+            specialized.related_information = schema_origin_related(ctx, bundle, problem);
+        }
+        out.push(specialized);
+        diagnosed.insert(value.pointer.clone());
+    }
+    diagnosed
+}
+
+/// The narrowest authored sub-definition of `parent` that the shared parser
+/// rejects, or `None` when the failure belongs to `parent` itself.
+///
+/// Candidates come from the library's structural locator
+/// ([`locate_schema_value`]), which is the same block/flow reader the
+/// source-aware parsers use. That matters because the frontmatter tree does not
+/// enumerate the interior of a sequence item, and because a delimiter search
+/// over the raw text would mistake a `[]` inside a quoted scalar for an empty
+/// union.
+fn smallest_invalid_definition_span(
+    text: &str,
+    parent: &crate::overlay::FmEntry,
+) -> Option<std::ops::Range<usize>> {
+    let value_span = complete_flow_value_span(text, parent.value_span.clone());
+    // The slice is deliberately not dedented: the locator reads *relative*
+    // indentation, so keeping the authored columns keeps every span it reports
+    // an exact document offset.
+    let root = locate_schema_value(text.get(value_span.clone())?, value_span.start)?;
+    let mut candidates = Vec::new();
+    collect_definition_candidates(&root, &parent.key, 0, &mut candidates);
+    candidates.sort_by_key(|(depth, _, _)| std::cmp::Reverse(*depth));
+    candidates.into_iter().find_map(|(_, key, span)| {
+        let raw = text.get(span.clone())?;
+        let raw = dedent_entry_yaml(raw, source_column(text, span.start));
+        let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&raw).ok()?;
+        parse_property_definition(&key, &yaml).is_err().then_some(span)
+    })
+}
+
+/// Flattens a located value into `(depth, property_name, span)` candidates,
+/// skipping the root — a root failure is already the caller's fallback range.
+fn collect_definition_candidates(
+    node: &SchemaValueNode,
+    key: &str,
+    depth: usize,
+    out: &mut Vec<(usize, String, std::ops::Range<usize>)>,
+) {
+    if depth > 0 {
+        out.push((depth, key.to_string(), node.span.clone()));
+    }
+    match &node.kind {
+        SchemaValueKind::Scalar => {}
+        SchemaValueKind::Mapping(entries) => {
+            for entry in entries {
+                collect_definition_candidates(&entry.value, &entry.key, depth + 1, out);
+            }
+        }
+        SchemaValueKind::Sequence(items) => {
+            for item in items {
+                collect_definition_candidates(item, key, depth + 1, out);
+            }
+        }
+    }
+}
+
+fn nested_property_value_span(
+    ast: &FrontmatterAst,
+    text: &str,
+    parent: &crate::overlay::FmEntry,
+    property: &str,
+) -> Option<std::ops::Range<usize>> {
+    ast.entries()
+        .iter()
+        .filter(|entry| {
+            entry.key == property
+                && entry.key_span.start >= parent.value_span.start
+                && entry.key_span.end <= parent.value_span.end
+        })
+        .max_by_key(|entry| entry.depth)
+        .map(|entry| complete_flow_value_span(text, entry.value_span.clone()))
+}
+
+fn complete_flow_value_span(text: &str, span: std::ops::Range<usize>) -> std::ops::Range<usize> {
+    let Some(open) = text.as_bytes().get(span.start).copied() else {
+        return span;
+    };
+    let close = match open {
+        b'[' => b']',
+        b'{' => b'}',
+        _ => return span,
+    };
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    for (relative, byte) in text.as_bytes()[span.start..].iter().copied().enumerate() {
+        if let Some(active) = quote {
+            if active == b'"' && byte == b'\\' && !escaped {
+                escaped = true;
+                continue;
+            }
+            if byte == active && !escaped {
+                quote = None;
+            }
+            escaped = false;
+            continue;
+        }
+        if matches!(byte, b'\'' | b'"') {
+            quote = Some(byte);
+        } else if byte == open {
+            depth += 1;
+        } else if byte == close {
+            depth -= 1;
+            if depth == 0 {
+                return span.start..span.start + relative + 1;
+            }
+        }
+    }
+    span
+}
+
+fn source_column(text: &str, offset: usize) -> usize {
+    text[..offset].rsplit_once('\n').map_or(offset, |(_, line)| line.len())
+}
+
+fn dedent_entry_yaml(source: &str, indent: usize) -> String {
+    let padding = " ".repeat(indent);
+    let mut normalized = String::with_capacity(source.len());
+    for (index, line) in source.lines().enumerate() {
+        if index > 0 {
+            normalized.push('\n');
+        }
+        normalized.push_str(if index == 0 {
+            line
+        } else {
+            line.strip_prefix(&padding).unwrap_or(line)
+        });
+    }
+    if source.ends_with('\n') {
+        normalized.push('\n');
+    }
+    normalized
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SemanticProblemKind {
+    TypeDefinition,
+    Schema,
+}
+
+fn semantic_problem_kind(problem: &ValidationProblem) -> Option<SemanticProblemKind> {
+    let segments = problem.schema_path.as_ref()?.segments();
+    if segments.iter().any(|segment| segment == "x-darkmatter-type-definition") {
+        Some(SemanticProblemKind::TypeDefinition)
+    } else if segments.iter().any(|segment| segment == "x-darkmatter-schema") {
+        Some(SemanticProblemKind::Schema)
+    } else {
+        None
+    }
+}
+
+fn semantic_problem_range(
+    ctx: &DocumentContext,
+    ast: &FrontmatterAst,
+    problem: &ValidationProblem,
+    kind: SemanticProblemKind,
+) -> Option<Range> {
+    let entry = ast.entry_or_ancestor(&problem.path)?;
+    let span = if kind == SemanticProblemKind::TypeDefinition {
+        let raw = ctx.text.get(entry.value_span.clone())?;
+        let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(raw).ok()?;
+        match parse_property_definition(&entry.key, &yaml) {
+            Err(SchemaError::Grammar { property, .. }) if property != entry.key => ast
+                .child_entry(&entry.pointer, property.as_str())
+                .map(|nested| nested.value_span.clone())
+                .unwrap_or_else(|| entry.value_span.clone()),
+            _ => entry.value_span.clone(),
+        }
+    } else {
+        entry.value_span.clone()
+    };
+    ctx.source_map.byte_range_to_lsp(span)
+}
+
 /// The concrete range for one validation problem (R-5 ranging rules).
 fn problem_range(ast: &FrontmatterAst, sm: &SourceMap, problem: &ValidationProblem) -> Option<Range> {
     let span = match problem.code {
@@ -198,18 +535,14 @@ fn problem_range(ast: &FrontmatterAst, sm: &SourceMap, problem: &ValidationProbl
 ///
 /// `expression_values` includes any property with *any* Expression union arm, so
 /// a value the Expression arm rejects but a sibling Enum/String arm accepts must
-/// not be flagged malformed. The effective-schema `report` is the arbiter: a
-/// value whose pointer carries a real validation problem is rejected by every
-/// arm (the union fails), so the dedicated `malformed` diagnostic is emitted;
-/// otherwise an alternate arm accepts it and the diagnostic is suppressed.
+/// not be flagged malformed. [`union_rejected_paths`] is the shared arbiter.
 fn expression_diagnostics(
     ctx: &DocumentContext,
     ast: &FrontmatterAst,
     report: &ValidationReport,
     out: &mut Vec<Diagnostic>,
 ) {
-    let union_rejected: std::collections::HashSet<&str> =
-        report.problems.iter().map(|problem| problem.path.as_str()).collect();
+    let union_rejected = union_rejected_paths(report);
 
     for value in crate::providers::frontmatter::expression_values(ctx, ast) {
         let expression = value.expression();
@@ -415,8 +748,23 @@ fn suggestion_message(problem: &SuggestionLintProblem) -> String {
     }
 }
 
-/// A malformed recognized standalone envelope, ranged at the whole buffer.
+/// A malformed recognized standalone envelope.
+///
+/// The three outcomes are separate client contracts and are attempted in
+/// specificity order: a rejected **inner** property definition is
+/// `dm.schema.invalid_type_definition`, a rejected **outer** declaration is
+/// `dm.schema.invalid_schema_shape`, and only a buffer that is not a usable
+/// YAML envelope at all falls back to `dm.schema.document_malformed` over the
+/// whole document. Collapsing the middle case into the fallback would cost
+/// clients the ability to tell a declaration-shape failure from a document
+/// YAML failure.
 fn standalone_error_diagnostic(ctx: &DocumentContext, error: &SchemaError) -> Diagnostic {
+    if let Some(diagnostic) = standalone_type_definition_diagnostic(ctx) {
+        return diagnostic;
+    }
+    if let Some(diagnostic) = standalone_declaration_diagnostic(ctx) {
+        return diagnostic;
+    }
     let span = 0..ctx.text.len();
     let range = ctx
         .source_map
@@ -429,6 +777,135 @@ fn standalone_error_diagnostic(ctx: &DocumentContext, error: &SchemaError) -> Di
         code::SCHEMA_DOCUMENT_MALFORMED,
         error.to_string(),
     )
+}
+
+fn standalone_type_definition_diagnostic(ctx: &DocumentContext) -> Option<Diagnostic> {
+    let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(ctx.text).ok()?;
+    let mapping = yaml.as_mapping()?;
+    let payload_key = standalone_payload_key(mapping);
+    let payload = mapping.get(serde_yaml_ng::Value::String(payload_key.to_string()))?;
+    let payload = payload.as_mapping()?;
+    let parsed = FrontmatterAst::parse_yaml(ctx.text);
+    let ast = parsed.ast?;
+
+    for (key, value) in payload {
+        let key = key.as_str()?;
+        let Err(error) = parse_property_definition(key, value) else {
+            continue;
+        };
+        // Key segments, not a dotted join: a property name containing `.` would
+        // otherwise miss its entry and fall through to the whole-document
+        // `dm.schema.document_malformed` fallback.
+        let entry = ast.entry_by_key_path(&[payload_key, key])?;
+        let span = match &error {
+            SchemaError::Grammar { property, .. } if property != key => ast
+                .entry_by_key_path(&[payload_key, key, property])
+                .map(|nested| nested.value_span.clone())
+                .unwrap_or_else(|| entry.value_span.clone()),
+            _ => entry.value_span.clone(),
+        };
+        let range = ctx.source_map.byte_range_to_lsp(span)?;
+        return Some(diagnostic(
+            range,
+            DiagnosticSeverity::ERROR,
+            source::SCHEMA,
+            code::SCHEMA_INVALID_TYPE_DEFINITION,
+            error.to_string(),
+        ));
+    }
+    None
+}
+
+/// An invalid **outer** standalone declaration, ranged at the smallest authored
+/// value the shared declaration parser rejects.
+///
+/// Only a sequence payload (root union) or a scalar payload (whole-file
+/// reference) is an outer declaration. A mapping payload's failure belongs to
+/// one of its property definitions, and
+/// [`standalone_type_definition_diagnostic`] has already had its chance to
+/// range that — returning `None` here is what keeps the inner/outer code split
+/// intact.
+///
+/// ## Notes
+///
+/// Spans come from the library's structural locator rather than a text search,
+/// so an offending union arm keeps its exact authored range. Reference arms are
+/// classified through the same passive path the declaration parser uses, which
+/// performs no existence check or file I/O.
+fn standalone_declaration_diagnostic(ctx: &DocumentContext) -> Option<Diagnostic> {
+    let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(ctx.text).ok()?;
+    let mapping = yaml.as_mapping()?;
+    let payload_key = standalone_payload_key(mapping);
+    let payload = mapping.get(serde_yaml_ng::Value::String(payload_key.to_string()))?;
+    if payload.as_mapping().is_some() {
+        return None;
+    }
+    let error = parse_schema_declaration(payload).err()?;
+    let node = standalone_payload_node(ctx.text, payload_key)?;
+    let span = invalid_union_arm_span(payload, &node).unwrap_or_else(|| node.span.clone());
+    let range = ctx.source_map.byte_range_to_lsp(span)?;
+    Some(diagnostic(
+        range,
+        DiagnosticSeverity::ERROR,
+        source::SCHEMA,
+        code::SCHEMA_INVALID_SHAPE,
+        error.to_string(),
+    ))
+}
+
+/// The payload key of whichever envelope claimed a standalone document.
+fn standalone_payload_key(mapping: &serde_yaml_ng::Mapping) -> &'static str {
+    let tagged = mapping
+        .get(serde_yaml_ng::Value::String("kind".to_string()))
+        .and_then(serde_yaml_ng::Value::as_str)
+        == Some("schema");
+    if tagged { "types" } else { "$schema" }
+}
+
+/// The located payload value of a standalone envelope, in document offsets.
+fn standalone_payload_node(text: &str, payload_key: &str) -> Option<SchemaValueNode> {
+    let SchemaValueKind::Mapping(entries) = locate_schema_value(text, 0)?.kind else {
+        return None;
+    };
+    entries
+        .into_iter()
+        .find(|entry| entry.key == payload_key)
+        .map(|entry| entry.value)
+}
+
+/// The authored span of the first root-union arm the declaration parser
+/// rejects, or `None` when the payload is not a union or every arm is
+/// individually acceptable (an empty union fails as a whole, not per arm).
+fn invalid_union_arm_span(
+    payload: &serde_yaml_ng::Value,
+    node: &SchemaValueNode,
+) -> Option<std::ops::Range<usize>> {
+    let (serde_yaml_ng::Value::Sequence(items), SchemaValueKind::Sequence(arms)) =
+        (payload, &node.kind)
+    else {
+        return None;
+    };
+    if items.len() != arms.len() {
+        return None;
+    }
+    items
+        .iter()
+        .zip(arms)
+        .find(|(item, _)| arm_is_rejected(item))
+        .map(|(_, arm)| arm.span.clone())
+}
+
+/// Whether one root-union arm is rejected on its own terms.
+///
+/// Mirrors `parse_schema_declaration`'s arm handling: a mapping is an inline
+/// shape, a string is a file reference classified without I/O, and anything
+/// else is not a legal arm.
+fn arm_is_rejected(item: &serde_yaml_ng::Value) -> bool {
+    match item {
+        serde_yaml_ng::Value::Mapping(_) => parse_yaml_schema(item).is_err(),
+        serde_yaml_ng::Value::String(reference) => classify_schema_reference(reference).is_err(),
+        _ => true,
+    }
 }
 
 /// The `(code, severity)` for a validation-problem category.
@@ -859,6 +1336,106 @@ mod tests {
                 );
             });
         }
+    }
+
+    #[test]
+    fn meta_schema_diagnostics_replace_generic_keyword_failures() {
+        let cases = [
+            (
+                "---\n$schema:\n  definition: type-definition\ndefinition: string(nope)\n---\n\nbody\n",
+                "dm.schema.invalid_type_definition",
+                "string(nope)",
+            ),
+            (
+                "---\n$schema:\n  definition: type-definition\ndefinition: 'string(nope)'\n---\n\nbody\n",
+                "dm.schema.invalid_type_definition",
+                "'string(nope)'",
+            ),
+            (
+                "---\n$schema:\n  definition: type-definition\ndefinition: 42\n---\n\nbody\n",
+                "dm.schema.invalid_type_definition",
+                "42",
+            ),
+            (
+                "---\n$schema:\n  definition: type-definition\ndefinition: []\n---\n\nbody\n",
+                "dm.schema.invalid_type_definition",
+                "[]",
+            ),
+            (
+                "---\n$schema:\n  definition: type-definition\ndefinition:\n  - nested: []\n---\n\nbody\n",
+                "dm.schema.invalid_type_definition",
+                "[]",
+            ),
+            (
+                "---\n$schema:\n  declaration: schema\ndeclaration: https://example.com/schema.yaml\n---\n\nbody\n",
+                code::SCHEMA_INVALID_SHAPE,
+                "https://example.com/schema.yaml",
+            ),
+            (
+                "---\n$schema:\n  declaration: schema\ndeclaration: ''\n---\n\nbody\n",
+                code::SCHEMA_INVALID_SHAPE,
+                "''",
+            ),
+        ];
+
+        for (text, expected_code, authored_value) in cases {
+            diagnostics_for(text, |diagnostics| {
+                let specialized: Vec<&Diagnostic> = diagnostics
+                    .iter()
+                    .filter(|diagnostic| code_of(diagnostic) == Some(expected_code))
+                    .collect();
+                assert_eq!(
+                    specialized.len(),
+                    1,
+                    "one specialized diagnostic for `{authored_value}`: {diagnostics:#?}"
+                );
+                assert!(
+                    diagnostics
+                        .iter()
+                        .all(|diagnostic| code_of(diagnostic) != Some(code::SCHEMA_CONSTRAINT)),
+                    "the generic custom-keyword diagnostic must be replaced: {diagnostics:#?}"
+                );
+
+                let source_map = SourceMap::new(
+                    "file:///w/doc.md".parse().unwrap(),
+                    1,
+                    PositionEncoding::Utf16,
+                    Arc::from(text),
+                );
+                let start = text.find(authored_value).unwrap();
+                let expected = source_map
+                    .byte_range_to_lsp(start..start + authored_value.len())
+                    .expect("authored value range");
+                assert_eq!(specialized[0].range, expected, "smallest authored value range");
+            });
+        }
+
+        let local = "---\n$schema:\n  declaration: schema\ndeclaration: ./missing.yaml\n---\n\nbody\n";
+        diagnostics_for(local, |diagnostics| {
+            assert!(
+                diagnostics.iter().all(|diagnostic| {
+                    code_of(diagnostic) != Some(code::SCHEMA_INVALID_SHAPE)
+                        && code_of(diagnostic) != Some("dm.schema.invalid_type_definition")
+                }),
+                "a syntactically valid local schema reference is not a semantic-shape error: {diagnostics:#?}"
+            );
+        });
+
+        let unresolved = "---\n$schema: ./missing.yaml\n---\n\nbody\n";
+        diagnostics_for(unresolved, |diagnostics| {
+            assert!(
+                diagnostics
+                    .iter()
+                    .any(|diagnostic| code_of(diagnostic) == Some(code::SCHEMA_PREPARE)),
+                "an unresolved control reference remains a preparation failure: {diagnostics:#?}"
+            );
+            assert!(
+                diagnostics
+                    .iter()
+                    .all(|diagnostic| code_of(diagnostic) != Some(code::SCHEMA_INVALID_SHAPE)),
+                "resolution is distinct from semantic reference syntax: {diagnostics:#?}"
+            );
+        });
     }
 
     #[test]

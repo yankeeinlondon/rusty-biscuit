@@ -388,7 +388,7 @@ refresh it after changing the catalog.
 | Filesystem | `markdown_body_empty(file)` | Returns true when the Markdown body has only whitespace. | `markdown_body_empty("fixture.md")` ⇒ `false` |
 | Filesystem | `markdown_title(file)` | Returns the title from frontmatter or the first H1 heading. | `markdown_title("fixture.md")` ⇒ `Fixture Title` |
 | Filesystem | `validate_schema(file)` | Validates a Markdown document against its declared schema. | `validate_schema("fixture.md")` ⇒ `true` |
-| Filesystem | `validate_schema(file, obj)` | Validates a Markdown document against its declared schema. |  |
+| Filesystem | `validate_schema(file, obj)` | Validates a Markdown document against its declared schema. | `validate_schema("fixture.md", {})` ⇒ `true` |
 | Filesystem | `is_indexed_file(file)` | Returns true when the filename stem matches the indexed grammar (base-NNN). | `is_indexed_file("review-1.md")` ⇒ `true` |
 | Filesystem | `file_index(file)` | Returns the parsed index suffix, or -1 when non-indexed. | `file_index("review-1.md")` ⇒ `1` |
 | Filesystem | `increment_file_index(file)` | Increments the numeric index suffix, preserving zero-padding width. | `increment_file_index("review-1.md")` ⇒ `review-2.md` |
@@ -412,6 +412,19 @@ refresh it after changing the catalog.
 | List Formatting | `as_space_separated(list)` | Joins a list into a space-separated string. | `as_space_separated(items)` ⇒ `1 2 3` |
 | List Formatting | `as_unordered_list(list)` | Renders a list as a Markdown unordered list, auto-nesting nested arrays and object-array shapes as indented sublists. |  |
 | List Formatting | `as_ordered_list(list)` | Renders a list as a Markdown ordered list, auto-nesting nested arrays and object-array shapes as indented sublists. |  |
+| Filesystem | `find_first_index(file)` | Returns the lowest-indexed existing sibling in the file's directory, with the unindexed base sorting first; returns the input when the family has no existing member. | `find_first_index("review-2.md")` ⇒ `review-1.md` |
+| Filesystem | `find_last_index(file)` | Returns the highest-indexed existing sibling in the file's directory; returns the input when the family has no existing member. | `find_last_index("review-1.md")` ⇒ `review-2.md` |
+| Git | `predict_conflicts(branch)` | Returns the repository-relative paths that would conflict if the named local branch were merged into the caller's current branch. |  |
+| Git | `branch_exists_on_remote()` | Returns whether an exact branch exists in the selected remote's live ref advertisement or authoritative provider API. |  |
+| Git | `branch_exists_on_remote(branch)` | Returns whether an exact branch exists in the selected remote's live ref advertisement or authoritative provider API. |  |
+| Git | `branch_exists_on_remote(branch, remote)` | Returns whether an exact branch exists in the selected remote's live ref advertisement or authoritative provider API. |  |
+| Git | `remote_vendor([remote])` | Returns the canonical provider token for the selected configured remote, probing an ambiguous self-hosted server only when allowlisted. |  |
+| Pull Requests | `pr(id)` | Returns one provider pull or merge request in canonical Markdown form. |  |
+| Pull Requests | `pr_list(query)` | Queries pull or merge requests with the canonical bounded filter vocabulary. See the [provider query vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys, enum values, defaults, and bounds. |  |
+| Pull Requests | `pr_list(count)` | Queries pull or merge requests with the canonical bounded filter vocabulary. See the [provider query vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys, enum values, defaults, and bounds. |  |
+| CI/CD | `cicd(id)` | Returns one provider-addressable CI/CD job in canonical Markdown form. |  |
+| CI/CD | `cicd_list(query)` | Queries CI/CD jobs with bounded direct listing or parent-execution traversal. See the [provider query vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys, enum values, defaults, and bounds. |  |
+| CI/CD | `cicd_list(count)` | Queries CI/CD jobs with bounded direct listing or parent-execution traversal. See the [provider query vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys, enum values, defaults, and bounds. |  |
 <!-- END GENERATED FUNCTION TABLE -->
 
 ### `date()` format tokens
@@ -515,6 +528,41 @@ one or more digits, where the hyphen is not preceded by another hyphen:
 | `dir_leading(file)` | directory path above the last directory segment, dropping the basename and its parent (complement of `file_trailing`) |
 | `join(left, right)` | joins two path strings, normalizing separators |
 
+#### Git Helpers
+
+`predict_conflicts(branch)` predicts the unresolved paths produced by merging
+the named local branch into the caller's current local branch. The named branch
+is incoming (`theirs`); the current branch is the destination (`ours`). The
+repository is resolved from the caller or launch-area anchor, not from the
+Markdown document's directory.
+
+Prediction uses only the two captured committed branch tips. Staged, unstaged,
+untracked, and already-conflicted index state do not affect it, including staged
+`.gitattributes`. It performs no fetch, network request, hook, merge driver,
+filter, or subprocess, and it does not change HEAD, refs, the index, worktree,
+or on-disk object database. A clean merge returns `[]`; missing prerequisites
+such as a repository, attached current branch, exact incoming local branch, or
+supported merge configuration return an error.
+
+Render predicted paths as a Markdown list:
+
+```md
+{{ as_unordered_list(predict_conflicts("feature/api")) }}
+```
+
+Branch on the result in an ordinary interpolation:
+
+```md
+{{ is_truthy(predict_conflicts("feature/api")) ? "Conflicts need resolution" : "Merge is clean" }}
+```
+
+The same function is available in frontmatter interpolation and `$()` ternary
+conditions or branches:
+
+```yaml
+merge_status: '$( is_truthy(predict_conflicts("feature/api")) ? "conflicted" : "clean" )'
+```
+
 #### Link Helpers
 
 - `link(file)` — emits `[relative](absolute)` for a local file. The one-argument
@@ -557,6 +605,107 @@ This applies to:
 are inspecting predicates and never error or null-propagate; they always return
 a boolean. `is_positive` and `is_negative` are coercing predicates: they error
 when their argument cannot be coerced to a number (including `null`).
+
+## Provider Query Vocabulary
+
+`pr_list()` and `cicd_list()` accept a structured query object drawn from a
+closed, canonical vocabulary. This section is the authority for that
+vocabulary; the catalog descriptions for both functions link here, so editor
+hover and completion reach the same tables.
+
+### Shared rules
+
+- **Repository-only scope.** A query is scoped to the repository identified by
+  the selected configured remote. Organization, group, workspace, account, and
+  all-visible scopes are not available.
+- **No provider-native escape hatch.** Only the canonical keys below are
+  accepted. Adapter-native query syntax stays internal to Sniff. A canonical
+  field the selected provider cannot honor exactly fails with an
+  unsupported-filter error naming the field and the provider flavor — it is
+  never ignored, approximated, or silently downgraded.
+- **Limits.** An omitted `limit` means 20; the hard maximum is 100. A
+  non-positive or over-maximum limit is an invalid-query error.
+- **Ordering.** Both functions return newest-first by default. `pr_list`'s
+  `sort: "provider-default"` preserves the provider's own result order
+  verbatim; because `direction` only orders a sort key, combining it with
+  `provider-default` is an invalid-query error rather than an ignored field.
+- **Provider-capability filters.** `stage` is honored only where the provider
+  exposes stage data (GitLab); on any other provider it fails with the
+  unsupported-filter error before any request. `workflow` matches the parent
+  workflow/pipeline name, its definition ID, or its definition path (for
+  example `.github/workflows/ci.yml`) where the provider has workflow
+  definitions.
+- **Empty results.** A successful query with no matches returns `[]`.
+- **Datetimes.** `*_after` / `*_before` values are RFC 3339 / ISO 8601 strings
+  (for example `2026-07-13T00:00:00Z`). Both bounds are inclusive; an inverted
+  range is an invalid-query error.
+- **Validation is pre-network.** Unknown keys, wrong types, invalid enum
+  values, inverted ranges, and invalid filter combinations are rejected before
+  any provider request.
+- **Integer overload.** `pr_list(count)` and `cicd_list(count)` are shorthand
+  for the newest `count` items — open pull requests for `pr_list`, jobs of any
+  status for `cicd_list`. `count` must be a positive integer and is capped by
+  the same hard maximum of 100.
+
+### `pr_list(query)` keys
+
+| Key | Type | Meaning |
+|-----|------|---------|
+| `remote` | string | Exact configured remote name; preferred remote when absent |
+| `state` | string or string[] | Any of `open`, `closed`, `merged`; defaults to `open` |
+| `draft` | boolean | Independently select draft/non-draft state |
+| `source_branch` | string | Exact source branch |
+| `target_branch` | string | Exact destination branch |
+| `author` | string | Provider login/username |
+| `assignee` | string | Provider login/username |
+| `reviewer` | string | Provider login/username |
+| `labels` | string[] | Require all listed labels |
+| `milestone` | string | Provider milestone title/identifier |
+| `search` | string | Portable title/body search term |
+| `commit` | string | Pull requests associated with a commit SHA |
+| `created_after` / `created_before` | datetime | Inclusive creation window |
+| `updated_after` / `updated_before` | datetime | Inclusive update window |
+| `sort` | string | `created`, `updated`, or `provider-default` |
+| `direction` | string | `ascending` or `descending` |
+| `limit` | number(integer) | Maximum returned items; default 20, maximum 100 |
+
+### `cicd_list(query)` keys
+
+| Key | Type | Meaning |
+|-----|------|---------|
+| `remote` | string | Exact configured remote name; preferred remote when absent |
+| `statuses` | string or string[] | Normalized lifecycle states; defaults to all statuses |
+| `name` | string | Exact or provider-supported job-name match |
+| `stage` | string | Pipeline stage when the provider exposes stages |
+| `workflow` | string | Parent workflow/pipeline name, definition ID, or path |
+| `parent` | number(integer) or string | Exact parent workflow-run/pipeline identity |
+| `branch` | string | Exact branch/ref |
+| `commit` | string | Exact commit SHA |
+| `actor` | string | Triggering provider login/username |
+| `trigger` | string | Push, PR/MR, schedule, manual, parent, or provider event |
+| `created_after` / `created_before` | datetime | Inclusive creation window |
+| `updated_after` / `updated_before` | datetime | Inclusive update window |
+| `direction` | string | `ascending` or `descending` |
+| `limit` | number(integer) | Maximum returned jobs; default 20, maximum 100 |
+
+### Closed enum values
+
+| Enum | Accepted values |
+|------|-----------------|
+| `state` (`pr_list`) | `open`, `closed`, `merged` |
+| `statuses` (`cicd_list`) | `success`, `failed`, `cancelled`, `queued`, `running`, `manual`, `skipped` |
+| `sort` (`pr_list`) | `created`, `updated`, `provider-default` |
+| `direction` | `ascending`, `descending` |
+
+The `statuses` values are Darkmatter's *normalized* vocabulary. Provider-native
+spellings are mapped onto it (for example GitHub's `completed` and Bitbucket's
+`successful` both normalize to `success`); the provider's raw state is retained
+in the structured record alongside the normalized one.
+
+```text
+pr_list({ state: ["open", "merged"], target_branch: "main", limit: 10 })
+cicd_list({ statuses: ["failed", "cancelled"], branch: "main", limit: 10 })
+```
 
 ## Null Propagation Summary
 

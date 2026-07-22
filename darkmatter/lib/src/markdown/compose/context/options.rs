@@ -872,37 +872,31 @@ impl ComposeOptions {
         &self,
         remote_fetch: &super::super::remote_fetch::RemoteFetchRuntime,
     ) -> super::super::expression::ResolutionContext {
-        super::super::expression::ResolutionContext {
-            base_dir: self.resolution_base_dir(),
-            magic_paths: self.magic_paths.clone(),
-            file_ref_fallback_dir: self.file_ref_fallback_dir.clone(),
-            remote_fetch: self.remote_reads_enabled().then(|| remote_fetch.clone()),
-            ctx_values: self.context_values_for_resolution(),
-            home_dir: dirs::home_dir(),
-        }
+        let mut context =
+            super::super::expression::ResolutionContext::new(self.resolution_base_dir());
+        context.magic_paths = self.magic_paths.clone();
+        context.file_ref_fallback_dir = self.file_ref_fallback_dir.clone();
+        context.remote_fetch = self.remote_reads_enabled().then(|| remote_fetch.clone());
+        context.ctx_values = self.context_values_for_resolution();
+        context.home_dir = dirs::home_dir();
+        context
     }
 
-    /// Builds the local-only [`ResolutionContext`] used by read-side expression
-    /// functions on **frontmatter** surfaces (both interpolation passes and the
-    /// `$()` shell ternary condition/branch evaluation).
-    ///
-    /// Unlike [`expression_resolution_context`], this never attaches a
-    /// remote-fetch runtime: per Decision B of the resolution-context spec,
-    /// frontmatter is local-filesystem only. A remote URL argument to a
-    /// read-side function in frontmatter therefore fails loudly rather than
-    /// performing a network read.
+    /// Builds the [`ResolutionContext`] used by frontmatter interpolation and
+    /// `$()` evaluation. Authorized remote reads share the compose run's same
+    /// single-flight runtime as body interpolation.
     ///
     /// [`expression_resolution_context`]: Self::expression_resolution_context
     /// [`ResolutionContext`]: super::super::expression::ResolutionContext
     pub(crate) fn frontmatter_resolution_context(&self) -> super::super::expression::ResolutionContext {
-        super::super::expression::ResolutionContext {
-            base_dir: self.resolution_base_dir(),
-            magic_paths: self.magic_paths.clone(),
-            file_ref_fallback_dir: self.file_ref_fallback_dir.clone(),
-            remote_fetch: None,
-            ctx_values: self.context_values_for_resolution(),
-            home_dir: dirs::home_dir(),
-        }
+        let mut context =
+            super::super::expression::ResolutionContext::new(self.resolution_base_dir());
+        context.magic_paths = self.magic_paths.clone();
+        context.file_ref_fallback_dir = self.file_ref_fallback_dir.clone();
+        context.remote_fetch = self.remote_reads_enabled().then(|| self.remote_fetch_runtime());
+        context.ctx_values = self.context_values_for_resolution();
+        context.home_dir = dirs::home_dir();
+        context
     }
 
     fn context_values_for_resolution(&self) -> serde_json::Map<String, serde_json::Value> {
@@ -2201,6 +2195,39 @@ mod tests {
         let options = ComposeOptions::new();
         let ctx = options.frontmatter_resolution_context();
         assert!(ctx.file_ref_fallback_dir.is_none());
+    }
+
+    #[test]
+    fn frontmatter_and_body_contexts_share_remote_query_single_flight() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let options = ComposeOptions::new()
+            .with_allowed_host("provider.example")
+            .with_shared_remote_fetch();
+        let runtime = options.remote_fetch_runtime();
+        let frontmatter = options.frontmatter_resolution_context();
+        let body = options.expression_resolution_context(&runtime);
+        let executions = Arc::new(AtomicUsize::new(0));
+
+        let first_counter = Arc::clone(&executions);
+        let first = frontmatter
+            .cached_provider_query("pr", "pr:123".to_string(), || {
+                first_counter.fetch_add(1, Ordering::SeqCst);
+                Ok(serde_json::Value::String("shared".to_string()))
+            })
+            .unwrap();
+        let second_counter = Arc::clone(&executions);
+        let second = body
+            .cached_provider_query("pr", "pr:123".to_string(), || {
+                second_counter.fetch_add(1, Ordering::SeqCst);
+                Ok(serde_json::Value::String("unexpected".to_string()))
+            })
+            .unwrap();
+
+        assert_eq!(first, serde_json::Value::String("shared".to_string()));
+        assert_eq!(second, first);
+        assert_eq!(executions.load(Ordering::SeqCst), 1);
     }
 
     /// The fallback appears in the `Debug` output so diagnostics surface it.

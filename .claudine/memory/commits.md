@@ -45,6 +45,13 @@ do not belong here.
   open the configured editor and block.
 - Do not place messages containing backticks, dollar signs, or other shell
   metacharacters in a double-quoted `-m` argument.
+- **`--only` + `-F -` argument order.** In a path-restricted commit that reads
+  the message from stdin, place `-F -` BEFORE `--only`, not after:
+  `git commit -F - --only -- <paths>` works; `git commit --only -F - -- <paths>`
+  makes `--only` absorb `-F` as a pathspec and git returns
+  `error: pathspec '-F' did not match any file(s) known to git`. The heredoc
+  payload is then never read. Pair this with the single-quoted `<<'COMMIT_MSG'`
+  delimiter above.
 
 ## Mixed-State Paths
 
@@ -138,6 +145,10 @@ do not belong here.
   block waiting for a TTY. Verify the agent has the key cached (or commit is
   deliberately unsigned) before dispatching, and report any signing hang
   immediately rather than letting the agent time out.
+- Never bypass repository hooks with `--no-verify`, `-c core.hooksPath=...`, or
+  equivalent overrides. An instruction not to run validations means do not
+  launch them explicitly; configured commit hooks still run normally. If a hook
+  blocks the commit, report the failure rather than suppressing it.
 - Never amend or create follow-up fixup commits after a successful commit in a
   concurrent batch. Report the issue so the orchestrator can decide whether to
   accept, revert, or coordinate a rewrite.

@@ -15,6 +15,8 @@ pub mod performance;
 pub mod programs;
 #[cfg(feature = "remote")]
 pub mod remote;
+#[cfg(feature = "network")]
+mod credentials;
 pub mod request;
 pub mod services;
 
@@ -376,8 +378,13 @@ mod tests {
     use super::*;
 
     #[test]
+    #[serial_test::serial]
     fn test_detect_returns_result() {
+        let original_dir = std::env::current_dir().unwrap();
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        std::env::set_current_dir(temp_dir.path()).unwrap();
         let result = detect();
+        std::env::set_current_dir(original_dir).unwrap();
         assert!(result.is_ok());
     }
 
@@ -426,9 +433,10 @@ mod tests {
 
     #[test]
     fn test_detect_with_base_dir() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
         // Filesystem only: skip os/hardware/network, which this test does not assert.
         let plan = DetectionPlan::new()
-            .base_dir(PathBuf::from("."))
+            .base_dir(temp_dir.path().to_path_buf())
             .without_os()
             .without_hardware()
             .without_network();
@@ -449,7 +457,8 @@ mod tests {
     // Regression test: OS should be present by default
     #[test]
     fn test_os_present_by_default() {
-        let config = SniffConfig::new();
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let config = SniffConfig::new().base_dir(temp_dir.path().to_path_buf());
         let result = detect_with_config(config).unwrap();
         assert!(result.os.is_some(), "OS should be Some by default");
     }
@@ -457,7 +466,12 @@ mod tests {
     // Regression test: Combining skip_os with other sections should work correctly
     #[test]
     fn test_skip_os_with_filesystem_only() {
-        let config = SniffConfig::new().skip_os().skip_hardware().skip_network();
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let config = SniffConfig::new()
+            .base_dir(temp_dir.path().to_path_buf())
+            .skip_os()
+            .skip_hardware()
+            .skip_network();
         let result = detect_with_config(config).unwrap();
         assert!(result.os.is_none(), "OS should be None when skipped");
         assert!(
