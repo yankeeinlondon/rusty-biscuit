@@ -4,6 +4,7 @@ status: reviewed
 reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-07-21
+review_iterations: 1
 area: claudine
 integration_seed: ff6de1834fe07de9d34d9ffd3cd717d7941d54f2
 feature_tips:
