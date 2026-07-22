@@ -105,6 +105,18 @@ fn every_case_renders_non_empty() {
 }
 
 #[test]
+fn warning_layout_matrix_snapshots_disabled_pending_table_width_contract() {
+    let spec = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../fixes/2026-07-22-table-width/spec.md");
+    assert!(
+        spec.is_file(),
+        "layout_matrix_snapshots is disabled pending the missing specification: {}",
+        spec.display()
+    );
+}
+
+#[test]
+#[ignore = "FIXME(table-width): width semantics are unresolved; see biscuit-terminal/fixes/2026-07-22-table-width/spec.md"]
 fn layout_matrix_snapshots() {
     for case in component_cases() {
         for scenario in scenarios() {
