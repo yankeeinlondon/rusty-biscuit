@@ -8,9 +8,10 @@ use chrono::{Local, Utc};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde_json::Value;
 
-use crate::error::Result;
+use crate::error::{ClaudineError, Result};
 use crate::events::EventMeta;
 
+use super::error::IngestError;
 use super::paths;
 use super::types::{DateRange, SyncFailure, SyncRequest, SyncSummary};
 
@@ -27,7 +28,9 @@ struct FileSyncStats {
     inserted: u64,
     skipped: u64,
     anonymous_session_fallbacks: u64,
-    line_failures: Vec<SyncFailure>,
+    /// Still typed: these project to `SyncFailure` in [`sync`], the one place
+    /// the run's outcome becomes a persisted record.
+    line_failures: Vec<IngestError>,
 }
 
 #[derive(Debug)]
@@ -117,11 +120,13 @@ pub(crate) fn sync(
                 summary.events_skipped += stats.skipped;
                 summary.anonymous_session_fallbacks += stats.anonymous_session_fallbacks;
                 summary.parse_failures += stats.line_failures.len() as u64;
-                summary.failures.extend(stats.line_failures);
+                summary
+                    .failures
+                    .extend(stats.line_failures.into_iter().map(SyncFailure::from));
             }
             Err(failure) => {
                 summary.parse_failures += 1;
-                summary.failures.push(failure);
+                summary.failures.push(failure.into());
             }
         }
     }
@@ -163,18 +168,27 @@ fn discover_log_files(logs_dir: &Path, request: SyncRequest) -> Result<Vec<PathB
     Ok(files)
 }
 
+/// Boxing `IngestError`'s typed cause would silence the lint but hide the cause
+/// from `as_diagnostic`'s downcast, costing the persisted record its one-level
+/// cause. One rare `Err` per log file is not worth that.
+#[allow(clippy::result_large_err)]
 fn sync_file(
     conn: &mut Connection,
     path: &Path,
-) -> std::result::Result<FileSyncStats, SyncFailure> {
+) -> std::result::Result<FileSyncStats, IngestError> {
     let source_file_str = path.display().to_string();
 
+    /// Wrap a lower failure without flattening it.
+    ///
+    /// `ClaudineError::from` is the identity for a value that is already one,
+    /// so a `load_state` failure keeps its `Sqlite` arm instead of being
+    /// stringified here and again at the report.
     macro_rules! fail {
         ($line:expr, $error:expr) => {
-            SyncFailure {
+            IngestError {
                 source_file: source_file_str.clone(),
                 line_number: $line,
-                message: $error.to_string(),
+                source: ClaudineError::from($error),
             }
         };
     }
@@ -258,11 +272,7 @@ fn sync_file(
         let meta: EventMeta = match serde_json::from_str(line) {
             Ok(meta) => meta,
             Err(error) => {
-                stats.line_failures.push(SyncFailure {
-                    source_file: source_file_str.clone(),
-                    line_number,
-                    message: error.to_string(),
-                });
+                stats.line_failures.push(fail!(line_number, error));
                 source_offset += bytes_read as u64;
                 line_number += 1;
                 continue;
@@ -272,11 +282,7 @@ fn sync_file(
         let prepared = match prepare_event(path, source_offset as i64, meta) {
             Ok(prepared) => prepared,
             Err(error) => {
-                stats.line_failures.push(SyncFailure {
-                    source_file: source_file_str.clone(),
-                    line_number,
-                    message: error.to_string(),
-                });
+                stats.line_failures.push(fail!(line_number, error));
                 source_offset += bytes_read as u64;
                 line_number += 1;
                 continue;

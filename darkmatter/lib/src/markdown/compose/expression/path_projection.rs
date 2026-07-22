@@ -31,8 +31,21 @@ use std::path::Path;
 /// [`make_portable_relative`] so the stored value is portable across OSes.
 ///
 /// `relative(file)` keeps using this raw form to preserve its existing contract.
+#[cfg(test)]
 pub(crate) fn make_relative(abs: &Path, base_dir: &Path) -> String {
-    if let Some(repo) = crate::markdown::compose::find_git_root_from(base_dir)
+    make_relative_in_context(abs, base_dir, None)
+}
+
+pub(crate) fn make_relative_in_context(
+    abs: &Path,
+    base_dir: &Path,
+    request_context: Option<&biscuit_file::FileResolutionContext>,
+) -> String {
+    let repository_root = match request_context {
+        Some(context) => context.repository_root().map(Path::to_path_buf),
+        None => crate::markdown::compose::find_git_root_from(base_dir),
+    };
+    if let Some(repo) = repository_root
         && let Ok(stripped) = abs.strip_prefix(&repo)
     {
         return stripped.to_string_lossy().to_string();
@@ -40,7 +53,11 @@ pub(crate) fn make_relative(abs: &Path, base_dir: &Path) -> String {
     if let Ok(stripped) = abs.strip_prefix(base_dir) {
         return stripped.to_string_lossy().to_string();
     }
-    if let Some(home) = dirs::home_dir()
+    let home_dir = match request_context {
+        Some(context) => context.home_dir().map(Path::to_path_buf),
+        None => dirs::home_dir(),
+    };
+    if let Some(home) = home_dir
         && let Ok(stripped) = abs.strip_prefix(&home)
     {
         return format!("~/{}", stripped.to_string_lossy());
@@ -55,8 +72,17 @@ pub(crate) fn make_relative(abs: &Path, base_dir: &Path) -> String {
 /// (Windows' native separator) become forward slashes. This is the function the
 /// eager-`file` rewrite pass calls so a committed value stays byte-identical
 /// regardless of the OS it was authored on.
+#[cfg(test)]
 pub(crate) fn make_portable_relative(abs: &Path, base_dir: &Path) -> String {
     make_relative(abs, base_dir).replace('\\', "/")
+}
+
+pub(crate) fn make_portable_relative_in_context(
+    abs: &Path,
+    base_dir: &Path,
+    request_context: Option<&biscuit_file::FileResolutionContext>,
+) -> String {
+    make_relative_in_context(abs, base_dir, request_context).replace('\\', "/")
 }
 
 #[cfg(test)]

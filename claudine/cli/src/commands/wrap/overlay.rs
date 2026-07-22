@@ -31,9 +31,14 @@ pub(crate) fn materialize_passthrough_harness_seed(
     source_path: &Path,
     prompt: String,
     shell_cwd: Option<&Path>,
+    runtime_state: std::sync::Arc<claudine::composition::RuntimeState>,
 ) -> Result<super::harness_orch::MaterializedHarnessPrompt> {
-    let source_text = fs::read_to_string(source_path)
-        .map_err(|e| eyre!("failed to read '{}': {e}", source_path.display()))?;
+    let source_text = fs::read_to_string(source_path).map_err(|e| {
+        claudine::composition::CompositionError::MarkdownLoad {
+            path: source_path.to_path_buf(),
+            source: claudine::composition::MarkdownLoadCause::Read(e),
+        }
+    })?;
     let source_markdown: darkmatter::markdown::Markdown = source_text.into();
     let options = claudine::composition::bind_agent_workspace(
         darkmatter::markdown::compose::ComposeOptions::new(),
@@ -50,6 +55,8 @@ pub(crate) fn materialize_passthrough_harness_seed(
         prompt,
         env_overrides: Vec::new(),
         inline_closure_plan: None,
+        file_resolution_context: None,
         live_frontmatter,
+        runtime_state,
     })
 }

@@ -1,5 +1,6 @@
 //! Ordered setup pipeline for one composition attempt.
 
+use color_eyre::eyre::WrapErr;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -205,6 +206,7 @@ fn resolve_selection_and_launch(
             agent_perf: None,
             iteration_signals: None,
             terminal_signal: None,
+            final_output: None,
         };
         if let Some(collector) = attempt.perf_collector.take() {
             crate::perf::emit_report(&collector.into_report());
@@ -400,7 +402,7 @@ fn prepare_environment_and_mcp(
             let repo_root_ref = source_repo_root.or(env_plan.repo_root.as_deref());
             let _ = super::super::bootstrap_mcp_state(repo_root_ref)?;
             let catalog =
-                McpCatalogStore::load().map_err(|e| eyre!("failed to load MCP catalog: {e}"))?;
+                McpCatalogStore::load().wrap_err("failed to load MCP catalog")?;
             let (cleaned_prompt, prompt_tags) = lex_tags(&effective_prompt);
             let prompt_is_interactive = request.session_interactive
                 && std::io::stdin().is_terminal()
@@ -422,7 +424,7 @@ fn prepare_environment_and_mcp(
                     .ok()
                 },
             )
-            .map_err(|e| eyre!("MCP session error: {e}"))?;
+            .wrap_err("MCP session error")?;
 
             if !session.missing_tags.is_empty() {
                 if request.strict {
@@ -476,7 +478,7 @@ fn prepare_environment_and_mcp(
                     let mut string_env = std::collections::HashMap::new();
                     let result = injector
                         .inject(&session.servers, &mut string_env, shadow)
-                        .map_err(|e| eyre!("MCP injection failed: {e}"))?;
+                        .wrap_err("MCP injection failed")?;
 
                     // The OpenCode inline config is shared with the system-prompt
                     // and YOLO producers, so it must merge into any value already on
@@ -661,7 +663,10 @@ fn construct_argv_and_system_prompt(
 
         record_substage(perf_collector, last_checkpoint, "argv assembly");
 
-        enforce_repo_launch_detection(request.repo, request.prep_launch_detection_error.as_deref())?;
+        enforce_repo_launch_detection(
+            request.repo,
+            request.prep_launch_detection_error.as_ref(),
+        )?;
         let mut launch_context = if let Some(prep) = request.prep_launch_context.as_ref() {
             // Phase fix (2026-05-09-slow-prep): reuse the launch_context computed
             // by the shared sniff scan in `CompositionPrepContext` instead of
@@ -672,9 +677,9 @@ fn construct_argv_and_system_prompt(
                 Ok(context) => context,
                 Err(error) => {
                     if request.repo {
-                        return Err(eyre!(
-                            "--repo requires startup repo detection, but launch-context detection failed: {error}"
-                        ));
+                        return Err(error).wrap_err(
+                            "--repo requires startup repo detection, but launch-context detection failed",
+                        );
                     }
                     if !silent && !quiet {
                         log::warn(&format!(
@@ -1084,6 +1089,7 @@ fn route_initialize(
     effective_repo_root: Option<&Path>,
     provider: Provider,
     term: &Terminal,
+    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
 ) -> CompositionPhaseResult<Option<PathBuf>> {
     let routed = (|| -> Result<CompositionPhaseResult<Option<PathBuf>>> {
         let init_outcome = guard.execute_event(LifecycleSignal::Initialize, init_ctx);
@@ -1135,6 +1141,7 @@ fn route_initialize(
                             agent_perf: None,
                             iteration_signals: None,
                             terminal_signal: None,
+                            final_output: None,
                         },
                     )));
                 }
@@ -1148,12 +1155,32 @@ fn route_initialize(
                     // re-materialize path. The harness loop resets the lifecycle
                     // guard and re-emits the target's own `initialize` before its
                     // pre-flight / start / terminal / finalize lifecycle runs.
-                    let resolved = claudine::composition::resolve_proxy_target(
-                        target,
-                        source_path,
-                        effective_repo_root,
-                    )
-                    .map_err(|e| eyre!("lifecycle initialize proxy: {e}"))?;
+                    let resolved = match file_resolution_context {
+                        Some(context) => claudine::composition::resolve_proxy_target_in_context(
+                            target,
+                            source_path,
+                            context,
+                        ),
+                        None => claudine::composition::resolve_proxy_target(
+                            target,
+                            source_path,
+                            effective_repo_root,
+                        ),
+                    }
+                    .map_err(|e| CompositionError::InvalidFileReference {
+                        context: Box::new(claudine::composition::FileReferenceContext {
+                            source_path: source_path.to_path_buf(),
+                            event: Some("initialize".to_string()),
+                            // Wildcard index: the stack position that authored
+                            // the `proxy` is not threaded back through the
+                            // outcome, so name the stable path, not a concrete
+                            // `[0]` we cannot verify (spec §D3/§D6).
+                            property: "initialize.stack[*].proxy".to_string(),
+                            reference: target.clone(),
+                            hint: PROXY_TARGET_HINT.to_string(),
+                        }),
+                        source: e,
+                    })?;
                     if !claudine::composition::proxy_handoff_allowed(
                         std::slice::from_ref(&source_path.to_path_buf()),
                         &resolved,
@@ -1369,12 +1396,15 @@ fn provider_run_handoff(
         // owned by the harness loop, which re-materializes frontmatter before
         // its own events fire.
         live_frontmatter: None,
+        runtime_state: None,
         err: None,
         timing: Some(&lifecycle_timing),
         current: Some(&lifecycle_current),
+        group: None,
         base_dir,
         ctx_base_dir: Some(launch_workspace.launch_cwd.as_path()),
         prepared_context: Some(lifecycle_context),
+        file_resolution_context: request.prepared.rematerialize.file_resolution_context.as_ref(),
         effect_engine: lifecycle_effect_engine,
         shell_runner: &SystemShellRunner,
         emitter,
@@ -1391,6 +1421,7 @@ fn provider_run_handoff(
         effective_repo_root,
         provider,
         term,
+        request.prepared.rematerialize.file_resolution_context.as_ref(),
     ));
 
     runner::run_composition_body(

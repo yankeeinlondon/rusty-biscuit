@@ -274,6 +274,7 @@ fn loop_iteration_failed_display_surfaces_reason_and_iteration() {
         exit_code: 1,
         reason: "step_timeout after 30m of stream silence".to_string(),
         exit_reason: Some("step_timeout".to_string()),
+        snapshot: None,
     };
     let rendered = err.to_string();
     assert!(
@@ -340,6 +341,7 @@ fn loop_iteration_failed_falls_back_when_no_exit_reason() {
         exit_code: 1,
         reason: "provider exited non-zero".to_string(),
         exit_reason: None,
+        snapshot: None,
     };
     let rendered = err.to_string();
     assert!(
@@ -923,6 +925,9 @@ fn shell_expansion_failed_via_real_markdown_preserves_rich_diagnostic() {
         shell_working_directory: None,
         prepared_context: None,
         file_ref_fallback_dir: None,
+        file_resolution_context: None,
+        name_coercion_keys: Vec::new(),
+        allow_empty_body: false,
     };
 
     let err = prepare_direct(&source, options).unwrap_err();
@@ -1318,19 +1323,67 @@ fn file_reference_detail_emits_full_registry_field_set() {
         source: None,
     });
     let detail = err.detail();
-    // Every field the registry declares for the code is present.
-    for field in ["reference", "kind", "base_dir", "suggestions", "fallback_dir"] {
+    // Read the field set from the registry rather than restating it: the
+    // catalog is additive, so a hard-coded list would keep passing while the
+    // projection silently omitted every field added after it was written.
+    let spec = crate::diagnostics::code_spec("composition.invalid_file_reference").unwrap();
+    for &field in spec.detail {
         assert!(
             detail.get(field).is_some(),
             "detail missing registry field `{field}`: {detail}"
         );
     }
+    assert_eq!(
+        detail.as_object().unwrap().len(),
+        spec.detail.len(),
+        "detail carries keys the catalog does not declare: {detail}"
+    );
     assert_eq!(detail["reference"], json!("features/spec.md"));
     assert_eq!(detail["base_dir"], json!("/repo/area"));
     // No fallback_dir set → projects to null (the optional sentinel).
     assert_eq!(detail["fallback_dir"], Value::Null);
     // Malformed reference offers no sibling suggestions.
     assert_eq!(detail["suggestions"], json!([]));
+}
+
+#[test]
+fn file_reference_detail_reserves_the_unavailable_resolver_fields_as_null() {
+    // The `FileReferenceDiagnostic` this projects from carries no authoring
+    // context or candidate record, so these keys are present-and-null: the
+    // file-resolution feature fills them. `failure` in particular must not be
+    // back-derived from `kind` — Darkmatter folds permission and
+    // missing-context errors into `NotFound`, so `no_match` here would assert a
+    // classification nothing made.
+    let err = file_ref_compose_error(FileReferenceDiagnostic {
+        function: "frontmatter",
+        reference: "features/spec.md".to_string(),
+        kind: FileRefFailure::NotFound,
+        base_dir: PathBuf::from("/repo/area"),
+        fallback_dir: None,
+        source: None,
+    });
+    let detail = err.detail();
+
+    for field in [
+        "source_path",
+        "property",
+        "event",
+        "repository_root",
+        "candidates",
+        "failure",
+    ] {
+        // `.get`, not `detail[field]` — indexing yields `Null` for an *absent*
+        // key too, which would pass this assertion on a payload that omits the
+        // field entirely. Present-and-null is the contract.
+        assert_eq!(
+            detail.get(field),
+            Some(&Value::Null),
+            "`{field}` must be present and null until a resolver supplies it: {detail}"
+        );
+    }
+    // ...while the fields the resolver *does* supply are unaffected.
+    assert_eq!(detail["kind"], json!("not_found"));
+    assert_eq!(detail["reference"], json!("features/spec.md"));
 }
 
 #[test]
@@ -1494,4 +1547,699 @@ fn phase_11_family_dispatch_routes_to_family_renderers() {
             "ColorDepth::None output must be escape-free for {err:?}: {rendered:?}"
         );
     }
+}
+
+// -- typed transport (Phase 4) --------------------------------------------
+//
+// The wrapper's whole purpose is that the concrete cause stays reachable. A
+// test that only asserts `Display` text would pass against the `eyre!("{e}")`
+// flattening these replaced.
+
+fn proxy_reference_error() -> CompositionError {
+    CompositionError::InvalidFileReference {
+        context: Box::new(FileReferenceContext {
+            source_path: PathBuf::from("/repo/run.md"),
+            event: Some("initialize".to_string()),
+            property: "initialize".to_string(),
+            reference: "nope.md".to_string(),
+            hint: "A `proxy` target must name an existing Markdown document.".to_string(),
+        }),
+        source: crate::harness::HarnessError::PathResolutionFailed {
+            raw: "nope.md".to_string(),
+            failure: crate::harness::PathResolutionFailure::TargetMissing,
+            source_path: Some(PathBuf::from("/repo/run.md")),
+            resolved: Some(PathBuf::from("/repo/nope.md")),
+            resolution: None,
+        },
+    }
+}
+
+#[test]
+fn invalid_file_reference_exposes_its_concrete_source() {
+    let err = proxy_reference_error();
+    let source = std::error::Error::source(&err).expect("wrapper must expose a source");
+    let concrete = source
+        .downcast_ref::<crate::harness::HarnessError>()
+        .expect("the concrete typed error must survive the wrapper");
+    assert!(matches!(
+        concrete,
+        crate::harness::HarnessError::PathResolutionFailed { .. }
+    ));
+}
+
+#[test]
+fn invalid_file_reference_owns_the_shared_code_for_every_surface() {
+    // The wrapper must not coin a proxy-specific code: one identity, with the
+    // surface told apart by `event` / `property` in detail.
+    use crate::diagnostics::Diagnostic;
+    let err = proxy_reference_error();
+    assert_eq!(err.code(), "composition.invalid_file_reference");
+    assert_eq!(err.role(), crate::diagnostics::DiagnosticRole::Semantic);
+}
+
+#[test]
+fn invalid_file_reference_detail_unions_authoring_context_over_the_source() {
+    use crate::diagnostics::Diagnostic;
+    let detail = proxy_reference_error().detail();
+
+    // Authoring context only this layer has.
+    assert_eq!(detail["property"], serde_json::json!("initialize"));
+    assert_eq!(detail["event"], serde_json::json!("initialize"));
+    assert_eq!(detail["reference"], serde_json::json!("nope.md"));
+    assert_eq!(detail["source_path"], serde_json::json!("/repo/run.md"));
+    // Carried up from the typed source's own projection, not re-derived.
+    assert_eq!(detail["failure"], serde_json::json!("no_match"));
+    // Still unavailable: not invented to fill the shape.
+    assert_eq!(detail["kind"], serde_json::Value::Null);
+    assert_eq!(detail["candidates"], serde_json::Value::Null);
+}
+
+#[test]
+fn invalid_file_reference_detail_declares_every_catalog_field() {
+    use crate::diagnostics::Diagnostic;
+    let detail = proxy_reference_error().detail();
+    let spec = crate::diagnostics::code_spec("composition.invalid_file_reference").unwrap();
+    for field in spec.detail {
+        assert!(
+            detail.get(*field).is_some(),
+            "declared field `{field}` absent from the wrapper's projection"
+        );
+    }
+    assert!(!detail.is_null(), "a registered code must not project top-level null");
+}
+
+#[test]
+fn invalid_file_reference_without_an_event_still_renders_and_classifies() {
+    // A non-lifecycle surface (schema, transclusion) has no event; the shared
+    // code and the `null` event are both part of the contract.
+    use crate::diagnostics::Diagnostic;
+    let err = CompositionError::InvalidFileReference {
+        context: Box::new(FileReferenceContext {
+            source_path: PathBuf::from("/repo/run.md"),
+            event: None,
+            property: "$schema.plan".to_string(),
+            reference: "@missing/plan.md".to_string(),
+            hint: "hint".to_string(),
+        }),
+        source: crate::harness::HarnessError::RepoRootRequired {
+            path: "@missing/plan.md".to_string(),
+        },
+    };
+    assert_eq!(err.code(), "composition.invalid_file_reference");
+    assert_eq!(err.detail()["event"], serde_json::Value::Null);
+    assert!(err.to_string().contains("$schema.plan"), "got: {err}");
+    let term = biscuit_terminal::terminal::Terminal::default();
+    assert!(!err.status_block(&term).render(&term).is_empty());
+}
+
+#[test]
+fn invalid_file_reference_anchors_its_frontmatter_excerpt_on_the_property() {
+    let source = source_from("---\ninitialize:\n    proxy: nope.md\n---\nbody\n");
+    let enriched = proxy_reference_error().enrich_frontmatter(&source, true);
+    assert!(
+        matches!(enriched, CompositionError::WithFrontmatter { .. }),
+        "the wrapper is frontmatter-rooted and must capture an excerpt"
+    );
+    // The transparent wrapper still reaches the concrete cause underneath.
+    assert!(enriched.to_string().contains("nope.md"), "got: {enriched}");
+}
+
+#[test]
+fn invalid_file_reference_body_does_not_leak_escape_backslashes() {
+    // Regression: the source's `Display` quotes the reference (`"nope.md"`),
+    // and the href-oriented `escape_prose_path` escapes `"` — which Prose does
+    // not treat as special, so the backslash rendered literally as `\"`.
+    let term = biscuit_terminal::terminal::Terminal::default();
+    let rendered = proxy_reference_error().status_block(&term).render(&term);
+    assert!(
+        !rendered.contains(r#"\""#),
+        "escape backslash leaked into rendered body:\n{rendered}"
+    );
+    assert!(rendered.contains("nope.md"), "{rendered}");
+}
+
+/// Stage a bare-implicit `reference` under `<repo>/prompts/run.md` and wrap the
+/// resulting harness resolution failure in the authoring surface, so the block
+/// renders against a real (repository-first) candidate plan.
+fn implicit_reference_error(reference: &str, repo: &std::path::Path) -> CompositionError {
+    let source = repo.join("prompts/run.md");
+    std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+    std::fs::write(&source, "x").unwrap();
+
+    let ctx = crate::harness::HarnessResolutionContext {
+        source_path: &source,
+        repo_root: Some(repo),
+        package_area: None,
+    };
+    let source_err = crate::harness::resolve_harness_path(reference, &ctx).unwrap_err();
+
+    CompositionError::InvalidFileReference {
+        context: Box::new(FileReferenceContext {
+            source_path: source,
+            event: Some("initialize".to_string()),
+            property: "initialize.stack[0].proxy".to_string(),
+            reference: reference.to_string(),
+            hint: "A `proxy` target must name an existing Markdown document.".to_string(),
+        }),
+        source: source_err,
+    }
+}
+
+#[test]
+fn invalid_file_reference_block_enumerates_the_plan_only_for_a_multi_candidate_miss() {
+    // The ordered "Tried:" list is enumerated only when more than one candidate
+    // was probed: an implicit miss (repository + source) shows it; an explicit
+    // `./` miss (one candidate) does not, since its single path is already named
+    // (spec §D8).
+    let term = biscuit_terminal::terminal::Terminal::default();
+
+    let implicit_repo = tempfile::tempdir().unwrap();
+    let implicit = implicit_reference_error("absent.md", implicit_repo.path());
+    let implicit_rendered = implicit.status_block(&term).render(&term);
+    assert!(
+        implicit_rendered.contains("Tried:"),
+        "an implicit two-candidate miss must enumerate its plan:\n{implicit_rendered}"
+    );
+
+    let explicit_repo = tempfile::tempdir().unwrap();
+    let explicit = implicit_reference_error("./absent.md", explicit_repo.path());
+    let explicit_rendered = explicit.status_block(&term).render(&term);
+    assert!(
+        !explicit_rendered.contains("Tried:"),
+        "an explicit single-candidate miss must not enumerate a one-item plan:\n{explicit_rendered}"
+    );
+}
+
+// -- Burn-down batch 3: typed sources on the composition edges ---------------
+//
+// Each site below traded a flattened string for a retained `#[source]`. Two
+// contracts are locked per site: the concrete cause is recoverable through
+// `Error::source` (spec §L1), and every observable projection stayed exactly
+// where it was (spec §D10 — richer detail, never renamed or re-valued detail).
+
+fn markdown_error() -> MarkdownError {
+    MarkdownError::AstParse("unbalanced `{{`".to_string())
+}
+
+/// The shell-audit catch-all publishes its `HarnessError` unboxed, so
+/// `as_diagnostic` — a downcast list over concrete types — can resolve it.
+/// Boxing it would publish the box instead and skip the diagnostic entirely.
+#[test]
+fn pre_flight_shell_audit_failed_publishes_its_harness_error() {
+    let err = CompositionError::PreFlightShellAuditFailed {
+        source: crate::harness::HarnessError::ShellCommandDenied {
+            command: "rm -rf /".to_string(),
+        },
+    };
+
+    let published = (&err as &(dyn std::error::Error + 'static))
+        .source()
+        .expect("the audit failure must publish a cause");
+    assert!(
+        published
+            .downcast_ref::<crate::harness::HarnessError>()
+            .is_some(),
+        "the chain must publish the concrete HarnessError, not a wrapper"
+    );
+    assert!(
+        crate::diagnostics::as_diagnostic(published).is_some(),
+        "the published cause must resolve through the central registry"
+    );
+}
+
+/// `PreFlightShellAuditFailed` replaced `PreFlightFailed(e.to_string())`, and
+/// `PreFlightStateBuildFailed` replaced a `PreFlightFailed(format!(…))`. Both
+/// duplicate the prose their prose twin rendered in order to hold a `#[source]`,
+/// so lock the twins against drift: every observable projection must agree for
+/// the same underlying failure.
+#[test]
+fn pre_flight_twins_agree() {
+    let audit_cause = crate::harness::HarnessError::ShellCommandDenied {
+        command: "rm -rf /".to_string(),
+    };
+    let plain = CompositionError::PreFlightFailed(audit_cause.to_string());
+    let sourced = CompositionError::PreFlightShellAuditFailed {
+        source: crate::harness::HarnessError::ShellCommandDenied {
+            command: "rm -rf /".to_string(),
+        },
+    };
+    assert_eq!(plain.to_string(), sourced.to_string());
+    assert_eq!(plain.code(), sourced.code());
+    assert_eq!(plain.category(), sourced.category());
+    assert_eq!(plain.disposition(), sourced.disposition());
+    assert_eq!(plain.origin(), sourced.origin());
+    assert_eq!(plain.detail(), sourced.detail());
+
+    let merge_cause = CtxMergeError::InvalidUserCtx {
+        kind: "array".to_string(),
+    };
+    let plain = CompositionError::PreFlightFailed(format!(
+        "lifecycle shell pre-flight: building early-binding state failed: {merge_cause}"
+    ));
+    let sourced = CompositionError::PreFlightStateBuildFailed {
+        source: CtxMergeError::InvalidUserCtx {
+            kind: "array".to_string(),
+        },
+    };
+    assert_eq!(plain.to_string(), sourced.to_string());
+    assert_eq!(plain.code(), sourced.code());
+    assert_eq!(plain.detail(), sourced.detail());
+}
+
+/// The state builder's `CtxMergeError` survives as a chain member.
+#[test]
+fn pre_flight_state_build_failed_publishes_its_merge_error() {
+    let err = CompositionError::PreFlightStateBuildFailed {
+        source: CtxMergeError::InvalidUserCtx {
+            kind: "array".to_string(),
+        },
+    };
+    assert!(
+        (&err as &(dyn std::error::Error + 'static))
+            .source()
+            .and_then(|c| c.downcast_ref::<CtxMergeError>())
+            .is_some()
+    );
+}
+
+/// `LifecycleShellResolution`'s source is `Option` because the same variant is
+/// raised by this layer's own late-binding guard, which never calls Darkmatter
+/// and so has no typed error to retain. Both shapes must render identically —
+/// only the recoverable cause differs.
+#[test]
+fn lifecycle_shell_resolution_source_is_optional_and_leaves_display_unmoved() {
+    let untyped = CompositionError::LifecycleShellResolution {
+        source_path: PathBuf::from("run.md"),
+        property: "start.stack[0].action.command".to_string(),
+        raw: "echo {{ err.msg }}".to_string(),
+        message: "late-binding reference `err`".to_string(),
+        source: None,
+    };
+    let typed = CompositionError::LifecycleShellResolution {
+        source_path: PathBuf::from("run.md"),
+        property: "start.stack[0].action.command".to_string(),
+        raw: "echo {{ err.msg }}".to_string(),
+        message: "late-binding reference `err`".to_string(),
+        source: Some(Box::new(markdown_error())),
+    };
+
+    assert_eq!(untyped.to_string(), typed.to_string());
+    assert_eq!(untyped.code(), typed.code());
+    assert_eq!(untyped.detail(), typed.detail());
+    assert!(
+        (&untyped as &(dyn std::error::Error + 'static))
+            .source()
+            .is_none(),
+        "the late-binding guard has no typed cause to publish"
+    );
+    assert!(
+        (&typed as &(dyn std::error::Error + 'static))
+            .source()
+            .is_some(),
+        "the DM2 failure must publish its cause"
+    );
+}
+
+/// The permissions probe now keeps the `io::Error`, so a handler can read the
+/// OS reason instead of substring-matching the message. `Display` must not move.
+#[test]
+fn insufficient_file_permissions_keeps_its_io_error_and_display() {
+    let err = CompositionError::InsufficientFilePermissions {
+        path: PathBuf::from("/repo/run.md"),
+        source: std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"),
+    };
+
+    assert_eq!(
+        err.to_string(),
+        "insufficient file permissions (need read+write): /repo/run.md: denied"
+    );
+    let io = (&err as &(dyn std::error::Error + 'static))
+        .source()
+        .and_then(|c| c.downcast_ref::<std::io::Error>())
+        .expect("the probe's io::Error must be recoverable");
+    assert_eq!(io.kind(), std::io::ErrorKind::PermissionDenied);
+}
+
+/// `InlineRewriteFailed` carries the prose its `InvalidInlineResponse(format!(…))`
+/// predecessor rendered, so the twins must agree on every projection.
+#[test]
+fn inline_rewrite_failed_twins_agree_and_publish_the_markdown_error() {
+    let plain = CompositionError::InvalidInlineResponse(format!(
+        "failed to update last_updated: {}",
+        markdown_error()
+    ));
+    let sourced = CompositionError::InlineRewriteFailed(markdown_error());
+
+    assert_eq!(plain.to_string(), sourced.to_string());
+    assert_eq!(plain.code(), sourced.code());
+    assert_eq!(plain.detail(), sourced.detail());
+    assert!(
+        (&sourced as &(dyn std::error::Error + 'static))
+            .source()
+            .and_then(|c| c.downcast_ref::<MarkdownError>())
+            .is_some()
+    );
+}
+
+// -- Staged for batches 4 and 5 ---------------------------------------------
+//
+// These variants have no call site yet; their consuming batches add them. The
+// contract they must hold on arrival is that they are drop-in replacements for
+// the prose variants they supersede, so it is locked here rather than left for
+// the batch that discovers it is not true.
+
+fn parse_error() -> ParseError {
+    darkmatter::markdown::compose::expression::parse("1 +").unwrap_err()
+}
+
+/// `LifecycleWhenExpressionInvalid` shares `LifecycleStackInvalidShape`'s
+/// `message`, so batch 4 can retain a `when:` parse error without moving
+/// `Display`, the code, the detail payload, or the rendered block.
+#[test]
+fn lifecycle_when_expression_invalid_twins_with_the_shape_variant() {
+    let message = format!("`when` is not a valid expression: {}", parse_error());
+    let plain = CompositionError::LifecycleStackInvalidShape {
+        source_path: PathBuf::from("run.md"),
+        property: "start".to_string(),
+        message: message.clone(),
+    };
+    let sourced = CompositionError::LifecycleWhenExpressionInvalid {
+        source_path: PathBuf::from("run.md"),
+        property: "start".to_string(),
+        message,
+        source: parse_error(),
+    };
+
+    assert_eq!(plain.to_string(), sourced.to_string());
+    assert_eq!(plain.code(), sourced.code());
+    assert_eq!(plain.category(), sourced.category());
+    assert_eq!(plain.disposition(), sourced.disposition());
+    assert_eq!(plain.origin(), sourced.origin());
+    assert_eq!(plain.detail(), sourced.detail());
+
+    let term = biscuit_terminal::terminal::Terminal::default();
+    assert_eq!(
+        plain.status_block(&term).render(&term),
+        sourced.status_block(&term).render(&term),
+        "the staged variant must render as its shape twin"
+    );
+    assert!(
+        (&sourced as &(dyn std::error::Error + 'static))
+            .source()
+            .and_then(|c| c.downcast_ref::<ParseError>())
+            .is_some()
+    );
+}
+
+/// `LifecycleActionInvalidLongForm`'s optional `#[source]` retains the typed
+/// `ActionExprError` (and its `ParseError` cause) without moving `Display`, the
+/// code, the detail payload, or the rendered block. A `None`-sourced twin (the
+/// shape failures that never had a lower cause) must be indistinguishable on
+/// every observable surface.
+#[test]
+fn lifecycle_action_invalid_long_form_source_twins_with_the_sourceless_shape() {
+    let cause = ActionExprError::Parse(Box::new(parse_error()));
+    let message = format!("`x` is not a valid value: {cause}");
+    let plain = CompositionError::LifecycleActionInvalidLongForm {
+        source_path: PathBuf::from("run.md"),
+        property: "start".to_string(),
+        action: "set".to_string(),
+        message: message.clone(),
+        source: None,
+    };
+    let sourced = CompositionError::LifecycleActionInvalidLongForm {
+        source_path: PathBuf::from("run.md"),
+        property: "start".to_string(),
+        action: "set".to_string(),
+        message,
+        source: Some(cause),
+    };
+
+    assert_eq!(plain.to_string(), sourced.to_string());
+    assert_eq!(plain.code(), sourced.code());
+    assert_eq!(plain.category(), sourced.category());
+    assert_eq!(plain.disposition(), sourced.disposition());
+    assert_eq!(plain.origin(), sourced.origin());
+    assert_eq!(plain.detail(), sourced.detail());
+
+    let term = biscuit_terminal::terminal::Terminal::default();
+    assert_eq!(
+        plain.status_block(&term).render(&term),
+        sourced.status_block(&term).render(&term),
+        "the sourced variant must render as its source-less twin"
+    );
+
+    // The concrete cause enum is recoverable directly (it is carried unboxed),
+    // and its `Parse` arm carries the typed Darkmatter parse error.
+    let action_cause = (&sourced as &(dyn std::error::Error + 'static))
+        .source()
+        .and_then(|c| c.downcast_ref::<ActionExprError>())
+        .expect("the source downcasts to ActionExprError");
+    assert!(
+        matches!(action_cause, ActionExprError::Parse(_)),
+        "the retained cause is the typed parse failure, got: {action_cause:?}"
+    );
+}
+
+/// `LoopExpressionInvalid` derives its prose from `kind`, `condition`, and the
+/// cause's stage. Both stages must reproduce `LoopInvalid`'s text byte for byte.
+#[test]
+fn loop_expression_invalid_twins_with_loop_invalid_at_both_stages() {
+    let parse_twin = CompositionError::LoopInvalid(format!(
+        "failed to parse loop.while `1 +`: {}",
+        parse_error()
+    ));
+    let parse_sourced = CompositionError::LoopExpressionInvalid {
+        kind: "while".to_string(),
+        condition: "1 +".to_string(),
+        source: LoopExpressionCause::Parse(parse_error()),
+    };
+    assert_eq!(parse_twin.to_string(), parse_sourced.to_string());
+    assert_eq!(parse_twin.code(), parse_sourced.code());
+    assert_eq!(parse_twin.detail(), parse_sourced.detail());
+
+    let eval_cause = ExpressionError::UnknownFunction {
+        name: "nope".to_string(),
+    };
+    let eval_twin = CompositionError::LoopInvalid(format!(
+        "failed to evaluate loop.until `nope()`: {eval_cause}"
+    ));
+    let eval_sourced = CompositionError::LoopExpressionInvalid {
+        kind: "until".to_string(),
+        condition: "nope()".to_string(),
+        source: LoopExpressionCause::Evaluate(Box::new(eval_cause)),
+    };
+    assert_eq!(eval_twin.to_string(), eval_sourced.to_string());
+    assert_eq!(eval_twin.code(), eval_sourced.code());
+}
+
+/// `LoopActionExpressionInvalid` derives `InvalidAction`'s two template
+/// messages from the cause's stage, so batch 5 can drop it in per stage.
+#[test]
+fn loop_action_expression_invalid_twins_with_invalid_action_at_both_stages() {
+    let parse_twin = CompositionError::InvalidAction {
+        iteration: 2,
+        action_index: 1,
+        total_actions: 3,
+        message: format!(
+            "invalid template `{{{{x +}}}}` in loop action: {}",
+            parse_error()
+        ),
+    };
+    let parse_sourced = CompositionError::LoopActionExpressionInvalid {
+        iteration: 2,
+        action_index: 1,
+        total_actions: 3,
+        expression: "x +".to_string(),
+        source: LoopExpressionCause::Parse(parse_error()),
+    };
+    assert_eq!(parse_twin.to_string(), parse_sourced.to_string());
+    assert_eq!(parse_twin.code(), parse_sourced.code());
+    assert_eq!(parse_twin.detail(), parse_sourced.detail());
+
+    let eval_cause = ExpressionError::UnknownFunction {
+        name: "nope".to_string(),
+    };
+    let eval_twin = CompositionError::InvalidAction {
+        iteration: 2,
+        action_index: 1,
+        total_actions: 3,
+        message: format!("failed to evaluate template `{{{{nope()}}}}`: {eval_cause}"),
+    };
+    let eval_sourced = CompositionError::LoopActionExpressionInvalid {
+        iteration: 2,
+        action_index: 1,
+        total_actions: 3,
+        expression: "nope()".to_string(),
+        source: LoopExpressionCause::Evaluate(Box::new(eval_cause)),
+    };
+    assert_eq!(eval_twin.to_string(), eval_sourced.to_string());
+}
+
+/// A registered code never projects a top-level `null` detail (spec §D7), and
+/// every new variant must satisfy it — including the staged ones, whose
+/// consuming batch would otherwise be the one to discover it does not.
+#[test]
+fn every_batch_3_variant_projects_a_catalog_shaped_detail() {
+    let errors: Vec<CompositionError> = vec![
+        CompositionError::PreFlightShellAuditFailed {
+            source: crate::harness::HarnessError::ShellCommandDenied {
+                command: "rm -rf /".to_string(),
+            },
+        },
+        CompositionError::PreFlightStateBuildFailed {
+            source: CtxMergeError::InvalidUserCtx {
+                kind: "array".to_string(),
+            },
+        },
+        CompositionError::InsufficientFilePermissions {
+            path: PathBuf::from("/repo/run.md"),
+            source: std::io::Error::other("denied"),
+        },
+        CompositionError::InlineRewriteFailed(markdown_error()),
+        CompositionError::LifecycleShellResolution {
+            source_path: PathBuf::from("run.md"),
+            property: "start.stack[0].action.command".to_string(),
+            raw: "echo hi".to_string(),
+            message: "boom".to_string(),
+            source: Some(Box::new(markdown_error())),
+        },
+        CompositionError::LifecycleWhenExpressionInvalid {
+            source_path: PathBuf::from("run.md"),
+            property: "start".to_string(),
+            message: "bad".to_string(),
+            source: parse_error(),
+        },
+        CompositionError::LoopExpressionInvalid {
+            kind: "while".to_string(),
+            condition: "1 +".to_string(),
+            source: LoopExpressionCause::Parse(parse_error()),
+        },
+        CompositionError::LoopActionExpressionInvalid {
+            iteration: 1,
+            action_index: 1,
+            total_actions: 1,
+            expression: "x".to_string(),
+            source: LoopExpressionCause::Parse(parse_error()),
+        },
+    ];
+
+    for err in &errors {
+        assert!(
+            !err.detail().is_null(),
+            "`{}` projects a top-level null detail for code `{}`",
+            err,
+            err.code()
+        );
+    }
+}
+
+// -- carried diagnostic snapshots (spec §D9) -------------------------------
+//
+// `LoopIterationFailed` and `SequenceTaskPromptLaunch` are both raised at a
+// boundary whose upstream returns an erased `color_eyre::eyre::Report`. The
+// prose field records what failed; the snapshot records *which diagnostic*
+// failed, so the facets survive a boundary no error value crosses.
+
+/// The projection the CLI sites build from the erased wiring error.
+fn carried_snapshot() -> DiagnosticSnapshot {
+    DiagnosticSnapshot::from_diagnostic(&CompositionError::FileNotFound("missing.md".to_string()))
+}
+
+#[test]
+fn loop_iteration_failed_carries_the_wiring_diagnostic_facets() {
+    let err = CompositionError::LoopIterationFailed {
+        iteration: 1,
+        prompt_path: PathBuf::from("plan.md"),
+        exit_code: 1,
+        reason: "could not resolve provider binary".to_string(),
+        exit_reason: None,
+        snapshot: Some(Box::new(carried_snapshot())),
+    };
+
+    let CompositionError::LoopIterationFailed { snapshot, .. } = &err else {
+        panic!("constructed variant");
+    };
+    let snapshot = snapshot.as_ref().expect("the wiring chain carried one");
+    assert_eq!(snapshot.code, "composition.invalid_file_reference");
+    assert_eq!(snapshot.category, "composition");
+    assert_eq!(snapshot.detail["reference"], "missing.md");
+}
+
+#[test]
+fn sequence_task_prompt_launch_carries_the_wrapper_diagnostic_facets() {
+    let err = CompositionError::SequenceTaskPromptLaunch {
+        task: "review".to_string(),
+        path: PathBuf::from("tasks/review.md"),
+        message: "could not resolve provider binary".to_string(),
+        snapshot: Some(Box::new(carried_snapshot())),
+    };
+
+    let CompositionError::SequenceTaskPromptLaunch { snapshot, .. } = &err else {
+        panic!("constructed variant");
+    };
+    let snapshot = snapshot.as_ref().expect("the wrapper chain carried one");
+    assert_eq!(snapshot.code, "composition.invalid_file_reference");
+    assert_eq!(snapshot.detail["reference"], "missing.md");
+}
+
+#[test]
+fn carrying_a_snapshot_does_not_change_the_rendered_prose() {
+    // Spec §D10: the snapshot is additive. Every existing surface — `Display`,
+    // and therefore the summary text and status-block body built from it —
+    // must read byte-for-byte the same with and without it.
+    let without = CompositionError::LoopIterationFailed {
+        iteration: 2,
+        prompt_path: PathBuf::from("fixes/plan.md"),
+        exit_code: 1,
+        reason: "step_timeout".to_string(),
+        exit_reason: Some("step_timeout".to_string()),
+        snapshot: None,
+    };
+    let with = CompositionError::LoopIterationFailed {
+        iteration: 2,
+        prompt_path: PathBuf::from("fixes/plan.md"),
+        exit_code: 1,
+        reason: "step_timeout".to_string(),
+        exit_reason: Some("step_timeout".to_string()),
+        snapshot: Some(Box::new(carried_snapshot())),
+    };
+    assert_eq!(with.to_string(), without.to_string());
+
+    let launch_without = CompositionError::SequenceTaskPromptLaunch {
+        task: "review".to_string(),
+        path: PathBuf::from("tasks/review.md"),
+        message: "boom".to_string(),
+        snapshot: None,
+    };
+    let launch_with = CompositionError::SequenceTaskPromptLaunch {
+        task: "review".to_string(),
+        path: PathBuf::from("tasks/review.md"),
+        message: "boom".to_string(),
+        snapshot: Some(Box::new(carried_snapshot())),
+    };
+    assert_eq!(launch_with.to_string(), launch_without.to_string());
+}
+
+#[test]
+fn carrying_a_snapshot_does_not_move_the_variants_own_identity() {
+    // The carried snapshot is data on the record, not a `#[source]`. Selection
+    // must still stop at the variant itself, so `err.code` — an authored
+    // matching surface — cannot shift under a `when:` clause (spec §D10).
+    let with = CompositionError::LoopIterationFailed {
+        iteration: 1,
+        prompt_path: PathBuf::from("plan.md"),
+        exit_code: 1,
+        reason: "boom".to_string(),
+        exit_reason: None,
+        snapshot: Some(Box::new(carried_snapshot())),
+    };
+
+    assert_eq!(with.code(), "composition.failed");
+    assert_eq!(
+        crate::diagnostics::DiagnosticSnapshot::select(&with)
+            .map(|selected| selected.code)
+            .as_deref(),
+        Some("composition.failed"),
+    );
 }

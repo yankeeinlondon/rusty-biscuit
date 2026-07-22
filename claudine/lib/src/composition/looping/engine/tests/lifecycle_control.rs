@@ -86,6 +86,7 @@ fn run_loop_lifecycle(
         &effect_engine,
         &crate::composition::lifecycle_executor::SystemShellRunner,
         emitter,
+        None,
         |_ctx, _guard| {
             *invocations.borrow_mut() += 1;
             Ok(LoopIterationOutput::success("ran"))
@@ -567,6 +568,7 @@ fn run_loop_lifecycle_emitting_terminal(
         &effect_engine,
         &shell_runner,
         emitter,
+        None,
         |ctx, guard| {
             *invocations.borrow_mut() += 1;
             // Emit the terminal `Success` signal so the loop gate's
@@ -586,6 +588,7 @@ fn run_loop_lifecycle_emitting_terminal(
                 &shell_runner,
                 emitter,
                 prompt_path.parent(),
+                None,
                 Some(&timing),
                 Some(&current),
             );

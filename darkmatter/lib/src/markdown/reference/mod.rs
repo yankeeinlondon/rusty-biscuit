@@ -17,42 +17,80 @@ pub use errors::ReferenceError;
 pub use types::*;
 
 use crate::markdown::Markdown;
-use crate::markdown::compose::ComposeSource;
+use crate::markdown::compose::{ComposeOptions, ComposeSource};
 use crate::markdown::compose::transclusion::{
     BlockOptions, DirectiveKind, parse_directives, parse_frontmatter_refs,
 };
 use crate::markdown::types::MarkdownResult;
 use std::path::PathBuf;
 
-/// Resolve a raw transclusion target to a string path using `FileReference`
-/// semantics, with fallback to simple path join.
-///
-/// Mirrors the resolution logic in [`graph::resolve_local_target`] so that
-/// `transclusions().resolved_target` agrees with graph/validation resolution.
+/// Ensure compatibility callers capture fallback resolution state once.
+fn options_with_reference_resolution_context(
+    source: &ComposeSource,
+    options: &ComposeOptions,
+) -> ComposeOptions {
+    if options.file_resolution_context().is_some() {
+        return options.clone();
+    }
+    let ComposeSource::File(source_path) = source else {
+        return options.clone();
+    };
+    let Some(base_dir) = source_path.parent() else {
+        return options.clone();
+    };
+    let repository_root = crate::markdown::compose::find_git_root_from(base_dir);
+    let package_area = crate::markdown::compose::find_package_area_from(
+        base_dir,
+        repository_root.as_deref(),
+    );
+    let context = crate::markdown::compose::document_resolution_context(
+        base_dir,
+        Some(source_path),
+        &options.magic_paths,
+        repository_root.as_deref(),
+        package_area.as_deref(),
+    );
+    options.clone().with_file_resolution_context(context)
+}
+
+/// Resolve a local reference through the shared detailed resolver.
 fn resolve_transclusion_target(
     raw_target: &str,
     source: &ComposeSource,
-    magic_paths: &[(std::path::PathBuf, biscuit_file::PathPosition)],
-) -> Option<String> {
-    match source {
-        ComposeSource::File(base_path) => {
-            let base_dir = base_path.parent();
-
-            // Try biscuit_file::FileReference for full resolution (@repo-root, etc.)
-            if let Ok(mut file_ref) = biscuit_file::FileReference::new(raw_target) {
-                for (path, position) in magic_paths {
-                    file_ref = file_ref.add_magic_path(path, *position);
-                }
-                if let Ok(Some(resolved)) = file_ref.resolve_relative(base_dir) {
-                    return Some(resolved.to_string_lossy().to_string());
-                }
+    options: &ComposeOptions,
+) -> Result<Option<PathBuf>, ReferenceError> {
+    let ComposeSource::File(source_path) = source else {
+        return Ok(None);
+    };
+    let Some(base_dir) = source_path.parent() else {
+        return Ok(None);
+    };
+    let context = match options.file_resolution_context() {
+        Some(snapshot) => match options.source_derivation {
+            crate::markdown::compose::context::options::SourceDerivation::Ordinary => {
+                snapshot.for_source(source_path)
             }
-
-            // Fallback to simple path join
-            base_dir.map(|dir| dir.join(raw_target).to_string_lossy().to_string())
+            crate::markdown::compose::context::options::SourceDerivation::TrustedExternal => {
+                snapshot.for_trusted_external_source(source_path)
+            }
+        },
+        None => {
+            let repository_root = crate::markdown::compose::find_git_root_from(base_dir);
+            let package_area = crate::markdown::compose::find_package_area_from(
+                base_dir,
+                repository_root.as_deref(),
+            );
+            crate::markdown::compose::document_resolution_context(
+                base_dir,
+                Some(source_path),
+                &options.magic_paths,
+                repository_root.as_deref(),
+                package_area.as_deref(),
+            )
         }
-        _ => None,
-    }
+    };
+    let reference = biscuit_file::FileReference::new(raw_target)?;
+    Ok(reference.resolve_detailed(&context).into_convenience()?)
 }
 
 #[allow(dead_code)]
@@ -157,7 +195,26 @@ impl Markdown {
     ///
     /// This is a local query that does not follow transclusions recursively.
     /// For recursive traversal, use [`transclusion_graph()`](Self::transclusion_graph).
+    ///
+    /// This compatibility facade captures ambient resolution state when called.
+    /// Request-scoped consumers should use [`transclusions_with_options`](Self::transclusions_with_options)
+    /// and supply `ComposeOptions::with_file_resolution_context`.
     pub fn transclusions(&self) -> MarkdownResult<Vec<TransclusionRef>> {
+        let source = self.source().clone().unwrap_or(ComposeSource::Unknown);
+        let options = options_with_reference_resolution_context(&source, &ComposeOptions::default());
+        self.transclusions_with_options(&options)
+    }
+
+    /// Returns local transclusion references using the supplied resolution policy.
+    ///
+    /// A host-provided `ComposeOptions::file_resolution_context` is reused for
+    /// every target, so later CWD, HOME, or environment changes cannot alter the
+    /// result. Invalid references and I/O failures are returned; only a typed
+    /// no-match produces `resolved_target: None`.
+    pub fn transclusions_with_options(
+        &self,
+        options: &ComposeOptions,
+    ) -> MarkdownResult<Vec<TransclusionRef>> {
         let source = self.source().clone().unwrap_or(ComposeSource::Unknown);
         let mut refs = Vec::new();
 
@@ -175,7 +232,8 @@ impl Markdown {
             // Fill resolved_target using FileReference semantics (rec #4)
             let resolved_target = match &kind {
                 TransclusionRefKind::File | TransclusionRefKind::Code => {
-                    resolve_transclusion_target(&directive.raw_target, &source, &[])
+                    resolve_transclusion_target(&directive.raw_target, &source, options)?
+                        .map(|path| path.to_string_lossy().to_string())
                 }
                 TransclusionRefKind::Url => {
                     // URL targets are already absolute
@@ -254,7 +312,8 @@ impl Markdown {
             self.source_context_for_errors(),
         ) {
             for prologue in &fm_refs.prologue {
-                let resolved_target = resolve_transclusion_target(prologue, &source, &[]);
+                let resolved_target = resolve_transclusion_target(prologue, &source, options)?
+                    .map(|path| path.to_string_lossy().to_string());
                 refs.push(TransclusionRef {
                     kind: TransclusionRefKind::Prologue,
                     raw_target: prologue.clone(),
@@ -270,7 +329,8 @@ impl Markdown {
             }
 
             for epilogue in &fm_refs.epilogue {
-                let resolved_target = resolve_transclusion_target(epilogue, &source, &[]);
+                let resolved_target = resolve_transclusion_target(epilogue, &source, options)?
+                    .map(|path| path.to_string_lossy().to_string());
                 refs.push(TransclusionRef {
                     kind: TransclusionRefKind::Epilogue,
                     raw_target: epilogue.clone(),

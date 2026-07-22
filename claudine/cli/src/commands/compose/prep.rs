@@ -24,8 +24,9 @@ use claudine::composition::{
     PrepareOptions, PreparedComposition, ResolvedCompositionSource, ResolvedExecutionTarget,
     SharedApprovalCache, SystemShellRunner, build_loop_seed_with_lifecycle, resolve_loop_config,
 };
+use claudine::diagnostics::DiagnosticSnapshot;
 use claudine::system_prompt::SystemPromptArgs;
-use color_eyre::eyre::{Result, eyre};
+use color_eyre::eyre::{Result, WrapErr, eyre};
 use tracing::info_span;
 
 use super::interrupt::{USER_INTERRUPT_EXIT_CODE, install_user_interrupt_guard};
@@ -98,7 +99,23 @@ pub(crate) fn run_composition_inner(
     let system_prompt_args = shared.system_prompt_args();
 
     let frontmatter_load_t = std::time::Instant::now();
-    let source = resolve_composition_source(&file, kind, &shared)?;
+    let provisional_context = claudine::composition::capture_file_resolution_context()?;
+    let source = resolve_composition_source(
+        &file,
+        kind,
+        &shared,
+        &provisional_context,
+    )?;
+    // Re-anchor the request snapshot at the resolved source's location so a
+    // top-level document selected from a different repository keeps that
+    // repository's nested references (D2/D10, AC12). The provisional context
+    // captured above is the right anchor only for resolving the top-level CLI
+    // argument; downstream surfaces (body composition, transclusion,
+    // schema, lifecycle) derive from this source-anchored snapshot.
+    let file_resolution_context = claudine::composition::derive_request_context_for_source(
+        &provisional_context,
+        &source.resolved_path,
+    )?;
     record_prep_substage(
         &mut prep_substages,
         perf_enabled,
@@ -247,15 +264,8 @@ pub(crate) fn run_composition_inner(
 
     kind.on_header_emitted(&source, &shared, &file, inline_state)?;
 
-    // ── Pre-flight shell approval ────────────────────────────────────────
-    //
-    // `ComposeContext::capture()` + `env_mut().insert(...)` installs the
-    // resolved `AGENT` (and any other composition env overrides) into
-    // the same Darkmatter compose pipeline that the preflight pass
-    // walks. Without this, frontmatter values that derive from env
-    // (e.g. `runtime_agent: '{{ env.AGENT }}'`) fail Darkmatter's
-    // built-in schema validation during preflight, before reaching
-    // `prepare_direct_with_schema`.
+    // Preflight must see the same resolved environment as the main prepare
+    // pass, including frontmatter values derived from `env.AGENT`.
     let compose_options = {
         let mut ctx = darkmatter::markdown::compose::ComposeContext::capture();
         for (key, value) in &env_overrides {
@@ -263,21 +273,13 @@ pub(crate) fn run_composition_inner(
         }
         let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(ctx)
             .with_source_file(&source.resolved_path)
-            // Defer the lifecycle event keys (DM1), exactly as the main prepare
-            // passes do. The preflight runs a full compose pipeline purely to
-            // discover template `::shell` directives; without the exclusion it
-            // also resolves the deferred lifecycle subtree at compose time, so a
-            // `success`/`failure` event's read-side file reference (e.g.
-            // `frontmatter(plan, …)` over a plan this very run is about to
-            // create) trips the now-fatal file-ref check before the event that
-            // would make the file exist ever fires. Lifecycle shell commands are
-            // audited separately via `collect_lifecycle_shell_commands`.
+            .with_file_resolution_context(file_resolution_context.clone())
+            // Lifecycle subtrees remain deferred because their file references
+            // may target artifacts created before the event fires. Their shell
+            // commands are audited separately by `collect_lifecycle_shell_commands`.
             .with_exclude_keys(LIFECYCLE_EVENT_KEYS.iter().copied())
-            // Anchor `file`-typed schema validation on the launch area so a
-            // caller-supplied area-relative path resolves here document-first
-            // then launch-area — exactly as the main prepare pass and the
-            // lifecycle events do. Without it the preflight's built-in schema
-            // validation would fall back to the (already-mutated) process CWD.
+            // Retain the captured launch directory as diagnostic metadata;
+            // document-authored references use the request-scoped resolver.
             .with_file_ref_fallback_dir(prep_context.launch_workspace.launch_cwd.clone());
         if let Some(ref overrides) = set_overrides {
             opts = opts.with_set_overrides(overrides.clone());
@@ -341,6 +343,7 @@ pub(crate) fn run_composition_inner(
         startup_timings,
         prep_substages,
         compose_entry,
+        file_resolution_context,
     )
 }
 
@@ -360,7 +363,7 @@ fn validate_timeout_flags(shared: &SharedComposeArgs) -> Result<()> {
     }
     if let Some(ref raw) = shared.timeout {
         claudine::harness::parse_timeout(raw, std::path::Path::new("<--timeout>"))
-            .map_err(|e| eyre!("invalid --timeout value: {e}"))?;
+            .wrap_err("invalid --timeout value")?;
     }
     Ok(())
 }
@@ -372,10 +375,11 @@ fn resolve_composition_source(
     file: &str,
     kind: CompositionKind,
     shared: &SharedComposeArgs,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
 ) -> Result<ResolvedCompositionSource> {
     let stderr_is_tty = std::io::stderr().is_terminal()
         || std::env::var_os("FORCE_COLOR").is_some();
-    match claudine::composition::resolve_composition_source(file) {
+    match claudine::composition::resolve_composition_source_in_context(file, file_resolution_context) {
         Ok(source) => Ok(source),
         Err(CompositionError::FileNotFound(_)) => {
             let mode = match kind {
@@ -386,20 +390,25 @@ fn resolve_composition_source(
             };
             let selected =
                 crate::completion::operation_file::autocomplete_operation_file(file, mode)?;
-            claudine::composition::resolve_composition_source(&selected).map_err(|e| {
-                claudine::composition::enrich_composition_source_load_error(
+            claudine::composition::resolve_composition_source_in_context(
+                &selected,
+                file_resolution_context,
+            ).map_err(|e| {
+                claudine::composition::enrich_composition_source_load_error_in_context(
                     &selected,
                     e,
                     stderr_is_tty,
+                    file_resolution_context,
                 )
                 .into()
             })
         }
         Err(e) => {
-            let e = claudine::composition::enrich_composition_source_load_error(
+            let e = claudine::composition::enrich_composition_source_load_error_in_context(
                 file,
                 e,
                 stderr_is_tty,
+                file_resolution_context,
             );
             if kind.is_inline() {
                 // Only a genuine reference-resolution failure means the file
@@ -522,6 +531,9 @@ fn build_and_run_loop(
         .build();
     let shell_runner = SystemShellRunner;
     let emitter = DefaultLifecycleEmitter;
+    // One cell for the whole `--loop` run: a `set` written in iteration 1 and
+    // every committed `outputs` entry stay visible to later iterations.
+    let runtime_state = std::sync::Arc::new(claudine::composition::RuntimeState::new());
 
     run_loop_with_overrides(
         source,
@@ -533,6 +545,7 @@ fn build_and_run_loop(
         &effect_engine,
         &shell_runner,
         &emitter,
+        loop_prepare_options.file_resolution_context.as_ref(),
         |ctx, guard| {
             let prepared = {
                 let _span = match kind {
@@ -547,7 +560,13 @@ fn build_and_run_loop(
                 // skip schema validation and shell pre-flight because the
                 // seed/frontmatter state was already judged on iteration 1.
                 let mut iteration_options = loop_prepare_options.clone();
-                iteration_options.set_overrides = Some(ctx.as_set_overrides());
+                iteration_options.set_overrides = Some(
+                    claudine::composition::layered_set_overrides(
+                        Some(&ctx.as_set_overrides()),
+                        Some(&runtime_state.snapshot()),
+                        None,
+                    ),
+                );
                 if ctx.iteration == 1 {
                     kind.prepare_with_schema(source, iteration_options)?
                 } else {
@@ -579,6 +598,7 @@ fn build_and_run_loop(
                 header_emitted,
                 kind.mode(),
                 prep_context,
+                std::sync::Arc::clone(&runtime_state),
             );
 
             let outcome = execute_composition_attempt(
@@ -598,6 +618,10 @@ fn build_and_run_loop(
                     exit_code: 1,
                     reason: e.to_string(),
                     exit_reason: None,
+                    // `Report` boxes its source rather than discarding it, so
+                    // the typed diagnostic the wiring raised is still reachable
+                    // by downcast here — the last point that has it.
+                    snapshot: DiagnosticSnapshot::select(e.as_ref()).map(Box::new),
                 }
             })?;
 
@@ -627,6 +651,7 @@ fn build_execution_request(
     header_emitted: bool,
     mode: CompositionMode,
     prep_context: &CompositionPrepContext,
+    runtime_state: std::sync::Arc<claudine::composition::RuntimeState>,
 ) -> CompositionExecutionRequest {
     let resolved = shared.resolve_session_interactivity(prepared.selection_hints.interactive);
     CompositionExecutionRequest {
@@ -666,6 +691,10 @@ fn build_execution_request(
         header_emitted,
         provider_args: shared.provider_args.clone(),
         provider_args_explicit: shared.provider_args_explicit,
+        runtime_state: Some(runtime_state),
+        suppress_output_commit: false,
+        // Not a sequence task: nothing owns a bar for this run.
+        task_frame_writer: None,
     }
 }
 
@@ -693,6 +722,7 @@ fn execute_loop_or_single(
     mut startup_timings: Option<crate::perf::StartupTimings>,
     prep_substages: Vec<crate::perf::SubstageTiming>,
     compose_entry: std::time::Instant,
+    file_resolution_context: biscuit_file::FileResolutionContext,
 ) -> Result<i32> {
     let loop_options = build_loop_options(&shared);
 
@@ -732,6 +762,11 @@ fn execute_loop_or_single(
         shell_working_directory: Some(prep_context.launch_workspace.child_cwd.clone()),
         prepared_context: Some(prepared_context.clone()),
         file_ref_fallback_dir: Some(prep_context.launch_workspace.launch_cwd.clone()),
+        file_resolution_context: Some(file_resolution_context.clone()),
+        // Name coercion is a sequence-only concern; standalone compose/loop
+        // prep injects no `state` object, so there is nothing to coerce.
+        name_coercion_keys: Vec::new(),
+        allow_empty_body: false,
     };
 
     if !shared.dry_run {
@@ -806,6 +841,9 @@ fn execute_loop_or_single(
                 ),
                 prepared_context: Some(prepared_context.clone()),
                 file_ref_fallback_dir: Some(prep_context.launch_workspace.launch_cwd.clone()),
+                file_resolution_context: Some(file_resolution_context.clone()),
+                name_coercion_keys: Vec::new(),
+                allow_empty_body: false,
             },
         )
         .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?
@@ -824,6 +862,7 @@ fn execute_loop_or_single(
         header_emitted,
         kind.mode(),
         &prep_context,
+        std::sync::Arc::new(claudine::composition::RuntimeState::new()),
     );
 
     if let Some(ref mut timings) = startup_timings {

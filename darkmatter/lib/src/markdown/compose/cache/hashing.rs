@@ -200,10 +200,12 @@ pub(crate) fn options_hash(options: &ComposeOptions) -> u64 {
     }
     parts.push(format!("trigger_schemas={}", options.trigger_schemas));
 
-    // The launch-area anchor changes read-side file resolution (file_exists,
-    // frontmatter, file schema validation), so distinct anchors must not share
-    // a cache entry. A `Some` discriminant keeps `None` distinct from
-    // `Some("")`.
+    // The launch-area anchor is no longer a file-resolution input (D2: it is not
+    // a fallback for document-authored references), but it remains part of the
+    // authored `ComposeOptions` identity. It is kept in the hash conservatively
+    // so two runs differing only in their anchor stay in distinct cache entries
+    // (over-invalidation is safe; sharing would risk surfacing a stale anchor in
+    // a diagnostic). A `Some` discriminant keeps `None` distinct from `Some("")`.
     match options.file_ref_fallback_dir {
         Some(ref dir) => parts.push(format!("file_ref_fallback_dir=Some:{}", dir.display())),
         None => parts.push("file_ref_fallback_dir=None".to_string()),

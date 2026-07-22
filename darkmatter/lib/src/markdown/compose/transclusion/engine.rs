@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Builds a target→resolved-target cache from a preflight graph node's
-/// outgoing edges, keyed by the normalized transclusion target.
+/// outgoing edges, keyed by the authored transclusion target.
 ///
 /// [`TransclusionEngine::prepare_block_transclusions`] consults this to skip a
 /// second [`resolve_target`](transclusion::resolve_target) pass for a directive
@@ -39,7 +39,7 @@ pub(crate) fn build_resolution_cache(
         .iter()
         .map(|edge| {
             (
-                transclusion::normalize_reference_token(&edge.directive.raw_target),
+                edge.directive.raw_target.clone(),
                 edge.resolved_target.clone(),
             )
         })
@@ -474,8 +474,8 @@ impl<'a> TransclusionEngine<'a> {
                 }
             }
 
-            let target = transclusion::normalize_reference_token(&directive.raw_target);
-            let cached = resolved_cache.and_then(|cache| cache.get(&target));
+            let target = &directive.raw_target;
+            let cached = resolved_cache.and_then(|cache| cache.get(target));
             let resolved = if let Some(cached) = cached {
                 // Reuse the preflight-resolved target, skipping a second
                 // `resolve_target` pass. The span still rides on `directive`
@@ -500,7 +500,7 @@ impl<'a> TransclusionEngine<'a> {
             } else {
                 match transclusion::resolve_target(
                     directive.kind,
-                    &target,
+                    target,
                     &transclusion_opts,
                     &options.source,
                     directive.line,
@@ -659,29 +659,29 @@ impl<'a> TransclusionEngine<'a> {
         prepared: &mut Vec<PreparedTransclusion>,
         next_order: &mut usize,
     ) -> MarkdownResult<()> {
-        if !transclusion::is_url_like(reference) && !transclusion::is_file_like_reference(reference)
-        {
-            prepared.push(PreparedTransclusion::FixedSection {
-                order: *next_order,
-                slot,
-                content: Some(reference.to_string()),
-                report: ComposeReport::new(),
-            });
-            *next_order += 1;
-            return Ok(());
-        }
-
-        let kind = if transclusion::is_url_like(reference) {
-            transclusion::DirectiveKind::Url
-        } else {
-            transclusion::DirectiveKind::File
+        let file_ref = match transclusion::classify_frontmatter_reference(reference) {
+            transclusion::FrontmatterReference::Inline => {
+                prepared.push(PreparedTransclusion::FixedSection {
+                    order: *next_order,
+                    slot,
+                    content: Some(reference.to_string()),
+                    report: ComposeReport::new(),
+                });
+                *next_order += 1;
+                return Ok(());
+            }
+            transclusion::FrontmatterReference::Parsed(file_ref) => file_ref,
+            transclusion::FrontmatterReference::ParseError(error) => {
+                return Err(transclusion::TransclusionError::from(error).into());
+            }
         };
+
         let ignore_invalid = self.resolve_ignore_invalid(options);
         let transclusion_opts = options.transclusion_options();
 
-        let resolved = match transclusion::resolve_target(
-            kind,
-            reference,
+        let resolved = match transclusion::resolve_parsed_target(
+            transclusion::DirectiveKind::File,
+            &file_ref,
             &transclusion_opts,
             &options.source,
             0,
@@ -1357,7 +1357,7 @@ impl<'a> TransclusionEngine<'a> {
                     .with_replace_parent_wins(replace_parent_wins)
                     .with_one_off_replace(one_off.clone());
                 child_options.external_state = Some(inherited.clone());
-                child_options.source = ComposeSource::File(path_buf.clone());
+                child_options = child_options.with_accepted_source_file(path_buf.clone());
                 // Recursive graph reuse: hand the child its OWN preflight
                 // sub-node (whose edges point at grandchildren), so the child's
                 // transclusion stage reuses grandchild target resolution too.

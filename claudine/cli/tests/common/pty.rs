@@ -2,7 +2,7 @@
 //! interactive tests.
 //!
 //! The `level2_schema_prompt_pty.rs` god file was split into a schema /
-//! inline-compose binary and a `level2_sequence_overlay_pty.rs` binary.
+//! inline-compose binary and a `sequence_overlay_pty.rs` binary.
 //! The draining loop (`read_for`), marker waiters (`wait_for_marker`,
 //! `wait_for_raw_mode`), and the config / goose-stub stagers are shared by
 //! both, so they live here **verbatim**. Gated `#[cfg(unix)]` at the

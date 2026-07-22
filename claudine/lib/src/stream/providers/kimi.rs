@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use serde_json::{Map, Value};
 use tracing::debug;
 
-use super::parser::{SemanticStreamParser, StreamParseError};
+use super::parser::SemanticStreamParser;
 use super::protocol::kimi::{
     KimiContentPart, KimiEnvelope, KimiJsonRpcError, KimiPromptResult, KimiToolCall,
     KimiToolCallPart, KimiToolResult, KimiWireEvent, KimiWireRequest, KimiWireStatusUpdate,
@@ -963,11 +963,11 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
 }
 
 impl<S: SemanticEventSink> SemanticStreamParser for KimiSemanticStreamParser<S> {
-    fn feed_line(&mut self, line: &str) -> Result<(), StreamParseError> {
+    fn feed_line(&mut self, line: &str) {
         self.line_num += 1;
         let line = line.trim();
         if line.is_empty() {
-            return Ok(());
+            return;
         }
         // Try direct envelope classification from `&str` to avoid the
         // intermediate `serde_json::Value` DOM allocation on the hot path.
@@ -984,7 +984,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for KimiSemanticStreamParser<S> 
                             &e.to_string(),
                         );
                         self.emit_malformed_warning(&e.to_string());
-                        return Ok(());
+                        return;
                     }
                 };
                 let raw_kind = if raw.get("method").is_some() {
@@ -998,7 +998,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for KimiSemanticStreamParser<S> 
                 };
                 super::trace_parser_event(Provider::KimiCode, &raw_kind, self.line_num);
                 self.emit_provider_extension(&raw_kind, Value::Object(raw));
-                return Ok(());
+                return;
             }
         };
 
@@ -1044,7 +1044,6 @@ impl<S: SemanticEventSink> SemanticStreamParser for KimiSemanticStreamParser<S> 
                 drop(extra);
             }
         }
-        Ok(())
     }
 
     fn finish(mut self: Box<Self>, exit_code: i32) -> StreamExecutionSummary {

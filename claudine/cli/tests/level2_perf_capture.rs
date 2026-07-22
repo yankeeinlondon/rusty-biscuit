@@ -44,7 +44,7 @@ use std::time::Duration;
 use test_toolkit::{Level, require_level};
 
 mod common;
-use common::{TestWorkspace, augmented_path, write_executable};
+use common::{TestWorkspace, augmented_path, clear_no_color, write_executable};
 
 /// A compose fixture with a slow `::shell` directive so shell expansion is the
 /// unambiguous dominant leaf (deterministic `HOT` marker).
@@ -258,6 +258,9 @@ fn level2_perf_tree_renders_styled_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
+    // This fixture asserts a *colored* surface under `FORCE_COLOR=1`, which an
+    // ambient `NO_COLOR` out-votes — see `common::clear_no_color`.
+    clear_no_color(&mut harness);
     let capture = run_perf_compose(&mut harness);
     assert_tree_structure(&capture.frame);
 
@@ -295,6 +298,9 @@ fn level2_perf_tree_renders_styled_in_wezterm() {
     );
 
     let mut harness = WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm");
+    // This fixture asserts a *colored* surface under `FORCE_COLOR=1`, which an
+    // ambient `NO_COLOR` out-votes — see `common::clear_no_color`.
+    clear_no_color(&mut harness);
     let capture = run_perf_compose(&mut harness);
     assert_tree_structure(&capture.frame);
 

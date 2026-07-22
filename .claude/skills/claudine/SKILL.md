@@ -1,8 +1,8 @@
 ---
 name: claudine
 description: Use when working in the claudine/ package area or with the Claudine library/CLI — normalizing agentic-CLI lifecycle events and hooks, wrapping providers (Claude Code, Codex, Gemini, Goose, Kimi, OpenCode, Qwen, Kilo, Pi, Antigravity), composing Markdown prompts (compose/inline-compose/sequence), managing the MCP catalog, linking skills/commands/agents across providers, or researching agentic CLI platform behavior.
-last_updated: 2026-07-16
-hash: 65dc854540ca152c-f3f0ea7bc1000720
+last_updated: 2026-07-17
+hash: 65dc854540ca152c-1083e38adfa76a8f
 ---
 
 ## Overview
@@ -44,7 +44,7 @@ Nineteen modules plus the shared error type and the flat `provider_id` leaf (the
 | `model_catalog` | Model validation against the generated expected-offerings baseline (+ user overrides), `family_latest` alias resolution, and the dynamic-listing drift channel |
 | `permissions` | Provider-agnostic policy engine (`PolicyEngine`) |
 | `protect` | Standalone regex deny catalog (bash commands, write/edit paths, MCP responses) |
-| `render` | Functional render components — `FinalMessage`, `AgentPrompt`/`SystemPrompt` (under `render/prompt/`, absorbed the former `prompt_reporting` module), `EventRenderer` + the exhaustive `DISPATCH` table (live-sink stderr status dispatch), the dual-target `MetricsReport` (`TerminalRenderable` + `BrowserRenderable`), and the `StreamRenderable` span contract (`open`/`append`/`flush_idle`/`close`) with its `AssistantStream` streaming-markdown component; all consume data + policy (`DisplayPolicy`), never `match provider` |
+| `render` | Functional render components — `FinalMessage`, `AgentPrompt`/`SystemPrompt` (under `render/prompt/`, absorbed the former `prompt_reporting` module), `EventRenderer` + the exhaustive `DISPATCH` table (live-sink stderr status dispatch), the dual-target `MetricsReport` (`TerminalRenderable` + `BrowserRenderable`), and the `StreamRenderable` span contract (`open`/`append`/`flush_idle`/`close`) with its `AssistantStream` streaming-markdown component, and `TaskStream`/`TaskStreamFrame` + the two-channel `TaskStreamSink` seam and its `TaskLiveOutput` binding (attributed color-bar framing for group tasks — headers/footers on the status channel, task body data on the data channel; `TaskBar::Invisible` gives serial work the same geometry); all consume data + policy (`DisplayPolicy`), never `match provider` |
 | `reporting` | JSONL-to-SQLite metrics index |
 | `runaway` | Pure content-guard detector (exit-expressions, group-cycle repetition, volume cap) + per-layer config; trips map to `ProcessTermination::Aborted` |
 | `stream` | Structured stream parsing for 8 providers (typed models in `stream::protocol`; Kilo reuses OpenCode's parser) |
@@ -88,7 +88,7 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 |---------|-------------|
 | `claudine compose <file> [key=value ...]` | Compose a Markdown file and send the result as a prompt (no file mutation) |
 | `claudine inline-compose <file> [key=value ...]` | Use frontmatter `prompt` to generate content and replace the body; preserves frontmatter, updates `last_updated`, stamps a Darkmatter `Simple` `hash:` |
-| `claudine sequence <file> [key=value ...]` | Run a serial sequence of composition steps with shared shell approval cache and `FAIL_FAST` propagation |
+| `claudine sequence <file> [key=value ...]` | Run an ordered list of steps — static preflight over the whole task graph, then just-in-time composition at each step's turn; tasks, groups (serial/parallel), and the `outputs` accumulator |
 
 **Administration**
 
@@ -119,8 +119,10 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 | Signals | One signal-aware wait loop across every spawn path; per-press stderr feedback, `SIGTERM → SIGKILL` ladder, `_exit(130)` second-press guard, Windows parity | [Signal Handling](signal-handling.md) |
 | Transient overlays | Written under `<repo_root>/.claudine/tmp/` (or `<launch_cwd>/.claudine-tmp/`), cleaned up on `Drop` | [System Prompt](system-prompt.md) |
 | Schema validation | `$schema` runs Darkmatter `SimplifiedSchema`; typed errors, `null`-as-absent, a biscuit-tui prompt loop for required-missing values | [Composition § Schema](composition.md#schema-validation) |
+| Error architecture | One discovery seam (`as_diagnostic`) + one role-based selection walk; rendering, `err.*`, and machine output all project the **same** effective diagnostic. Read before adding an error type or a catalog code | [Error Architecture](error-architecture.md) |
 | Composition diagnostics | Prepare-time did-you-mean warnings (unknown function / `ctx.*`, `--silent`-suppressed); frontmatter-rooted errors append a highlighted, line-numbered YAML block (TTY-gated) | [Composition](composition.md#prepare-time-warnings) |
 | Whole-value frontmatter | A value that is *exactly one* `{{ … }}` / `$(…)` span is executable state — it must resolve and must never leak as raw syntax | [Composition § Whole-value](composition.md#whole-value-frontmatter-expansion-is-executable-state) |
+| Sequences | Two phases: static preflight over the whole task graph (dynamic sources snapshot once, shell approved byte-for-byte, no exceptions), then just-in-time composition at each step's turn against the live file. One executable per task; `outputs` is the sole accumulator; groups run serial or parallel | [Sequences](../../../claudine/docs/topics/flow-control/sequences.md) · [architecture.md § Sequences](architecture.md#sequences) |
 | Lifecycle stacks | Seven flow-control verbs (`stop`/`skip`/`error`/`proxy`/`retry`/`resume`/`defer`; `defer` unimplemented), two action forms, early/late binding via Darkmatter DM1/DM2 (strict, fail-closed), leak & err-placement guards, `no_error`, the `stdout` channel | [Lifecycle](lifecycle.md) |
 | Protect | `protect::observe` classifies bash- and write-shaped tools; best-effort defense-in-depth, not a security boundary | [Protect Service](protect-service.md) |
 
@@ -157,6 +159,7 @@ Wrapper behavior: `--mcp` launches with effective defaults; `--use id-or-alias[,
 These files are linked into this skill directory as a temporary bridge until
 Darkmatter can publish skill-local reference copies.
 
+- [Error Architecture](error-architecture.md) — the `Diagnostic`/`BlockError` pair, the discovery seam, effective-diagnostic selection and the `Semantic`/`Transparent` role contract, the snapshot boundary, typed-wrapper rules, and the lossy-boundary audit
 - [Composition](composition.md) — `compose`, `inline-compose`, `sequence`, lifecycle stacks, provider selection
 - [Timeouts](timeouts.md) — the two timeout rules, four env vars, precedence, termination path, exit reasons, and the three runaway content guards
 - [Signal Handling](signal-handling.md) — user Ctrl+C vs wrapper-driven SIGTERM/SIGKILL, the unified wait loop, termination labels (`Aborted`/`Interrupted`/`TimedOut`), non-interactive ladder, Windows parity

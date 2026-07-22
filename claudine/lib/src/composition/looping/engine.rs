@@ -257,8 +257,11 @@ pub fn execute_loop_with_config(
                 iteration + 1,
                 &last_output,
                 last_exit_code,
-                base_dir,
-                None,
+                LoopFileResolution {
+                    source_path: prompt_path,
+                    fallback_dir: None,
+                    context: None,
+                },
             )?
         {
             return Ok(LoopExecutionResult::failure(
@@ -309,6 +312,7 @@ pub fn execute_loop_with_lifecycle<E>(
     effect_engine: &darkmatter::effects::EffectEngine,
     shell_runner: &dyn ShellRunner,
     emitter: &dyn LifecycleEmitter,
+    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
     mut executor: E,
 ) -> Result<LoopExecutionResult, CompositionError>
 where
@@ -346,6 +350,7 @@ where
         shell_runner,
         emitter,
         base_dir,
+        file_resolution_context,
         Some(&init_timing),
         Some(&init_current),
     );
@@ -412,11 +417,19 @@ where
                 unreachable!("the catch protocol consumes initialize error control: {reason:?}");
             }
             StackControl::Proxy { target } => {
-                let resolved = match resolve_proxy_target(
-                    &target,
-                    prompt_path,
-                    lifecycle_ctx.repo_root,
-                ) {
+                let resolution = match file_resolution_context.as_ref() {
+                    Some(context) => super::super::resolve_proxy_target_in_context(
+                        &target,
+                        prompt_path,
+                        context,
+                    ),
+                    None => resolve_proxy_target(
+                        &target,
+                        prompt_path,
+                        lifecycle_ctx.repo_root,
+                    ),
+                };
+                let resolved = match resolution {
                     Ok(path) => path,
                     Err(err) => {
                         // Resolution failure (missing file, unresolvable
@@ -529,7 +542,8 @@ where
             let pre_mutation_lookup =
                 LoopExpressionLookup::new(&frontmatter, &pre_mutation_ambient)
                     .with_base_dir(base_dir)
-                    .with_file_ref_fallback_dir(lifecycle_ctx.launch_area);
+                    .with_file_ref_fallback_dir(lifecycle_ctx.launch_area)
+                    .with_file_resolution_context(file_resolution_context, prompt_path);
             !evaluate_condition(&config.condition, &pre_mutation_lookup)?
         };
         let ambient = LoopAmbient::new(
@@ -601,6 +615,9 @@ where
                         exit_code: last_exit_code,
                         reason: "iteration failed".to_string(),
                         exit_reason,
+                        // The fail-fast fallback: no iteration error was
+                        // attached, so there is no chain to project from.
+                        snapshot: None,
                     }
                 }),
             ));
@@ -652,6 +669,7 @@ where
         shell_runner,
         emitter,
         loop_start,
+        file_resolution_context,
     )? {
             LoopGateOutcome::Exit => {
                 return Ok(LoopExecutionResult::success(
@@ -684,8 +702,11 @@ where
                 iteration + 1,
                 &last_output,
                 last_exit_code,
-                base_dir,
-                lifecycle_ctx.launch_area,
+                LoopFileResolution {
+                    source_path: prompt_path,
+                    fallback_dir: lifecycle_ctx.launch_area,
+                    context: file_resolution_context,
+                },
             )?
         {
             return Ok(LoopExecutionResult::failure(
@@ -832,6 +853,7 @@ fn run_loop_gate(
     shell_runner: &dyn ShellRunner,
     emitter: &dyn LifecycleEmitter,
     loop_start: std::time::Instant,
+    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
 ) -> Result<LoopGateOutcome, CompositionError> {
     let (timing, current) =
         capture_loop_lifecycle_globals(base_dir, lifecycle_ctx.launch_area, loop_start);
@@ -843,6 +865,7 @@ fn run_loop_gate(
         shell_runner,
         emitter,
         base_dir,
+        file_resolution_context,
         Some(&timing),
         Some(&current),
     );
@@ -942,7 +965,8 @@ fn run_loop_gate(
 
     let lookup = LoopExpressionLookup::new(frontmatter, ambient)
         .with_base_dir(base_dir)
-        .with_file_ref_fallback_dir(lifecycle_ctx.launch_area);
+        .with_file_ref_fallback_dir(lifecycle_ctx.launch_area)
+        .with_file_resolution_context(file_resolution_context, prompt_path);
     if !evaluate_condition(&config.condition, &lookup)? {
         return Ok(LoopGateOutcome::Exit);
     }
@@ -964,6 +988,7 @@ fn build_loop_stack_context<'a>(
     shell_runner: &'a dyn ShellRunner,
     emitter: &'a dyn LifecycleEmitter,
     base_dir: Option<&'a Path>,
+    file_resolution_context: Option<&'a biscuit_file::FileResolutionContext>,
     timing: Option<&'a super::super::lifecycle_context::LifecycleTiming>,
     current: Option<&'a super::super::lifecycle_context::LifecycleCurrent>,
 ) -> StackExecutionContext<'a> {
@@ -977,12 +1002,17 @@ fn build_loop_stack_context<'a>(
         // live cell is unnecessary here; intra-stack visibility is handled by
         // `execute_stack`'s local working map.
         live_frontmatter: None,
+        runtime_state: None,
         err: None,
         timing,
         current,
+        // A loop gate is not inside a sequence group; `group.*` has no scope
+        // here.
+        group: None,
         base_dir,
         ctx_base_dir: lifecycle_ctx.launch_area,
         prepared_context: lifecycle_ctx.context,
+        file_resolution_context,
         effect_engine,
         shell_runner,
         emitter,
@@ -1191,14 +1221,21 @@ fn should_continue_after_cap(
     next_iteration: usize,
     last_output: &str,
     last_exit_code: i32,
-    base_dir: Option<&Path>,
-    file_ref_fallback_dir: Option<&Path>,
+    resolution: LoopFileResolution<'_>,
 ) -> Result<bool, CompositionError> {
     let ambient = LoopAmbient::new(next_iteration, false, true, last_output, last_exit_code);
     let lookup = LoopExpressionLookup::new(frontmatter, &ambient)
-        .with_base_dir(base_dir)
-        .with_file_ref_fallback_dir(file_ref_fallback_dir);
+        .with_base_dir(resolution.source_path.parent())
+        .with_file_ref_fallback_dir(resolution.fallback_dir)
+        .with_file_resolution_context(resolution.context, resolution.source_path);
     evaluate_condition(&config.condition, &lookup)
+}
+
+#[derive(Clone, Copy)]
+struct LoopFileResolution<'a> {
+    source_path: &'a Path,
+    fallback_dir: Option<&'a Path>,
+    context: Option<&'a biscuit_file::FileResolutionContext>,
 }
 
 #[cfg(test)]

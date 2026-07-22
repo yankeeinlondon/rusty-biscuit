@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use super::launch_workspace::LaunchWorkspaceContext;
 use super::lifecycle::LifecycleConfig;
+use crate::diagnostics::DiagnosticSnapshot;
 use crate::harness::shell::CachedApprovalDecision;
 use crate::provider::Provider;
 
@@ -498,6 +499,9 @@ pub struct RematerializeInputs {
     pub set_overrides: Option<serde_json::Value>,
     /// Launch-area directory that anchors caller-supplied file references.
     pub file_ref_fallback_dir: Option<PathBuf>,
+    /// Immutable request-scoped resolution inputs captured before the first
+    /// source is resolved.
+    pub file_resolution_context: Option<biscuit_file::FileResolutionContext>,
     /// Shell commands approved during the original pre-flight discovery.
     pub pre_approved_commands: Option<HashSet<String>>,
     /// Composition env overrides (e.g. `AGENT`, `MODEL`, `YOLO`) injected into
@@ -720,13 +724,17 @@ pub struct CompositionExecutionRequest {
     /// root matches the launch CWD, the executor reuses it instead of
     /// calling `detect_environment_fast` again.
     pub prep_env_context: Option<crate::events::EnvironmentContext>,
-    /// Captured error message from the shared prep-time sniff scan, if
+    /// Diagnostic snapshot of the shared prep-time sniff scan failure, if
     /// it failed. The shared scan defaults to an empty
     /// [`crate::system_prompt::LaunchContext`] on failure to keep
     /// best-effort callers happy, so the executor reads this field to
     /// preserve the legacy hard-fail contract for `--repo`. `None` (or
     /// no prep context at all) means no failure happened during prep.
-    pub prep_launch_detection_error: Option<String>,
+    ///
+    /// A [`DiagnosticSnapshot`](crate::diagnostics::DiagnosticSnapshot)
+    /// rather than a `String` so the typed `sniff::SniffError` retained
+    /// upstream survives into this `Clone` record.
+    pub prep_launch_detection_error: Option<crate::diagnostics::DiagnosticSnapshot>,
     /// Whether the caller already emitted the execution header up front.
     ///
     /// `compose` / `inline-compose` resolve the agent eagerly (prompting
@@ -748,97 +756,36 @@ pub struct CompositionExecutionRequest {
     /// (opaque, unclassified) rather than an implicit non-Claudine switch.
     /// Drives the INFO status wording only; never affects forwarding.
     pub provider_args_explicit: bool,
-}
 
-/// Describes where the sequence definition was found.
-#[derive(Debug, Clone)]
-pub enum SequenceSource {
-    /// The sequence was defined inline in the document's frontmatter.
-    Inline,
-    /// The sequence was loaded from an external YAML file.
-    External { path: PathBuf },
-}
-
-/// A single step in a sequence.
-#[derive(Debug, Clone)]
-pub struct SequenceStep {
-    /// Zero-based index in the sequence list.
-    pub index: usize,
-    /// Display name for the step (scalar value or the `name` field of an object).
-    pub name: String,
-    /// The full state value: a JSON string for scalar steps, a JSON object for object steps.
-    pub raw_state: serde_json::Value,
-}
-
-/// A validated, normalized sequence plan ready for execution.
-#[derive(Debug, Clone)]
-pub struct SequencePlan {
-    /// Where the sequence definition came from.
-    pub source: SequenceSource,
-    /// Ordered list of steps.
-    pub steps: Vec<SequenceStep>,
-    /// The document's `fail_fast` setting (defaults to `true`).
-    pub document_fail_fast: bool,
-}
-
-/// Per-step overlay values injected into each composition run.
-#[derive(Debug, Clone)]
-pub struct SequenceStepOverlay {
-    /// Current step's state value.
-    pub state: serde_json::Value,
-    /// Previous step's state value, or `null` for the first step.
-    pub previous_state: serde_json::Value,
-    /// Next step's state value, or `null` for the last step.
-    pub next_state: serde_json::Value,
-    /// `true` if this is the first step.
-    pub is_first: bool,
-    /// `true` if this is the last step.
-    pub is_last: bool,
-    /// 1-based step number.
-    pub step: usize,
-    /// Total number of steps in the sequence.
-    pub total_steps: usize,
-}
-
-impl SequenceStepOverlay {
-    /// Reserved overlay keys that must always win over user `--set` values.
-    pub const RESERVED_KEYS: &[&str] = &[
-        "state",
-        "previous_state",
-        "next_state",
-        "is_first",
-        "is_last",
-        "step",
-        "total_steps",
-    ];
-
-    /// Build a `serde_json::Value::Object` suitable for `set_overrides`.
+    /// The invocation-local runtime state cell shared with the caller.
     ///
-    /// Merge order: user `--set` first, then overlay (overlay wins on conflict).
-    pub fn as_set_overrides(&self, user_set: Option<serde_json::Value>) -> serde_json::Value {
-        let mut map = serde_json::Map::new();
+    /// Supplied by callers that execute more than one composition in one
+    /// logical run — the `--loop` engine across iterations, and sequence
+    /// execution across steps — so accumulated `set` mutations and the
+    /// `outputs` array survive from one execution to the next. `None` makes the
+    /// executor mint a fresh cell, which is the correct lifetime for a
+    /// standalone `compose` / `inline-compose`.
+    pub runtime_state: Option<std::sync::Arc<super::runtime_state::RuntimeState>>,
 
-        // 1. Start with user --set values
-        if let Some(serde_json::Value::Object(user_map)) = user_set {
-            for (key, value) in user_map {
-                map.insert(key, value);
-            }
-        }
-
-        // 2. Overlay reserved keys (always win)
-        map.insert("state".into(), self.state.clone());
-        map.insert("previous_state".into(), self.previous_state.clone());
-        map.insert("next_state".into(), self.next_state.clone());
-        map.insert("is_first".into(), serde_json::Value::Bool(self.is_first));
-        map.insert("is_last".into(), serde_json::Value::Bool(self.is_last));
-        map.insert("step".into(), serde_json::Value::Number(self.step.into()));
-        map.insert(
-            "total_steps".into(),
-            serde_json::Value::Number(self.total_steps.into()),
-        );
-
-        serde_json::Value::Object(map)
-    }
+    /// Suppress this execution's own commit to `outputs`.
+    ///
+    /// Set by a caller that owns output timing itself — the sequence task
+    /// executor, which must not publish an entry until `teardown` has completed
+    /// (a failing teardown converts the task to failure and owes no output).
+    /// The captured text still reaches the caller through
+    /// `SingleCompositionOutcome::final_output`.
+    pub suppress_output_commit: bool,
+    /// Frames this run's live provider stdout under one task's bar.
+    ///
+    /// Set by the sequence task executor so a group member's assistant text is
+    /// attributed line by line, the same way its shell output is. `None` — every
+    /// non-sequence run — leaves the stream undecorated.
+    ///
+    /// Owned rather than borrowed because the stdout reader runs on its own
+    /// thread; owned rather than a handle on the process-wide coordinator
+    /// because attribution is per task and several sessions share that
+    /// coordinator at once.
+    pub task_frame_writer: Option<crate::render::TaskFrameWriter>,
 }
 
 /// Options for sequence execution at the CLI level.
@@ -871,10 +818,41 @@ pub struct SequenceStepResult {
     /// Whether the step succeeded (exit code 0).
     pub success: bool,
     /// Error message if the step failed.
+    ///
+    /// Load-bearing beyond display: `run_sequence_steps` compares it against
+    /// the `interrupted by SIGINT` sentinel to select exit code 130, so its
+    /// text is a contract, not prose.
     pub error: Option<String>,
+    /// The failure's diagnostic identity, when the step's error chain carried
+    /// one.
+    ///
+    /// Beside [`error`](Self::error) rather than replacing it: the prose is
+    /// matched for the interrupt sentinel and rendered verbatim, while this
+    /// carries the `code`, `category`, `detail`, and one-level cause the
+    /// string discards (spec §D9). `None` for an interrupt, a success, or a
+    /// chain that held only prose.
+    /// Boxed to match the `StepOutcome` variant it is moved from.
+    pub error_snapshot: Option<Box<DiagnosticSnapshot>>,
     /// Wall-clock duration of the step.
     pub duration: std::time::Duration,
+    /// When the step ran a group, one entry per member task that ran, in
+    /// declaration order. Empty for every other step.
+    pub tasks: Vec<SequenceTaskResult>,
 }
 
-#[cfg(test)]
-mod tests;
+/// One group member task's contribution to a step summary.
+///
+/// Deliberately name + outcome + timing only: the removed group `output` and
+/// task `passthrough` fields are not reintroduced here — `outputs` is the only
+/// output accumulator.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SequenceTaskResult {
+    /// The task's authored `name:`, or its generated label.
+    pub name: String,
+    /// Whether the task succeeded.
+    pub success: bool,
+    /// Whether the task was interrupted rather than failed.
+    pub interrupted: bool,
+    /// Wall-clock duration of the task.
+    pub duration: std::time::Duration,
+}

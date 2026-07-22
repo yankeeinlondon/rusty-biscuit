@@ -13,6 +13,7 @@ use super::{HarnessPromptMode, HarnessPromptState, MaterializedHarnessPrompt};
 
 pub(crate) fn materialized_harness_prompt_from_prepared(
     prepared: &claudine::composition::PreparedComposition,
+    runtime_state: std::sync::Arc<claudine::composition::RuntimeState>,
 ) -> MaterializedHarnessPrompt {
     let inline_closure_plan = match &prepared.closure {
         claudine::composition::CompositionClosurePlan::Inline(plan) => Some(plan.clone()),
@@ -26,7 +27,9 @@ pub(crate) fn materialized_harness_prompt_from_prepared(
         prompt: prepared.prompt.clone(),
         env_overrides: Vec::new(),
         inline_closure_plan,
+        file_resolution_context: prepared.rematerialize.file_resolution_context.clone(),
         live_frontmatter,
+        runtime_state,
     }
 }
 
@@ -34,8 +37,14 @@ pub(crate) fn materialize_passthrough_harness_seed(
     source_path: &Path,
     prompt: String,
     shell_cwd: Option<&Path>,
+    runtime_state: std::sync::Arc<claudine::composition::RuntimeState>,
 ) -> Result<MaterializedHarnessPrompt> {
-    super::super::overlay::materialize_passthrough_harness_seed(source_path, prompt, shell_cwd)
+    super::super::overlay::materialize_passthrough_harness_seed(
+        source_path,
+        prompt,
+        shell_cwd,
+        runtime_state,
+    )
 }
 
 pub(crate) fn find_wrapper_harness_source(
@@ -79,6 +88,9 @@ fn apply_rematerialize_inputs(
     }
     if let Some(fallback) = inputs.file_ref_fallback_dir.clone() {
         options = options.with_file_ref_fallback_dir(fallback);
+    }
+    if let Some(context) = inputs.file_resolution_context.clone() {
+        options = options.with_file_resolution_context(context);
     }
     options
 }
@@ -130,10 +142,10 @@ pub(crate) fn preflight_proxy_target(
         return Ok(());
     }
     let source_text = fs::read_to_string(&state.source_path).map_err(|e| {
-        Box::new(claudine::composition::CompositionError::PreFlightFailed(format!(
-            "proxy target pre-flight: failed to read '{}': {e}",
-            state.source_path.display()
-        )))
+        Box::new(claudine::composition::CompositionError::MarkdownLoad {
+            path: state.source_path.clone(),
+            source: claudine::composition::MarkdownLoadCause::Read(e),
+        })
     })?;
     let markdown: darkmatter::markdown::Markdown = source_text.into();
 
@@ -153,6 +165,9 @@ pub(crate) fn preflight_proxy_target(
     );
     if let Some(fallback) = state.rematerialize.file_ref_fallback_dir.clone() {
         options = options.with_file_ref_fallback_dir(fallback);
+    }
+    if let Some(context) = state.rematerialize.file_resolution_context.clone() {
+        options = options.with_file_resolution_context(context);
     }
     if let Some(overrides) = state.rematerialize.set_overrides.clone() {
         options = options.with_set_overrides(overrides);
@@ -192,19 +207,38 @@ pub(crate) fn materialize_harness_prompt(
     _repo_root: Option<&Path>,
     child_cwd: &Path,
 ) -> Result<MaterializedHarnessPrompt> {
-    let source_text = fs::read_to_string(&state.source_path)
-        .map_err(|e| eyre!("failed to read '{}': {e}", state.source_path.display()))?;
+    let source_text = fs::read_to_string(&state.source_path).map_err(|e| {
+        claudine::composition::CompositionError::MarkdownLoad {
+            path: state.source_path.clone(),
+            source: claudine::composition::MarkdownLoadCause::Read(e),
+        }
+    })?;
     let mut effective_markdown: darkmatter::markdown::Markdown = source_text.clone().into();
+    effective_markdown = effective_markdown.with_source(
+        darkmatter::markdown::compose::ComposeSource::File(state.source_path.clone()),
+    );
     super::super::overlay::merge_frontmatter_overlay(
         effective_markdown.frontmatter_mut().as_map_mut(),
         &state.overlay,
     );
 
+    // Re-materialization re-reads the document from disk, so the accumulated
+    // runtime layer has to be re-applied on top of the caller's setters or a
+    // loop iteration would silently roll back every `set` and lose `outputs`.
+    let rematerialize = claudine::composition::RematerializeInputs {
+        set_overrides: Some(claudine::composition::layered_set_overrides(
+            state.rematerialize.set_overrides.as_ref(),
+            Some(&state.runtime_state.snapshot()),
+            None,
+        )),
+        ..state.rematerialize.clone()
+    };
+
     let (mut prompt, frontmatter, env_overrides, inline_closure_plan) = match state.mode {
         HarnessPromptMode::Passthrough => {
             let options = apply_rematerialize_inputs(
                 claudine::composition::bind_agent_workspace(
-                    rematerialize_compose_options(&state.rematerialize),
+                    rematerialize_compose_options(&rematerialize),
                     &state.source_path,
                     Some(child_cwd),
                 )
@@ -213,7 +247,7 @@ pub(crate) fn materialize_harness_prompt(
                         .iter()
                         .copied(),
                 ),
-                &state.rematerialize,
+                &rematerialize,
             );
             let (composed, _report) = effective_markdown.compose_with(options)?;
             let prompt = state.base_prompt.clone().ok_or_else(|| {
@@ -238,7 +272,7 @@ pub(crate) fn materialize_harness_prompt(
             // spans resolve here, before the run, and bake to empty.
             let options = apply_rematerialize_inputs(
                 claudine::composition::bind_agent_workspace(
-                    rematerialize_compose_options(&state.rematerialize),
+                    rematerialize_compose_options(&rematerialize),
                     &state.source_path,
                     Some(child_cwd),
                 )
@@ -255,7 +289,7 @@ pub(crate) fn materialize_harness_prompt(
                 .with_incidental_newline_mode(
                     darkmatter::markdown::cleanup::IncidentalNewlineMode::Preserve,
                 ),
-                &state.rematerialize,
+                &rematerialize,
             );
             let (composed, _report) = effective_markdown.compose_with(options)?;
             let body = composed.content().to_string();
@@ -270,8 +304,7 @@ pub(crate) fn materialize_harness_prompt(
             )
         }
         HarnessPromptMode::Inline => {
-            claudine::composition::validate_file_permissions(&state.source_path)
-                .map_err(|e| eyre!("frontmatter-prompt: {e}"))?;
+            claudine::composition::validate_file_permissions(&state.source_path)?;
             let source = claudine::composition::ResolvedCompositionSource {
                 original_ref: state.source_path.display().to_string(),
                 resolved_path: state.source_path.clone(),
@@ -281,13 +314,14 @@ pub(crate) fn materialize_harness_prompt(
             let prepared = claudine::composition::prepare_inline(
                 &source,
                 claudine::composition::PrepareOptions {
-                    set_overrides: state.rematerialize.set_overrides.clone(),
-                    pre_approved_commands: state.rematerialize.pre_approved_commands.clone(),
-                    file_ref_fallback_dir: state.rematerialize.file_ref_fallback_dir.clone(),
+                    set_overrides: rematerialize.set_overrides.clone(),
+                    pre_approved_commands: rematerialize.pre_approved_commands.clone(),
+                    file_ref_fallback_dir: rematerialize.file_ref_fallback_dir.clone(),
+                    file_resolution_context: rematerialize.file_resolution_context.clone(),
                     // Carry the resolved `AGENT`/`MODEL` env so `ctx.agent`/
                     // `ctx.model` in the re-materialized body resolve to the run's
                     // provider instead of the `unknown`/`default` fallbacks.
-                    env_overrides: state.rematerialize.env_overrides.clone(),
+                    env_overrides: rematerialize.env_overrides.clone(),
                     ..claudine::composition::PrepareOptions::default()
                 },
             )?;
@@ -318,7 +352,9 @@ pub(crate) fn materialize_harness_prompt(
         prompt,
         env_overrides,
         inline_closure_plan,
+        file_resolution_context: state.rematerialize.file_resolution_context.clone(),
         live_frontmatter,
+        runtime_state: std::sync::Arc::clone(&state.runtime_state),
     })
 }
 
@@ -339,6 +375,9 @@ mod tests {
             next_prompt_override: None,
             next_resume_session_id: None,
             rematerialize,
+            runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
+            suppress_output_commit: false,
+            last_final_output: None,
         }
     }
 

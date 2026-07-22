@@ -308,6 +308,10 @@ fn write_to_non_allowed_sensitive_path_is_still_blocked() {
     );
 }
 
+// Unix-only for the *fixture*: creating the symlink needs
+// SeCreateSymbolicLinkPrivilege on Windows, which a test host cannot assume. The
+// canonicalization this guards is cross-platform.
+#[cfg(unix)]
 #[test]
 fn symlinked_cwd_to_home_blocks_write_to_ssh() {
     let tmp = tempfile::tempdir().unwrap();

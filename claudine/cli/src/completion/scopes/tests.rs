@@ -81,64 +81,6 @@ fn scope_set_iter_preserves_priority_order() {
 }
 
 #[test]
-fn magic_scope_iter_orders_extras_before_user_claudine() {
-    // Spec §5.5: magic-path resolution gives repo-local extras
-    // (docs, skills) priority over user-global prompts.
-    let set = ScopeSet {
-        repo: Some(Scope {
-            kind: ScopeKind::RepoPrompts,
-            path: PathBuf::from("/repo"),
-            follow_links: true,
-        }),
-        package_area: Some(Scope {
-            kind: ScopeKind::PackageAreaPrompts,
-            path: PathBuf::from("/area"),
-            follow_links: true,
-        }),
-        package: Some(Scope {
-            kind: ScopeKind::PackagePrompts,
-            path: PathBuf::from("/pkg"),
-            follow_links: true,
-        }),
-        repo_claudine: Some(Scope {
-            kind: ScopeKind::RepoClaudinePrompts,
-            path: PathBuf::from("/repo/.claudine"),
-            follow_links: true,
-        }),
-        user_claudine: Some(Scope {
-            kind: ScopeKind::UserClaudinePrompts,
-            path: PathBuf::from("/user/.claudine"),
-            follow_links: true,
-        }),
-        extras: vec![
-            Scope {
-                kind: ScopeKind::RepoDocs,
-                path: PathBuf::from("/repo/docs"),
-                follow_links: true,
-            },
-            Scope {
-                kind: ScopeKind::AgentSkills,
-                path: PathBuf::from("/repo/.claude/skills"),
-                follow_links: false,
-            },
-        ],
-    };
-    let paths: Vec<&PathBuf> = set.iter_magic_scopes().map(|s| &s.path).collect();
-    assert_eq!(
-        paths,
-        vec![
-            &PathBuf::from("/repo"),
-            &PathBuf::from("/area"),
-            &PathBuf::from("/pkg"),
-            &PathBuf::from("/repo/.claudine"),
-            &PathBuf::from("/repo/docs"),
-            &PathBuf::from("/repo/.claude/skills"),
-            &PathBuf::from("/user/.claudine"),
-        ]
-    );
-}
-
-#[test]
 fn outside_repo_only_user_scope_is_set() {
     // Place the cwd at a depth far below any realistic enclosing git
     // repo so `find_enclosing_repo` returns `None`. On developer

@@ -1397,8 +1397,12 @@ fn level2_lifecycle_initialize_proxy_cycle_guarded() {
         "target initialize must run before the back-proxy; got {lines:?}; pane:\n{pane}"
     );
     assert!(
-        pane.contains("proxy") && (pane.contains("cycle") || pane.contains("hop limit")),
-        "the LifecycleProxyCycle error must surface in the terminal; pane:\n{pane}"
+        pane.contains("CompositionError")
+            && pane.contains("composition failed")
+            && pane.contains("lifecycle `proxy` hand-off")
+            && pane.contains("forms a cycle or exceeds the proxy hop limit")
+            && pane.contains("active chain"),
+        "the typed LifecycleProxyCycle block must surface in the terminal; pane:\n{pane}"
     );
 }
 
@@ -1552,9 +1556,22 @@ fn level2_lifecycle_proxy_target_lifecycle_parse_failure_routes_blocked_finalize
 /// `Err` surfaces at the post-spawn `attempt_result?` site in
 /// `run_harness_loop`, which the fix routes through
 /// `emit_failure_finalize_with_err` (terminal is always `Failure` because
-/// pre-flight already passed). The site wraps the underlying error via
-/// `from_action_failure("harness_attempt", ...)`, so the stacks observe
-/// `err.kind = "LifecycleAction"` / `err.variant = "harness_attempt"`.
+/// pre-flight already passed).
+///
+/// ## The migrated values
+///
+/// This site used to wrap the underlying error via
+/// `from_action_failure("harness_attempt", ...)`, so the stacks observed the
+/// synthesized labels `err.kind = "LifecycleAction"` / `err.variant =
+/// "harness_attempt"` — which described *the machinery that noticed* rather than
+/// the failure. Error-propagation Phase 5 (§D7) passes the typed diagnostic
+/// through, and `err.kind`/`err.variant` are now deprecated aliases of
+/// `err.category`/`err.code`, so the stacks observe `config` /`config.invalid`.
+///
+/// That is strictly more useful here, and worth stating plainly: a malformed
+/// `exit_expressions` regex genuinely **is** a config-validation failure. An
+/// author writing `when: err.category == "config"` now matches it; under the
+/// old labels no faceted clause could.
 ///
 /// Asserts the ordered markers prove: `start` fired → the provider never ran
 /// (pre-spawn error) → `failure.stack` fired with the `err` interpolated →
@@ -1607,18 +1624,17 @@ Body
     );
     // The failure stack fired with the typed err payload (NOT the legacy
     // drop path, which never runs the failure stack). The post-spawn
-    // `attempt_result?` site wraps the underlying error via
-    // `from_action_failure("harness_attempt", ...)`, so err.kind is
-    // `LifecycleAction` and err.variant is the `harness_attempt` verb.
+    // `attempt_result?` site passes the typed error through, so the stacks see
+    // its real facets rather than a synthesized label (see the doc comment).
     assert!(
-        lines.iter().any(|l| l == "failure-kind=LifecycleAction"),
-        "failure.stack must fire and observe err.kind='LifecycleAction'; \
-         got {lines:?}; pane:\n{pane}"
+        lines.iter().any(|l| l == "failure-kind=config"),
+        "failure.stack must fire and observe the typed error's category \
+         (err.kind='config'); got {lines:?}; pane:\n{pane}"
     );
     assert!(
-        lines.iter().any(|l| l == "failure-variant=harness_attempt"),
-        "failure.stack must observe err.variant='harness_attempt'; \
-         got {lines:?}; pane:\n{pane}"
+        lines.iter().any(|l| l == "failure-variant=config.invalid"),
+        "failure.stack must observe the typed error's code \
+         (err.variant='config.invalid'); got {lines:?}; pane:\n{pane}"
     );
     // The finalize stack fired and its `when: "err"` guard was truthy.
     assert!(

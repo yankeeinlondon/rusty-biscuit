@@ -19,11 +19,12 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 
 use super::{
-    ExpressionError, FileRefFailure, FileReferenceDiagnostic, json_number, make_portable_relative,
-    make_relative, scalar_string, to_number, to_number_coerce,
+    ExpressionError, FileRefFailure, FileReferenceDiagnostic, json_number, make_portable_relative_in_context,
+    make_relative_in_context, scalar_string, to_number, to_number_coerce,
 };
 use super::resolve_ctx::{
-    ResolutionContext, is_remote_url, normalize_path_arg, resolve_file_ref_with_fallback,
+    ResolutionContext, is_remote_url, normalize_path_arg, resolve_document_file_ref,
+    resolve_document_file_ref_shape,
 };
 use crate::markdown::Markdown;
 use crate::markdown::schemas::DarkmatterSchemas;
@@ -1422,30 +1423,7 @@ pub fn is_this_year_utc(args: &[Value]) -> Result<Value, String> {
     Ok(Value::Bool(is_this_year_with(&args[0], today_utc(), true)))
 }
 
-/// Resolves a filepath argument to an absolute path using FileReference rules.
-///
-/// Encodes the single shared resolution order (delegated to
-/// [`resolve_file_ref_with_fallback`]):
-///
-/// 1. absolute paths are returned as-is by `FileReference`;
-/// 2. document-relative via `resolve_from(base_dir)` (so references written
-///    inside a composed document resolve next to that document);
-/// 3. launch-area fallback via `resolve_from(file_ref_fallback_dir)` when the
-///    context carries one (a caller-supplied path relative to the launch area);
-/// 4. no ambient process-CWD fallback.
-///
-/// The launch-area fallback replaces the previous implicit ambient-CWD
-/// `resolve()` branch, which depended on `std::env::current_dir()`. Production
-/// surfaces thread the captured launch area as `file_ref_fallback_dir` so
-/// resolution stays correct after the wrapper `chdir`s the process.
-///
-/// ## Returns
-///
-/// - `Ok(Some(path))` when the reference resolves to a path.
-/// - `Ok(None)` when the reference is well-formed but resolves to nothing.
-/// - `Err` when the reference string itself is invalid.
-///
-/// [`resolve_file_ref_with_fallback`]: super::resolve_ctx::resolve_file_ref_with_fallback
+/// Constructs an [`ExpressionError::Other`] for `function` with `message`.
 fn expression_other(function: &'static str, message: String) -> ExpressionError {
     ExpressionError::Other {
         function: function.to_string(),
@@ -1491,7 +1469,7 @@ fn resolve_arg(
     ctx: &ResolutionContext,
 ) -> Result<Option<PathBuf>, ExpressionError> {
     let normalized = normalize_path_arg(raw);
-    let mut file_ref = biscuit_file::FileReference::new(&normalized).map_err(|e| {
+    let file_ref = biscuit_file::FileReference::new(&normalized).map_err(|e| {
         file_reference_error(
             function,
             raw,
@@ -1500,13 +1478,16 @@ fn resolve_arg(
             Some(e),
         )
     })?;
-    for (path, position) in &ctx.magic_paths {
-        file_ref = file_ref.add_magic_path(path, *position);
-    }
-    resolve_file_ref_with_fallback(
+    // Magic (`@`) roots and the pass's cached repository root live on the
+    // context; per D2 there is no launch-area fallback for a nested-document
+    // reference — only repository and authoring-document candidates participate.
+    resolve_document_file_ref(
         &file_ref,
         &ctx.base_dir,
-        ctx.file_ref_fallback_dir.as_deref(),
+        ctx.repository_root.as_deref(),
+        ctx.package_area.as_deref(),
+        &ctx.magic_paths,
+        ctx.file_resolution_context.as_ref(),
     )
     .map_err(|e| {
         file_reference_error(
@@ -1626,17 +1607,21 @@ pub fn relative_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Exp
             ));
         }
     };
-    Ok(Value::String(make_relative(&abs, &ctx.base_dir)))
+    Ok(Value::String(make_relative_in_context(
+        &abs,
+        &ctx.base_dir,
+        ctx.file_resolution_context.as_ref(),
+    )))
 }
 
 /// Resolves a filepath argument through the shared FS-path rules.
 ///
-/// Rejects HTTP(S) URLs. First tries the standard `FileReference` resolution
-/// (which requires the file to exist so magic paths and git-root fallbacks
-/// work); if that yields no match, falls back to a path shape computed from
-/// the reference kind and the base directory. This lets path-component
-/// functions operate on missing files and directories without checking
-/// `Path::exists()`.
+/// Rejects HTTP(S) URLs. Otherwise delegates entirely to `FileReference`
+/// classification and its ordered candidate plan (D1/D3): an existing target
+/// resolves to its matched path, and a missing target takes the plan's first
+/// candidate as its shape. Path-component functions thus operate on missing
+/// files and directories without a private prefix grammar or an existence
+/// probe.
 fn resolve_path_arg(
     name: &'static str,
     value: &Value,
@@ -1649,7 +1634,11 @@ fn resolve_path_arg(
 /// Resolves a raw path string to an absolute path shape.
 ///
 /// See [`resolve_path_arg`]. Exposed separately so `join()` can validate its
-/// computed result without constructing a temporary [`Value`].
+/// computed result without constructing a temporary [`Value`]. Both existing
+/// and missing targets are shaped by the shared
+/// [`resolve_document_file_ref_shape`], so a shape can never disagree with an
+/// execution-time resolution on classification, candidate order, or
+/// repository-first anchoring.
 fn resolve_path_shape(
     name: &'static str,
     raw: &str,
@@ -1661,44 +1650,23 @@ fn resolve_path_shape(
             format!("{name}() does not accept HTTP(S) URLs"),
         ));
     }
-    // Existing `FileReference` resolution handles existing files, magic paths,
-    // package paths, git-root fallbacks, and absolute references.
-    if let Ok(Some(p)) = resolve_arg(name, raw, ctx) {
-        return Ok(p);
-    }
-    // No existing match: build a deterministic path shape without touching
-    // `Path::exists()`.
     let normalized = normalize_path_arg(raw);
-    let path = PathBuf::from(&normalized);
-    if path.is_absolute() {
-        return Ok(path);
-    }
-    if normalized.starts_with("./")
-        || normalized.starts_with("../")
-        || normalized == "."
-        || normalized == ".."
-    {
-        return Ok(ctx.base_dir.join(path));
-    }
-    if let Some(rest) = normalized.strip_prefix('@') {
-        for (magic, _position) in &ctx.magic_paths {
-            let candidate = magic.join(rest);
-            if candidate.exists() {
-                return Ok(candidate);
-            }
-        }
-        return Ok(ctx.base_dir.join(rest));
-    }
-    if let Some(rest) = normalized.strip_prefix('!') {
-        return Ok(ctx.base_dir.join(rest));
-    }
-    if normalized.starts_with("vault:") {
-        return Err(expression_other(
-            name,
-            format!("{name}() vault references require an existing file"),
-        ));
-    }
-    Ok(ctx.base_dir.join(path))
+    let file_ref = biscuit_file::FileReference::new(&normalized).map_err(|e| {
+        file_reference_error(name, raw, ctx, FileRefFailure::classify(&e), Some(e))
+    })?;
+    // Magic (`@`) roots and the pass's cached repository root live on the
+    // context; the shared shaper builds the same candidate plan execution
+    // probes (repository-first for implicit references), so a missing target's
+    // shape is the first shared candidate rather than a source-first join.
+    resolve_document_file_ref_shape(
+        &file_ref,
+        &ctx.base_dir,
+        ctx.repository_root.as_deref(),
+        ctx.package_area.as_deref(),
+        &ctx.magic_paths,
+        ctx.file_resolution_context.as_ref(),
+    )
+    .map_err(|e| file_reference_error(name, raw, ctx, FileRefFailure::classify(&e), Some(e)))
 }
 
 /// Parses a stem against the indexed grammar, returning the base name, parsed
@@ -1731,8 +1699,12 @@ fn format_indexed_stem(base: &str, index: u64, width: usize) -> String {
 /// The display shape follows the same `relative(file)` policy used elsewhere:
 /// repo-root relative, base-dir relative, `~`-aliased, or absolute. Components
 /// are returned with `/` separators in mind.
-fn path_display_components(path: &Path, base_dir: &Path) -> (Vec<String>, String) {
-    let rel = make_portable_relative(path, base_dir);
+fn path_display_components(
+    path: &Path,
+    base_dir: &Path,
+    request_context: Option<&biscuit_file::FileResolutionContext>,
+) -> (Vec<String>, String) {
+    let rel = make_portable_relative_in_context(path, base_dir, request_context);
     let trimmed = rel.strip_prefix('/').unwrap_or(&rel).to_string();
     match trimmed.rfind('/') {
         Some(pos) => {
@@ -1756,7 +1728,7 @@ pub fn is_indexed_file_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Val
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("is_indexed_file", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.base_dir);
+    let (_, base) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
     let stem = file_stem(&base);
     Ok(Value::Bool(parse_indexed_stem(&stem).is_some()))
 }
@@ -1768,7 +1740,7 @@ pub fn file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, E
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("file_index", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.base_dir);
+    let (_, base) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
     let stem = file_stem(&base);
     let index = parse_indexed_stem(&stem)
         .map(|i| i.index as i64)
@@ -1784,7 +1756,7 @@ pub fn increment_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Resul
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("increment_file_index", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.base_dir);
+    let (_, base) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
     let ext = file_extension(&base);
     let stem = file_stem(&base);
     let new_stem = if let Some((base_name, index, width)) = indexed_stem_info(&stem) {
@@ -1802,7 +1774,11 @@ pub fn increment_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Resul
         .parent()
         .map(|p| p.join(&new_base))
         .unwrap_or_else(|| PathBuf::from(&new_base));
-    Ok(Value::String(make_portable_relative(&out, &ctx.base_dir)))
+    Ok(Value::String(make_portable_relative_in_context(
+        &out,
+        &ctx.base_dir,
+        ctx.file_resolution_context.as_ref(),
+    )))
 }
 
 /// `decrement_file_index(file) -> string` — decrements the numeric suffix,
@@ -1813,7 +1789,7 @@ pub fn decrement_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Resul
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("decrement_file_index", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.base_dir);
+    let (_, base) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
     let ext = file_extension(&base);
     let stem = file_stem(&base);
     let new_stem = if let Some((base_name, index, width)) = indexed_stem_info(&stem) {
@@ -1831,7 +1807,11 @@ pub fn decrement_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Resul
         .parent()
         .map(|p| p.join(&new_base))
         .unwrap_or_else(|| PathBuf::from(&new_base));
-    Ok(Value::String(make_portable_relative(&out, &ctx.base_dir)))
+    Ok(Value::String(make_portable_relative_in_context(
+        &out,
+        &ctx.base_dir,
+        ctx.file_resolution_context.as_ref(),
+    )))
 }
 
 /// `basename(file) -> string` — the final path component including extension.
@@ -1841,7 +1821,7 @@ pub fn basename_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Exp
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("basename", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.base_dir);
+    let (_, base) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
     Ok(Value::String(base))
 }
 
@@ -1853,7 +1833,7 @@ pub fn basename_without_index_fn(args: &[Value], ctx: &ResolutionContext) -> Res
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("basename_without_index", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.base_dir);
+    let (_, base) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
     let stem = file_stem(&base);
     let ext = file_extension(&base);
     let unindexed = match indexed_stem_info(&stem) {
@@ -1875,7 +1855,7 @@ pub fn dirname_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Expr
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("dirname", &args[0], ctx)?;
-    let (dirs, _) = path_display_components(&path, &ctx.base_dir);
+    let (dirs, _) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
     Ok(Value::String(if dirs.is_empty() {
         String::new()
     } else {
@@ -1891,7 +1871,7 @@ pub fn ext_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Expressi
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("ext", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.base_dir);
+    let (_, base) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
     Ok(Value::String(file_extension(&base)))
 }
 
@@ -1903,7 +1883,7 @@ pub fn parent_dir_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, E
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("parent_dir", &args[0], ctx)?;
-    let (dirs, _) = path_display_components(&path, &ctx.base_dir);
+    let (dirs, _) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
     Ok(Value::String(dirs.last().cloned().unwrap_or_default()))
 }
 
@@ -1915,7 +1895,7 @@ pub fn file_trailing_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("file_trailing", &args[0], ctx)?;
-    let (dirs, base) = path_display_components(&path, &ctx.base_dir);
+    let (dirs, base) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
     Ok(Value::String(match dirs.last() {
         Some(d) => format!("{d}/{base}"),
         None => base,
@@ -1930,7 +1910,7 @@ pub fn dir_leading_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, 
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("dir_leading", &args[0], ctx)?;
-    let (dirs, _) = path_display_components(&path, &ctx.base_dir);
+    let (dirs, _) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
     Ok(Value::String(if dirs.len() <= 1 {
         String::new()
     } else {
@@ -1960,7 +1940,11 @@ pub fn join_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Express
     let joined_str = joined.to_string_lossy().to_string();
     let validated = resolve_path_shape("join", &joined_str, ctx)?;
     Ok(Value::String(
-        make_portable_relative(&validated, &ctx.base_dir),
+        make_portable_relative_in_context(
+            &validated,
+            &ctx.base_dir,
+            ctx.file_resolution_context.as_ref(),
+        ),
     ))
 }
 
@@ -2018,7 +2002,11 @@ pub fn link_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Express
                 ));
             }
             let path = resolve_path_arg("link", &args[0], ctx)?;
-            let desc = make_portable_relative(&path, &ctx.base_dir);
+            let desc = make_portable_relative_in_context(
+                &path,
+                &ctx.base_dir,
+                ctx.file_resolution_context.as_ref(),
+            );
             let dest = path.to_string_lossy().replace('\\', "/");
             Ok(Value::String(format_markdown_link(&desc, &dest)))
         }
@@ -2075,8 +2063,14 @@ pub fn has_skill_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Ex
     }
     let agent = ctx.agent();
     let home_dir = ctx.home_dir().unwrap_or_else(|| PathBuf::from("."));
-    let local_root = crate::markdown::compose::find_git_root_from(&ctx.base_dir)
-        .unwrap_or_else(|| ctx.base_dir.clone());
+    let local_root = match &ctx.file_resolution_context {
+        Some(snapshot) => snapshot
+            .repository_root()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| ctx.base_dir.clone()),
+        None => crate::markdown::compose::find_git_root_from(&ctx.base_dir)
+            .unwrap_or_else(|| ctx.base_dir.clone()),
+    };
     let roots = SkillRoots::new(home_dir, local_root).roots_for_agent(&agent);
     Ok(Value::Bool(skill_exists_in_roots(&roots, name)))
 }
@@ -2097,8 +2091,14 @@ pub fn has_local_skill_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Val
         ));
     }
     let agent = ctx.agent();
-    let local_root = crate::markdown::compose::find_git_root_from(&ctx.base_dir)
-        .unwrap_or_else(|| ctx.base_dir.clone());
+    let local_root = match &ctx.file_resolution_context {
+        Some(snapshot) => snapshot
+            .repository_root()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| ctx.base_dir.clone()),
+        None => crate::markdown::compose::find_git_root_from(&ctx.base_dir)
+            .unwrap_or_else(|| ctx.base_dir.clone()),
+    };
     let roots = SkillRoots::new(PathBuf::from("."), local_root).local_roots_for_agent(&agent);
     Ok(Value::Bool(skill_exists_in_roots(&roots, name)))
 }
@@ -2923,6 +2923,19 @@ mod tests {
             assert!(first_fn(&v(json!("hi"))).is_err());
             assert!(last_fn(&v(json!({"a": 1}))).is_err());
         }
+
+        #[test]
+        fn last_preserves_typed_element() {
+            // The Sequence Plus `outputs` array has shape `(string | string[])[]`:
+            // a parallel group pushes a nested array. `last(outputs)` must return
+            // that element with its type intact, not a stringified form.
+            let outputs = json!(["one", ["a", "b"]]);
+            assert_eq!(last_fn(&v(outputs)).unwrap(), json!(["a", "b"]));
+
+            // An object element is likewise returned whole.
+            let mixed = json!(["x", {"k": 1}]);
+            assert_eq!(last_fn(&v(mixed)).unwrap(), json!({"k": 1}));
+        }
     }
 
     mod fn_string_predicates {
@@ -3317,19 +3330,36 @@ mod tests {
         }
 
         #[test]
+        fn absolute_package_reference_uses_package_area_not_repository() {
+            let repo = tempfile::TempDir::new().unwrap();
+            let package_area = repo.path().join("darkmatter");
+            let base_dir = package_area.join("docs");
+            std::fs::create_dir_all(&base_dir).unwrap();
+            std::fs::write(repo.path().join("shared.md"), "repository decoy").unwrap();
+            std::fs::write(package_area.join("shared.md"), "package").unwrap();
+            let ctx = ResolutionContext::new(base_dir)
+                .with_repository_root(repo.path())
+                .with_package_area(&package_area);
+
+            assert_eq!(
+                absolute_fn(&[json!("!shared.md")], &ctx).unwrap(),
+                json!(package_area.join("shared.md").to_string_lossy().to_string()),
+            );
+        }
+
+        #[test]
         #[serial_test::serial]
-        fn file_exists_resolves_via_explicit_fallback_not_process_cwd() {
-            // The launch-area fallback replaces the old ambient-CWD `resolve()`
-            // branch. A caller-supplied path relative to the launch area must
-            // resolve via `file_ref_fallback_dir` even when the process CWD has
-            // been mutated to an unrelated directory.
+        fn file_exists_does_not_consult_launch_area_fallback_or_process_cwd() {
+            // Per D2 the launch-area fallback is not a resolution input for a
+            // reference authored inside a document. A file present only under the
+            // configured fallback (and not under base_dir) reads as missing, and
+            // the ambient process CWD is likewise never consulted.
             let launch_dir = tempfile::TempDir::new().unwrap();
             std::fs::write(launch_dir.path().join("plan.md"), "# Plan\n").unwrap();
-            // base_dir deliberately lacks plan.md, so document-relative
-            // resolution misses and only the fallback can succeed.
+            // base_dir deliberately lacks plan.md.
             let base_dir = tempfile::TempDir::new().unwrap();
-            // An unrelated directory the process is chdir'd into: plan.md is
-            // NOT here, proving the fallback (not ambient CWD) is consulted.
+            // An unrelated directory the process is chdir'd into: plan.md is NOT
+            // here either.
             let unrelated_dir = tempfile::TempDir::new().unwrap();
             let ctx = ResolutionContext::new(base_dir.path().to_path_buf())
                 .with_file_ref_fallback_dir(launch_dir.path().to_path_buf());
@@ -3339,7 +3369,7 @@ mod tests {
             let found = file_exists_fn(&[json!("plan.md")], &ctx);
             std::env::set_current_dir(&original).unwrap();
 
-            assert_eq!(found.unwrap(), json!(true));
+            assert_eq!(found.unwrap(), json!(false));
         }
 
         #[test]
@@ -4218,6 +4248,28 @@ mod tests {
             assert!(join_fn(&[json!("a"), json!([])], &ctx).is_err());
         }
 
+        /// A missing implicit bare reference is shaped **repository-first**
+        /// (D3), matching how an existing implicit reference resolves — not the
+        /// removed private `ctx.base_dir.join` source-first fallback. The
+        /// explicit `./` form still pins to the source directory only.
+        #[test]
+        fn missing_implicit_path_shape_is_repository_first() {
+            let repo = tempfile::TempDir::new().unwrap();
+            std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+            let base = repo.path().join("prompts");
+            std::fs::create_dir_all(&base).unwrap();
+            let ctx = ResolutionContext::new(base.clone())
+                .with_repository_root(repo.path().to_path_buf());
+
+            // Implicit bare miss → repository-root candidate, not `prompts/…`.
+            let implicit = resolve_path_shape("dirname", "sub/missing.md", &ctx).unwrap();
+            assert_eq!(implicit, repo.path().join("sub/missing.md"));
+
+            // Explicit `./` miss → source-directory candidate only.
+            let explicit = resolve_path_shape("dirname", "./sub/missing.md", &ctx).unwrap();
+            assert_eq!(explicit, base.join("./sub/missing.md"));
+        }
+
         #[test]
         fn path_functions_do_not_require_existence() {
             let ctx = ResolutionContext::new(std::env::temp_dir());
@@ -4451,6 +4503,26 @@ mod tests {
             assert_eq!(
                 has_skill_fn(&[json!("local-skill")], &ctx).unwrap(),
                 json!(true)
+            );
+        }
+
+        #[test]
+        fn skill_lookup_reuses_request_snapshot_roots() {
+            let request_repo = tempfile::TempDir::new().unwrap();
+            let nested_repo = tempfile::TempDir::new().unwrap();
+            std::fs::create_dir_all(request_repo.path().join(".claude/skills/captured")).unwrap();
+            std::fs::create_dir_all(nested_repo.path().join(".git")).unwrap();
+            let snapshot = biscuit_file::FileResolutionContext::new(request_repo.path())
+                .with_repository_root(request_repo.path())
+                .without_home_dir();
+            let mut ctx = ResolutionContext::new(nested_repo.path().to_path_buf())
+                .with_ctx_value("agent", json!("claude"));
+            ctx.file_resolution_context = Some(snapshot);
+
+            assert_eq!(ctx.home_dir(), None);
+            assert_eq!(
+                has_local_skill_fn(&[json!("captured")], &ctx).unwrap(),
+                json!(true),
             );
         }
 

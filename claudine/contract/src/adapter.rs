@@ -106,9 +106,10 @@ impl ClaudineInferenceAdapter {
         };
         let mut parser = create_semantic_parser(self.provider, NullSemanticSink, config);
         for line in &raw.stdout_lines {
-            // Malformed lines are non-fatal (parser emits a warning); a real
-            // parse error is surfaced through the summary, not by aborting.
-            let _ = parser.feed_line(line);
+            // Parsing is infallible: a malformed line becomes a warning event,
+            // and anything the run got wrong reaches the caller through the
+            // summary rather than by aborting the drain.
+            parser.feed_line(line);
         }
         parser.finish(raw.exit_code)
     }

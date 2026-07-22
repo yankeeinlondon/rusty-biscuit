@@ -123,9 +123,10 @@ test-l2 *args="":
 
 # Level-3 OS-keyboard-injection tests. Gated by `require_level!(Level::L3, ...)`;
 # the recipe exports RUN_LEVEL3=1, and each test also skips cleanly when its
-# backend (WezTerm + cliclick, macOS only) is absent. Covers genuine OS Ctrl+C
-# keystroke delivery into a real WezTerm window (signal-handling.md). The tmux
-# multiplexer Ctrl+C coverage lives at L2 (`just test-l2`).
+# backend is absent (WezTerm plus the per-OS injector: cliclick on macOS,
+# xdotool on Linux/X11, PowerShell SendKeys on Windows). Covers genuine OS
+# Ctrl+C keystroke delivery into a real WezTerm window (signal-handling.md).
+# The tmux multiplexer Ctrl+C coverage lives at L2 (`just test-l2`).
 test-l3 *args="":
     @just _test_l3 claudine-cli {{ args }}
 
@@ -161,14 +162,24 @@ test-real *args="":
     CLAUDINE_CONTRACT_REAL=1 cargo test -p claudine-cli --test real_opencode_yolo_subagent {{ args }} || rc=$?
     exit $rc
 
-# Guard against typed lower-layer errors collapsing to strings at the
-# Darkmatter→Claudine / BlockError transport boundary (real-errors Phase 6).
-# Pure grep heuristic — no cargo — so it runs even when the toolchain is gated.
+# Guard against typed errors collapsing to prose anywhere in lib/src, cli/src,
+# or contract/src, and against the diagnostic registry and code catalog drifting
+# from the sources (error-propagation Phase 6, D2/D7/D8).
+#
+# A `syn` scan, not a grep: a binding is only lossy when the syntax tree proves
+# it is an error *and* proves the typed value does not survive alongside the
+# prose. This needs cargo — the predecessor grep did not, but it also could not
+# tell `eyre!("unknown server {id}")` from a real collapse.
+#
+# `just test` runs these too; the recipe exists so `just lint` fails on a
+# transport regression without waiting for the full suite.
 lint-transport:
-    @../scripts/check-error-transport.sh
+    @just _test claudine-cli --test error_guards
 
-# Guard new lifecycle docs onto the faceted `err.*` contract, keeping the
-# deprecated err.kind/err.variant/err.msg aliases out of fresh examples.
+# Guard new lifecycle docs onto the faceted `err.*` contract: the deprecated
+# err.kind/err.variant aliases stay inside their documentation section, and
+# `err.msg` is never a match target (rendering it is correct and unrestricted —
+# it is the effective diagnostic's notification-safe projection, not an alias).
 # Pure grep heuristic — no cargo — so it runs even when the toolchain is gated.
 lint-lifecycle-doc-facets:
     @../scripts/check-lifecycle-doc-facets.sh
@@ -225,6 +236,28 @@ lint-fix:
 # Validate the source code without doing a full build
 check:
     @cargo check -p claudine-catalog-types -p claudine -p claudine-contract -p claudine-cli -p claudine-gen
+
+# Type-check the library and CLI *including test targets* for Windows.
+#
+# The only gate that compiles the Windows-only suites (`termination/windows.rs`
+# and `level2_windows_sequence_ctrl_c.rs`). Without it they are unverifiable
+# dead source that merely looks like coverage. Requires the mingw-w64 toolchain
+# and the `x86_64-pc-windows-gnu` rustup target.
+#
+# Two host workarounds are load-bearing, not incidental:
+#   - `RUSTC_WRAPPER=""` — a `rustc-wrapper` in ~/.cargo/config.toml leaks into
+#     cc-rs as a compiler launcher and breaks every C build for this target.
+#   - `-Wa,-mbig-obj` — duckdb's unity build (reached via the `rendezvous-daemon`
+#     dev-dependency) emits objects past COFF's 32767-section limit, which
+#     mingw's assembler rejects until told to use the big-object format.
+check-windows:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export RUSTC_WRAPPER=""
+    export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target/windows-check}"
+    export CFLAGS_x86_64_pc_windows_gnu="-Wa,-mbig-obj"
+    export CXXFLAGS_x86_64_pc_windows_gnu="-Wa,-mbig-obj"
+    cargo check -p claudine -p claudine-cli --tests --target x86_64-pc-windows-gnu
 
 # Run the latest debug build of the Claudine CLI
 cli *args="":

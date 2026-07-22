@@ -17,7 +17,7 @@ use std::collections::HashMap;
 
 use serde_json::{Map, Value};
 
-use super::parser::{SemanticStreamParser, StreamParseError};
+use super::parser::SemanticStreamParser;
 use super::protocol::gemini::{
     GeminiErrorEvent, GeminiEvent, GeminiInit, GeminiMessage, GeminiResult, GeminiToolResult,
     GeminiToolUse,
@@ -319,11 +319,11 @@ impl<S: SemanticEventSink> GeminiSemanticStreamParser<S> {
 }
 
 impl<S: SemanticEventSink> SemanticStreamParser for GeminiSemanticStreamParser<S> {
-    fn feed_line(&mut self, line: &str) -> Result<(), StreamParseError> {
+    fn feed_line(&mut self, line: &str) {
         self.line_num += 1;
         let line = line.trim();
         if line.is_empty() {
-            return Ok(());
+            return;
         }
 
         // Try typed deserialization first to avoid `serde_json::Value` DOM
@@ -381,7 +381,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for GeminiSemanticStreamParser<S
                             &e.to_string(),
                         );
                         self.emit_malformed_warning(&e.to_string());
-                        return Ok(());
+                        return;
                     }
                 };
                 let raw_kind = raw
@@ -394,7 +394,6 @@ impl<S: SemanticEventSink> SemanticStreamParser for GeminiSemanticStreamParser<S
                 self.emit_provider_extension(&raw_kind, Value::Object(raw));
             }
         }
-        Ok(())
     }
 
     fn finish(mut self: Box<Self>, exit_code: i32) -> StreamExecutionSummary {

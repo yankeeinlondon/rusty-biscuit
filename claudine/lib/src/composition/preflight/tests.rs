@@ -1,4 +1,5 @@
 use super::*;
+use crate::diagnostics::Diagnostic;
 use darkmatter::markdown::compose::shell_expansion::types::{
     ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionError,
 };
@@ -205,9 +206,91 @@ fn blacklisted_command_returns_error() {
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(
-        matches!(err, CompositionError::PreFlightFailed(ref msg) if msg.contains("blacklisted")),
-        "expected PreFlightFailed with blacklisted, got: {err}"
+        matches!(
+            err,
+            CompositionError::ShellApprovalUnavailable {
+                failure: ShellApprovalFailure::Blacklisted(_),
+                ..
+            }
+        ),
+        "expected ShellApprovalUnavailable/Blacklisted, got: {err}"
     );
+    // The prose the variant replaced is a user-visible surface; typing the
+    // error must not reword it.
+    assert!(
+        err.to_string().contains("is blacklisted:"),
+        "blacklist message must survive the typed variant; got: {err}"
+    );
+}
+
+/// Every approval failure claims `composition.shell_approval` and projects the
+/// authored command, its source, and a matchable `reason` — the distinction a
+/// `when:` clause lost when these three all collapsed into
+/// `PreFlightFailed(String)`'s `composition.failed` catch-all (Phase 7 finding,
+/// ruled in decisions.md §D-14).
+#[test]
+fn approval_failures_project_a_matchable_reason() {
+    let cases = [
+        (
+            ShellApprovalFailure::Blacklisted("destructive".to_string()),
+            "blacklisted",
+        ),
+        (ShellApprovalFailure::NoHandler, "no_handler"),
+        (ShellApprovalFailure::DryRun, "dry_run"),
+    ];
+
+    for (failure, expected_reason) in cases {
+        let err = CompositionError::ShellApprovalUnavailable {
+            command: "rm -rf /".to_string(),
+            source_file: std::path::PathBuf::from("/repo/run.md"),
+            line: 12,
+            failure,
+        };
+        assert_eq!(err.code(), "composition.shell_approval");
+        let detail = err.detail();
+        assert_eq!(detail["reason"], serde_json::json!(expected_reason));
+        assert_eq!(detail["command"], serde_json::json!("rm -rf /"));
+        assert_eq!(detail["source_path"], serde_json::json!("/repo/run.md"));
+        assert_eq!(detail["line"], serde_json::json!(12));
+    }
+}
+
+/// A user declining shares the family's code, so one `when:` clause catches
+/// every approval failure, and `reason` separates a denial from a blacklist hit.
+#[test]
+fn a_user_denial_shares_the_approval_code_with_reason_denied() {
+    let err = CompositionError::ShellCommandDenied {
+        command: "curl example.com".to_string(),
+        source_file: std::path::PathBuf::from("/repo/run.md"),
+        line: 3,
+    };
+    assert_eq!(err.code(), "composition.shell_approval");
+    assert_eq!(err.detail()["reason"], serde_json::json!("denied"));
+}
+
+/// The lifecycle-stack source carries no line number, and `0` is its sentinel.
+/// Projecting `0` would assert a line that does not exist, so it must be `null`
+/// — the same absent-optional rule the rest of `err.detail.*` follows.
+#[test]
+fn a_line_less_source_projects_a_null_line_not_zero() {
+    let err = CompositionError::ShellApprovalUnavailable {
+        command: "rm -rf /".to_string(),
+        source_file: std::path::PathBuf::from("<lifecycle-stack>"),
+        line: 0,
+        failure: ShellApprovalFailure::NoHandler,
+    };
+    assert!(err.detail()["line"].is_null(), "line 0 must project null");
+}
+
+/// `PreFlightFailed` keeps the `composition.failed` catch-all deliberately: it
+/// is prose covering unrelated failures (the early-binding state builder, a
+/// shell-audit error outside the family), so claiming the approval code would
+/// mean parsing its `Display` to find a reason — the exact defect this feature
+/// exists to remove (decisions.md §D-14).
+#[test]
+fn preflight_failed_does_not_claim_the_approval_code() {
+    let err = CompositionError::PreFlightFailed("building early-binding state failed".to_string());
+    assert_eq!(err.code(), "composition.failed");
 }
 
 #[test]
@@ -552,22 +635,9 @@ fn approval_request_carries_real_source_provenance() {
     );
 }
 
-// --- Lifecycle shell read-side resolution: launch-area fallback ---------
-//
-// A lifecycle `shell` command whose `{{ }}` span calls a read-side
-// filesystem function (`file_exists`) against a launch-area-relative path
-// must resolve via the threaded `file_ref_fallback_dir`, not the prompt
-// directory alone. The regression below keeps the prompt dir, the
-// launch-area fallback, and the ambient CWD all distinct, with `spec.md`
-// present ONLY under the fallback, and proves the resolved (stamped)
-// command depends on the fallback being supplied — independently of the
-// post-launch process CWD.
-
 use darkmatter::markdown::compose::ComposeContext;
 
-/// RAII guard that switches the process CWD and restores it on drop
-/// (including on panic). Tests using it are `#[serial_test::serial]` to
-/// avoid racing on process-global CWD with other CWD-mutating tests.
+/// Restores the process CWD on drop. CWD-mutating tests are serialized.
 struct CwdGuard {
     prior: std::path::PathBuf,
 }
@@ -586,9 +656,8 @@ impl Drop for CwdGuard {
     }
 }
 
-/// Builds a `start` lifecycle config with a single positional `shell`
-/// action whose command interpolates `file_exists(spec)`, plus the
-/// effective frontmatter that supplies `spec`.
+/// Returns a lifecycle shell fixture whose command interpolates
+/// `file_exists(spec)`.
 fn lifecycle_with_file_exists_shell()
 -> (crate::composition::lifecycle::LifecycleConfig, serde_json::Value) {
     let frontmatter = serde_json::json!({ "spec": "spec.md" });
@@ -606,8 +675,7 @@ fn lifecycle_with_file_exists_shell()
     (config, frontmatter)
 }
 
-/// Reads the resolved (stamped) command string from the first `start`
-/// stack action.
+/// Returns the resolved command from the first `start` action.
 fn resolved_start_shell_command(
     config: &crate::composition::lifecycle::LifecycleConfig,
 ) -> String {
@@ -625,13 +693,14 @@ fn resolved_start_shell_command(
 
 #[test]
 #[serial_test::serial(preflight_cwd)]
-fn lifecycle_shell_read_side_resolves_via_launch_area_fallback() {
+fn lifecycle_shell_read_side_resolves_against_document_dir() {
     let doc_dir = tempfile::TempDir::new().unwrap();
     let launch_dir = tempfile::TempDir::new().unwrap();
     let unrelated = tempfile::TempDir::new().unwrap();
-    // spec.md exists ONLY under the launch-area fallback — not the prompt
-    // (document) directory, not the ambient CWD.
-    std::fs::write(launch_dir.path().join("spec.md"), "# Spec\n").unwrap();
+    // spec.md lives under the prompt (document) directory — the base_dir a
+    // reference authored inside the document resolves against (D2). The
+    // launch-area fallback is diagnostic-only and never a candidate.
+    std::fs::write(doc_dir.path().join("spec.md"), "# Spec\n").unwrap();
 
     let source_path = doc_dir.path().join("prompt.md");
     let (mut config, frontmatter) = lifecycle_with_file_exists_shell();
@@ -645,25 +714,23 @@ fn lifecycle_shell_read_side_resolves_via_launch_area_fallback() {
         &frontmatter,
         &ComposeContext::capture(),
         &source_path,
+        None,
         Some(launch_dir.path()),
     )
-    .expect("resolution with the launch-area fallback must succeed");
+    .expect("resolution against the document dir must succeed");
 
     assert_eq!(
         resolved_start_shell_command(&config),
         "echo true",
-        "file_exists(spec) must see spec.md via the launch-area fallback",
+        "file_exists(spec) must see spec.md via base_dir (the document directory), CWD-independently",
     );
 }
 
-/// Same setup WITHOUT the fallback: `file_exists(spec)` cannot find the
-/// launch-only file via the prompt dir or the unrelated CWD, so it resolves
-/// to `false`. This confirms the test above passes because of the fallback,
-/// not because the file is reachable some other way. Before the fix this
-/// was the only code path, so the launch-relative reference resolved wrong.
+/// A launch-only file is not a candidate for a lifecycle expression authored
+/// by the document.
 #[test]
 #[serial_test::serial(preflight_cwd)]
-fn lifecycle_shell_read_side_without_fallback_misses_launch_area_file() {
+fn lifecycle_shell_read_side_does_not_resolve_launch_only_file() {
     let doc_dir = tempfile::TempDir::new().unwrap();
     let launch_dir = tempfile::TempDir::new().unwrap();
     let unrelated = tempfile::TempDir::new().unwrap();
@@ -680,12 +747,93 @@ fn lifecycle_shell_read_side_without_fallback_misses_launch_area_file() {
         &ComposeContext::capture(),
         &source_path,
         None,
+        None,
     )
     .expect("resolution still succeeds; file just resolves to absent");
 
     assert_eq!(
         resolved_start_shell_command(&config),
         "echo false",
-        "without the fallback the launch-only spec.md is unreachable",
+        "the launch-only spec.md must be unreachable from the document context",
+    );
+}
+
+#[test]
+#[serial_test::serial(file_resolution_snapshot)]
+fn lifecycle_shell_read_side_reuses_all_request_resolution_inputs() {
+    let request = tempfile::TempDir::new().unwrap();
+    let source_dir = request.path().join("prompts");
+    let home = request.path().join("home");
+    let magic = request.path().join("magic");
+    let package = request.path().join("package");
+    for dir in [&source_dir, &home, &magic, &package] {
+        std::fs::create_dir_all(dir).unwrap();
+    }
+    for path in [
+        request.path().join("env.flag"),
+        home.join("home.flag"),
+        magic.join("magic.flag"),
+        package.join("package.flag"),
+    ] {
+        std::fs::write(path, "ready").unwrap();
+    }
+
+    let env_ref = "{{CLAUDINE_PREFLIGHT_SNAPSHOT_ROOT}}/env.flag";
+    let frontmatter = serde_json::json!({
+        "env_ref": env_ref,
+        "home_ref": "~/home.flag",
+        "magic_ref": "@magic.flag",
+        "package_ref": "!package.flag",
+    });
+    let fm_with_event = serde_json::json!({
+        "env_ref": env_ref,
+        "home_ref": "~/home.flag",
+        "magic_ref": "@magic.flag",
+        "package_ref": "!package.flag",
+        "start": {
+            "stack": [{"action": {"shell": concat!(
+                "echo {{ file_exists(env_ref) }} ",
+                "{{ file_exists(home_ref) }} ",
+                "{{ file_exists(magic_ref) }} ",
+                "{{ file_exists(package_ref) }}"
+            )}}]
+        }
+    });
+    let mut lifecycle = crate::composition::lifecycle::parse_lifecycle_config(
+        &fm_with_event,
+        Path::new("<test>"),
+    )
+    .unwrap();
+    let snapshot = biscuit_file::FileResolutionContext::from_snapshot(
+        request.path(),
+        Some(home),
+        std::collections::HashMap::from([(
+            "CLAUDINE_PREFLIGHT_SNAPSHOT_ROOT".to_string(),
+            request.path().display().to_string(),
+        )]),
+    )
+    .with_repository_root(request.path())
+    .with_package_area(package)
+    .add_magic_path(magic, biscuit_file::PathPosition::Start);
+
+    let ambient = tempfile::TempDir::new().unwrap();
+    let _home = test_toolkit::EnvGuard::set_safe("HOME", ambient.path());
+    let _env = test_toolkit::EnvGuard::set_safe(
+        "CLAUDINE_PREFLIGHT_SNAPSHOT_ROOT",
+        ambient.path(),
+    );
+    resolve_lifecycle_shell_commands(
+        &mut lifecycle,
+        &frontmatter,
+        &ComposeContext::capture(),
+        &source_dir.join("prompt.md"),
+        Some(&snapshot),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(
+        resolved_start_shell_command(&lifecycle),
+        "echo true true true true",
     );
 }

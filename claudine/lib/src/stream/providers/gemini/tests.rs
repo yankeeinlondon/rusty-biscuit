@@ -31,8 +31,7 @@ fn kinds(events: &[SemanticEvent]) -> Vec<&'static str> {
 fn init_emits_session_start() {
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"init","session_id":"gem-1","model":"gemini-2.5-pro"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"init","session_id":"gem-1","model":"gemini-2.5-pro"}"#);
     let collected = events.lock().unwrap().clone();
     assert!(matches!(
         collected[0],
@@ -45,8 +44,7 @@ fn init_emits_session_start() {
 fn assistant_message_emits_output_text() {
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"message","role":"assistant","content":"Hello"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"message","role":"assistant","content":"Hello"}"#);
     let collected = events.lock().unwrap().clone();
     assert!(matches!(
         collected[0],
@@ -62,8 +60,7 @@ fn gemini_non_assistant_message_emits_no_provider_extension() {
     parser
         .feed_line(
             r#"{"type":"message","content":"Hi how are you?","role":"user","timestamp":"2026-04-14T00:00:00Z"}"#,
-        )
-        .unwrap();
+        );
 
     let captured = events.lock().unwrap().clone();
     assert!(
@@ -83,8 +80,7 @@ fn gemini_non_assistant_message_emits_no_provider_extension() {
 fn gemini_assistant_message_still_routes_to_output_text() {
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"message","content":"response text","role":"assistant"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"message","content":"response text","role":"assistant"}"#);
 
     let captured = events.lock().unwrap().clone();
     assert!(
@@ -101,13 +97,11 @@ fn tool_use_and_result_emit_typed_events() {
     parser
         .feed_line(
             r#"{"type":"tool_use","tool_id":"t1","tool_name":"search","parameters":{"q":"rust"}}"#,
-        )
-        .unwrap();
+        );
     parser
         .feed_line(
             r#"{"type":"tool_result","tool_id":"t1","status":"success","output":{"hits":3}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     assert_eq!(kinds(&collected), vec!["tool_call", "tool_result"]);
     match &collected[1] {
@@ -131,8 +125,7 @@ fn tool_use_and_result_emit_typed_events() {
 fn error_severity_warning_emits_warning() {
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"error","severity":"warning","message":"Loop detected"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"error","severity":"warning","message":"Loop detected"}"#);
     let collected = events.lock().unwrap().clone();
     assert!(matches!(
         collected[0],
@@ -146,8 +139,7 @@ fn error_severity_warning_emits_warning() {
 fn error_fatal_severity_emits_error() {
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"error","severity":"fatal","message":"Catastrophe"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"error","severity":"fatal","message":"Catastrophe"}"#);
     let collected = events.lock().unwrap().clone();
     assert!(matches!(
         collected[0],
@@ -161,8 +153,7 @@ fn result_status_success_emits_turn_complete() {
     parser
         .feed_line(
             r#"{"type":"result","status":"success","stats":{"input_tokens":500,"output_tokens":250,"cached":100,"duration_ms":8000,"tool_calls":2}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     match &collected[0] {
         SemanticEvent::TurnComplete {
@@ -191,8 +182,7 @@ fn result_status_error_emits_error() {
     parser
         .feed_line(
             r#"{"type":"result","status":"error","error":{"type":"FatalTurnLimited","message":"max turns"}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     assert!(matches!(
         collected[0],
@@ -207,8 +197,7 @@ fn result_status_error_emits_error() {
 fn unknown_event_type_becomes_provider_extension() {
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"some_unknown","data":"x"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"some_unknown","data":"x"}"#);
     let collected = events.lock().unwrap().clone();
     assert!(matches!(
         collected[0],
@@ -219,7 +208,7 @@ fn unknown_event_type_becomes_provider_extension() {
 #[test]
 fn malformed_json_emits_warning() {
     let (events, mut parser) = new_parser();
-    assert!(parser.feed_line("garbage").is_ok());
+    parser.feed_line("garbage");
     assert!(matches!(
         events.lock().unwrap()[0],
         SemanticEvent::Warning { .. }
@@ -230,8 +219,7 @@ fn malformed_json_emits_warning() {
 fn tool_input_string_fallback_parses_without_panic() {
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"tool_use","tool_id":"t","tool_name":"bash","input":"ls -la"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"tool_use","tool_id":"t","tool_name":"bash","input":"ls -la"}"#);
     let collected = events.lock().unwrap().clone();
     assert_eq!(kinds(&collected), vec!["tool_call"]);
     match &collected[0] {
@@ -245,7 +233,7 @@ fn tool_input_string_fallback_parses_without_panic() {
 #[test]
 fn missing_discriminator_falls_through_to_provider_extension() {
     let (events, mut parser) = new_parser();
-    parser.feed_line(r#"{"payload":{"k":1}}"#).unwrap();
+    parser.feed_line(r#"{"payload":{"k":1}}"#);
     let collected = events.lock().unwrap().clone();
     assert_eq!(collected.len(), 1);
     match &collected[0] {
@@ -269,7 +257,7 @@ fn streamed_markdown_list_emits_contiguous_items() {
     let raw = std::fs::read_to_string(&path).expect("fixture exists");
     let (events, mut parser) = new_parser();
     for line in raw.lines() {
-        parser.feed_line(line).unwrap();
+        parser.feed_line(line);
     }
     let text: String = events
         .lock()
@@ -309,11 +297,9 @@ fn delta_false_message_bypasses_buffer() {
     // Non-delta messages must emit immediately, not be held back.
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"init","session_id":"g1","model":"gemini-2.5"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"init","session_id":"g1","model":"gemini-2.5"}"#);
     parser
-        .feed_line(r#"{"type":"message","role":"assistant","content":"one-shot answer"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"message","role":"assistant","content":"one-shot answer"}"#);
     let kinds: Vec<&'static str> = events
         .lock()
         .unwrap()
@@ -332,19 +318,15 @@ fn pending_delta_flushed_on_non_text_event() {
     // (e.g. turn completion) arrives, even without an explicit blank line.
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"init","session_id":"g1","model":"gemini-2.5"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"init","session_id":"g1","model":"gemini-2.5"}"#);
     // Partial delta: no trailing \n\n
     parser
-        .feed_line(r#"{"type":"message","role":"assistant","delta":true,"content":"partial "}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"message","role":"assistant","delta":true,"content":"partial "}"#);
     parser
-        .feed_line(r#"{"type":"message","role":"assistant","delta":true,"content":"more"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"message","role":"assistant","delta":true,"content":"more"}"#);
     // Turn completes — buffer must flush.
     parser
-        .feed_line(r#"{"type":"result","usage":{"input_tokens":10,"output_tokens":20}}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"result","usage":{"input_tokens":10,"output_tokens":20}}"#);
     let text: String = events
         .lock()
         .unwrap()
@@ -372,7 +354,7 @@ fn round_trip_fidelity_mixed_fixture() {
         r#"{"type":"future.unknown","x":1}"#,
         r#"{"type":"result","status":"success","stats":{"duration_ms":1}}"#,
     ] {
-        parser.feed_line(line).unwrap();
+        parser.feed_line(line);
     }
     for event in events.lock().unwrap().iter() {
         let v = serde_json::to_value(event).unwrap();

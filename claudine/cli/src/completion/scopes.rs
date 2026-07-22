@@ -20,6 +20,7 @@
 
 use std::path::{Path, PathBuf};
 
+use biscuit_file::{FileResolutionContext, PathPosition};
 use sniff::filesystem::repo::{RepoInfo, detect_repo_structure};
 
 /// The composition command the scopes are being resolved for.
@@ -158,23 +159,6 @@ impl ScopeSet {
             .chain(self.extras.iter())
     }
 
-    /// Iteration order for magic-path resolution (spec §5.5).
-    ///
-    /// Repo-local scopes — including mode-specific `docs/` and skill
-    /// extras — precede `user_claudine`. This is stricter than
-    /// [`iter_scopes`](Self::iter_scopes) so project-specific prompts win
-    /// over global prompts in the `@` search priority. Used exclusively
-    /// by the magic-path pipeline; the non-magic pipeline still uses
-    /// [`iter_scopes`](Self::iter_scopes) to preserve its existing contract.
-    pub(crate) fn iter_magic_scopes(&self) -> impl Iterator<Item = &Scope> {
-        self.repo
-            .iter()
-            .chain(self.package_area.iter())
-            .chain(self.package.iter())
-            .chain(self.repo_claudine.iter())
-            .chain(self.extras.iter())
-            .chain(self.user_claudine.iter())
-    }
 }
 
 /// Context required to resolve scopes for one `__complete` invocation.
@@ -232,6 +216,48 @@ impl ScopeContext {
             git_root: repo_root,
         }
     }
+}
+
+/// Build the explicit file-resolution context used by one composition
+/// completion invocation.
+///
+/// The shared `FileReference` completer receives the same ordered Claudine
+/// magic roots that runtime composition registers. Repository, package-area,
+/// discrete-package, home, and environment state are captured once here;
+/// completion does not rediscover or reclassify them while walking candidates.
+pub(crate) fn file_resolution_context(ctx: &ScopeContext) -> FileResolutionContext {
+    let repository_root = effective_repo_root(ctx);
+    let package_area = ctx.repo_info.as_ref().and_then(|repo| {
+        repo.package_area_label_for_dir(&ctx.cwd)
+            .map(|area| repo.root.join(area.as_ref()))
+    });
+    let package = ctx
+        .repo_info
+        .as_ref()
+        .and_then(|repo| repo.package_for_dir(&ctx.cwd))
+        .map(|package| package.path.clone());
+
+    let mut resolution = FileResolutionContext::new(ctx.cwd.clone());
+    if let Some(root) = repository_root {
+        resolution = resolution.with_repository_root(root);
+    }
+    if let Some(area) = package_area.as_ref() {
+        resolution = resolution.with_package_area(area);
+    }
+    if let Some(home) = ctx.home.as_ref() {
+        resolution = resolution.with_home_dir(home);
+    } else {
+        resolution = resolution.without_home_dir();
+    }
+    for root in claudine::composition::prompt_magic_roots(
+        repository_root,
+        package_area.as_deref(),
+        package.as_deref(),
+        ctx.home.as_deref(),
+    ) {
+        resolution = resolution.add_magic_path(root, PathPosition::Start);
+    }
+    resolution
 }
 
 /// Walk upward from `start` until a `.git` entry is found.

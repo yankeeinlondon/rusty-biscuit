@@ -33,8 +33,7 @@ fn kinds(events: &[SemanticEvent]) -> Vec<&'static str> {
 fn session_header_emits_session_start_with_cwd() {
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"session","version":3,"id":"s-1","cwd":"/work"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"session","version":3,"id":"s-1","cwd":"/work"}"#);
     let collected = events.lock().unwrap().clone();
     match &collected[0] {
         SemanticEvent::SessionStart {
@@ -56,13 +55,11 @@ fn text_delta_emits_output_text_and_accumulates() {
     parser
         .feed_line(
             r#"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"Hello "}}"#,
-        )
-        .unwrap();
+        );
     parser
         .feed_line(
             r#"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"world"}}"#,
-        )
-        .unwrap();
+        );
     assert_eq!(
         kinds(&events.lock().unwrap()),
         vec!["output_text", "output_text"]
@@ -77,8 +74,7 @@ fn thinking_delta_emits_reasoning() {
     parser
         .feed_line(
             r#"{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","delta":"weighing options"}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     match &collected[0] {
         SemanticEvent::Reasoning { text, .. } => assert_eq!(text, "weighing options"),
@@ -96,7 +92,7 @@ fn block_boundary_and_toolcall_deltas_are_silent() {
         r#"{"type":"message_update","assistantMessageEvent":{"type":"toolcall_delta","delta":"{\"a\":1}"}}"#,
         r#"{"type":"message_update","assistantMessageEvent":{"type":"done"}}"#,
     ] {
-        parser.feed_line(line).unwrap();
+        parser.feed_line(line);
     }
     assert!(
         events.lock().unwrap().is_empty(),
@@ -111,13 +107,11 @@ fn tool_execution_lifecycle_emits_call_then_result() {
     parser
         .feed_line(
             r#"{"type":"tool_execution_start","toolCallId":"t1","toolName":"bash","args":{"command":"ls"}}"#,
-        )
-        .unwrap();
+        );
     parser
         .feed_line(
             r#"{"type":"tool_execution_end","toolCallId":"t1","toolName":"bash","result":"file.txt","isError":false}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     assert_eq!(kinds(&collected), vec!["tool_call", "tool_result"]);
     match &collected[0] {
@@ -146,8 +140,7 @@ fn tool_error_marks_result_error_status() {
     parser
         .feed_line(
             r#"{"type":"tool_execution_end","toolCallId":"t9","toolName":"bash","result":"boom","isError":true}"#,
-        )
-        .unwrap();
+        );
     match &events.lock().unwrap()[0] {
         SemanticEvent::ToolResult { status, .. } => assert_eq!(status.as_deref(), Some("error")),
         other => panic!("expected ToolResult, got {other:?}"),
@@ -160,8 +153,7 @@ fn tool_execution_update_is_silent() {
     parser
         .feed_line(
             r#"{"type":"tool_execution_update","toolCallId":"t1","partialResult":"partial output so far"}"#,
-        )
-        .unwrap();
+        );
     assert!(
         events.lock().unwrap().is_empty(),
         "accumulated progress must not emit a delta"
@@ -174,13 +166,11 @@ fn message_end_accumulates_usage_and_cost() {
     parser
         .feed_line(
             r#"{"type":"message_end","message":{"stopReason":"stop","usage":{"input":1200,"output":150,"cacheRead":300,"totalTokens":1650,"cost":{"total":0.00594}}}}"#,
-        )
-        .unwrap();
+        );
     parser
         .feed_line(
             r#"{"type":"message_end","message":{"stopReason":"stop","usage":{"input":100,"output":50,"totalTokens":150,"cost":{"total":0.001}}}}"#,
-        )
-        .unwrap();
+        );
     // message_end alone emits nothing user-visible.
     assert!(events.lock().unwrap().is_empty());
     let summary = parser.finish(0);
@@ -198,8 +188,7 @@ fn message_end_error_stop_reason_emits_error() {
     parser
         .feed_line(
             r#"{"type":"message_end","message":{"stopReason":"error","errorMessage":"Provider returned error: 503 service unavailable"}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     match &collected[0] {
         SemanticEvent::Error {
@@ -225,11 +214,9 @@ fn agent_end_emits_terminal_turn_complete() {
     parser
         .feed_line(
             r#"{"type":"message_end","message":{"stopReason":"stop","usage":{"input":10,"output":5,"totalTokens":15}}}"#,
-        )
-        .unwrap();
+        );
     parser
-        .feed_line(r#"{"type":"agent_end","willRetry":false}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"agent_end","willRetry":false}"#);
     let collected = events.lock().unwrap().clone();
     assert_eq!(kinds(&collected), vec!["turn_complete"]);
     match &collected[0] {
@@ -253,13 +240,11 @@ fn auto_retry_start_emits_info_and_end_failure_emits_error() {
     parser
         .feed_line(
             r#"{"type":"auto_retry_start","attempt":3,"maxAttempts":3,"errorMessage":"503 service unavailable"}"#,
-        )
-        .unwrap();
+        );
     parser
         .feed_line(
             r#"{"type":"auto_retry_end","success":false,"attempt":3,"finalError":"provider overloaded"}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     assert_eq!(kinds(&collected), vec!["info", "error"]);
     match &collected[0] {
@@ -273,8 +258,7 @@ fn auto_retry_start_emits_info_and_end_failure_emits_error() {
 fn successful_auto_retry_end_is_silent() {
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"auto_retry_end","success":true,"attempt":2}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"auto_retry_end","success":true,"attempt":2}"#);
     assert!(events.lock().unwrap().is_empty());
 }
 
@@ -284,8 +268,7 @@ fn failed_compaction_emits_warning() {
     parser
         .feed_line(
             r#"{"type":"compaction_end","result":null,"aborted":false,"errorMessage":"compaction model unavailable"}"#,
-        )
-        .unwrap();
+        );
     match &events.lock().unwrap()[0] {
         SemanticEvent::Warning { message, .. } => assert!(message.contains("compaction failed")),
         other => panic!("expected Warning, got {other:?}"),
@@ -306,7 +289,7 @@ fn silent_lifecycle_events_emit_nothing() {
         r#"{"type":"session_info_changed"}"#,
         r#"{"type":"thinking_level_changed","level":"high"}"#,
     ] {
-        parser.feed_line(line).unwrap();
+        parser.feed_line(line);
     }
     assert!(
         events.lock().unwrap().is_empty(),
@@ -319,8 +302,7 @@ fn silent_lifecycle_events_emit_nothing() {
 fn unknown_event_becomes_provider_extension() {
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"some_future_event","x":1}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"some_future_event","x":1}"#);
     match &events.lock().unwrap()[0] {
         SemanticEvent::ProviderExtension { provider, kind, .. } => {
             assert_eq!(*provider, Provider::Pi);
@@ -333,7 +315,7 @@ fn unknown_event_becomes_provider_extension() {
 #[test]
 fn malformed_json_emits_warning() {
     let (events, mut parser) = new_parser();
-    assert!(parser.feed_line("not json").is_ok());
+    parser.feed_line("not json");
     assert!(matches!(
         events.lock().unwrap()[0],
         SemanticEvent::Warning { .. }
@@ -343,8 +325,8 @@ fn malformed_json_emits_warning() {
 #[test]
 fn blank_lines_are_skipped() {
     let (events, mut parser) = new_parser();
-    parser.feed_line("").unwrap();
-    parser.feed_line("   ").unwrap();
+    parser.feed_line("");
+    parser.feed_line("   ");
     assert!(events.lock().unwrap().is_empty());
 }
 
@@ -361,7 +343,7 @@ fn round_trip_serialization_fidelity() {
         r#"{"type":"agent_end","willRetry":false}"#,
         r#"{"type":"future.kind","x":1}"#,
     ] {
-        parser.feed_line(line).unwrap();
+        parser.feed_line(line);
     }
     for event in events.lock().unwrap().iter() {
         let v = serde_json::to_value(event).unwrap();

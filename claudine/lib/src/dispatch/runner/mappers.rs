@@ -143,14 +143,32 @@ pub(super) fn map_regex_with_compiled(
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::process::ExitStatusExt;
-
     use super::*;
+
+    /// Build an [`ExitStatus`](std::process::ExitStatus) reporting `code` as the
+    /// process exit code.
+    ///
+    /// The two hosts' `ExitStatusExt::from_raw` take different things: Unix takes
+    /// a `wait(2)` status, which carries the exit code in the second byte, while
+    /// Windows takes the exit code itself. These tests care about the code, so
+    /// the encoding difference belongs here rather than at each call site.
+    fn exit_status(code: i32) -> std::process::ExitStatus {
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            std::process::ExitStatus::from_raw(code << 8)
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::ExitStatusExt;
+            std::process::ExitStatus::from_raw(code as u32)
+        }
+    }
 
     #[test]
     fn mapper_exit_code_deny() {
         let output = CommandOutput {
-            status: std::process::ExitStatus::from_raw(2 << 8),
+            status: exit_status(2),
             stdout: "blocked".to_string(),
             stderr: String::new(),
         };
@@ -163,7 +181,7 @@ mod tests {
     #[test]
     fn mapper_exit_code_allow_on_zero() {
         let output = CommandOutput {
-            status: std::process::ExitStatus::from_raw(0),
+            status: exit_status(0),
             stdout: "ok".to_string(),
             stderr: String::new(),
         };
@@ -179,7 +197,7 @@ mod tests {
         // the next action.
         for code in [1_i32, 127, 139, 200] {
             let output = CommandOutput {
-                status: std::process::ExitStatus::from_raw(code << 8),
+                status: exit_status(code),
                 stdout: String::new(),
                 stderr: format!("boom at {code}"),
             };
@@ -195,7 +213,7 @@ mod tests {
     #[test]
     fn mapper_json_field() {
         let output = CommandOutput {
-            status: std::process::ExitStatus::from_raw(0),
+            status: exit_status(0),
             stdout: r#"{"decision":"deny","reason":"nope"}"#.to_string(),
             stderr: String::new(),
         };

@@ -45,7 +45,7 @@ fn replay(
     let config = ParserConfig { model };
     let mut parser = create_semantic_parser(provider, sink, config);
     for line in lines {
-        parser.feed_line(line).unwrap();
+        parser.feed_line(line);
     }
     let collected = events.lock().unwrap().clone();
     (collected, parser)

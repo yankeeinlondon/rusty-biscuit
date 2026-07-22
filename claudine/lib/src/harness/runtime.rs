@@ -114,6 +114,19 @@ pub fn failure_message(outcome: &AttemptOutcome, attempt: u32) -> String {
     sanitize_message(&base, &suffix)
 }
 
+/// Reduce arbitrary error text to a concise, notification-safe line.
+///
+/// The same hygiene [`failure_message`] applies to a provider attempt failure,
+/// exposed for the other producer of notification-facing text: the
+/// [`DiagnosticSnapshot`] message projected from a typed error's `Display`.
+/// One implementation means a typed error and a provider failure cannot reach
+/// TTS, messaging, or a desktop notification under different rules.
+///
+/// [`DiagnosticSnapshot`]: crate::diagnostics::DiagnosticSnapshot
+pub fn concise_message(text: &str) -> String {
+    sanitize_message(text, "")
+}
+
 fn base_failure_message(outcome: &AttemptOutcome) -> String {
     if let Some(line) = outcome
         .error_message

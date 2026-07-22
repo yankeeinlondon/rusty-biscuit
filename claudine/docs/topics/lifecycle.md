@@ -193,6 +193,16 @@ Lifecycle flow control actions terminate the current event's stack and influence
 
 At most one flow-control action may appear in a stack item, and it must be the last action.
 
+**Proxy target resolution.** A `proxy` target resolves through the shared
+`biscuit-file::FileReference` contract, anchored on the document that authored
+it: a bare implicit path (`other.md`) is repository-root first, then next to the
+authoring document; an explicit `./`/`../` path is source-relative only; `@` is a
+magic-root search (repository root, configured roots, home — **not** a repo-root
+join); and `~/` is home-pinned. The target must name an existing document, so a
+missing target fails loudly with a typed `Unresolvable file reference` rather than
+handing off to a nonexistent path. When a proxied target authors its own proxy,
+the target becomes the new source for that reference.
+
 **Flow control is universal.** Flow control reacts to **state** — an error, a missing file, an `env` value, frontmatter — and an error is just one kind of state. So `error`/`stop`/`retry`/`resume`/`defer`/`proxy` are valid in **every** event. The headline example: a `success` stack can `resume: "you finished but never wrote abc.md — create it as instructed"` when the agent completed cleanly but an expected artifact is missing. The only placement rule is `skip` (`initialize`-only). Apparent event-specific behavior is **runtime capability**, not placement: `resume` needs a live session (pre-launch → `ResumeWithoutSession`) and `retry`'s re-entry point is derived from whether the provider had launched. This is enforced once, at parse time (`LifecycleControlAction::is_valid_for` → `LifecycleActionPlacement`); at runtime every event's stack dispatches its control through the same event-agnostic path (`decide_control` + `dispatch_terminal_control`). The iteration `loop:` (while/until) is a separate mechanism and is never coupled to handler dispatch.
 
 The provider run-loop events — `start`, `success`, `failure`, `finalize` — dispatch `retry`/`resume`/`proxy` fully (this is where `success` + `resume` lives). The events that sit *outside* that loop — `initialize`, a compose pre-flight `blocked`, and the `loop` gate — handle `error`/`stop` (and `proxy`/`skip` at `initialize`) directly, but `retry`/`proxy` from those events have no re-entry loop to act on yet, so they surface a clear typed error (`LifecycleSetupPhaseRecoveryUnsupported`) rather than a silent no-op. Put recovery on a post-launch event, or use `initialize` `proxy` for pre-launch routing. `defer` (deferred re-execution) is **not implemented in any event yet** — it always surfaces `LifecycleDeferNotImplemented` until its rendezvous backend lands.
@@ -274,7 +284,9 @@ Stack expressions have access to three lifecycle-only globals in addition to fro
 
 ### `err` Fields
 
-Match handlers on these **faceted** fields — a stable, versioned contract (see the [error catalog](../../features/2026-06-28-real-errors/error-catalog.md)). Matching on these instead of human prose is what makes a lifecycle handler portable across providers and codes.
+Match handlers on these **faceted** fields — a stable, versioned contract (see the [error catalog](../../features/_completed/2026-06-28-real-errors/error-catalog.md), and [error-architecture.md](error-architecture.md) for how a failure's facets are selected). Matching on these instead of human prose is what makes a lifecycle handler portable across providers and codes.
+
+Every field below describes the **effective diagnostic** — the one error in the failure's cause chain selected to speak for it. The terminal block you see, the `err.*` you match on, and the serialized machine output are all projected from that same selection, so what you match can never be a different error than what was rendered.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -284,6 +296,19 @@ Match handlers on these **faceted** fields — a stable, versioned contract (see
 | `err.origin` | string | Who remediates: `provider`, `author`, `caller`, `environment`, or `internal`. |
 | `err.severity` | string | Operator-facing severity: `info`, `warning`, or `error`. Defaulted from `disposition` (`transient`/`throttled`/`needs_input` → `warning`, `correctable`/`unrecoverable` → `error`) and overridable per code. |
 | `err.detail.*` | typed | Per-instance payload — the fields that vary per occurrence (`err.detail.reference`, `err.detail.property`, `err.detail.reset_at`, …). Shape depends on `code`; an absent field reads as `null`. |
+| `err.msg` | string | Concise, notification-safe rendering of the selected error — see [below](#errmsg). |
+| `err.cause.*` | typed | The next registered diagnostic below the selected one — see [below](#errcause). |
+
+#### A registered code always carries a detail object
+
+If `err.code` names a code in the catalog, `err.detail` is **always an object**, with **every field that code declares present as a key**. A value the run could not determine reads as `null`.
+
+This matters for two things that look alike but are not:
+
+- `err.detail.reset_at == null` — the catalog says `cap.rate_limit` has a `reset_at`, and this occurrence did not carry one. Honest, and matchable.
+- `err.detail.reset_at` against a *scalar* `err.detail` — a bug. It cannot happen: a code with no per-instance data available still projects the full all-`null` object rather than a bare `null`.
+
+So `err.detail.<field>` is always a safe read for a registered code, and the value — not the shape — is what tells you whether the field was known. Only bare `when: "err.detail"` sees a difference, and it is a truthiness test on a container that no handler should be making.
 
 Promoted conveniences (sugar over the canonical fields, present only when the error is classifiable):
 
@@ -300,6 +325,41 @@ failure:
       action: { notify: "Shell command was denied" }
 ```
 
+#### `err.msg`
+
+The selected diagnostic's **concise** message: single-line, escape-free, and length-clamped (~240 characters), so a TTS route, a webhook, or a desktop notification can use it verbatim.
+
+It is deliberately **not** the multi-line rendered block — that block is for a terminal, and pushing it through a speech synthesizer or a Slack message is what the clamp exists to prevent. It is also not a classifier input: match on `err.code`, never on this text.
+
+```yaml
+failure:
+  stack:
+    - action: { say: "{{ err.msg }}" }          # safe: one clean line
+    - action: { notify: "{{ err.code }}: {{ err.msg }}" }
+```
+
+For a provider attempt failure, `err.msg` keeps the established `harness::failure_message` precedence (its headline, timeout, and stderr fallbacks, plus the `(attempt N)` suffix) rather than being replaced by a typed error's `Display`. Both producers pass through the same hygiene stage, so a typed error and a provider failure cannot reach a notification under different rules.
+
+#### `err.cause`
+
+The **next registered diagnostic** below the selected one, when the chain has one. Unregistered prose causes are walked through, so `err.cause` is the next thing with facets — not merely the next `source()`.
+
+| Field | Type |
+|-------|------|
+| `err.cause.code` / `err.cause.category` / `err.cause.disposition` / `err.cause.origin` / `err.cause.severity` | string |
+| `err.cause.detail.*` | typed |
+| `err.cause.msg` | string |
+
+It is a strict **one-level** projection. **`err.cause.cause` is not exposed in v1** — it is unrepresentable in the underlying type rather than merely undocumented, so it cannot quietly start working. `err.cause` is `null` when the selected error has no registered cause, and always `null` for a facet-less failure.
+
+```yaml
+failure:
+  stack:
+    # the write failed; the cause says why
+    - when: "err.code == 'io.write_failed' && err.cause.code == 'io.permission_denied'"
+      action: { notify: "Cannot write {{ err.detail.path }} — check permissions" }
+```
+
 #### Deprecated aliases
 
 The original `err` fields remain available for backward compatibility but are **deprecated** — new documents should match the faceted fields above.
@@ -310,7 +370,6 @@ The original `err` fields remain available for backward compatibility but are **
 |------------------|------|-------------|
 | `err.kind` | string | Deprecated alias of `err.category`. Mirrors the category for a classifiable error; falls back to the internal Rust error *type* name (`ClaudineError`, `HarnessError`, `CompositionError`) only for a facet-less action failure. |
 | `err.variant` | string | Deprecated alias of `err.code`. Mirrors the code for a classifiable error; falls back to the internal Rust enum *arm* name (`Io`, `ShellCommandDenied`, `SchemaLoad`) only for a facet-less action failure. |
-| `err.msg` | string | The human-readable `Display` rendering of the error. Prose; matching on it is discouraged. |
 
 ### `doc.err` Escape Hatch
 

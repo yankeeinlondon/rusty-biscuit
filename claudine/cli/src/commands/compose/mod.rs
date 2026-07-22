@@ -24,11 +24,14 @@ use claudine::composition::{
 };
 use claudine::provider::Provider;
 use claudine::system_prompt::SystemPromptArgs;
-use color_eyre::eyre::{Result, eyre};
+use color_eyre::eyre::{Result, WrapErr};
 
 use crate::provider_values::provider_value_parser;
 
-mod interrupt;
+// `pub(crate)` because the Windows console-control handler in
+// `wrap::exec::termination::windows` drives the compose ladder from a thread
+// that owns no part of the compose run.
+pub(crate) mod interrupt;
 mod loop_run;
 mod prep;
 mod setters;
@@ -280,7 +283,7 @@ impl SharedComposeArgs {
             Some(raw) => {
                 let duration =
                     claudine::harness::parse_timeout(raw, std::path::Path::new("<--step-timeout>"))
-                        .map_err(|e| eyre!("invalid --step-timeout value: {e}"))?;
+                        .wrap_err("invalid --step-timeout value")?;
                 Ok(Some(duration.as_secs()))
             }
             None => Ok(None),
@@ -301,7 +304,7 @@ impl SharedComposeArgs {
                     raw,
                     std::path::Path::new("<--stall-timeout>"),
                 )
-                .map_err(|e| eyre!("invalid --stall-timeout value: {e}"))?;
+                .wrap_err("invalid --stall-timeout value")?;
                 Ok(Some(duration.as_secs()))
             }
             None => Ok(None),

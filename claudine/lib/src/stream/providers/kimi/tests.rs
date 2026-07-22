@@ -31,8 +31,7 @@ fn feed_initialize(parser: &mut KimiSemanticStreamParser<Recording>) {
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","id":"init-1","result":{"protocol_version":"1.9","server":{"name":"Kimi Code CLI","version":"1.38.0"},"slash_commands":[],"hooks":[],"capabilities":{"supports_question":true}}}"#,
-        )
-        .unwrap();
+        );
 }
 
 #[test]
@@ -56,8 +55,7 @@ fn initialize_response_accepts_wire_1_10() {
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","id":"init-1","result":{"protocol_version":"1.10","server":{"name":"Kimi Code CLI","version":"1.47.0"},"slash_commands":[],"hooks":[],"capabilities":{"supports_question":true}}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     assert!(matches!(collected[0], SemanticEvent::SessionStart { .. }));
     if let SemanticEvent::SessionStart { extra, .. } = &collected[0] {
@@ -80,8 +78,7 @@ fn initialize_response_unknown_version_emits_terminal_configuration_error() {
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","id":"init-1","result":{"protocol_version":"2.0","server":{"name":"Kimi Code CLI","version":"9.9.9"}}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     let err = collected
         .iter()
@@ -128,8 +125,7 @@ fn initialize_response_missing_version_stays_lenient() {
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","id":"init-1","result":{"server":{"name":"Kimi Code CLI","version":"1.38.0"}}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     assert!(matches!(collected[0], SemanticEvent::SessionStart { .. }));
     assert!(
@@ -147,8 +143,7 @@ fn turn_begin_emits_turn_start() {
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","method":"event","params":{"type":"TurnBegin","payload":{"user_input":"Hi Bob"}}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     assert!(
         collected
@@ -164,13 +159,11 @@ fn content_part_text_emits_output_text() {
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","method":"event","params":{"type":"ContentPart","payload":{"type":"text","text":"Hello "}}}"#,
-        )
-        .unwrap();
+        );
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","method":"event","params":{"type":"ContentPart","payload":{"type":"text","text":"world"}}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     let texts: Vec<&str> = collected
         .iter()
@@ -191,14 +184,12 @@ fn content_part_think_emits_reasoning() {
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","method":"event","params":{"type":"ContentPart","payload":{"type":"think","think":"pondering"}}}"#,
-        )
-        .unwrap();
+        );
     // Thinking tokens are accumulated; a turn boundary triggers the flush.
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","method":"event","params":{"type":"TurnEnd","payload":{}}}"#,
-        )
-        .unwrap();
+        );
     assert!(events.lock().unwrap().iter().any(|e| matches!(e,
             SemanticEvent::Reasoning { text, .. } if text == "pondering")));
 }
@@ -211,7 +202,7 @@ fn content_part_think_chunks_coalesce_into_one_reasoning_event() {
         let line = format!(
             r#"{{"jsonrpc":"2.0","method":"event","params":{{"type":"ContentPart","payload":{{"type":"think","think":"{chunk}"}}}}}}"#,
         );
-        parser.feed_line(&line).unwrap();
+        parser.feed_line(&line);
     }
     // No flush yet — accumulator still buffering.
     let mid = events.lock().unwrap().clone();
@@ -224,8 +215,7 @@ fn content_part_think_chunks_coalesce_into_one_reasoning_event() {
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","method":"event","params":{"type":"ContentPart","payload":{"type":"text","text":"Hi!"}}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     let reasoning_texts: Vec<&str> = collected
         .iter()
@@ -248,8 +238,7 @@ fn pending_thinking_flushes_on_finish() {
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","method":"event","params":{"type":"ContentPart","payload":{"type":"think","think":"trailing thoughts"}}}"#,
-        )
-        .unwrap();
+        );
     let _ = parser.finish(0);
     assert!(
         events
@@ -268,8 +257,7 @@ fn status_update_above_threshold_emits_warning() {
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","method":"event","params":{"type":"StatusUpdate","payload":{"context_usage":0.85,"context_tokens":110000,"max_context_tokens":128000}}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     assert!(
         collected
@@ -287,8 +275,7 @@ fn status_update_below_threshold_no_warning() {
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","method":"event","params":{"type":"StatusUpdate","payload":{"context_usage":0.06,"context_tokens":15969,"max_context_tokens":262144,"token_usage":{"input_other":10000,"input_cache_read":5000,"output":50}}}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     assert!(
         !collected
@@ -304,8 +291,7 @@ fn step_retry_emits_warning_with_retry_observability() {
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","method":"event","params":{"type":"StepRetry","payload":{"n":1,"next_attempt":2,"max_attempts":5,"wait_s":1.5,"error_type":"APIEmptyResponseError","status_code":500}}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     let warning = collected
         .iter()
@@ -340,8 +326,7 @@ fn step_retry_with_empty_payload_still_emits_warning() {
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","method":"event","params":{"type":"StepRetry","payload":{}}}"#,
-        )
-        .unwrap();
+        );
     assert!(events.lock().unwrap().iter().any(|e| matches!(e,
             SemanticEvent::Warning { message, .. } if message == "Step retry")));
 }
@@ -353,8 +338,7 @@ fn notification_1_10_shape_resolves_body_and_severity() {
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","method":"event","params":{"type":"Notification","payload":{"id":"notif-1","category":"task","type":"task.completed","source_kind":"background_task","source_id":"task-9","title":"Background task finished","body":"Task `lint` completed","severity":"warning","created_at":1751700000.25,"payload":{"exit_code":1}}}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     let warning = collected
         .iter()
@@ -394,8 +378,7 @@ fn notification_1_10_info_severity_emits_info() {
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","method":"event","params":{"type":"Notification","payload":{"id":"notif-2","category":"task","type":"task.completed","source_kind":"background_task","source_id":"task-10","title":"Background task finished","body":"Task `build` completed","severity":"info","created_at":1751700001.0}}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     assert!(collected.iter().any(|e| matches!(e,
             SemanticEvent::Info { message, .. } if message == "Task `build` completed")));
@@ -413,8 +396,7 @@ fn status_update_pressure_warning_carries_mcp_status() {
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","method":"event","params":{"type":"StatusUpdate","payload":{"context_usage":0.9,"context_tokens":118000,"max_context_tokens":131072,"mcp_status":{"loading":false,"connected":1,"total":2,"tools":4,"servers":[{"name":"weather","status":"connected","tools":["forecast"]},{"name":"broken","status":"failed"}]}}}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     let extra = collected
         .iter()
@@ -442,19 +424,17 @@ fn tool_call_with_streamed_arguments_decodes() {
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","method":"event","params":{"type":"ToolCall","payload":{"type":"function","id":"tool_1","function":{"name":"Shell","arguments":""}}}}"#,
-        )
-        .unwrap();
+        );
     for delta in ["{\\\"", "command", "\\\":", " \\\"ls", "\\\"}"] {
         let line = format!(
             r#"{{"jsonrpc":"2.0","method":"event","params":{{"type":"ToolCallPart","payload":{{"arguments_part":"{delta}"}}}}}}"#
         );
-        parser.feed_line(&line).unwrap();
+        parser.feed_line(&line);
     }
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","method":"event","params":{"type":"ToolResult","payload":{"tool_call_id":"tool_1","return_value":{"is_error":false,"output":"ok"}}}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     let tool_call = collected
         .iter()
@@ -483,13 +463,11 @@ fn malformed_tool_arguments_pass_through_as_string() {
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","method":"event","params":{"type":"ToolCall","payload":{"id":"t1","function":{"name":"Shell","arguments":"{not json"}}}}"#,
-        )
-        .unwrap();
+        );
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","method":"event","params":{"type":"TurnEnd","payload":{}}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     let input = collected
         .iter()
@@ -508,8 +486,7 @@ fn approval_request_emits_auto_approved_info() {
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","method":"request","id":"req-1","params":{"type":"ApprovalRequest","payload":{"id":"req-1","tool_call_id":"t1","sender":"Shell","action":"run command","description":"Run command `ls`","display":[{"type":"shell","language":"bash","command":"ls"}]}}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     let info = collected
         .iter()
@@ -537,8 +514,7 @@ fn unexpected_question_legacy_flat_shape_emits_warning() {
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","method":"request","id":"q-1","params":{"type":"QuestionRequest","payload":{"id":"q-1","question":"What now?"}}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     assert!(
         collected.iter().any(|e| matches!(e,
@@ -556,7 +532,7 @@ fn unexpected_question_current_nested_shape_emits_warning() {
     );
     let (events, mut parser) = new_parser();
     feed_initialize(&mut parser);
-    parser.feed_line(QUESTION_LINE.trim()).unwrap();
+    parser.feed_line(QUESTION_LINE.trim());
     let collected = events.lock().unwrap().clone();
     let warning = collected
         .iter()
@@ -583,8 +559,7 @@ fn external_tool_call_request_emits_warning() {
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","method":"request","id":"x-1","params":{"type":"ToolCallRequest","payload":{"id":"x-1","tool_call":{"name":"external"}}}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     assert!(collected.iter().any(|e| matches!(e,
             SemanticEvent::Warning { message, .. } if message.contains("external tool"))));
@@ -597,8 +572,7 @@ fn hook_request_emits_info() {
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","method":"request","id":"h-1","params":{"type":"HookRequest","payload":{"id":"h-1","event":"PreToolUse","context":{"foo":"bar"}}}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     let info = collected
         .iter()
@@ -619,8 +593,7 @@ fn prompt_finished_response_sets_status() {
     let (events, mut parser) = new_parser();
     feed_initialize(&mut parser);
     parser
-        .feed_line(r#"{"jsonrpc":"2.0","id":"prompt-2","result":{"status":"finished"}}"#)
-        .unwrap();
+        .feed_line(r#"{"jsonrpc":"2.0","id":"prompt-2","result":{"status":"finished"}}"#);
     let collected = events.lock().unwrap().clone();
     assert!(collected.iter().any(|e| matches!(e,
             SemanticEvent::Info { extra, .. } if extra.get("kind").and_then(Value::as_str) == Some("prompt_status"))));
@@ -638,7 +611,7 @@ fn prompt_max_steps_response_surfaces_steps() {
     );
     let (events, mut parser) = new_parser();
     feed_initialize(&mut parser);
-    parser.feed_line(MAX_STEPS_LINE.trim()).unwrap();
+    parser.feed_line(MAX_STEPS_LINE.trim());
     let collected = events.lock().unwrap().clone();
     let info = collected
         .iter()
@@ -665,8 +638,7 @@ fn prompt_cancelled_response_emits_terminal_error() {
     let (events, mut parser) = new_parser();
     feed_initialize(&mut parser);
     parser
-        .feed_line(r#"{"jsonrpc":"2.0","id":"prompt-2","result":{"status":"cancelled"}}"#)
-        .unwrap();
+        .feed_line(r#"{"jsonrpc":"2.0","id":"prompt-2","result":{"status":"cancelled"}}"#);
     let collected = events.lock().unwrap().clone();
     let err = collected
         .iter()
@@ -695,8 +667,7 @@ fn auth_expired_error_response_classifies_configuration() {
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","id":"prompt-2","error":{"code":-32004,"message":"Authentication expired; please re-authenticate via `kimi login`","data":null}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     let err = collected
         .iter()
@@ -762,7 +733,7 @@ fn classify_jsonrpc_error_unknown_code_falls_through_to_message() {
 #[test]
 fn unknown_envelope_shape_falls_back_to_provider_extension() {
     let (events, mut parser) = new_parser();
-    parser.feed_line(r#"{"jsonrpc":"2.0"}"#).unwrap();
+    parser.feed_line(r#"{"jsonrpc":"2.0"}"#);
     assert!(matches!(
         events.lock().unwrap()[0],
         SemanticEvent::ProviderExtension { .. }
@@ -772,7 +743,7 @@ fn unknown_envelope_shape_falls_back_to_provider_extension() {
 #[test]
 fn missing_discriminator_falls_through_to_provider_extension() {
     let (events, mut parser) = new_parser();
-    parser.feed_line(r#"{"payload":{"k":1}}"#).unwrap();
+    parser.feed_line(r#"{"payload":{"k":1}}"#);
     let collected = events.lock().unwrap().clone();
     assert_eq!(collected.len(), 1);
     match &collected[0] {
@@ -800,8 +771,7 @@ fn notification_with_error_level_emits_warning() {
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","method":"event","params":{"type":"Notification","payload":{"level":"error","source":"claudine","message":"Hook dispatch failed: boom"}}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     assert!(
         collected.iter().any(|e| matches!(e,
@@ -823,8 +793,7 @@ fn notification_with_warn_level_emits_warning() {
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","method":"event","params":{"type":"Notification","payload":{"level":"warn","message":"Approaching limit"}}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     assert!(collected.iter().any(|e| matches!(e,
             SemanticEvent::Warning { message, .. } if message.contains("Approaching limit"))));
@@ -839,8 +808,7 @@ fn notification_with_info_level_emits_info() {
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","method":"event","params":{"type":"Notification","payload":{"level":"info","message":"Hello"}}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     assert!(collected.iter().any(|e| matches!(e,
             SemanticEvent::Info { message, .. } if message.contains("Hello"))));
@@ -891,7 +859,7 @@ fn known_wire_events_do_not_leak_as_provider_extension() {
         r#"{"jsonrpc":"2.0","method":"request","id":"x1","params":{"type":"ToolCallRequest","payload":{"id":"x1"}}}"#,
         r#"{"jsonrpc":"2.0","method":"request","id":"h1","params":{"type":"HookRequest","payload":{"event":"PreToolUse"}}}"#,
     ] {
-        parser.feed_line(line).unwrap();
+        parser.feed_line(line);
     }
     let collected = events.lock().unwrap().clone();
     let leaks: Vec<_> = collected
@@ -916,8 +884,7 @@ fn unknown_event_type_emits_provider_extension_with_event_kind() {
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","method":"event","params":{"type":"FutureKimiEvent","payload":{"x":1}}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     let ext_kind = collected
         .iter()
@@ -932,7 +899,7 @@ fn unknown_event_type_emits_provider_extension_with_event_kind() {
 #[test]
 fn malformed_json_emits_warning() {
     let (events, mut parser) = new_parser();
-    assert!(parser.feed_line("x").is_ok());
+    parser.feed_line("x");
     assert!(matches!(
         events.lock().unwrap()[0],
         SemanticEvent::Warning { .. }
@@ -946,8 +913,7 @@ fn turn_end_increments_num_turns_and_emits_turn_complete() {
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","method":"event","params":{"type":"TurnEnd","payload":{}}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     assert!(
         collected
@@ -968,7 +934,7 @@ fn round_trip_fidelity_for_emitted_events() {
         r#"{"jsonrpc":"2.0","method":"event","params":{"type":"TurnEnd","payload":{}}}"#,
         r#"{"jsonrpc":"2.0","id":"prompt-2","result":{"status":"finished"}}"#,
     ] {
-        parser.feed_line(line).unwrap();
+        parser.feed_line(line);
     }
     for event in events.lock().unwrap().iter() {
         let v = serde_json::to_value(event).unwrap();

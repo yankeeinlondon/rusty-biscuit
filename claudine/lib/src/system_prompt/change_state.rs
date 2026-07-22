@@ -28,7 +28,7 @@ pub fn compute_prompt_hash(composed_markdown: &str, appendix: Option<&str>) -> S
 
 /// Resolve the on-disk state file for a given scope path.
 fn state_file_for_scope(scope: &Path) -> io::Result<PathBuf> {
-    let home = claudine_home_dir().map_err(|e| io::Error::other(e.to_string()))?;
+    let home = claudine_home_dir().map_err(io::Error::other)?;
     let dir = home.join("state").join("system_prompts");
     fs::create_dir_all(&dir)?;
     let scope_key = xx_hash(&scope.to_string_lossy());

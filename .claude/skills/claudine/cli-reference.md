@@ -295,11 +295,26 @@ claudine inline-compose @notes/update.md draft=false
 
 ### `claudine sequence <file-ref> [key=value ...]`
 
-Run a serial sequence of composition steps declared in a single document. Shared shell approval cache across steps.
+Run an ordered list of steps. Each step composes and executes one unit of work; later steps see what earlier ones produced. Accepts a Markdown document or a YAML file (`kind: sequence`) invoked directly.
 
 ```bash
 claudine sequence @research.md topic="async traits"
+claudine sequence @pipeline.yaml dir=features/my-feature
 ```
+
+**Execution is two-phase.** *Static preflight* walks the entire task graph before anything runs: dynamic sources resolve exactly once (the step list is a snapshot), every referenced group/task/prompt document loads transitively, schemas aggregate their missing properties into one interactive pass, and every shell command — including those in branches that never run — is approved byte-for-byte under an early-binding-only lookup. A preflight failure aborts regardless of `fail_fast`. *Just-in-time composition* then composes each step **at its turn**, re-reading the live source from disk, so an earlier step's inline-compose write-back or `set` mutation is visible to later steps.
+
+**One executable per task.** A step declares at most one of `prompt` (a file reference), `shell`, `side_effect`, `group`, or `task`; a step with none composes the source document's body. Steps accumulate their final stdout into the reserved `outputs` array — `{{ last(outputs) }}` is the previous task's output, and it behaves identically in standalone `compose`/`inline-compose`.
+
+**Groups** bundle tasks under a name, inline or via a `kind: group` / `kind: group-catalog` file, and run `serial` (default) or `parallel` with an optional `max_parallel` cap. Parallel members take one state snapshot, merge mutations in declaration order, and render with attributed color bars. Group `loop` is rejected pending ratified commit semantics.
+
+> **`prompt` means two things.** At the document root it is *prose* that flips the sequence to inline-compose; on a step or task it is a *file reference* to a prompt document. They never co-occur at the same level.
+
+Full user contract: [`claudine/docs/topics/flow-control/sequences.md`](../../../claudine/docs/topics/flow-control/sequences.md).
+
+#### `--fail-fast <BOOL>`
+
+Overrides the document's `fail_fast`. Precedence: CLI → document → default `true`. The effective value reaches child processes as `CLAUDINE_FAIL_FAST`. Exit `0` when every executed step succeeded (or a dynamic source resolved to 0 steps), `1` on any step failure, `130` on Ctrl+C.
 
 ### `--dry-run`
 
@@ -310,7 +325,7 @@ Runs the full composition pipeline **up to but not including provider launch**, 
 - **stdout** = composed body; **stderr** = highlighted YAML frontmatter + a metadata table (Document as a blue OSC8 link, Description, Agent, Model, YOLO, Session mode/source, and Area when inside a monorepo). So `compose --dry-run doc.md > body.md` captures only the body.
 - `--quiet` / `--silent` have **no effect** under `--dry-run`.
 - **Non-TTY shell gate:** an unapproved shell command in a non-TTY environment exits non-zero with `Cannot dry-run: shell command 'X' requires interactive approval. Run with --yolo to auto-approve, or pre-approve the command in your configuration.` In a TTY the normal interactive approval prompt fires. Bypass with `--yolo`.
-- **`sequence --dry-run`** concatenates all step bodies to stdout in order, prints each step's metadata to stderr separated by a `=== Document N of M ===` divider (before every document after the first), and fails fast on the first composition error.
+- **`sequence --dry-run`** performs the full static preflight, then just-in-time-composes every step against the *initial* state (empty `outputs`, no runtime mutations), concatenating step bodies to stdout in order with each step's metadata on stderr. No provider launches and no inline-compose write-back occurs. Shell work is **not** suppressed: `$( … )` expansions and `shell:` tasks execute for real, so a dry run of a sequence containing `shell: just commit` will commit.
 
 See [Composition — Dry Run](composition.md#dry-run) for the full reference.
 

@@ -7,7 +7,7 @@ use darkmatter::markdown::compose::expression::{
 };
 use serde_json::{Map, Value};
 
-use super::super::error::CompositionError;
+use super::super::error::{CompositionError, LoopExpressionCause};
 use super::super::types::LoopCondition;
 
 /// Ambient values injected into loop condition and prompt evaluation.
@@ -59,21 +59,22 @@ impl LoopAmbient {
 /// When constructed with a base directory ([`with_base_dir`](Self::with_base_dir)),
 /// the lookup exposes a [`ResolutionContext`] rooted at the prompt's parent so
 /// read-side expression functions (`file_exists`, `absolute`, `relative`, …)
-/// resolve against the document directory. The probe re-runs each iteration
-/// while the base directory stays fixed.
+/// resolve implicit document-authored references repository-first, then against
+/// the document directory. The probe re-runs each iteration while the request
+/// snapshot and source remain fixed.
 ///
-/// When a fallback directory is also set
-/// ([`with_file_ref_fallback_dir`](Self::with_file_ref_fallback_dir)),
-/// caller-supplied file references that miss under the document dir resolve
-/// against the captured launch area instead of the ambient process CWD, so
-/// `file_exists` inside `loop.while`/`loop.until` stays correct after the
-/// wrapper's `chdir`.
+/// [`with_file_ref_fallback_dir`](Self::with_file_ref_fallback_dir) retains the
+/// captured launch area as diagnostic metadata only. It is not a candidate for
+/// these document-authored references; genuinely launch-relative top-level CLI
+/// references are resolved before loop evaluation.
 #[derive(Debug, Clone, Copy)]
 pub struct LoopExpressionLookup<'a> {
     frontmatter: &'a Map<String, Value>,
     ambient: &'a LoopAmbient,
     base_dir: Option<&'a Path>,
     file_ref_fallback_dir: Option<&'a Path>,
+    file_resolution_context: Option<&'a biscuit_file::FileResolutionContext>,
+    source_path: Option<&'a Path>,
 }
 
 impl<'a> LoopExpressionLookup<'a> {
@@ -84,6 +85,8 @@ impl<'a> LoopExpressionLookup<'a> {
             ambient,
             base_dir: None,
             file_ref_fallback_dir: None,
+            file_resolution_context: None,
+            source_path: None,
         }
     }
 
@@ -95,14 +98,26 @@ impl<'a> LoopExpressionLookup<'a> {
         self
     }
 
-    /// Set the explicit fallback directory for caller-supplied file
-    /// references (typically the captured launch area). Resolution still
-    /// tries the document dir ([`with_base_dir`](Self::with_base_dir)) first;
-    /// only when that misses does it consult this directory. `None` disables
-    /// the fallback.
+    /// Retain the captured launch area as `file_ref_fallback_dir` diagnostic
+    /// metadata.
+    ///
+    /// References authored by the loop document resolve repository-first, then
+    /// source-relative; this directory is never an additional candidate.
     #[must_use]
     pub fn with_file_ref_fallback_dir(mut self, fallback: Option<&'a Path>) -> Self {
         self.file_ref_fallback_dir = fallback;
+        self
+    }
+
+    /// Reuse the request snapshot for references authored by `source_path`.
+    #[must_use]
+    pub fn with_file_resolution_context(
+        mut self,
+        context: Option<&'a biscuit_file::FileResolutionContext>,
+        source_path: &'a Path,
+    ) -> Self {
+        self.file_resolution_context = context;
+        self.source_path = Some(source_path);
         self
     }
 }
@@ -129,11 +144,19 @@ impl EvaluationLookup for LoopExpressionLookup<'_> {
     }
 
     fn resolution_context(&self) -> Option<ResolutionContext> {
-        self.base_dir.map(|dir| {
-            let ctx = ResolutionContext::new(dir.to_path_buf());
-            match self.file_ref_fallback_dir {
-                Some(fallback) => ctx.with_file_ref_fallback_dir(fallback.to_path_buf()),
-                None => ctx,
+        self.base_dir.map(|dir| match self.source_path {
+            Some(source_path) => super::super::document_expression_resolution_context(
+                source_path,
+                None,
+                self.file_resolution_context,
+                self.file_ref_fallback_dir,
+            ),
+            None => {
+                let ctx = ResolutionContext::new(dir.to_path_buf());
+                match self.file_ref_fallback_dir {
+                    Some(fallback) => ctx.with_file_ref_fallback_dir(fallback.to_path_buf()),
+                    None => ctx,
+                }
             }
         })
     }
@@ -146,7 +169,8 @@ impl EvaluationLookup for LoopExpressionLookup<'_> {
 ///
 /// ## Errors
 ///
-/// Returns `LoopInvalid` when the condition cannot be parsed or evaluated.
+/// Returns `LoopExpressionInvalid` when the condition cannot be parsed or
+/// evaluated, carrying the typed failure as its `#[source]`.
 pub fn evaluate_condition(
     condition: &LoopCondition,
     lookup: &LoopExpressionLookup<'_>,
@@ -157,12 +181,18 @@ pub fn evaluate_condition(
     };
 
     let parsed = parse_condition(source).map_err(|error| {
-        CompositionError::LoopInvalid(format!("failed to parse loop.{kind} `{source}`: {error}"))
+        CompositionError::LoopExpressionInvalid {
+            kind: kind.to_string(),
+            condition: source.clone(),
+            source: LoopExpressionCause::Parse(error),
+        }
     })?;
     let value = evaluate(&parsed, lookup).map_err(|error| {
-        CompositionError::LoopInvalid(format!(
-            "failed to evaluate loop.{kind} `{source}`: {error}"
-        ))
+        CompositionError::LoopExpressionInvalid {
+            kind: kind.to_string(),
+            condition: source.clone(),
+            source: LoopExpressionCause::Evaluate(Box::new(error)),
+        }
     })?;
     let truthy = is_truthy(&value);
 
@@ -246,6 +276,8 @@ mod tests {
     use super::*;
     use darkmatter::markdown::compose::expression::EvaluationLookup;
     use serde_json::json;
+
+    mod resolution_context;
 
     fn map(value: Value) -> Map<String, Value> {
         value.as_object().unwrap().clone()
@@ -416,49 +448,53 @@ mod tests {
         );
     }
 
-    /// A caller-supplied file reference that misses under the document dir
-    /// (`base_dir`) but exists under the launch-area fallback resolves via the
-    /// fallback, independent of the ambient process CWD.
+    /// The launch-area fallback (`file_ref_fallback_dir`) is diagnostic-only: a
+    /// reference authored inside a document resolves against `base_dir`, not the
+    /// launch area (D2). A file present ONLY under the launch area does not
+    /// resolve even when the fallback is set, while a file under `base_dir`
+    /// does — and the fallback is still carried on the resolution context for
+    /// diagnostics.
     #[test]
-    fn file_exists_resolves_via_launch_area_fallback() {
+    fn file_ref_fallback_dir_is_diagnostic_only_not_a_resolution_candidate() {
         let prompt_dir = tempfile::TempDir::new().unwrap();
         let launch_dir = tempfile::TempDir::new().unwrap();
 
-        // The artifact lives ONLY under the launch area.
+        // One artifact under the launch area, one under the document dir.
         std::fs::write(launch_dir.path().join("spec.md"), "# spec\n").unwrap();
+        std::fs::write(prompt_dir.path().join("local.md"), "# local\n").unwrap();
 
         let fm = map(json!({}));
         let ambient = ambient();
 
-        // No fallback: the artifact is missing under the prompt dir, so the
+        let lookup = LoopExpressionLookup::new(&fm, &ambient)
+            .with_base_dir(Some(prompt_dir.path()))
+            .with_file_ref_fallback_dir(Some(launch_dir.path()));
+
+        // A file present only under the launch area does NOT resolve, so the
         // `until` condition keeps going (file_exists is falsy).
-        let no_fallback = LoopExpressionLookup::new(&fm, &ambient)
-            .with_base_dir(Some(prompt_dir.path()));
         assert!(
             evaluate_condition(
                 &LoopCondition::Until("file_exists('spec.md')".into()),
-                &no_fallback
+                &lookup
             )
             .unwrap(),
-            "without the fallback, spec.md is missing under the prompt dir"
+            "a launch-area-only file must not resolve; the fallback is diagnostic-only"
         );
 
-        // With the launch-area fallback: the artifact resolves and the `until`
+        // A file under base_dir resolves as the source-local candidate, so the `until`
         // condition stops (file_exists is truthy).
-        let with_fallback = LoopExpressionLookup::new(&fm, &ambient)
-            .with_base_dir(Some(prompt_dir.path()))
-            .with_file_ref_fallback_dir(Some(launch_dir.path()));
         assert!(
             !evaluate_condition(
-                &LoopCondition::Until("file_exists('spec.md')".into()),
-                &with_fallback
+                &LoopCondition::Until("file_exists('local.md')".into()),
+                &lookup
             )
             .unwrap(),
-            "with the fallback, spec.md resolves against the launch area"
+            "a file under base_dir resolves; `until` stops"
         );
 
-        // The fallback is propagated into the resolution context.
-        let ctx = with_fallback
+        // The fallback is still propagated into the resolution context for
+        // diagnostics, even though it is not a resolution candidate.
+        let ctx = lookup
             .resolution_context()
             .expect("resolution context is present");
         assert_eq!(
@@ -467,16 +503,52 @@ mod tests {
         );
     }
 
+    /// A condition that cannot be parsed reports the `while`/`until` keyword and
+    /// the authored text, and keeps the Darkmatter `ParseError` recoverable
+    /// through the chain (spec §L1) rather than flattening it into prose.
     #[test]
-    fn parse_errors_are_loop_invalid() {
+    fn parse_errors_carry_the_typed_parse_cause() {
         let fm = map(json!({}));
         let ambient = ambient();
         let lookup = LoopExpressionLookup::new(&fm, &ambient);
         let err = evaluate_condition(&LoopCondition::While("counter <".into()), &lookup)
             .expect_err("condition should fail to parse");
 
-        assert!(
-            matches!(err, CompositionError::LoopInvalid(message) if message.contains("loop.while"))
-        );
+        let CompositionError::LoopExpressionInvalid {
+            kind,
+            condition,
+            source,
+        } = &err
+        else {
+            panic!("expected LoopExpressionInvalid, got {err:?}");
+        };
+        assert_eq!(kind, "while");
+        assert_eq!(condition, "counter <");
+        assert!(matches!(source, LoopExpressionCause::Parse(_)));
+        assert!(err.to_string().contains("failed to parse loop.while"));
+
+        // `LoopExpressionCause` is `#[error(transparent)]`, so it *replaces* the
+        // concrete error rather than adding a hop to it: the stage is recovered
+        // by downcasting to the cause enum, not by walking one level deeper.
+        let cause = std::error::Error::source(&err).expect("the typed cause is on the chain");
+        assert!(cause.downcast_ref::<LoopExpressionCause>().is_some());
+    }
+
+    /// The evaluate stage is discriminated from the parse stage by the cause's
+    /// arm, and both project through the same variant.
+    #[test]
+    fn evaluate_errors_carry_the_typed_evaluate_cause() {
+        let fm = map(json!({}));
+        let ambient = ambient();
+        let lookup = LoopExpressionLookup::new(&fm, &ambient);
+        let err = evaluate_condition(&LoopCondition::Until("no_such_function()".into()), &lookup)
+            .expect_err("condition should fail to evaluate");
+
+        let CompositionError::LoopExpressionInvalid { kind, source, .. } = &err else {
+            panic!("expected LoopExpressionInvalid, got {err:?}");
+        };
+        assert_eq!(kind, "until");
+        assert!(matches!(source, LoopExpressionCause::Evaluate(_)));
+        assert!(err.to_string().contains("failed to evaluate loop.until"));
     }
 }

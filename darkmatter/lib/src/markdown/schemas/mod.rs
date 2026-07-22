@@ -83,7 +83,10 @@ pub use about::{
     trigger_grammar_descriptors,
 };
 pub use completion::{CompletionKind, CompletionSuggestion};
-pub use detect::{DetectOptions, detect_from_document, detect_schema, schema_to_yaml};
+pub use detect::{
+    DetectOptions, detect_from_document, detect_from_document_with_context, detect_schema,
+    detect_schema_with_contexts, schema_to_yaml,
+};
 pub use discriminant::select_literal_discriminant_arm;
 pub use errors::SchemaError;
 pub use rewrite::NormalizationOutcome;
@@ -183,6 +186,7 @@ pub struct DarkmatterSchemas {
     baseline: Option<BaselineSchema>,
     cache: ValidatorCache,
     triggers: Option<triggers::TriggerRegistry>,
+    file_resolution_context: Option<biscuit_file::FileResolutionContext>,
 }
 
 #[derive(Clone)]
@@ -207,22 +211,29 @@ impl DarkmatterSchemas {
         Self::default()
     }
 
-    /// Sets the explicit fallback directory for `format: darkmatter-file`
-    /// property-value resolution (typically the captured launch area).
+    /// Records the launch-area anchor (typically the captured launch area).
     ///
-    /// When set, file-typed frontmatter values resolve against this directory
-    /// instead of the ambient process working directory, so schema validation
-    /// agrees with expression-side `file_exists`/`frontmatter` resolution
-    /// after the wrapper has `chdir`'d away from the launch area. `None`
-    /// (the default) preserves the legacy ambient-CWD behavior.
-    ///
-    /// Must be called before any `validate` / `effective_for` call. The
-    /// fallback is baked into the compiled validators via the cache; changing
-    /// it after validators are cached leaves stale validators that still
-    /// resolve against the prior directory.
+    /// Per D2 the launch area is **not** a resolution input for a
+    /// document-authored `format: darkmatter-file` value: those resolve
+    /// repository-first then against the document directory, never the launch
+    /// area or the ambient CWD. This anchor is retained for structural parity
+    /// with the validator-cache identity (it still participates in
+    /// `ComposeOptions`/cache identity) but does not change the resolved path.
     #[must_use]
     pub fn with_file_ref_fallback_dir(mut self, dir: impl Into<PathBuf>) -> Self {
         self.cache = self.cache.with_file_ref_fallback_dir(dir);
+        self
+    }
+
+    /// Supplies the immutable host request snapshot used by schema file
+    /// values. Nested document bases derive from this snapshot.
+    #[must_use]
+    pub fn with_file_resolution_context(
+        mut self,
+        context: biscuit_file::FileResolutionContext,
+    ) -> Self {
+        self.cache = self.cache.with_file_resolution_context(context.clone());
+        self.file_resolution_context = Some(context);
         self
     }
 
@@ -370,7 +381,12 @@ impl DarkmatterSchemas {
         // Resolve the document $schema with schema-root context.
         let resolved = match schema_value {
             Some(value) => {
-                let r = resolve::resolve_schema_with_roots(value, &base_dir, trigger_roots)?;
+                let r = resolve::resolve_schema_with_roots_in_context(
+                    value,
+                    &base_dir,
+                    trigger_roots,
+                    self.file_resolution_context.as_ref(),
+                )?;
                 // The document must not directly reference a trigger-schema
                 // file — triggers activate by placement and match, never by
                 // reference.
@@ -412,9 +428,8 @@ impl DarkmatterSchemas {
             }
         };
 
-        // Anchor `format: darkmatter-file` value resolution document-first
-        // against the prompt directory, then the cache's launch-area fallback —
-        // the same order the expression path uses for `file_exists`/`frontmatter`.
+        // Keep eager-file validation on the same request-scoped candidate plan
+        // as expression-side `file_exists` and `frontmatter` resolution.
         let validator = self.cache.validator_for(&merged_json, Some(&base_dir))?;
         let arm_validators = build_arm_validators(&merged_json, &self.cache, &base_dir)?;
         let origins = build_origin_map_with_triggers(
@@ -432,6 +447,7 @@ impl DarkmatterSchemas {
             arm_validators,
             base_dir: Some(base_dir),
             file_ref_fallback_dir: self.cache.file_ref_fallback_dir().map(Path::to_path_buf),
+            file_resolution_context: self.file_resolution_context.clone(),
             dependencies,
         }))
     }
@@ -551,13 +567,13 @@ pub struct EffectiveSchema {
     /// Per-arm validators when `json_schema` is a root `anyOf` union.
     /// `None` for ordinary schemas.
     arm_validators: Option<Vec<Arc<Validator>>>,
-    /// Prompt document directory the validator was built with, the
-    /// document-first anchor for `format: darkmatter-file` re-resolution when
-    /// substituting a targeted diagnostic.
+    /// Prompt document directory used to reproduce the validator's
+    /// repository-first, then source-relative candidate plan in diagnostics.
     base_dir: Option<PathBuf>,
-    /// Captured launch-area fallback the validator was built with, the second
-    /// anchor for `format: darkmatter-file` re-resolution.
+    /// Captured launch-area metadata retained for file-reference diagnostics.
     file_ref_fallback_dir: Option<PathBuf>,
+    /// Immutable host request snapshot used by eager-file normalization.
+    file_resolution_context: Option<biscuit_file::FileResolutionContext>,
     /// Resolved paths of the files this schema depends on: the sorted,
     /// deduplicated union of the document `$schema`'s `Name@file`/`@this` imports
     /// (Feature B), its `example(...)` artifacts (Feature A), and the referenced
@@ -729,8 +745,8 @@ impl EffectiveSchema {
     /// Walks the compiled schema for every present, non-null value under an
     /// eager `format: darkmatter-file` marker and rewrites it to the same
     /// projection `relative(value)` / `dirname(value)` already produce, using
-    /// the `base_dir` + launch-area fallback anchors this schema was built
-    /// with. Pure: the caller's `frontmatter` is never mutated.
+    /// the request-scoped resolution context this schema was built with. Pure:
+    /// the caller's `frontmatter` is never mutated.
     ///
     /// ## Precondition
     ///
@@ -800,12 +816,13 @@ impl EffectiveSchema {
                 changed: false,
             };
         };
-        rewrite::rewrite_eager_file_values(
+        rewrite::rewrite_eager_file_values_in_context(
             &self.json_schema,
             frontmatter,
             base_dir,
             self.file_ref_fallback_dir.as_deref(),
             composition_pending,
+            self.file_resolution_context.as_ref(),
         )
     }
 }
@@ -1645,14 +1662,14 @@ mod tests {
         }
     }
 
-    /// A `file`-typed schema property value resolves via the captured
-    /// fallback even when the process CWD is an unrelated directory
-    /// (verification goal #7 precursor). The format validator closure
-    /// captures the fallback dir and resolves via `FileReference::resolve_from`
-    /// instead of the ambient-CWD `resolve()`.
+    /// A `file`-typed schema property value is **not** resolved via the
+    /// captured launch-area fallback (D2): the launch area is not a resolution
+    /// input for a reference authored inside the document. A value present only
+    /// under the fallback (and not under the document base or ambient CWD) fails
+    /// validation.
     #[test]
     #[serial_test::serial(darkmatter_file_cwd)]
-    fn file_format_resolves_via_fallback_when_cwd_unrelated() {
+    fn file_format_does_not_resolve_via_launch_area_fallback() {
         let launch_dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(launch_dir.path().join("spec.md"), "# Spec\n").expect("write spec");
         let unrelated_dir = tempfile::tempdir().expect("tempdir");
@@ -1665,20 +1682,20 @@ mod tests {
         let report = api.validate(&md).expect("validate");
 
         assert!(
-            report.valid,
-            "expected file-format validation to resolve via fallback: {:?}",
+            !report.valid,
+            "the launch-area fallback must not resolve a document-authored file reference: {:?}",
             report.problems,
         );
     }
 
     /// A `file`-typed schema property value that exists under the ambient CWD
-    /// but NOT under the prompt directory or the fallback dir fails validation
-    /// — proving the document-first / fallback anchors (not the ambient CWD)
-    /// drive resolution when configured. The prompt has a real file source in
-    /// a third directory so its `base_dir` is distinct from the CWD.
+    /// but NOT under the prompt directory fails validation — proving the
+    /// document base directory (not the ambient CWD, and not the inert
+    /// launch-area anchor) drives resolution. The prompt has a real file source
+    /// in a third directory so its `base_dir` is distinct from the CWD.
     #[test]
     #[serial_test::serial(darkmatter_file_cwd)]
-    fn file_format_fallback_rejects_when_not_under_fallback() {
+    fn file_format_rejects_when_not_under_document_base() {
         let prompt_dir = tempfile::tempdir().expect("tempdir");
         let fallback_dir = tempfile::tempdir().expect("tempdir");
         let cwd_dir = tempfile::tempdir().expect("tempdir");
@@ -1699,12 +1716,10 @@ mod tests {
         );
     }
 
-    /// `$schema: ./schema.yaml` resolves relative to the document directory,
-    /// NOT the fallback dir (verification goal #6). Only `file`-typed property
-    /// VALUES use the fallback; `$schema` REFERENCE resolution stays
-    /// document-relative in `schemas::resolve`.
+    /// `$schema: ./schema.yaml` is explicitly source-relative. Captured launch
+    /// metadata is not a candidate for a schema reference.
     #[test]
-    fn schema_reference_stays_document_relative_with_fallback() {
+    fn explicit_schema_reference_ignores_launch_anchor() {
         let doc_dir = tempfile::tempdir().expect("tempdir");
         let fallback_dir = tempfile::tempdir().expect("tempdir");
         // schema.yaml lives ONLY in the document dir.
@@ -1721,23 +1736,20 @@ mod tests {
         .expect("write doc");
 
         let md = Markdown::try_from(doc_path.as_path()).expect("read doc");
-        // Fallback points at a dir WITHOUT schema.yaml — if the $schema
-        // reference were resolved via the fallback, this would fail.
         let api = DarkmatterSchemas::new()
             .with_file_ref_fallback_dir(fallback_dir.path().to_path_buf());
         let report = api.validate(&md).expect("validate");
         assert!(
             report.valid,
-            "$schema reference must resolve from the document dir, not the fallback: {:?}",
+            "explicit $schema reference must resolve from the document directory: {:?}",
             report.problems,
         );
     }
 
-    /// A root-union `$schema` with a string arm referencing a YAML file
-    /// still resolves that arm relative to the document directory, not the
-    /// fallback (verification goal #6, root-union variant).
+    /// A root-union `$schema` string arm with `./` remains explicitly
+    /// source-relative and does not search captured launch metadata.
     #[test]
-    fn root_union_schema_string_arm_stays_document_relative_with_fallback() {
+    fn explicit_root_union_schema_arm_ignores_launch_anchor() {
         let doc_dir = tempfile::tempdir().expect("tempdir");
         let fallback_dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(
@@ -1763,36 +1775,18 @@ mod tests {
         );
     }
 
-    // ── file-property document-first resolution (Finding 1) ──────────────
-    //
-    // A `file`-typed schema property VALUE must resolve document-first (the
-    // prompt directory) before the launch-area fallback, matching the
-    // expression path's `file_exists`/`frontmatter` order. These L1 tests
-    // write a real prompt file so `base_dir` is the prompt directory, point
-    // the fallback at a separate directory, and assert each rung of the
-    // resolution order independently of the ambient process CWD.
-
-    /// Writes `---\n{frontmatter}---\nbody\n` to `dir/prompt.md` and reads it
-    /// back as a `Markdown` whose source is that file (so `base_dir_for`
-    /// returns the prompt directory).
+    /// Returns file-backed Markdown with `dir` as its source directory.
     fn prompt_with_source(dir: &std::path::Path, frontmatter: &str) -> Markdown {
         let path = dir.join("prompt.md");
         std::fs::write(&path, format!("---\n{frontmatter}---\nbody\n")).expect("write prompt");
         Markdown::try_from(path.as_path()).expect("read prompt")
     }
 
-    /// Document-first precedence: a `spec.md` present in BOTH the prompt
-    /// directory and the launch-area fallback must resolve to the prompt-dir
-    /// copy. We prove the prompt-dir copy wins by deleting it afterwards is
-    /// unnecessary — instead we assert validation succeeds while the fallback
-    /// copy is the only other candidate, and the conflicting-filename
-    /// precedence is covered structurally by the resolver unit test
-    /// `resolve_ctx::document_relative_hit_wins_over_fallback_conflict`.
-    /// Here we additionally guard that resolution does not depend on the
-    /// ambient CWD by switching it to an unrelated directory.
+    /// Captured launch metadata does not displace a valid source-local
+    /// candidate when no repository candidate exists.
     #[test]
     #[serial_test::serial(darkmatter_file_cwd)]
-    fn file_property_present_in_both_resolves_prompt_dir() {
+    fn file_property_ignores_launch_copy_when_source_exists() {
         let prompt_dir = tempfile::tempdir().expect("tempdir");
         let fallback_dir = tempfile::tempdir().expect("tempdir");
         let unrelated = tempfile::tempdir().expect("tempdir");
@@ -1807,14 +1801,13 @@ mod tests {
         let report = api.validate(&md).expect("validate");
         assert!(
             report.valid,
-            "a file value present in both dirs must validate via the prompt dir: {:?}",
+            "the source-local file value must validate independently of the launch copy: {:?}",
             report.problems,
         );
     }
 
-    /// A `file` value that exists ONLY in the prompt directory still validates
-    /// when a fallback is configured (document-first hit). Independent of the
-    /// ambient CWD.
+    /// A source-local `file` value validates when no repository candidate
+    /// exists, independently of captured launch metadata and ambient CWD.
     #[test]
     #[serial_test::serial(darkmatter_file_cwd)]
     fn file_property_present_only_in_prompt_dir_validates() {
@@ -1837,11 +1830,12 @@ mod tests {
     }
 
     /// A `file` value that exists ONLY under the launch-area fallback (not the
-    /// prompt directory) still validates via the fallback rung. Independent of
-    /// the ambient CWD.
+    /// prompt directory) does **not** validate: per D2 the launch area is not a
+    /// resolution input for a document-authored reference. Independent of the
+    /// ambient CWD.
     #[test]
     #[serial_test::serial(darkmatter_file_cwd)]
-    fn file_property_present_only_in_fallback_validates() {
+    fn file_property_present_only_in_fallback_does_not_validate() {
         let prompt_dir = tempfile::tempdir().expect("tempdir");
         let fallback_dir = tempfile::tempdir().expect("tempdir");
         let unrelated = tempfile::tempdir().expect("tempdir");
@@ -1854,8 +1848,8 @@ mod tests {
         let _cwd = CwdGuard::enter(unrelated.path());
         let report = api.validate(&md).expect("validate");
         assert!(
-            report.valid,
-            "a file value under the launch-area fallback must validate: {:?}",
+            !report.valid,
+            "a file value present only under the launch-area fallback must not validate: {:?}",
             report.problems,
         );
     }
@@ -2442,6 +2436,50 @@ mod tests {
         assert!(
             deps.iter().any(|p| p.ends_with("schema.yaml")),
             "referenced schema file missing: {deps:?}",
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn schema_union_reuses_snapshot_environment_for_nested_source() {
+        let request = tempfile::tempdir().expect("request tempdir");
+        let nested = request.path().join("nested");
+        std::fs::create_dir_all(&nested).expect("create nested source directory");
+        let schema = request.path().join("captured-schema.yaml");
+        std::fs::write(&schema, "$schema:\n  title: 'string(required)'\n")
+            .expect("write schema");
+        let ambient = tempfile::tempdir().expect("ambient tempdir");
+        let prior = std::env::var_os("DARKMATTER_SCHEMA_ROOT");
+        let mut env = std::collections::HashMap::new();
+        env.insert(
+            "DARKMATTER_SCHEMA_ROOT".to_string(),
+            request.path().display().to_string(),
+        );
+        let snapshot = biscuit_file::FileResolutionContext::new(request.path()).with_env(env);
+        let content = "---\n$schema:\n  - '{{DARKMATTER_SCHEMA_ROOT}}/captured-schema.yaml'\ntitle: captured\n---\nbody\n";
+        let md: Markdown = content.into();
+        let md = md.with_source(crate::markdown::compose::ComposeSource::File(
+            nested.join("child.md"),
+        ));
+
+        // SAFETY: this test is serialized while mutating process-global state.
+        unsafe { std::env::set_var("DARKMATTER_SCHEMA_ROOT", ambient.path()) };
+        let effective = DarkmatterSchemas::new()
+            .with_file_resolution_context(snapshot)
+            .effective_for(&md);
+        match prior {
+            Some(value) => unsafe { std::env::set_var("DARKMATTER_SCHEMA_ROOT", value) },
+            None => unsafe { std::env::remove_var("DARKMATTER_SCHEMA_ROOT") },
+        }
+
+        let effective = effective.unwrap().expect("effective schema");
+        assert!(
+            effective
+                .dependencies()
+                .iter()
+                .any(|path| path.ends_with("captured-schema.yaml")),
+            "schema dependency missing: {:?}",
+            effective.dependencies(),
         );
     }
 

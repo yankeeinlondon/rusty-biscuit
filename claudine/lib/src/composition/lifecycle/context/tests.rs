@@ -1,6 +1,31 @@
 use super::*;
 use serde_json::json;
 
+/// Hand-build a [`DiagnosticSnapshot`] for a projection test where no typed
+/// `Diagnostic` reconstructs the `detail` (e.g. a cap payload the label-only
+/// path cannot rebuild). `message` is irrelevant here: `to_value` reads
+/// `LifecycleErrorInfo::msg`, not the embedded snapshot's message.
+fn snapshot_with(
+    code: &str,
+    category: &str,
+    disposition: &str,
+    origin: &str,
+    severity: &str,
+    detail: Value,
+) -> DiagnosticSnapshot {
+    DiagnosticSnapshot {
+        schema_version: crate::diagnostics::DIAGNOSTIC_SNAPSHOT_SCHEMA_VERSION,
+        category: category.to_string(),
+        code: code.to_string(),
+        disposition: disposition.to_string(),
+        origin: origin.to_string(),
+        severity: severity.to_string(),
+        detail,
+        message: String::new(),
+        cause: None,
+    }
+}
+
 #[test]
 fn error_info_from_claudine_error_records_kind_variant_msg() {
     let err = ClaudineError::Io(std::io::Error::other("disk full"));
@@ -36,7 +61,7 @@ fn error_info_to_value_has_kind_variant_msg() {
         kind: "ClaudineError",
         variant: "Io".to_string(),
         msg: "disk full".to_string(),
-        facets: None,
+        snapshot: None,
     };
     let value = info.to_value();
     assert_eq!(value.get("kind"), Some(&json!("ClaudineError")));
@@ -272,18 +297,18 @@ fn cap_detail_promotes_reset_at_and_retry_after_ms_to_top_level() {
         kind: "LifecycleAction",
         variant: "rate_limit".to_string(),
         msg: "slow down".to_string(),
-        facets: Some(Box::new(DiagnosticFacets {
-            code: "cap.rate_limit",
-            category: "cap",
-            disposition: "throttled",
-            origin: "provider",
-            severity: "warning",
-            detail: json!({
+        snapshot: Some(Box::new(snapshot_with(
+            "cap.rate_limit",
+            "cap",
+            "throttled",
+            "provider",
+            "warning",
+            json!({
                 "provider": "claude",
                 "reset_at": "2026-06-28T17:30:00Z",
                 "retry_after_ms": 5_400_000u64,
             }),
-        })),
+        ))),
     };
     let value = info.to_value();
     // Promoted to the top level …
@@ -303,14 +328,14 @@ fn null_detail_field_promotes_to_null() {
         kind: "LifecycleAction",
         variant: "x".to_string(),
         msg: "m".to_string(),
-        facets: Some(Box::new(DiagnosticFacets {
-            code: "document.missing_frontmatter",
-            category: "document",
-            disposition: "correctable",
-            origin: "provider",
-            severity: "error",
-            detail: json!({ "doc": "spec.md", "property": "status" }),
-        })),
+        snapshot: Some(Box::new(snapshot_with(
+            "document.missing_frontmatter",
+            "document",
+            "correctable",
+            "provider",
+            "error",
+            json!({ "doc": "spec.md", "property": "status" }),
+        ))),
     };
     let value = info.to_value();
     assert_eq!(value.get("reset_at"), Some(&Value::Null));
@@ -364,7 +389,7 @@ fn injected_globals_attaches_err_timing_current() {
         kind: "ClaudineError",
         variant: "Io".to_string(),
         msg: "disk full".to_string(),
-        facets: None,
+        snapshot: None,
     };
     let timing = LifecycleTiming {
         document_ms: Some(100),
@@ -394,7 +419,7 @@ fn err_global_resolves_through_dm2_subtree() {
         kind: "ClaudineError",
         variant: "Io".to_string(),
         msg: "disk full".to_string(),
-        facets: None,
+        snapshot: None,
     };
     let globals = lifecycle_injected_globals(Some(&info), None, None);
     let state = state(json!({}));
@@ -431,7 +456,7 @@ fn doc_namespace_reaches_literal_err_property_through_dm2() {
         kind: "ClaudineError",
         variant: "Io".to_string(),
         msg: "disk full".to_string(),
-        facets: None,
+        snapshot: None,
     };
     let globals = lifecycle_injected_globals(Some(&info), None, None);
     let state = state(json!({"err": "literal-value"}));
@@ -548,4 +573,208 @@ fn when_clause_reacts_to_env_changed_after_prepare() {
         !is_truthy(&prepare_value),
         "the prepare-time snapshot still holds the old value"
     );
+}
+
+// --- Phase 5: one selection, hygienic `err.msg`, one-level `err.cause` ------
+
+/// `err.msg` feeds TTS, webhooks, and desktop notifications verbatim, so it is
+/// hygiened at the *constructor*, not at each producer. The nastiest input a
+/// producer can hand over — multi-line, escape-bearing, and far over the cap —
+/// must still come out usable.
+#[test]
+fn err_msg_is_hygiened_for_a_hostile_action_failure() {
+    let hostile = format!(
+        "\u{1b}[31mboom\u{1b}[0m\nsecond line\r\nthird line\n{}",
+        "x".repeat(500)
+    );
+    let value = LifecycleErrorInfo::from_action_failure("shell", hostile).to_value();
+    let msg = value["msg"].as_str().expect("msg is a string");
+
+    assert!(!msg.is_empty());
+    assert!(!msg.contains('\u{1b}'), "escape bytes survived: {msg:?}");
+    assert!(!msg.contains('\n') && !msg.contains('\r'), "not one line: {msg:?}");
+    assert!(msg.chars().count() <= 240, "over cap ({}): {msg:?}", msg.chars().count());
+    assert!(msg.contains("boom"), "headline lost: {msg:?}");
+}
+
+/// The same hygiene contract, asserted over every constructor that can reach
+/// `err.msg` — a typed error of each registered kind plus the facet-less
+/// action-failure path.
+#[test]
+fn every_err_msg_producer_is_single_line_escape_free_and_capped() {
+    let cases: Vec<(&str, LifecycleErrorInfo)> = vec![
+        (
+            "claudine",
+            LifecycleErrorInfo::from_claudine_error(&ClaudineError::Io(
+                std::io::Error::other("disk full"),
+            )),
+        ),
+        (
+            "harness",
+            LifecycleErrorInfo::from_harness_error(&HarnessError::ShellCommandDenied {
+                command: "rm -rf /".to_string(),
+            }),
+        ),
+        (
+            "composition",
+            LifecycleErrorInfo::from_composition_error(&CompositionError::NoRunnableProviders),
+        ),
+        (
+            "action",
+            LifecycleErrorInfo::from_action_failure("shell", "command `x` exited with code 2"),
+        ),
+        (
+            "error_or_action-typed",
+            LifecycleErrorInfo::from_error_or_action(
+                "materialize",
+                &CompositionError::NoRunnableProviders,
+            ),
+        ),
+        (
+            "error_or_action-untyped",
+            LifecycleErrorInfo::from_error_or_action("materialize", &std::io::Error::other("io")),
+        ),
+    ];
+
+    for (name, info) in cases {
+        assert!(!info.msg.is_empty(), "`{name}` produced an empty err.msg");
+        assert!(!info.msg.contains('\u{1b}'), "`{name}` leaked escapes: {:?}", info.msg);
+        assert!(
+            !info.msg.contains('\n') && !info.msg.contains('\r'),
+            "`{name}` is multi-line: {:?}",
+            info.msg
+        );
+        assert!(
+            info.msg.chars().count() <= 240,
+            "`{name}` exceeds the cap: {:?}",
+            info.msg
+        );
+    }
+}
+
+/// The provider attempt cascade keeps its ratified precedence and its
+/// budget-reserved `(attempt N)` suffix: the constructor's hygiene pass is
+/// idempotent over an already-hygiened `failure_message`, so re-running it
+/// cannot re-truncate or re-order the cascade's choice.
+#[test]
+fn provider_failure_message_precedence_survives_the_constructor() {
+    let outcome = crate::harness::AttemptOutcome {
+        attempt: 3,
+        session_id: None,
+        final_response: String::new(),
+        exit_code: 1,
+        termination: crate::harness::ProcessTermination::Completed,
+        stderr_text: Some("noise\nlast stderr line".to_string()),
+        error_kind: Some("agent_failure".to_string()),
+        guard_context: None,
+        error_message: Some("provider said no".to_string()),
+        timeout_secs: None,
+    };
+    let expected = crate::harness::failure_message(&outcome, 3);
+    // The cascade prefers `error_message` over stderr, and keeps `(attempt 3)`.
+    assert_eq!(expected, "provider said no (attempt 3)");
+
+    let info = LifecycleErrorInfo::from_action_failure("agent_failure", expected.clone());
+    assert_eq!(info.msg, expected, "the constructor perturbed the cascade's message");
+}
+
+/// A registered code must never project a *top-level* `null` detail, even on
+/// the label-only path that knows no per-instance values: `err.detail.reset_at`
+/// has to read as "declared but unknown", not blow up against a scalar
+/// (spec §D7).
+#[test]
+fn every_error_kind_code_projects_a_catalog_shaped_detail_object() {
+    for spec in crate::diagnostics::CODES {
+        let Some(snapshot) = DiagnosticSnapshot::from_code(spec.code, String::new()) else {
+            continue;
+        };
+        let detail = &snapshot.detail;
+        assert!(
+            detail.is_object(),
+            "`{}` projects a top-level non-object detail: {detail}",
+            spec.code
+        );
+        for field in spec.detail {
+            assert!(
+                detail.get(field).is_some(),
+                "`{}` omits its declared detail key `{field}`: {detail}",
+                spec.code
+            );
+        }
+    }
+}
+
+/// `err.cause.*` is a strict one-level projection of the next *registered*
+/// diagnostic — unregistered prose in between is walked through.
+#[test]
+fn err_cause_projects_one_level_of_registered_diagnostic() {
+    let inner = CompositionError::FileNotFound("missing.md".to_string());
+    let wrapped = CompositionError::LifecycleEvaluationAlreadyEmitted {
+        inner: Box::new(inner),
+    };
+    // The transparent wrapper is walked through, so the *selected* diagnostic
+    // is the inner one and it has no registered cause below it.
+    let value = LifecycleErrorInfo::from_composition_error(&wrapped).to_value();
+    assert_eq!(value["code"], json!("composition.invalid_file_reference"));
+    assert_eq!(value["cause"], Value::Null, "a leaf must project a null cause");
+
+    // A semantic wrapper over a *registered* source projects that source.
+    let err = CompositionError::InvalidFileReference {
+        context: Box::new(crate::composition::FileReferenceContext {
+            source_path: std::path::PathBuf::from("route.md"),
+            event: Some("initialize".to_string()),
+            property: "initialize.stack[0].proxy".to_string(),
+            reference: "no/such/target.md".to_string(),
+            hint: "name an existing document".to_string(),
+        }),
+        source: HarnessError::PathResolutionFailed {
+            raw: "no/such/target.md".to_string(),
+            failure: crate::harness::PathResolutionFailure::TargetMissing,
+            source_path: Some(std::path::PathBuf::from("route.md")),
+            resolved: Some(std::path::PathBuf::from("/repo/no/such/target.md")),
+            resolution: None,
+        },
+    };
+    let value = LifecycleErrorInfo::from_composition_error(&err).to_value();
+    let cause = &value["cause"];
+    assert!(cause.is_object(), "expected a projected cause, got {cause}");
+    assert_eq!(cause["code"], json!("composition.invalid_file_reference"));
+    assert!(cause["message"].as_str().is_some_and(|m| !m.is_empty()));
+    // v1 exposes exactly one level: `err.cause.cause` is unrepresentable.
+    assert!(
+        cause.get("cause").is_none(),
+        "`err.cause.cause` must not be exposed in v1: {cause}"
+    );
+}
+
+/// A facet-less action failure projects no `cause` key at all — a cause is only
+/// meaningful below a selected diagnostic.
+#[test]
+fn facet_less_action_failure_projects_no_cause() {
+    let value = LifecycleErrorInfo::from_action_failure("shell", "boom").to_value();
+    assert!(value.get("facets").is_none());
+    assert!(value.get("cause").is_none(), "got: {value}");
+}
+
+/// `from_error_or_action` keeps a typed error's facets where
+/// `from_action_failure(verb, err.to_string())` would have flattened them to
+/// prose — and still falls back to the verb label for genuinely untyped prose.
+#[test]
+fn from_error_or_action_prefers_facets_and_falls_back_to_the_verb() {
+    let typed = LifecycleErrorInfo::from_error_or_action(
+        "materialize",
+        &CompositionError::FileNotFound("missing.md".to_string()),
+    );
+    let value = typed.to_value();
+    assert_eq!(value["code"], json!("composition.invalid_file_reference"));
+    // The deprecated aliases mirror the facets for a classifiable error.
+    assert_eq!(value["variant"], json!("composition.invalid_file_reference"));
+    assert_eq!(value["kind"], json!("composition"));
+
+    let untyped =
+        LifecycleErrorInfo::from_error_or_action("materialize", &std::io::Error::other("boom"));
+    assert!(untyped.snapshot.is_none(), "std::io::Error is not a Claudine diagnostic");
+    let value = untyped.to_value();
+    assert_eq!(value["variant"], json!("materialize"));
+    assert_eq!(value["kind"], json!("LifecycleAction"));
 }

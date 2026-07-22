@@ -23,7 +23,7 @@ use darkmatter::markdown::compose::expression::{
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-use super::error::CompositionError;
+use super::error::{ActionExprError, CompositionError};
 use self::actions::{
     all_lifecycle_verbs, CommunicationAction, CommunicationChannel, ExpressionFunctionAction,
     expression_function_signature, is_known_lifecycle_verb, LifecycleAction, LifecycleActionKind,
@@ -47,7 +47,10 @@ use action_shape::*;
 pub use audio::*;
 #[cfg(test)]
 use audio::run_blocking_with_timeout;
-pub use parse::{parse_lifecycle_config, scan_removed_validation_keys};
+pub use parse::{
+    parse_lifecycle_config, parse_single_action, parse_task_action_stack,
+    scan_removed_validation_keys,
+};
 pub use validate::{
     collect_lifecycle_shell_commands, validate_no_err_in_no_error_events,
     validate_no_interpolation_leaks, validate_no_undefined_lifecycle_variables,
@@ -332,7 +335,7 @@ pub struct LifecycleRuntimeState {
 ///
 /// Injectable to allow test doubles that capture emissions without hitting
 /// real stderr, messaging, TTS, or sound playback.
-pub trait LifecycleEmitter {
+pub trait LifecycleEmitter: Sync {
     /// Write a plain prose line (no status glyph) to stderr.
     ///
     /// `stderr` is the statusless channel: rich text and links are honored, but

@@ -114,7 +114,7 @@ pub fn apply_inline_closure(
         today,
         &serialized_props,
     )
-    .map_err(CompositionError::InvalidInlineResponse)?;
+    .map_err(CompositionError::InlineRewriteFailed)?;
 
     // Stamp a Darkmatter Simple hash into the `hash:` frontmatter property
     // in the same atomic write that persists the body.
@@ -146,7 +146,7 @@ pub fn apply_inline_closure(
     crate::config::atomic::atomic_write(target_path, final_text.as_bytes())
         .map_err(|e| CompositionError::AtomicWriteFailed {
             path: target_path.to_path_buf(),
-            source: Box::new(e),
+            source: e,
         })?;
 
     // Compute the post-write fm-segment-change signal for tooling that wants
@@ -167,12 +167,23 @@ pub fn apply_inline_closure(
 
 /// Reconstruct a Markdown document from `frontmatter_source` (for its
 /// frontmatter) and `body` (new body), updating `last_updated` to `today`.
+///
+/// ## Errors
+///
+/// Only the fallback path — taken when `frontmatter_source` has no parseable
+/// frontmatter block — can fail, and only at its `fm_insert` of `last_updated`.
+/// The typed [`MarkdownError`] is returned so the caller can retain it as a
+/// source rather than flatten it; the "failed to update last_updated" context
+/// this function used to `format!` in now lives on
+/// [`CompositionError::InlineRewriteFailed`], the variant that renders it.
+///
+/// [`MarkdownError`]: darkmatter::markdown::MarkdownError
 pub fn rewrite_inline_document(
     frontmatter_source: &str,
     body: &str,
     today: &str,
     new_properties: &[(String, String)],
-) -> Result<String, String> {
+) -> Result<String, darkmatter::markdown::MarkdownError> {
     if let Some(parts) = split_frontmatter_parts(frontmatter_source) {
         let newline = detect_newline(frontmatter_source);
         let prop_lines: Vec<String> = new_properties.iter().map(|(_, v)| v.clone()).collect();
@@ -188,9 +199,7 @@ pub fn rewrite_inline_document(
     }
 
     let mut markdown: darkmatter::markdown::Markdown = frontmatter_source.to_string().into();
-    markdown
-        .fm_insert("last_updated", today)
-        .map_err(|e| format!("failed to update last_updated: {e}"))?;
+    markdown.fm_insert("last_updated", today)?;
     *markdown.content_mut() = body.to_string();
     Ok(markdown.as_string())
 }

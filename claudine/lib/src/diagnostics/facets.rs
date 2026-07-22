@@ -1,7 +1,7 @@
 //! The four closed facet enums of the diagnostic contract.
 //!
 //! These are the ratified, locked sets from
-//! `claudine/features/2026-06-28-real-errors/error-catalog.md` §1 — 12
+//! `claudine/features/_completed/2026-06-28-real-errors/error-catalog.md` §1 — 12
 //! categories, 5 dispositions, 5 origins, and the operator-facing severity
 //! (reusing [`BadgeSeverity`] as [`Severity`]). Each enum carries a stable
 //! `snake_case` string projection: it is what an author matches on in a

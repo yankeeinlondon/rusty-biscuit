@@ -2,7 +2,7 @@ use std::path::Path;
 
 use tracing::warn;
 
-use crate::error::{ClaudineError, Result};
+use crate::error::{ClaudineError, ConfigCause, Result};
 
 /// Advisory list of commands that look suspicious in a bash action context.
 ///
@@ -95,8 +95,11 @@ pub fn validate_command(command: &str) -> Result<ValidatedCommand> {
 /// Checks for a shebang on the first line; if absent, falls back to `bun` then
 /// `node` (node only for `.js`/`.mjs`).
 fn validate_js_ts(command: &str, extension: &str) -> Result<ValidatedCommand> {
-    let content = std::fs::read_to_string(command).map_err(|e| {
-        ClaudineError::ConfigValidation(format!("cannot read script `{command}`: {e}"))
+    let content = std::fs::read_to_string(command).map_err(|error| {
+        ClaudineError::ConfigValidationWithCause {
+            message: format!("cannot read script `{command}`: {error}"),
+            source: ConfigCause::Read(error),
+        }
     })?;
 
     if let Some(first_line) = content.lines().next()

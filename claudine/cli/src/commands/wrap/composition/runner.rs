@@ -167,17 +167,14 @@ pub(super) fn run_composition_body(
             Some(lifecycle_context),
             frontmatter,
             document_start,
-            claudine::composition::LifecycleErrorInfo::from_action_failure(
-                "harness_plan",
-                e.to_string(),
-            ),
+            claudine::composition::LifecycleErrorInfo::from_error_or_action("harness_plan", &e),
         );
         match preflight_outcome {
             PreflightBlockedOutcome::EvaluationError(ce) => ce.into(),
             PreflightBlockedOutcome::Control(control) => {
                 match preflight_blocked_control_error(control, &request.prepared.resolved_path) {
                     Some(ce) => ce.into(),
-                    None => color_eyre::eyre::eyre!("{e}"),
+                    None => color_eyre::Report::from(e),
                 }
             }
         }
@@ -215,9 +212,9 @@ pub(super) fn run_composition_body(
                 Some(lifecycle_context),
                 frontmatter,
                 document_start,
-                claudine::composition::LifecycleErrorInfo::from_action_failure(
+                claudine::composition::LifecycleErrorInfo::from_error_or_action(
                     "shell_approval",
-                    e.to_string(),
+                    &e,
                 ),
             );
             match preflight_outcome {
@@ -228,7 +225,7 @@ pub(super) fn run_composition_body(
                         &request.prepared.resolved_path,
                     ) {
                         Some(ce) => ce.into(),
-                        None => color_eyre::eyre::eyre!("{e}"),
+                        None => color_eyre::Report::from(e),
                     }
                 }
             }
@@ -286,6 +283,7 @@ pub(super) fn run_composition_body(
             // Dry-run never produces a per-iteration summary.
             iteration_signals: None,
             terminal_signal: None,
+            final_output: None,
         };
         // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
         // The perf report is always emitted to stderr when requested.
@@ -411,6 +409,17 @@ pub(super) fn run_composition_body(
         HarnessPromptMode::Compose
     };
 
+    // A caller running several compositions as one logical run (the `--loop`
+    // engine, sequence execution) hands its own cell down so `set` mutations
+    // and `outputs` accumulate across them; a standalone run owns a fresh one.
+    let runtime_state = request
+        .runtime_state
+        .clone()
+        .unwrap_or_else(|| std::sync::Arc::new(claudine::composition::RuntimeState::new()));
+    // Baseline for "did *this* execution commit an entry": a caller-supplied
+    // cell may already hold prior loop iterations' or sequence steps' outputs.
+    let outputs_before = runtime_state.output_count();
+
     // When an `initialize` Proxy redirected to a different document, the
     // harness loop re-materializes (re-composes frontmatter + body) from
     // `source_path` each attempt, so swapping the path here runs the
@@ -427,7 +436,10 @@ pub(super) fn run_composition_body(
         None => (
             request.prepared.resolved_path.clone(),
             request.file_ref.clone(),
-            Some(materialized_harness_prompt_from_prepared(&request.prepared)),
+            Some(materialized_harness_prompt_from_prepared(
+                &request.prepared,
+                std::sync::Arc::clone(&runtime_state),
+            )),
         ),
     };
 
@@ -445,6 +457,9 @@ pub(super) fn run_composition_body(
         // pre-approved shell commands (a proxy target with a `$schema` needs
         // the same inputs the original document was prepared with).
         rematerialize: request.prepared.rematerialize.clone(),
+        runtime_state: std::sync::Arc::clone(&runtime_state),
+        suppress_output_commit: request.suppress_output_commit,
+        last_final_output: None,
     };
 
     let mut harness_base_args = args_before_prompt.clone();
@@ -482,6 +497,7 @@ pub(super) fn run_composition_body(
         guard,
         proxy_source,
         true,
+        request.task_frame_writer.clone(),
     )?;
     if let (Some(collector), Some(perf)) = (perf_collector.as_mut(), harness_perf) {
         collector.set_agent_perf(perf);
@@ -499,6 +515,14 @@ pub(super) fn run_composition_body(
         // exit_reason pickup for every composition document.
         iteration_signals: harness_signals,
         terminal_signal,
+        // The harness loop records the captured text on the success path only.
+        // `outputs_before` still gates it so a suppressed *and* a committed run
+        // report identically, and a skipped or failed run reports `None`.
+        final_output: prompt_state.last_final_output.clone().or_else(|| {
+            (runtime_state.output_count() > outputs_before)
+                .then(|| runtime_state.last_output_text())
+                .flatten()
+        }),
     };
     // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
     // The perf report is always emitted to stderr when requested.

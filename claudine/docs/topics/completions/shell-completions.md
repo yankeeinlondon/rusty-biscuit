@@ -143,24 +143,20 @@ Default iteration order (`ScopeSet::iter_scopes`):
 5. **User Claudine scope** — `~/.claudine/prompts/`.
 6. **Extras** — mode-specific (see below).
 
-Magic-path iteration order (`ScopeSet::iter_magic_scopes`):
+Magic-path roots come from Claudine's shared `prompt_magic_roots` builder and
+are expanded by `FileReference::complete_partial_in_context`:
 
-1. **Repo root** — `<repo>/prompts/`.
-2. **Package-area root** — `<repo>/<area>/prompts/`.
-3. **Package root** — `<pkg>/prompts/`.
+1. **Discrete package** — `<pkg>/`, then `<pkg>/prompts/`.
+2. **Package area** — `<repo>/<area>/`, then `<repo>/<area>/prompts/`.
+3. **Repo prompts** — `<repo>/prompts/`.
 4. **Repo Claudine scope** — `<repo>/.claudine/prompts/`.
-5. **Extras** — repo-local mode-specific scopes (`docs/`, agent-skill
-   peers).
-6. **User Claudine scope** — `~/.claudine/prompts/` (last).
+5. **Repo document scopes** — `docs/`, then the agent-skill peers.
+6. **User Claudine scope** — `~/.claudine/prompts/`.
 
-**Why a separate magic order.** Project-specific prompts should win
-over global prompts because the user's intent on `<TAB>` is nearly
-always "the thing in my current project." For inline-compose and
-sequence the repo-local extras (`docs/`, skill peers) similarly
-outrank `~/.claudine/prompts/` so a project's design docs and skill
-files shadow any user-global prompt that happens to share a name. The
-default (non-magic) pipeline preserves its original ordering
-to avoid disrupting existing committed-directory behavior.
+Runtime composition registers this identical ordered list. The package and
+area bare roots keep path-shaped values such as `@prompts/plan.md` resolvable;
+the prompt children support the concise `@plan.md` form. The default
+non-magic pipeline retains its separate display-oriented scope ordering.
 
 **Why a single scope resolution per invocation.** `sniff::detect_repo_structure`
 can shell out to `cargo metadata` on first call. Threading a single
@@ -211,11 +207,12 @@ file.
 ### Magic `@` resolution
 
 A partial beginning with `@` is a magic path — a **filename search**. The
-engine walks the scope set in the **magic-path priority order** (see
-"Scopes" above) and emits candidates of the form `@<basename>`: the `@`
-sigil is **kept** and only the filename is inserted, never a path. The `@`
-stays because it is a runtime-resolution marker — at launch the composition
-pipeline resolves the committed `@<basename>` to the closest matching prompt
+engine constructs one explicit `FileResolutionContext`, asks
+`FileReference::complete_partial_in_context` for the ordered roots and rendered
+prefix, and emits that prefix plus each matching basename. A bare partial emits
+`@<basename>`; a path-shaped partial retains its scope. The `@` stays because it
+is a runtime-resolution marker — at launch the composition pipeline resolves
+the committed value through the identical ordered roots
 (see [Composition](../composition.md) and the prompt-magic search roots in
 `claudine::composition::resolve`).
 
@@ -230,23 +227,21 @@ filename present in several scopes (e.g. both `<repo>/prompts/plan.md` and
 first) owns the candidate's sort rank; runtime resolution independently
 picks the closest file on disk.
 
-**Why keep the sigil and the filename only.** The whole point of `@` is to
-say "find this prompt by name, wherever it lives" — surfacing the full
-resolved path is clutter the user did not ask for, and there is usually
-exactly one prompt of a given name. Keeping `@<basename>` lets the user
-commit a short, stable token and defers the path decision to launch time,
-where "closest wins."
+**Why keep the sigil.** The whole point of `@` is to defer the concrete path
+decision to the shared ordered roots. Bare searches stay concise as
+`@<basename>`; an authored scope remains present so completion does not discard
+syntax that the shared parser classified.
 
 #### Path-shaped form: `@prompts/plan`
 
 A `/` in the magic body constrains the **walk** to that subdirectory (the
-portion before the last `/`), but the rendered candidate is still
-filename-only. Multi-segment paths are supported (`@a/b/c`).
+portion before the last `/`) and remains in the emitted candidate.
+Multi-segment paths are supported (`@a/b/c`).
 
 ```text
-# Walk is constrained to <scope>/prompts/, candidate is filename-only
+# Walk is constrained to the shared roots' prompts/ children
 claudine compose @prompts/plan<TAB>
-→ @plan.md
+→ @prompts/plan.md
 ```
 
 When the path-shaped `dir` does not exist under a particular scope, that
@@ -262,14 +257,8 @@ Directory drilling is a Word-mode (non-`@`) behavior — type a bare path like
 
 #### Magic-path priority
 
-Magic resolution searches scopes in this order (closest first):
-
-1. Repo root (`<repo>/prompts/`)
-2. Package-area root
-3. Package root
-4. Repo Claudine scope (`<repo>/.claudine/prompts/`)
-5. Mode-specific extras — `docs/` plus repo-local agent-skill peers
-6. User Claudine scope (`~/.claudine/prompts/`)
+Magic resolution uses the shared package → package-area → repository → user
+order documented under [Scopes](#scopes).
 
 The user-global scope is **last**. The basename dedup keeps the closest
 occurrence, so a repo-local `plan.md` owns the `@plan.md` candidate's rank
@@ -277,8 +266,8 @@ over a `~/.claudine/prompts/plan.md` of the same basename. Filenames that
 exist **only** in a lower-priority scope (e.g. a global-only prompt) still
 surface — the union across scopes is offered, just deduped by basename.
 
-**Runtime closest-resolution.** The committed `@<basename>` is resolved at
-launch by registering these same prompt directories as magic search roots,
+**Runtime closest-resolution.** The committed magic value is resolved at
+launch by registering these same directories as magic search roots,
 closest-first; `biscuit_file::FileReference` returns the first existing
 candidate, so the nearest prompt wins. This mirrors the completion scope
 set, so anything the engine offers under `@` is resolvable at launch.
@@ -824,12 +813,12 @@ $ claudine compose @plan<TAB>
 ### Composition with a path-shaped magic prefix
 
 ```text
-# The path constrains the search; the candidate is still filename-only
+# The path constrains the search and remains in the emitted token
 $ claudine compose @prompts/plan<TAB>
-→ @plan.md
+→ @prompts/plan.md
 
 $ claudine compose @prompts/drafts/plan<TAB>
-→ @plan.md
+→ @prompts/drafts/plan.md
 ```
 
 ### Non-magic repo `.claudine` scope
@@ -881,7 +870,7 @@ $ claudine inline-compose @spec<TAB>
 → docs/feature-spec.md
 ```
 
-### Inline-compose magic is filename-only and deduped
+### Inline-compose bare magic is filename-only and deduped
 
 ```text
 # Given:

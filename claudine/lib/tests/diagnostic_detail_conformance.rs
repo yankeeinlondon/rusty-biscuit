@@ -86,6 +86,7 @@ fn claudine_representatives() -> Vec<ClaudineError> {
         ClaudineError::PolicyNativeParse {
             source_id: "src".to_string(),
             message: "bad".to_string(),
+            source: None,
         },
         // config.mcp_invalid (server known)
         ClaudineError::McpServerNotFound {
@@ -168,7 +169,7 @@ fn composition_representatives() -> Vec<CompositionError> {
         // io.write_failed (atomic write)
         CompositionError::AtomicWriteFailed {
             path: PathBuf::from("p.md"),
-            source: Box::new(ClaudineError::LinkingError("x".to_string())),
+            source: std::io::Error::other("x"),
         },
         // composition.lifecycle_invalid
         CompositionError::LifecycleInvalid {

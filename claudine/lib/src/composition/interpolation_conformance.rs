@@ -251,7 +251,8 @@ fn divergence_unknown_root_strictness() {
 
 /// Both engines fail closed on a malformed expression — the shared invariant —
 /// but with the error type each surface needs: the loop renderer's contextual
-/// `InvalidAction` (carrying iteration/action index) and DM2's `Transform`.
+/// `LoopActionExpressionInvalid` (carrying iteration/action index plus the typed
+/// parse cause) and DM2's `Transform`.
 #[test]
 fn divergence_malformed_expression_both_fail_closed() {
     let input = json!("{{ >bad }}");
@@ -259,8 +260,11 @@ fn divergence_malformed_expression_both_fail_closed() {
 
     let loop_error = loop_render(&input, &frontmatter).expect_err("loop fails closed");
     assert!(
-        matches!(loop_error, CompositionError::InvalidAction { .. }),
-        "loop surfaces a contextual InvalidAction: {loop_error}"
+        matches!(
+            loop_error,
+            CompositionError::LoopActionExpressionInvalid { .. }
+        ),
+        "loop surfaces a contextual LoopActionExpressionInvalid: {loop_error}"
     );
 
     let dm2_error = dm2_render(&input, &frontmatter, SubtreeStrictness::Strict)

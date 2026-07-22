@@ -48,7 +48,7 @@ impl LaunchContext {
             );
 
         let result = sniff::detect_with_plan(plan)
-            .map_err(|e| crate::error::ClaudineError::LaunchContextDetection(e.to_string()))?;
+            .map_err(|e| crate::error::ClaudineError::LaunchContextDetection(Box::new(e)))?;
 
         Ok(Self::from_sniff_result(&result, cwd))
     }

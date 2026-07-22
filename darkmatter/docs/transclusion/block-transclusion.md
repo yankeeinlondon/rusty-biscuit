@@ -42,8 +42,8 @@ The example showed a relative path used to the foreign file and this is the reco
 - relative paths
 
     - the most popular and easily to reason about
-    - they are identified by a leading `./` in the file path
-    - these paths look for documents from the directory of the base document
+    - an **explicit** relative path carries a leading `./` (or `../`) and looks for documents from the directory of the base document **only**
+    - a **bare/implicit** relative path (no leading `./`, e.g. `some-content.md` or `sub/some-content.md`) is resolved **repository-root first, then the base document's directory**
 
 - absolute paths
 

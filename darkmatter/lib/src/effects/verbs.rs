@@ -3,6 +3,7 @@
 use crate::effects::EffectEngine;
 use crate::effects::error::EffectError;
 use crate::effects::fs_write::{atomic_write_guarded, ensure_within};
+use crate::markdown::FrontmatterMap;
 use crate::markdown::Markdown;
 use crate::markdown::hash::MdHashOptions;
 use biscuit_file::file_reference::fetch::{FetchPolicy, HostPattern};
@@ -49,6 +50,38 @@ impl EffectEngine {
             md.as_string()
         };
         atomic_write_guarded(self.mutation_root(), &path, serialized.as_bytes())
+    }
+
+    /// `set(key, value)` → prior value (or null).
+    ///
+    /// Writes `key` into an in-memory `state` map and returns the value it
+    /// replaced. Unlike [`set_frontmatter`](Self::set_frontmatter), this never
+    /// touches disk: it mutates the caller's map so an orchestrator can carry
+    /// runtime state across lifecycle actions and loop iterations without a
+    /// file write-back.
+    ///
+    /// The value is stored verbatim, so its JSON type is preserved (a boolean
+    /// stays a boolean, an array stays an array).
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`EffectError::InvalidKey`] when `key` is empty or contains a
+    /// `.` (dotted-path nesting is not supported; keys are top-level only).
+    /// Which top-level keys an orchestrator forbids (e.g. Claudine's reserved
+    /// sequence keys) is the caller's policy and is intentionally not enforced
+    /// here.
+    pub fn set(
+        &self,
+        state: &mut FrontmatterMap,
+        key: &str,
+        value: Value,
+    ) -> Result<Value, EffectError> {
+        if key.is_empty() || key.contains('.') {
+            return Err(EffectError::InvalidKey(key.to_string()));
+        }
+        let prior = state.get(key).cloned().unwrap_or(Value::Null);
+        state.insert(key.to_string(), value);
+        Ok(prior)
     }
 
     /// `set_frontmatter(file, prop, value)` → prior value (or null).
@@ -315,7 +348,67 @@ fn normalize_path_arg(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use crate::effects::EffectEngine;
+    use crate::markdown::FrontmatterMap;
     use serde_json::{Value, json};
+
+    #[test]
+    fn set_returns_prior_value_and_mutates_in_memory() {
+        let eng = EffectEngine::builder().build();
+        let mut state = FrontmatterMap::new();
+
+        // First write of an absent key returns null.
+        let prior = eng.set(&mut state, "count", json!(1)).unwrap();
+        assert_eq!(prior, Value::Null);
+        assert_eq!(state.get("count"), Some(&json!(1)));
+
+        // Overwriting returns the value that was replaced.
+        let prior = eng.set(&mut state, "count", json!(2)).unwrap();
+        assert_eq!(prior, json!(1));
+        assert_eq!(state.get("count"), Some(&json!(2)));
+    }
+
+    #[test]
+    fn set_preserves_whole_value_types() {
+        let eng = EffectEngine::builder().build();
+        let mut state = FrontmatterMap::new();
+
+        eng.set(&mut state, "flag", json!(true)).unwrap();
+        eng.set(&mut state, "list", json!([1, 2, 3])).unwrap();
+        eng.set(&mut state, "obj", json!({"a": 1})).unwrap();
+
+        assert_eq!(state.get("flag"), Some(&Value::Bool(true)));
+        assert_eq!(state.get("list"), Some(&json!([1, 2, 3])));
+        assert_eq!(state.get("obj"), Some(&json!({"a": 1})));
+    }
+
+    #[test]
+    fn set_performs_no_filesystem_write() {
+        // A file-less mutation root would make any disk write fail; `set` must
+        // not touch it. The temp dir starts and stays empty.
+        let dir = tempfile::TempDir::new().unwrap();
+        let eng = EffectEngine::builder().mutation_root(dir.path()).build();
+        let mut state = FrontmatterMap::new();
+
+        eng.set(&mut state, "ready", json!(true)).unwrap();
+
+        let entries: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
+        assert!(entries.is_empty(), "set must not write to disk");
+    }
+
+    #[test]
+    fn set_rejects_empty_and_dotted_keys() {
+        let eng = EffectEngine::builder().build();
+        let mut state = FrontmatterMap::new();
+
+        let empty = eng.set(&mut state, "", json!(1)).unwrap_err();
+        assert!(matches!(empty, crate::effects::EffectError::InvalidKey(k) if k.is_empty()));
+
+        let dotted = eng.set(&mut state, "a.b", json!(1)).unwrap_err();
+        assert!(matches!(dotted, crate::effects::EffectError::InvalidKey(k) if k == "a.b"));
+
+        // A rejected write leaves the map untouched.
+        assert!(state.is_empty());
+    }
 
     #[test]
     fn set_frontmatter_writes_and_rehashes() {

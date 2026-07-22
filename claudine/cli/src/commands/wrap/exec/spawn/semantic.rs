@@ -16,7 +16,7 @@ use biscuit_terminal::components::status::{Status, StatusState};
 use claudine::render::{AssistantStream, StreamRenderable};
 use claudine::signals::{SignalHub, SignalSource};
 use claudine::stream::logs::{EarlyTermination, StderrBridgeHandle, StderrIngestOutcome};
-use claudine::stream::parser::{SemanticStreamParser, StreamParseError};
+use claudine::stream::parser::SemanticStreamParser;
 use claudine::stream::progress::LiveMetrics;
 use claudine::stream::prompt_timing::PromptTimingContext;
 use claudine::stream::summary::StreamExecutionSummary;
@@ -35,7 +35,7 @@ use super::super::watchdog::{
 };
 use super::super::{
     ErrorParser, OutputTextCallback, ProcessResult, ProcessTelemetry, ReasoningCallback,
-    SemanticParserBuilder, join_with_timeout_or, kill_process_group, new_assistant_stream,
+    SemanticParserBuilder, join_with_timeout_or, kill_process_group, new_assistant_stream_inset,
     resolve_first_response, stop_timing_ticker,
 };
 use super::setup;
@@ -60,6 +60,36 @@ use crate::commands::wrap::stream_io::StreamOutput;
 /// `ProcessResult.signals`.
 ///
 /// [`SemanticEventSink`]: claudine::stream::semantic::SemanticEventSink
+/// Drain the assistant renderer's final frames to whichever stdout path is live.
+///
+/// The framed path also flushes its held partial line: the stream is over, so a
+/// fragment waiting for a newline it will never receive must still be shown.
+fn drain_close(
+    renderer: &Arc<std::sync::Mutex<AssistantStream>>,
+    framed: &Option<Arc<std::sync::Mutex<claudine::render::TaskFrameWriter>>>,
+    out: &mut impl Write,
+) {
+    let Ok(mut renderer) = renderer.lock() else {
+        return;
+    };
+    let frames = renderer.close();
+    match framed {
+        Some(framed) => {
+            if let Ok(mut framed) = framed.lock() {
+                for frame in frames {
+                    framed.write(&frame);
+                }
+                framed.flush();
+            }
+        }
+        None => {
+            for frame in frames {
+                let _ = out.write_all(frame.as_bytes());
+            }
+            let _ = out.flush();
+        }
+    }
+}
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_child_stream_semantic(
     binary: &Path,
@@ -81,6 +111,10 @@ pub(crate) fn run_child_stream_semantic(
     section_tracker: Option<Arc<Mutex<SectionTracker>>>,
     content_early_rx: Option<std::sync::mpsc::Receiver<EarlyTermination>>,
     signal_hub: Arc<SignalHub>,
+    // Frames assistant text under one sequence task's bar before it reaches
+    // stdout. `None` writes the stream undecorated, as every non-sequence run
+    // does.
+    task_frame_writer: Option<claudine::render::TaskFrameWriter>,
 ) -> Result<ProcessResult<StreamExecutionSummary>> {
     setup::debug_assert_child_env(env);
 
@@ -116,8 +150,15 @@ pub(crate) fn run_child_stream_semantic(
     // which emits BlockQuote-formatted thinking text through the
     // section-aware stderr emitter. The reasoning_cb passed to the
     // parser builder is a no-op.
+    // One shared writer, not a clone per closure: the streaming callback and
+    // the end-of-stream `close` must agree about the held partial line.
+    let framed_writer = task_frame_writer
+        .map(|writer| Arc::new(std::sync::Mutex::new(writer)));
+    let text_inset = framed_writer
+        .as_ref()
+        .map_or(0, |writer| writer.lock().map_or(0, |w| w.gutter_width() as u32));
     let text_renderer: Arc<std::sync::Mutex<AssistantStream>> =
-        Arc::new(std::sync::Mutex::new(new_assistant_stream()));
+        Arc::new(std::sync::Mutex::new(new_assistant_stream_inset(text_inset)));
 
     let stdout_output = stream_output.clone();
 
@@ -130,6 +171,7 @@ pub(crate) fn run_child_stream_semantic(
         watchdog_state.clone(),
         section_tracker.clone(),
         timeout_config,
+        framed_writer.clone(),
     ));
 
     // Prompt-scoped periodic header + warnings. Only started when the
@@ -190,10 +232,12 @@ pub(crate) fn run_child_stream_semantic(
         let mut out = stdout_output.stdout_writer();
 
         let text_renderer = stdout_renderer;
+        let framed_close = framed_writer.clone();
 
         let output_cb: OutputTextCallback = {
             let text = text_renderer.clone();
             let mut writer = stdout_output.stdout_writer();
+            let framed = framed_writer.clone();
             let first_at = first_semantic_at_clone;
             Box::new(move |chunk: &str| {
                 if !chunk.is_empty() {
@@ -203,10 +247,26 @@ pub(crate) fn run_child_stream_semantic(
                     }
                 }
                 if let Ok(mut r) = text.lock() {
-                    for frame in r.append(chunk) {
-                        let _ = writer.write_all(frame.as_bytes());
+                    let frames = r.append(chunk);
+                    match framed.as_ref() {
+                        // Framed: the writer emits only complete lines through
+                        // the coordinator, so there is nothing to flush per
+                        // chunk — a mid-line flush would publish half a line
+                        // under the bar.
+                        Some(framed) => {
+                            if let Ok(mut framed) = framed.lock() {
+                                for frame in frames {
+                                    framed.write(&frame);
+                                }
+                            }
+                        }
+                        None => {
+                            for frame in frames {
+                                let _ = writer.write_all(frame.as_bytes());
+                            }
+                            let _ = writer.flush();
+                        }
                     }
-                    let _ = writer.flush();
                 }
             })
         };
@@ -214,7 +274,6 @@ pub(crate) fn run_child_stream_semantic(
 
         let mut parser: Box<dyn SemanticStreamParser> =
             build_parser(output_cb, reasoning_cb, Some(captured_pid));
-        let mut fallback_mode = false;
         let mut stream_capture = stream_capture_owned;
 
         for line in reader.lines() {
@@ -266,38 +325,10 @@ pub(crate) fn run_child_stream_semantic(
                 }
             }
 
-            if fallback_mode {
-                let _ = writeln!(out, "{}", crate::log::maybe_strip(&line));
-                continue;
-            }
-
-            match parser.feed_line(&line) {
-                Ok(()) => {}
-                Err(StreamParseError::MalformedLine { .. }) => {
-                    // Semantic parsers emit Warning events instead of
-                    // returning MalformedLine, but guard the variant here
-                    // in case a legacy adapter still surfaces it.
-                    tracing::debug!("skipping malformed stream line: {line}");
-                }
-                Err(StreamParseError::Fatal(_)) => {
-                    if let Ok(mut r) = text_renderer.lock() {
-                        for frame in r.close() {
-                            let _ = out.write_all(frame.as_bytes());
-                        }
-                        let _ = out.flush();
-                    }
-                    fallback_mode = true;
-                    let _ = writeln!(out, "{}", crate::log::maybe_strip(&line));
-                }
-            }
+            parser.feed_line(&line);
         }
 
-        if let Ok(mut r) = text_renderer.lock() {
-            for frame in r.close() {
-                let _ = out.write_all(frame.as_bytes());
-            }
-            let _ = out.flush();
-        }
+        drain_close(&text_renderer, &framed_close, &mut out);
         parser
     });
 

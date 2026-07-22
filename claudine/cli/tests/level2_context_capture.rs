@@ -69,6 +69,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 use test_toolkit::{require_level, Level};
 
+mod common;
+use common::clear_no_color;
+
 /// Captures a `claudine context <args>` run inside a freshly spawned tmux
 /// session of `cols` × `rows` cells, then tears the session down.
 ///
@@ -108,14 +111,21 @@ fn capture_context(args: &[&str], cols: u32, rows: u32) -> CapturedFrame {
 
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
+    // This fixture asserts a *colored* surface under `FORCE_COLOR=1`, which an
+    // ambient `NO_COLOR` out-votes — see `common::clear_no_color`.
+    clear_no_color(&mut harness);
 
     let claudine = cargo_bin!("claudine").display().to_string();
     let cols_s = cols.to_string();
-    let cmd = format!("{claudine} context {}", args.join(" "));
-    let send = harness.send_command_with_env(
-        &cmd,
-        &[("FORCE_COLOR", "1"), ("COLUMNS", cols_s.as_str())],
+    // The environment is bound through `env` rather than the harness' inline
+    // `KEY='v' cmd` prefix so the line can open with the `REPORT_SENTINEL`
+    // print — see `report_plain_slice` for why the sentinel has to precede
+    // claudine's first byte of output.
+    let cmd = format!(
+        "printf '{REPORT_SENTINEL}\\n'; env FORCE_COLOR=1 COLUMNS={cols_s} {claudine} context {}",
+        args.join(" ")
     );
+    let send = harness.send_command_with_env(&cmd, &[]);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
     std::thread::sleep(Duration::from_millis(250));
     let frame = harness.capture();
@@ -125,21 +135,39 @@ fn capture_context(args: &[&str], cols: u32, rows: u32) -> CapturedFrame {
     frame.expect("capture failed")
 }
 
+/// Printed by the shell immediately before claudine runs, so everything after
+/// it in the captured pane is claudine's own output.
+const REPORT_SENTINEL: &str = "__CTX_L2_REPORT_BEGIN__";
+
+/// The captured pane text with the leading shell noise removed.
+///
+/// The pane also holds the shell's echo of the typed command, which carries the
+/// absolute binary path and readily exceeds the report's width envelope. That
+/// echo is a *single logical line*, so the terminal wraps it into as many
+/// physical rows as it needs — and every wrapped row but the last is exactly
+/// pane-width. Filtering rows by a substring of the command cannot remove them:
+/// the wrap lands wherever the prompt length puts it, frequently mid-token, so
+/// the marker is split across two rows and matches neither. That is a false
+/// "report is too wide" of exactly `cols` cells, and it is why the command is
+/// preceded by `REPORT_SENTINEL`. Anchoring on the *last* occurrence picks the
+/// printed sentinel over the echoed one.
+///
+/// Falls back to the whole frame when the sentinel is absent, which happens when
+/// an over-tall report has scrolled it off the pane — in which case the echo has
+/// scrolled off with it and there is no shell noise left to drop.
+fn report_plain_slice(frame: &CapturedFrame) -> &str {
+    let Some(idx) = frame.plain.rfind(REPORT_SENTINEL) else {
+        return &frame.plain;
+    };
+    let rest = &frame.plain[idx..];
+    rest.find('\n').map_or(rest, |nl| &rest[nl + 1..])
+}
+
 /// Maximum visible width across the rendered report rows (trailing pad
 /// stripped, since tmux pads its capture to the pane width).
-///
-/// The captured pane also holds the shell's echo of the typed
-/// `claudine context …` command. That line carries the absolute binary path
-/// and can exceed the report's width envelope, yet it is shell noise, not
-/// claudine output — so it must not count toward the report width. It is the
-/// only captured line containing the literal `claudine context` invocation
-/// (report content never does), which makes it unambiguous to drop regardless
-/// of the developer's prompt length.
 fn max_visible_width(frame: &CapturedFrame) -> usize {
-    frame
-        .plain
+    report_plain_slice(frame)
         .lines()
-        .filter(|l| !l.contains("claudine context"))
         .map(|l| visible_width(l.trim_end()) as usize)
         .max()
         .unwrap_or(0)

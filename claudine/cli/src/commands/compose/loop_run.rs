@@ -82,7 +82,12 @@ pub(crate) fn build_loop_iteration_output(
     let model_id = signals.model_id.clone();
 
     if outcome.exit_code == 0 {
-        claudine::composition::LoopIterationOutput::success("")
+        // The captured entry this iteration committed to `outputs` is the same
+        // text `_loop_last_output` names, so the two agree by construction
+        // rather than the ambient reporting a placeholder empty string.
+        claudine::composition::LoopIterationOutput::success(
+            outcome.final_output.unwrap_or_default(),
+        )
             .with_rate_limit(rate_limit)
             .with_exit_reason(exit_reason)
             .with_attribution(provider_id, model_id)
@@ -104,6 +109,10 @@ pub(crate) fn build_loop_iteration_output(
             exit_code: outcome.exit_code,
             reason,
             exit_reason: exit_reason.clone(),
+            // The provider ran and exited non-zero: `reason` is assembled from
+            // session_end fields, not raised as a typed error, so there is no
+            // chain to project from here.
+            snapshot: None,
         };
         claudine::composition::LoopIterationOutput::failure("", outcome.exit_code, error)
             .with_rate_limit(rate_limit)
@@ -135,6 +144,7 @@ pub(crate) fn run_loop_with_overrides<F>(
     effect_engine: &darkmatter::effects::EffectEngine,
     shell_runner: &dyn claudine::composition::ShellRunner,
     emitter: &dyn claudine::composition::LifecycleEmitter,
+    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
     mut executor: F,
 ) -> std::result::Result<
     Option<claudine::composition::LoopExecutionResult>,
@@ -209,6 +219,7 @@ where
         effect_engine,
         shell_runner,
         emitter,
+        file_resolution_context,
         wrapped_executor,
     )?;
 

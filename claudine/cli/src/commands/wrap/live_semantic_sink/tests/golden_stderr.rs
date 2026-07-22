@@ -94,7 +94,7 @@ pub(super) fn replay_to_combined(
     let config = ParserConfig { model };
     let mut parser = create_semantic_parser(provider, parser_sink, config);
     for line in fixture {
-        parser.feed_line(line).unwrap();
+        parser.feed_line(line);
     }
     drop(parser);
 

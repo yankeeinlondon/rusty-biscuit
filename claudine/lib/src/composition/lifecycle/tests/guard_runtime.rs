@@ -331,12 +331,15 @@ fn finalize_requires_recorded_terminal_not_just_stack_run() {
         signal: LifecycleSignal::Failure,
         frontmatter: &serde_json::Map::new(),
         live_frontmatter: None,
+        runtime_state: None,
         err: None,
         timing: None,
         current: None,
+        group: None,
         base_dir: None,
         ctx_base_dir: None,
         prepared_context: None,
+        file_resolution_context: None,
         effect_engine: &darkmatter::effects::EffectEngine::builder()
             .mutation_root(std::env::current_dir().unwrap())
             .auto_rehash(false)
@@ -441,12 +444,15 @@ fn run_event_stack_emits_top_level_and_stack() {
         signal: LifecycleSignal::Start,
         frontmatter: &serde_json::Map::new(),
         live_frontmatter: None,
+        runtime_state: None,
         err: None,
         timing: None,
         current: None,
+        group: None,
         base_dir: None,
         ctx_base_dir: None,
         prepared_context: None,
+        file_resolution_context: None,
         effect_engine: &darkmatter::effects::EffectEngine::builder()
             .mutation_root(std::env::current_dir().unwrap())
             .auto_rehash(false)
@@ -505,12 +511,15 @@ fn execute_event_still_runs_full_event() {
         signal: LifecycleSignal::Start,
         frontmatter: &serde_json::Map::new(),
         live_frontmatter: None,
+        runtime_state: None,
         err: None,
         timing: None,
         current: None,
+        group: None,
         base_dir: None,
         ctx_base_dir: None,
         prepared_context: None,
+        file_resolution_context: None,
         effect_engine: &darkmatter::effects::EffectEngine::builder()
             .mutation_root(std::env::current_dir().unwrap())
             .auto_rehash(false)
@@ -528,4 +537,3 @@ fn execute_event_still_runs_full_event() {
     assert!(guard.start_emitted());
     assert_eq!(emitter.signals().len(), 1);
 }
-

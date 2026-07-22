@@ -23,7 +23,7 @@
 //!
 //! This binary owns the direct-`compose` schema-prompt coverage and the
 //! interactive `inline-compose` collection coverage. The sequence-overlay
-//! coverage lives in `level2_sequence_overlay_pty.rs`; shared PTY harness
+//! coverage lives in `sequence_overlay_pty.rs`; shared PTY harness
 //! helpers live in `common::pty`.
 //!
 //! Gating: `#![cfg(unix)]`, `require_level!(Level::L2, pty_available(),

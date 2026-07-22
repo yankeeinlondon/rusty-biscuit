@@ -40,6 +40,7 @@ pub(crate) fn execute_harness_attempt(
     term: &Terminal,
     child_spawned: &mut bool,
     prompt_timing: Option<claudine::stream::prompt_timing::PromptTimingContext>,
+    task_frame_writer: Option<claudine::render::TaskFrameWriter>,
 ) -> Result<(
     claudine::harness::AttemptOutcome,
     Option<crate::perf::AgentExecutionPerf>,
@@ -157,6 +158,11 @@ pub(crate) fn execute_harness_attempt(
             child_cwd,
             stream_verbosity,
             summary_details.clone(),
+            // Same bytes the data channel is framed with, so a reader matches a
+            // status line to the body above it by gutter, not by ordering.
+            task_frame_writer
+                .as_ref()
+                .map(|writer| writer.gutter().to_string()),
         )
         .with_context_extra(dispatch_context.clone())
         .with_status_reporter(session_presence.status_reporter());
@@ -236,6 +242,7 @@ pub(crate) fn execute_harness_attempt(
                 Some(section_stream.tracker()),
                 content_early_rx,
                 signal_hub,
+                task_frame_writer,
             )?
         };
         let api_duration_ms = stream_result.data.duration_ms;

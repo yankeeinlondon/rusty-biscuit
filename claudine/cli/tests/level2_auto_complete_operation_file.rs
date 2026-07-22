@@ -2,11 +2,12 @@
 //!
 //! Phase 5 follow-up for the `2026-06-14-auto-complete` feature. These tests
 //! start from an unresolved operation-file partial (`claudine compose plan`)
-//! rather than a missing schema property, and verify the two presentation
-//! paths mandated by the spec:
+//! rather than a missing schema property, and verify the presentation and
+//! interaction paths mandated by the spec:
 //!
 //! - Single match → lightweight `Use this file? (Y/n)` confirmation dialog.
 //! - Multiple matches → `ChooseOne` two-pane chooser with live detail pane.
+//! - Enter/Y acceptance and arrow-key selection → the chosen operation runs.
 //!
 //! Gating: `#![cfg(unix)]`, `require_level!(Level::L2, ...)` so the tests skip
 //! cleanly when the backend is unavailable and panic under
@@ -44,18 +45,54 @@ const CHOOSER_HINT: &str = "Enter=Submit";
 /// Backend-specific byte/key injection for the small set of keys used by
 /// these L2 tests.
 trait KeySender: TerminalHarness {
+    fn send_enter(&mut self) -> io::Result<()>;
     fn send_esc(&mut self) -> io::Result<()>;
+    fn send_yes(&mut self) -> io::Result<()>;
+    fn send_down(&mut self) -> io::Result<()>;
+    fn send_up(&mut self) -> io::Result<()>;
 }
 
 impl KeySender for TmuxHarness {
+    fn send_enter(&mut self) -> io::Result<()> {
+        self.send_key("Enter")
+    }
+
     fn send_esc(&mut self) -> io::Result<()> {
         self.send_key("Escape")
+    }
+
+    fn send_yes(&mut self) -> io::Result<()> {
+        self.send_key("y")
+    }
+
+    fn send_down(&mut self) -> io::Result<()> {
+        self.send_key("Down")
+    }
+
+    fn send_up(&mut self) -> io::Result<()> {
+        self.send_key("Up")
     }
 }
 
 impl KeySender for WezTermHarness {
+    fn send_enter(&mut self) -> io::Result<()> {
+        self.send_text(b"\r")
+    }
+
     fn send_esc(&mut self) -> io::Result<()> {
         self.send_text(b"\x1b")
+    }
+
+    fn send_yes(&mut self) -> io::Result<()> {
+        self.send_text(b"y")
+    }
+
+    fn send_down(&mut self) -> io::Result<()> {
+        self.send_text(b"\x1b[B")
+    }
+
+    fn send_up(&mut self) -> io::Result<()> {
+        self.send_text(b"\x1b[A")
     }
 }
 
@@ -109,14 +146,14 @@ fn stage_yaml_sequence_workspace(single_match: bool) -> TestWorkspace {
     fs::create_dir_all(&prompts).unwrap();
     fs::write(
         prompts.join("steps.yaml"),
-        "name: 'Build Pipeline'\ndescription: 'CI steps'\n$schema:\n  env: 'enum(dev, prod)'\nsequence:\n  - one\n",
+        "kind: sequence\nname: 'Build Pipeline'\ndescription: 'CI steps'\nprompt: 'Process {{ state.name }}'\n$schema:\n  env: 'enum(dev, prod)'\nsequence:\n  - one\n",
     )
     .unwrap();
 
     if !single_match {
         fs::write(
             prompts.join("extra_steps.yaml"),
-            "name: 'Deploy Flow'\ndescription: 'Release steps'\n$schema:\n  region: 'enum(us, eu)'\nsequence:\n  - two\n",
+            "kind: sequence\nname: 'Deploy Flow'\ndescription: 'Release steps'\nprompt: 'Process {{ state.name }}'\n$schema:\n  region: 'enum(us, eu)'\nsequence:\n  - two\n",
         )
         .unwrap();
     }
@@ -359,6 +396,133 @@ fn is_list_line(line: &str) -> bool {
 
 fn active_line(plain: &str) -> Option<&str> {
     plain.lines().find(|l| l.contains('▶'))
+}
+
+fn wait_for_text(harness: &mut impl TerminalHarness, expected: &str) -> CapturedFrame {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut frame = harness.capture().expect("initial capture");
+    while Instant::now() < deadline {
+        if frame.plain.contains(expected) {
+            return frame;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+        frame = harness.capture().expect("poll terminal content");
+    }
+    panic!(
+        "expected terminal content {expected:?} never rendered; plain:\n{}",
+        frame.plain
+    );
+}
+
+fn wait_for_active_change(
+    harness: &mut impl TerminalHarness,
+    previous: &str,
+) -> CapturedFrame {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut frame = harness.capture().expect("initial active-item capture");
+    while Instant::now() < deadline {
+        if let Some(active) = active_line(&frame.plain)
+            && active != previous
+        {
+            return frame;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+        frame = harness.capture().expect("poll active chooser item");
+    }
+    panic!(
+        "active chooser item did not change from {previous:?}; plain:\n{}",
+        frame.plain
+    );
+}
+
+fn wait_for_provider(harness: &mut impl TerminalHarness, ws: &TestWorkspace) -> CapturedFrame {
+    let marker = ws.path().join("launched.flag");
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut frame = harness.capture().expect("initial provider capture");
+    while Instant::now() < deadline {
+        if marker.exists() && shell_done_flag(ws).exists() {
+            return frame;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+        frame = harness.capture().expect("poll provider completion");
+    }
+    panic!(
+        "provider did not launch and return to the shell; marker={}, shell_done={}; plain:\n{}",
+        marker.exists(),
+        shell_done_flag(ws).exists(),
+        frame.plain
+    );
+}
+
+fn read_recorded_prompt(ws: &TestWorkspace) -> String {
+    let path = ws.path().join("received.prompt");
+    fs::read_to_string(&path)
+        .unwrap_or_else(|_| panic!("provider did not record a prompt at {}", path.display()))
+}
+
+#[derive(Clone, Copy)]
+enum AcceptKey {
+    Enter,
+    Yes,
+}
+
+fn run_confirmation_accept_test<H: KeySender>(
+    harness: &mut H,
+    ws: &TestWorkspace,
+    send_command: impl FnOnce(&mut H, &TestWorkspace),
+    key: AcceptKey,
+    expected_prompt: &str,
+) {
+    send_command(harness, ws);
+    wait_for_text(harness, CONFIRMATION_PROMPT);
+    match key {
+        AcceptKey::Enter => harness.send_enter().expect("send Enter"),
+        AcceptKey::Yes => harness.send_yes().expect("send y"),
+    }
+    wait_for_provider(harness, ws);
+    let prompt = read_recorded_prompt(ws);
+    assert!(
+        prompt.contains(expected_prompt),
+        "provider prompt must contain {expected_prompt:?}; prompt:\n{prompt}"
+    );
+}
+
+fn run_chooser_navigation_test<H: KeySender>(
+    harness: &mut H,
+    ws: &TestWorkspace,
+    send_command: impl FnOnce(&mut H, &TestWorkspace),
+    expected_prompt: &str,
+) {
+    send_command(harness, ws);
+    let baseline = wait_for_text(harness, CHOOSER_HINT);
+    let baseline_active = active_line(&baseline.plain)
+        .expect("chooser must show an active item")
+        .to_string();
+
+    harness.send_down().expect("send Down");
+    let after_down = wait_for_active_change(harness, &baseline_active);
+    let down_active = active_line(&after_down.plain)
+        .expect("chooser must show an active item after Down")
+        .to_string();
+
+    harness.send_up().expect("send Up");
+    let after_up = wait_for_active_change(harness, &down_active);
+    assert_eq!(
+        active_line(&after_up.plain),
+        Some(baseline_active.as_str()),
+        "Up must restore the original active item"
+    );
+
+    harness.send_down().expect("send Down before submit");
+    wait_for_active_change(harness, &baseline_active);
+    harness.send_enter().expect("send Enter to submit");
+    wait_for_provider(harness, ws);
+
+    let prompt = read_recorded_prompt(ws);
+    assert!(
+        prompt.contains(expected_prompt),
+        "provider prompt must contain the navigated selection {expected_prompt:?}; prompt:\n{prompt}"
+    );
 }
 
 fn detail_marker(plain: &str) -> bool {
@@ -710,12 +874,54 @@ fn level2_tmux_operation_file_single_match_shows_confirmation() {
 
 #[test]
 #[serial(level2_terminal)]
+fn level2_tmux_operation_file_enter_accepts_single_match() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    let ws = stage_workspace(true);
+    let mut harness = TmuxHarness::new();
+    harness.spawn_shell().expect("tmux harness");
+    run_confirmation_accept_test(
+        &mut harness,
+        &ws,
+        send_compose_command,
+        AcceptKey::Enter,
+        "Plan Alpha",
+    );
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_tmux_operation_file_y_accepts_single_match() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    let ws = stage_workspace(true);
+    let mut harness = TmuxHarness::new();
+    harness.spawn_shell().expect("tmux harness");
+    run_confirmation_accept_test(
+        &mut harness,
+        &ws,
+        send_compose_command,
+        AcceptKey::Yes,
+        "Plan Alpha",
+    );
+}
+
+#[test]
+#[serial(level2_terminal)]
 fn level2_tmux_operation_file_multi_match_uses_choose_one() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
     let mut harness = TmuxHarness::new();
     harness.spawn_shell().expect("tmux harness");
     harness.resize(80, 24).ok();
     run_multi_match_test(&mut harness);
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_tmux_operation_file_arrow_navigation_selects_in_chooser() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    let ws = stage_workspace(false);
+    let mut harness = TmuxHarness::new();
+    harness.spawn_shell().expect("tmux harness");
+    run_chooser_navigation_test(&mut harness, &ws, send_compose_command, "Plan Beta");
 }
 
 #[test]
@@ -754,12 +960,54 @@ fn level2_tmux_sequence_yaml_single_match_shows_confirmation() {
 
 #[test]
 #[serial(level2_terminal)]
+fn level2_tmux_sequence_yaml_enter_accepts_single_match() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    let ws = stage_yaml_sequence_workspace(true);
+    let mut harness = TmuxHarness::new();
+    harness.spawn_shell().expect("tmux harness");
+    run_confirmation_accept_test(
+        &mut harness,
+        &ws,
+        send_sequence_command,
+        AcceptKey::Enter,
+        "one",
+    );
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_tmux_sequence_yaml_y_accepts_single_match() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    let ws = stage_yaml_sequence_workspace(true);
+    let mut harness = TmuxHarness::new();
+    harness.spawn_shell().expect("tmux harness");
+    run_confirmation_accept_test(
+        &mut harness,
+        &ws,
+        send_sequence_command,
+        AcceptKey::Yes,
+        "one",
+    );
+}
+
+#[test]
+#[serial(level2_terminal)]
 fn level2_tmux_sequence_yaml_multi_match_uses_choose_one() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
     let mut harness = TmuxHarness::new();
     harness.spawn_shell().expect("tmux harness");
     harness.resize(80, 24).ok();
     run_yaml_multi_match_test(&mut harness);
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_tmux_sequence_yaml_arrow_navigation_selects_in_chooser() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    let ws = stage_yaml_sequence_workspace(false);
+    let mut harness = TmuxHarness::new();
+    harness.spawn_shell().expect("tmux harness");
+    run_chooser_navigation_test(&mut harness, &ws, send_sequence_command, "one");
 }
 
 #[test]

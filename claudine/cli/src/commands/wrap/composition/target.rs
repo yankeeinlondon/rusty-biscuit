@@ -18,7 +18,7 @@ use claudine::composition::{
     invalid_agent_message,
 };
 use claudine::provider::Provider;
-use color_eyre::eyre::{Result, eyre};
+use color_eyre::eyre::{Result, WrapErr, eyre};
 use sniff::programs::InstalledAiClients;
 
 use super::super::wrap_terminal;
@@ -462,7 +462,7 @@ fn prompt_for_agent_state(
 
     let plan = scoped_picker_plan_for_state(state, hints, snapshot, favorite)?;
     super::super::selection_ui::prompt_one_shot_provider(plan)
-        .map_err(|e| eyre!("provider selection cancelled: {e}"))
+        .wrap_err("provider selection cancelled")
 }
 
 /// Build a picker plan scoped to a subset of installed providers.

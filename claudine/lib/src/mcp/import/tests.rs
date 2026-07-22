@@ -322,3 +322,71 @@ fn import_same_fingerprint_different_name_adds_alias() {
     let server = catalog.get_server("my-server").unwrap();
     assert!(server.aliases.contains(&"server".to_string()));
 }
+
+/// L1 / D9: a per-file parse failure must project a catalog-shaped
+/// `DiagnosticSnapshot` beside its prose `reason`, not merely stringify.
+///
+/// `import_provider` also discovers the ambient `$HOME` configs, so the
+/// assertions key on the planted path rather than on `errors` as a whole.
+#[test]
+fn import_provider_projects_a_diagnostic_snapshot_for_a_parse_failure() {
+    let tmp = TempDir::new().unwrap();
+    let repo_root = tmp.path();
+    let planted = repo_root.join(".mcp.json");
+    fs::write(&planted, "{ this is not json").unwrap();
+
+    let catalog_path = repo_root.join("catalog.json");
+    let state_path = repo_root.join("state.json");
+    let mut catalog = McpCatalogStore::load_from(&catalog_path).unwrap();
+    let mut state = McpProviderStateStore::load_from(&state_path).unwrap();
+    let mut importer = McpImporter::new(&mut catalog, &mut state);
+
+    let report = importer.import_provider(Provider::Claude, Some(repo_root));
+
+    let planted_str = planted.to_string_lossy().to_string();
+    let error = report
+        .errors
+        .iter()
+        .find(|e| e.native_name == planted_str)
+        .expect("the planted malformed config must be reported as an error");
+
+    // The prose field is unchanged — the snapshot is additive beside it.
+    assert!(!error.reason.is_empty());
+
+    // D7: a registered code projects a catalog-shaped detail object, never a
+    // top-level null.
+    let snapshot = &error.diagnostic;
+    assert!(!snapshot.code.is_empty());
+    assert_eq!(snapshot.category, snapshot.code.split('.').next().unwrap());
+    assert!(
+        !snapshot.detail.is_null(),
+        "a registered code must not project a top-level null detail"
+    );
+    assert!(!snapshot.message.is_empty());
+    assert_eq!(
+        snapshot.schema_version,
+        crate::diagnostics::DIAGNOSTIC_SNAPSHOT_SCHEMA_VERSION
+    );
+}
+
+/// The snapshot must survive the report's own serialization boundary, since
+/// `ImportReport` is what the CLI emits as machine output.
+#[test]
+fn import_error_snapshot_round_trips_through_the_report_serialization() {
+    let error = ImportError {
+        provider: Provider::Claude,
+        native_name: "/tmp/.mcp.json".to_string(),
+        reason: "boom".to_string(),
+        diagnostic: DiagnosticSnapshot::from_diagnostic(&crate::error::ClaudineError::JsonParse(
+            serde_json::from_str::<serde_json::Value>("{").unwrap_err(),
+        )),
+    };
+
+    let json = serde_json::to_value(&error).unwrap();
+    assert_eq!(json["reason"], "boom");
+    assert!(
+        json["diagnostic"]["detail"].is_object(),
+        "detail must serialize as an object: {json}"
+    );
+    assert!(json["diagnostic"]["code"].as_str().is_some());
+}

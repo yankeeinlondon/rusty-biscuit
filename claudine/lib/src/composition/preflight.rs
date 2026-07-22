@@ -12,7 +12,7 @@ use darkmatter::markdown::compose::expression::{Expr, ExpressionFinder, Resoluti
 use darkmatter::markdown::compose::subtree::SubtreeCompose;
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, EffectiveStateBuilder};
 
-use crate::composition::error::CompositionError;
+use crate::composition::error::{CompositionError, ShellApprovalFailure};
 use crate::composition::lifecycle::{
     LATE_BINDING_ROOTS, LifecycleConfig, LifecycleSignal, collect_lifecycle_shell_commands,
 };
@@ -45,7 +45,9 @@ pub struct PreFlightResult {
 ///
 /// - `ShellCommandDenied` if the user denies any command
 /// - `PreFlightDiscoveryFailed` if Darkmatter's document graph walk fails
-/// - `PreFlightFailed` for blacklisted commands or missing approval handler
+/// - `ShellApprovalUnavailable` for blacklisted commands or missing approval handler
+/// - `PreFlightShellAuditFailed` for a shell-audit failure outside the approval
+///   family, carrying the raised `HarnessError` as its typed source
 ///
 /// ## Arguments
 ///
@@ -99,7 +101,57 @@ pub fn resolve_shell_approvals(
         }
     }
 
-    // -- Deduplicate -----------------------------------------------------------
+    approve_commands(all_commands, approval_options)
+}
+
+/// Approve every shell command a sequence's preflight graph can reach.
+///
+/// Two sources feed the gate, and both are condition-blind:
+///
+/// 1. the graph's own already-resolved bytes — task `shell:` commands and
+///    `setup:`/`teardown:` shell actions, which preflight resolved once so that
+///    what is approved is exactly what runs;
+/// 2. every referenced prompt document's template `::shell` directives, so a
+///    document composed at its turn can never stop mid-sequence for approval.
+///
+/// ## Errors
+///
+/// As [`resolve_shell_approvals`]: denial, a missing handler, a blacklisted
+/// command, or a document-graph walk failure.
+pub fn resolve_graph_shell_approvals(
+    graph: &crate::composition::sequence::preflight::PreflightGraph,
+    approval_options: &ShellApprovalOptions,
+    prompt_compose_options: &dyn Fn(&Path) -> ComposeOptions,
+) -> Result<PreFlightResult, CompositionError> {
+    let mut all_commands: Vec<(String, std::path::PathBuf, usize)> = Vec::new();
+
+    for command in &graph.shell_commands {
+        all_commands.push((command.command.clone(), command.source_file.clone(), 0));
+    }
+
+    for document in &graph.prompt_documents {
+        let options = prompt_compose_options(&document.path);
+        let preflight = document
+            .markdown
+            .compose_preflight(&options)
+            .map_err(CompositionError::PreFlightDiscoveryFailed)?;
+        for entry in &preflight.entries {
+            all_commands.push((
+                entry.normalized.clone(),
+                entry.source_file.clone(),
+                entry.origin.line_number(),
+            ));
+        }
+    }
+
+    approve_commands(all_commands, approval_options)
+}
+
+/// Deduplicate discovered commands and run each through the approval gate.
+fn approve_commands(
+    all_commands: Vec<(String, std::path::PathBuf, usize)>,
+    approval_options: &ShellApprovalOptions,
+) -> Result<PreFlightResult, CompositionError> {
     let unique: Vec<(String, std::path::PathBuf, usize)> = {
         let mut seen = HashSet::new();
         all_commands
@@ -146,38 +198,31 @@ pub fn resolve_shell_approvals(
                 // No handler -- cannot get approval. Under `--dry-run` the
                 // CI/non-TTY gate names the offending command and points at
                 // the two ways to proceed (spec: Non-TTY Behavior).
-                if approval_options.dry_run {
-                    return Err(CompositionError::PreFlightFailed(format!(
-                        "Cannot dry-run: shell command '{command}' requires interactive approval. \
-                         Run with --yolo to auto-approve, or pre-approve the command in your \
-                         configuration."
-                    )));
-                }
-                let location = if *line > 0 {
-                    format!("{}:{}", source_file.display(), line)
+                let failure = if approval_options.dry_run {
+                    ShellApprovalFailure::DryRun
                 } else {
-                    source_file.display().to_string()
+                    ShellApprovalFailure::NoHandler
                 };
-                return Err(CompositionError::PreFlightFailed(format!(
-                    "Shell command '{command}' at {location} requires approval but no approval handler \
-                     is available. Add to whitelist or run interactively."
-                )));
+                return Err(CompositionError::ShellApprovalUnavailable {
+                    command,
+                    source_file: source_file.clone(),
+                    line: *line,
+                    failure,
+                });
             }
             Err(crate::harness::error::HarnessError::ShellCommandBlacklisted {
                 command,
                 reason,
             }) => {
-                let location = if *line > 0 {
-                    format!("{}:{}", source_file.display(), line)
-                } else {
-                    source_file.display().to_string()
-                };
-                return Err(CompositionError::PreFlightFailed(format!(
-                    "Shell command '{command}' at {location} is blacklisted: {reason}"
-                )));
+                return Err(CompositionError::ShellApprovalUnavailable {
+                    command,
+                    source_file: source_file.clone(),
+                    line: *line,
+                    failure: ShellApprovalFailure::Blacklisted(reason),
+                });
             }
             Err(e) => {
-                return Err(CompositionError::PreFlightFailed(e.to_string()));
+                return Err(CompositionError::PreFlightShellAuditFailed { source: e });
             }
         }
     }
@@ -231,6 +276,7 @@ pub fn resolve_lifecycle_shell_commands(
     effective_frontmatter: &serde_json::Value,
     context: &ComposeContext,
     source_path: &Path,
+    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
     file_ref_fallback_dir: Option<&Path>,
 ) -> Result<(), CompositionError> {
     let frontmatter: HashMap<String, serde_json::Value> = effective_frontmatter
@@ -245,27 +291,14 @@ pub fn resolve_lifecycle_shell_commands(
         // pathological `ctx` shape to a warning rather than aborting pre-flight.
         .with_allow_ctx_override(true)
         .build()
-        .map_err(|e| {
-            CompositionError::PreFlightFailed(format!(
-                "lifecycle shell pre-flight: building early-binding state failed: {e}"
-            ))
-        })?;
+        .map_err(|e| CompositionError::PreFlightStateBuildFailed { source: e })?;
 
-    // Read-side functions (`parent_dir`, `dirname`, `file_exists`, …) resolve
-    // against the prompt's parent directory first (document-first contract),
-    // then fall back to the launch-area anchor when supplied — matching the
-    // event-time lifecycle lookup so a launch-relative read-side reference
-    // (`file_exists(spec)`) resolves identically at pre-flight and event-time
-    // instead of depending on the prompt-only anchor.
-    let mut resolution_ctx = ResolutionContext::new(
-        source_path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| std::path::PathBuf::from(".")),
+    let resolution_ctx = super::document_expression_resolution_context(
+        source_path,
+        Some(context),
+        file_resolution_context,
+        file_ref_fallback_dir,
     );
-    if let Some(fallback) = file_ref_fallback_dir {
-        resolution_ctx = resolution_ctx.with_file_ref_fallback_dir(fallback.to_path_buf());
-    }
 
     for signal in LifecycleSignal::ALL {
         let event_name = signal.property_name();
@@ -331,6 +364,9 @@ fn resolve_shell_command_expr(
                  early-binding values (`doc.*`, `ctx.*`, `env.*`, read-side functions) may be \
                  used here"
             ),
+            // This layer's own guard, raised before Darkmatter is consulted, so
+            // there is no typed failure to retain.
+            source: None,
         });
     }
 
@@ -344,6 +380,7 @@ fn resolve_shell_command_expr(
             property: property.to_string(),
             raw: raw.clone(),
             message: e.to_string(),
+            source: Some(Box::new(e)),
         })?;
 
     let resolved = match resolved {

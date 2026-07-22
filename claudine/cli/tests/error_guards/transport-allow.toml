@@ -1,0 +1,308 @@
+# D8 lossy-boundary exceptions, read by `cli/tests/error_guards.rs`.
+#
+# Each entry suppresses one shape in one enclosing symbol in one file. Keying on
+# the symbol — not, as the predecessor grep guard did, on a trimmed source line —
+# is deliberate: a line is not unique, so an exception granted to one boundary
+# used to silently cover an identical line anywhere else in the tree.
+#
+# Three tests keep this file honest: an entry naming no live site fails as
+# stale, an entry with an unknown shape or tag fails, and an entry without a
+# substantive reason fails.
+#
+# ## Shapes
+#
+# `formatted_report`   — `eyre!("context: {e}")`; the typed error becomes a report.
+# `to_string_collapse` — `map_err(|e| … e.to_string() …)`.
+# `error_text_field`   — a prose `reason`/`message`/`detail` field built from a
+#                        typed error that is not also retained.
+# `format_context`     — `format!("context: {e}")` feeding a returned error.
+# `log_then_return_other` — the cause is logged and a different error is returned.
+# `snapshot_re_erasure` — a facet (`snapshot.message`, `snapshot.code`, …) lifted
+#                        out of a `DiagnosticSnapshot` and fed to `eyre!`/`bail!`/
+#                        `format!`/a prose error field, or a closure that projects
+#                        one facet and drops the snapshot. The snapshot is already
+#                        the lossless projection of a typed error, captured so a
+#                        `Clone` record could carry the identity across a boundary
+#                        no error value survives; collapsing it back to a string
+#                        discards `code`, `category`, `disposition`, `origin`,
+#                        `detail`, and the one-level cause at the last place that
+#                        still had them. Restore it with
+#                        `claudine::diagnostics::RestoredDiagnostic` instead — the
+#                        facets re-enter selection, `err.*`, and `StatusBlock`
+#                        rendering, and a boundary-specific framing line goes on
+#                        `with_context` rather than into an `eyre!` format string.
+#
+# ## Tags
+#
+# `retained` — permanent. The value genuinely has no typed source (a panic
+# payload, arbitrary user text, a ratified String-carrying cross-package
+# contract), or the site is downstream of the final render boundary.
+#
+# A `color_eyre::eyre::Report` in hand is **not** by itself a reason to retain.
+# `Report` does not implement `std::error::Error`, so it cannot be a `#[source]`
+# — but it *boxes* its source rather than discarding it, so the typed diagnostic
+# is still reachable: `DiagnosticSnapshot::select(report.as_ref())` runs the same
+# selection walk the CLI renders through and yields the facets. Three entries
+# here once claimed the upstream `Result<_, Report>` boundary had "already
+# erased" the provenance; it had not, and they are gone. A record that stores the
+# projection beside its prose field loses nothing.
+#
+# `d10-routing-change` — a ratified cross-spec deferral, not a burn-down. A typed
+# error IS in hand, but typing it here would change an authored matching surface
+# (`err.kind`/`err.variant`/`err.code` a `when:` clause selects on), which spec
+# §D10 and decisions D-2/D-12 reserve for a separate versioned migration. The
+# entry's reason names the surface that would move. This is a closed decision, so
+# the set does not grow: a *new* collapse with a typed source still fails the
+# guard and must be fixed, never tagged.
+#
+# The `error-propagation-followup` burn-down is closed (all entries fixed or
+# reclassified); the tag no longer exists. A typed error in hand, inside this
+# feature's scope, is a defect to fix — never an entry here.
+
+[[allow]]
+shape = "error_text_field"
+file = "lib/src/harness/audit.rs"
+symbol = "audit_shell_commands"
+tag = "retained"
+reason = """
+The sink is `ShellAuditOutcome.message`, a pre-rendered prose field carrying terminal markup (`prose_escape`d text inside `<red-500>` spans). It is a partially-rendered view for the audit report, not a data record, and `audit_shell_commands` returns a `ShellAuditReport` rather than an `Err` — nothing propagates. The typed variants that carry structure (`ShellCommandDenied`, `ShellCommandBlacklisted`) are already destructured by the preceding match arms; the catch-all `Err(e)` arm this entry covers is the final render of everything else."""
+
+[[allow]]
+shape = "format_context"
+file = "cli/src/cli_utils.rs"
+symbol = "parse_naive_date"
+tag = "retained"
+reason = """
+A clap `value_parser` (`logs/mod.rs` `#[arg(long, value_parser = parse_naive_date)]`). clap's `TypedValueParser` requires `Err: Into<String>`; clap owns the resulting error, prints usage, and exits. The `String` is structurally forced by an external ratified contract and the value never reaches the error walker."""
+
+[[allow]]
+shape = "format_context"
+file = "cli/src/commands/actions.rs"
+symbol = "run"
+tag = "retained"
+reason = """
+Config-load failure is rendered with `log::error` and the function returns `Ok(())`. The typed error is rendered here and never returned; this line is the final render. The enclosing function's `Ok(())`-on-failure is a separate exit-status defect, recorded as follow-up 1 in `features/2026-07-13-error-propogation/burndown-triage.md` — spec D10 forbids changing exit status in the transport migration."""
+
+[[allow]]
+shape = "format_context"
+file = "cli/src/commands/config_tui/mod.rs"
+symbol = "run_tui"
+tag = "retained"
+reason = """
+The final render boundary for the config TUI. `app.pending_test` now carries a typed `Result<(), MessagingError>`, and this line converts the selected failure into a ratatui `test_status` widget field. `MessagingError`'s `Display` is already webhook-redacted, so the rendered string is the whole contract here."""
+
+[[allow]]
+shape = "format_context"
+file = "cli/src/commands/init_wizard.rs"
+symbol = "register_hooks_all_providers"
+tag = "retained"
+reason = """
+Per-provider hook registration failure is rendered with `log::message` — not even marked as an error — and the loop continues. The typed error is rendered here and never returned; this line is the final render. The enclosing function's `Ok(())`-on-failure is a separate exit-status defect, recorded as follow-up 1 in `features/2026-07-13-error-propogation/burndown-triage.md` — spec D10 forbids changing exit status in the transport migration."""
+
+[[allow]]
+shape = "format_context"
+file = "cli/src/commands/init/mod.rs"
+symbol = "run_interactive"
+tag = "retained"
+reason = """
+Per-provider registration failure is rendered with `log::error` and the wizard continues to print 'Done!'. The typed error is rendered here and never returned; this line is the final render. The enclosing function's `Ok(())`-on-failure is a separate exit-status defect, recorded as follow-up 1 in `features/2026-07-13-error-propogation/burndown-triage.md` — spec D10 forbids changing exit status in the transport migration."""
+
+[[allow]]
+shape = "format_context"
+file = "cli/src/commands/init/mod.rs"
+symbol = "run_quick"
+tag = "retained"
+reason = """
+Per-provider registration failure is rendered with `log::error` and the quick path continues to print 'Done!'. The typed error is rendered here and never returned; this line is the final render. The enclosing function's `Ok(())`-on-failure is a separate exit-status defect, recorded as follow-up 1 in `features/2026-07-13-error-propogation/burndown-triage.md` — spec D10 forbids changing exit status in the transport migration."""
+
+[[allow]]
+shape = "format_context"
+file = "cli/src/commands/logs/mod.rs"
+symbol = "best_effort_sync"
+tag = "retained"
+reason = """
+The function returns `()`; propagation is structurally impossible and deliberately so — all call sites invoke it as a bare statement. The `log::warn` is the final render of a documented best-effort degradation. No exit-status defect: there is no `Result` to swallow."""
+
+[[allow]]
+shape = "format_context"
+file = "cli/src/commands/signals.rs"
+symbol = "check_provider"
+tag = "retained"
+reason = """
+The signals research corpus reads hand-authored YAML describing external documents. The failure is authoring prose about a research file, not a Claudine operation, and the subcommand is maintainer-facing."""
+
+[[allow]]
+shape = "format_context"
+file = "cli/src/commands/uninstall.rs"
+symbol = "run"
+tag = "retained"
+reason = """
+Per-provider hook-removal failure is rendered with `log::error` while the later `remove_file` failure does exit 1 — an internal inconsistency, not a transport loss. The typed error is rendered here and never returned; this line is the final render. The enclosing function's `Ok(())`-on-failure is a separate exit-status defect, recorded as follow-up 1 in `features/2026-07-13-error-propogation/burndown-triage.md` — spec D10 forbids changing exit status in the transport migration."""
+
+[[allow]]
+shape = "format_context"
+file = "cli/src/commands/wrap/env/mod.rs"
+symbol = "build_child_env_with_launch"
+tag = "retained"
+reason = """
+The sink is `EnvPlan.warnings`, a deferred-warning display buffer drained only for rendering. The shadow-HOME fallback is chosen by the `Err` arm itself, never by the string, so nothing downstream reads this text as data."""
+
+[[allow]]
+shape = "format_context"
+file = "cli/src/commands/wrap/exec/wiring/dispatch.rs"
+symbol = "dispatch_hook_request"
+tag = "retained"
+reason = """
+The signature is infallible by design (`-> HookDispatchResult`; hook dispatch fails open to allow). The sink is `HookDispatchResult.warning`, which becomes an agent-facing synthetic Notification envelope whose `message` is a String field on the stream wire contract; the parser routes on `level`, never on the text."""
+
+[[allow]]
+shape = "format_context"
+file = "cli/src/commands/wrap/inline.rs"
+symbol = "try_inline_closure"
+tag = "d10-routing-change"
+reason = """
+A typed `CompositionError` is in hand, but typing it here is a routing/matching-surface change spec D10 and decisions D-2/D-12 defer to a separate spec — not a burn-down. The flattened string is joined into `fail_msg` and fed to `LifecycleErrorInfo::from_action_failure("inline_closure", fail_msg)` (`harness_orch/loop_control.rs`), which projects `err.msg`/`err.kind`/`err.variant` into the lifecycle expression context that author-written `when:` rules match on. Threading the typed cause so `err.code`/`err.category`/`err.detail.*` populate would flip which aliases `to_value()` projects (`lifecycle/context.rs`): a classifiable error projects `category`/`code` under `err.kind`/`err.variant` instead of the action-failure spellings, so a rule matching `err.variant == "inline_closure"` would silently stop matching. That is the authored-matching-surface change D10 reserves for a versioned migration, so this defers rather than fixes. Do not retag `retained`: a typed error is genuinely in hand."""
+
+[[allow]]
+shape = "format_context"
+file = "contract/src/structured.rs"
+symbol = "compile_schema"
+tag = "retained"
+reason = """
+biscuit-contract's InferenceError is a ratified cross-package contract with a String message and a closed kind. Provider detail is treated as secret-bearing and reaches tracing only, never the message."""
+
+[[allow]]
+shape = "format_context"
+file = "lib/src/composition/looping/config.rs"
+symbol = "resolve_loop_config"
+tag = "retained"
+reason = """
+The value is already a `String`: `OnRateLimit::parse` returns `Result<Self, String>` and constructs its message inline from an unrecognized literal. No typed error is ever created, so none is dropped. The other hits in this function interpolate `json_type_name(...)`, a `&'static str` type label."""
+
+[[allow]]
+shape = "format_context"
+file = "lib/src/dispatch/runner/mod.rs"
+symbol = "execute_actions"
+tag = "retained"
+reason = """
+The sink is `HookResponse.reason`, the agent-facing hook-protocol JSON field Claudine emits for the provider CLI to consume. `String` is the wire contract, and `execute_actions` returns `Ok(Some(response))` — the failure becomes a protocol response, not an `Err`, so there is no error slot to carry a cause."""
+
+[[allow]]
+shape = "format_context"
+file = "lib/src/mcp/session.rs"
+symbol = "compute_session_set"
+tag = "retained"
+reason = """
+The sink is `SessionSet.warnings`, a display buffer the CLI drains verbatim into `deferred_warnings`; the conversion is the final render. Control flow keys on `missing_tags`/`ambiguous_tags`, never on this text, so a resolve failure here changes nothing a handler reads. Retagged against the triage's Category-1 call: modeling it structurally would add a `SessionSet` field no consumer reads and would change the warning prose, which spec D10 forbids."""
+
+[[allow]]
+shape = "formatted_report"
+file = "cli/src/cli_utils.rs"
+symbol = "parse_provider"
+tag = "retained"
+reason = """
+No typed error exists to lose. `Provider::parse_cli_name` returns `Option<Self>`, and `parse_provider_clap` builds the message from `None` plus a `&'static str` slug list. The sibling `String` shape exists to satisfy a clap `try_map`, and the only caller (`handle.rs`) discards the report with `.ok()`."""
+
+[[allow]]
+shape = "formatted_report"
+file = "cli/src/commands/compose/setters.rs"
+symbol = "parse_set_json"
+tag = "retained"
+reason = """
+--set text is arbitrary user input. serde carries only line and column, which the message already reproduces, so no typed cause is lost."""
+
+[[allow]]
+shape = "formatted_report"
+file = "cli/src/commands/handle.rs"
+symbol = "run_inner"
+tag = "retained"
+reason = """
+The binding is a tokio JoinError wrapping a panic payload. There is no domain error to preserve; the panic message is the only information."""
+
+[[allow]]
+shape = "formatted_report"
+file = "cli/src/commands/signals.rs"
+symbol = "load_exclusions"
+tag = "retained"
+reason = """
+The signals research corpus reads hand-authored YAML describing external documents. The failure is authoring prose about a research file, not a Claudine operation, and the subcommand is maintainer-facing."""
+
+[[allow]]
+shape = "formatted_report"
+file = "cli/src/commands/signals.rs"
+symbol = "load_validated_frontmatter"
+tag = "retained"
+reason = """
+The signals research corpus reads hand-authored YAML describing external documents. The failure is authoring prose about a research file, not a Claudine operation, and the subcommand is maintainer-facing."""
+
+[[allow]]
+shape = "formatted_report"
+file = "cli/src/commands/wrap/mod.rs"
+symbol = "run_provider_wrapper_inner"
+tag = "retained"
+reason = """
+`impl FromStr for OutputFormat { type Err = String }` (`lib/src/composition/types.rs`) — the error is prose at its origin, so `eyre!(e)` faithfully transports an already-unstructured value rather than collapsing a typed one. Typing `OutputFormat::Err` is the real fix and is a separate, additive change."""
+
+[[allow]]
+shape = "to_string_collapse"
+file = "cli/src/commands/sync.rs"
+symbol = "run"
+tag = "retained"
+reason = """
+The sink is `SyncAction::Error(String)`, a per-provider display record rendered as a table row by `prose_error`; the conversion is the final render. The typed error is rendered here and never returned; this line is the final render. The enclosing function's `Ok(())`-on-failure is a separate exit-status defect, recorded as follow-up 1 in `features/2026-07-13-error-propogation/burndown-triage.md` — spec D10 forbids changing exit status in the transport migration."""
+
+[[allow]]
+shape = "to_string_collapse"
+file = "lib/src/stream/providers/claude.rs"
+symbol = "ClaudeSemanticStreamParser::feed_line"
+tag = "retained"
+reason = """
+Provider stdout is external text. The parser keeps the raw line — which is the actual diagnostic — and drops the serde error, which only reports where the JSON stopped. Recovery continues; no error is returned."""
+
+[[allow]]
+shape = "to_string_collapse"
+file = "lib/src/stream/providers/codex.rs"
+symbol = "CodexSemanticStreamParser::feed_line"
+tag = "retained"
+reason = """
+Provider stdout is external text. The parser keeps the raw line — which is the actual diagnostic — and drops the serde error, which only reports where the JSON stopped. Recovery continues; no error is returned."""
+
+[[allow]]
+shape = "to_string_collapse"
+file = "lib/src/stream/providers/gemini.rs"
+symbol = "GeminiSemanticStreamParser::feed_line"
+tag = "retained"
+reason = """
+Provider stdout is external text. The parser keeps the raw line — which is the actual diagnostic — and drops the serde error, which only reports where the JSON stopped. Recovery continues; no error is returned."""
+
+[[allow]]
+shape = "to_string_collapse"
+file = "lib/src/stream/providers/kimi.rs"
+symbol = "KimiSemanticStreamParser::feed_line"
+tag = "retained"
+reason = """
+Provider stdout is external text. The parser keeps the raw line — which is the actual diagnostic — and drops the serde error, which only reports where the JSON stopped. Recovery continues; no error is returned."""
+
+[[allow]]
+shape = "to_string_collapse"
+file = "lib/src/stream/providers/opencode.rs"
+symbol = "OpenCodeSemanticStreamParser::feed_line"
+tag = "retained"
+reason = """
+Provider stdout is external text. The parser keeps the raw line — which is the actual diagnostic — and drops the serde error, which only reports where the JSON stopped. Recovery continues; no error is returned."""
+
+[[allow]]
+shape = "to_string_collapse"
+file = "lib/src/stream/providers/pi.rs"
+symbol = "PiSemanticStreamParser::feed_line"
+tag = "retained"
+reason = """
+Provider stdout is external text. The parser keeps the raw line — which is the actual diagnostic — and drops the serde error, which only reports where the JSON stopped. Recovery continues; no error is returned."""
+
+[[allow]]
+shape = "to_string_collapse"
+file = "lib/src/stream/providers/qwen.rs"
+symbol = "QwenSemanticStreamParser::feed_line"
+tag = "retained"
+reason = """
+Provider stdout is external text. The parser keeps the raw line — which is the actual diagnostic — and drops the serde error, which only reports where the JSON stopped. Recovery continues; no error is returned."""

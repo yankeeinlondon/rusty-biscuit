@@ -1,6 +1,5 @@
 use super::*;
 use std::fs;
-use std::path::PathBuf;
 use tempfile::TempDir;
 
 fn write(path: &Path, content: &str) {
@@ -31,128 +30,6 @@ fn seed_cargo_workspace(root: &Path, members: &[&str]) {
         .unwrap();
         fs::write(member_dir.join("src").join("lib.rs"), "").unwrap();
     }
-}
-
-// -- PartialKind::classify --------------------------------------------
-
-#[test]
-fn classify_empty() {
-    assert_eq!(PartialKind::classify(""), PartialKind::Empty);
-}
-
-#[test]
-fn classify_magic_strips_at_sigil() {
-    assert_eq!(
-        PartialKind::classify("@plan"),
-        PartialKind::Magic {
-            dir: String::new(),
-            active: "plan".to_string(),
-        }
-    );
-    assert_eq!(
-        PartialKind::classify("@"),
-        PartialKind::Magic {
-            dir: String::new(),
-            active: String::new(),
-        }
-    );
-}
-
-#[test]
-fn classify_magic_path_shaped() {
-    assert_eq!(
-        PartialKind::classify("@prompts/plan"),
-        PartialKind::Magic {
-            dir: "prompts".to_string(),
-            active: "plan".to_string(),
-        }
-    );
-    assert_eq!(
-        PartialKind::classify("@a/b/c"),
-        PartialKind::Magic {
-            dir: "a/b".to_string(),
-            active: "c".to_string(),
-        }
-    );
-    assert_eq!(
-        PartialKind::classify("@/x"),
-        PartialKind::Magic {
-            dir: String::new(),
-            active: "x".to_string(),
-        }
-    );
-    assert_eq!(
-        PartialKind::classify("@plan"),
-        PartialKind::Magic {
-            dir: String::new(),
-            active: "plan".to_string(),
-        }
-    );
-}
-
-#[test]
-fn classify_committed_dir_with_trailing_slash() {
-    assert_eq!(
-        PartialKind::classify("prompts/"),
-        PartialKind::CommittedDir("prompts/".to_string())
-    );
-    assert_eq!(
-        PartialKind::classify("docs/guides/"),
-        PartialKind::CommittedDir("docs/guides/".to_string())
-    );
-}
-
-#[test]
-fn classify_partial_path_between_slashes() {
-    assert_eq!(
-        PartialKind::classify("prompts/pl"),
-        PartialKind::PartialPath {
-            dir: "prompts".to_string(),
-            active: "pl".to_string(),
-        }
-    );
-}
-
-#[test]
-fn classify_word_has_no_slash() {
-    assert_eq!(
-        PartialKind::classify("plan"),
-        PartialKind::Word("plan".to_string())
-    );
-}
-
-#[test]
-fn active_segment_varies_by_kind() {
-    assert_eq!(PartialKind::Empty.active_segment(), "");
-    assert_eq!(
-        PartialKind::CommittedDir("x/".to_string()).active_segment(),
-        ""
-    );
-    assert_eq!(
-        PartialKind::Magic {
-            dir: String::new(),
-            active: "pl".to_string(),
-        }
-        .active_segment(),
-        "pl"
-    );
-    assert_eq!(
-        PartialKind::Magic {
-            dir: "prompts".to_string(),
-            active: "pl".to_string(),
-        }
-        .active_segment(),
-        "pl"
-    );
-    assert_eq!(PartialKind::Word("pl".to_string()).active_segment(), "pl");
-    assert_eq!(
-        PartialKind::PartialPath {
-            dir: "prompts".to_string(),
-            active: "pl".to_string(),
-        }
-        .active_segment(),
-        "pl"
-    );
 }
 
 // -- name_stem --------------------------------------------------------
@@ -393,9 +270,8 @@ fn compose_magic_dedups_basename_across_scopes() {
 }
 
 #[test]
-fn compose_magic_path_shaped_constrains_walk_but_renders_filename() {
-    // `@prompts/plan` still constrains the walk to the `prompts/` subtree
-    // but renders the basename only.
+fn compose_magic_path_shaped_uses_shared_rendered_prefix() {
+    // The shared parser keeps the authored scope in the emitted value.
     let tmp = TempDir::new().unwrap();
     seed_cargo_workspace(tmp.path(), &["a/lib"]);
     let prompts = tmp.path().join("prompts");
@@ -404,15 +280,13 @@ fn compose_magic_path_shaped_constrains_walk_but_renders_filename() {
     let ctx = ScopeContext::discover_from(tmp.path());
     let got = run(ComposeMode::Compose, &ctx, "@prompts/plan");
     assert!(
-        got.iter().any(|c| c == "@plan.md"),
-        "path-shaped magic must render filename only: {got:?}"
+        got.iter().any(|c| c == "@prompts/plan.md"),
+        "path-shaped magic must retain the shared prefix: {got:?}"
     );
 }
 
 #[test]
-fn compose_magic_nested_path_shaped_renders_filename() {
-    // `@prompts/drafts/plan` constrains to `prompts/drafts/` and renders
-    // `@plan.md`.
+fn compose_magic_nested_path_shaped_uses_shared_rendered_prefix() {
     let tmp = TempDir::new().unwrap();
     seed_cargo_workspace(tmp.path(), &["a/lib"]);
     let prompts = tmp.path().join("prompts");
@@ -424,8 +298,25 @@ fn compose_magic_nested_path_shaped_renders_filename() {
     let ctx = ScopeContext::discover_from(tmp.path());
     let got = run(ComposeMode::Compose, &ctx, "@prompts/drafts/plan");
     assert!(
-        got.iter().any(|c| c == "@plan.md"),
-        "nested path-shaped magic must render filename: {got:?}"
+        got.iter().any(|c| c == "@prompts/drafts/plan.md"),
+        "nested path-shaped magic must retain the shared prefix: {got:?}"
+    );
+}
+
+#[test]
+fn compose_magic_does_not_emit_a_nested_file_without_its_scope() {
+    let tmp = TempDir::new().unwrap();
+    seed_cargo_workspace(tmp.path(), &["a/lib"]);
+    write(
+        &tmp.path().join("prompts/drafts/plan.md"),
+        "---\ntitle: X\n---\n",
+    );
+
+    let ctx = ScopeContext::discover_from(tmp.path());
+    let got = run(ComposeMode::Compose, &ctx, "@plan");
+    assert!(
+        !got.iter().any(|candidate| candidate == "@plan.md"),
+        "completion must not flatten a nested path that runtime cannot resolve: {got:?}",
     );
 }
 
@@ -444,64 +335,6 @@ fn compose_magic_path_shaped_misses_when_dir_absent() {
     assert!(
         !got.iter().any(|c| c.ends_with("plan.md")),
         "missing dir join must yield no candidates: {got:?}"
-    );
-}
-
-// -- resolve_magic_walk_root ------------------------------------------
-
-#[test]
-fn magic_walk_root_empty_dir_is_scope_root() {
-    let scope = Path::new("/r/prompts");
-    assert_eq!(
-        magic_at::resolve_magic_walk_root(scope, ""),
-        Some(PathBuf::from("/r/prompts"))
-    );
-}
-
-#[test]
-fn magic_walk_root_dir_matches_scope_leaf_exactly() {
-    // `@prompts/plan` against `scope = /r/prompts` with
-    // `dir = "prompts"` should resolve to `/r/prompts`, not
-    // `/r/prompts/prompts`.
-    let scope = Path::new("/r/prompts");
-    assert_eq!(
-        magic_at::resolve_magic_walk_root(scope, "prompts"),
-        Some(PathBuf::from("/r/prompts"))
-    );
-}
-
-#[test]
-fn magic_walk_root_dir_extends_past_scope_leaf() {
-    // `dir = "prompts/drafts"` peels `prompts` off so the join
-    // becomes `/r/prompts/drafts`, not `/r/prompts/prompts/drafts`.
-    let scope = Path::new("/r/prompts");
-    assert_eq!(
-        magic_at::resolve_magic_walk_root(scope, "prompts/drafts"),
-        Some(PathBuf::from("/r/prompts/drafts"))
-    );
-}
-
-#[test]
-fn magic_walk_root_dir_without_leaf_match_joins_raw() {
-    // `dir = "drafts"` does not start with the scope leaf; join
-    // raw → `/r/prompts/drafts`.
-    let scope = Path::new("/r/prompts");
-    assert_eq!(
-        magic_at::resolve_magic_walk_root(scope, "drafts"),
-        Some(PathBuf::from("/r/prompts/drafts"))
-    );
-}
-
-#[test]
-fn magic_walk_root_dir_against_non_matching_scope() {
-    // `dir = "prompts/plan"` against a scope whose leaf is `docs`
-    // joins raw because `"prompts/plan"` does not start with
-    // `"docs"`. The caller's `is_dir()` check will then reject an
-    // unlikely path.
-    let scope = Path::new("/r/docs");
-    assert_eq!(
-        magic_at::resolve_magic_walk_root(scope, "prompts/plan"),
-        Some(PathBuf::from("/r/docs/prompts/plan"))
     );
 }
 
@@ -777,8 +610,7 @@ fn compose_magic_empty_partial_surfaces_no_directories() {
 
 #[test]
 fn compose_magic_path_shaped_surfaces_file_not_subdir() {
-    // Path-shaped magic constrains the walk to `prompts/` but still emits
-    // a filename, and never a directory.
+    // Path-shaped magic retains the shared scope and never emits a directory.
     let tmp = TempDir::new().unwrap();
     seed_cargo_workspace(tmp.path(), &["a/lib"]);
     let prompts = tmp.path().join("prompts");
@@ -788,7 +620,7 @@ fn compose_magic_path_shaped_surfaces_file_not_subdir() {
     let ctx = ScopeContext::discover_from(tmp.path());
     let got = run(ComposeMode::Compose, &ctx, "@prompts/pl");
     assert!(
-        got.iter().any(|c| c == "@plan.md"),
+        got.iter().any(|c| c == "@prompts/plan.md"),
         "path-shaped magic must surface file: {got:?}"
     );
     assert!(

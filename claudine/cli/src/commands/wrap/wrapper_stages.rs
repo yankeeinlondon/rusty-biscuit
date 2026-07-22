@@ -5,7 +5,7 @@ use biscuit_terminal::terminal::Terminal;
 use claudine::events::EnvironmentContext;
 use claudine::provider::Provider;
 use claudine::stream::stderr::Verbosity;
-use color_eyre::eyre::{Result, eyre};
+use color_eyre::eyre::{Result, WrapErr, eyre};
 
 use super::flags::WrapperArgs;
 use super::profile::{self, WrapperProfile};
@@ -51,7 +51,7 @@ pub(crate) fn parse_cli_timeouts(args: &WrapperArgs) -> Result<Option<std::time:
     let cli_timeout_duration: Option<std::time::Duration> = match args.timeout.as_deref() {
         Some(raw) => Some(
             claudine::harness::parse_timeout(raw, Path::new("<--timeout>"))
-                .map_err(|e| eyre!("invalid --timeout value: {e}"))?,
+                .wrap_err("invalid --timeout value")?,
         ),
         None => None,
     };
@@ -63,7 +63,7 @@ pub(crate) fn parse_cli_timeouts(args: &WrapperArgs) -> Result<Option<std::time:
 
     if let Some(raw) = args.step_timeout.as_deref() {
         let parsed = claudine::harness::parse_timeout(raw, Path::new("<--step-timeout>"))
-            .map_err(|e| eyre!("invalid --step-timeout value: {e}"))?;
+            .wrap_err("invalid --step-timeout value")?;
         if parsed == std::time::Duration::from_secs(0) {
             return Err(eyre!(
                 "--step-timeout: zero duration is not accepted; omit the flag or set the env var to 0s to disable the step timeout"
@@ -78,7 +78,7 @@ pub(crate) fn parse_cli_timeouts(args: &WrapperArgs) -> Result<Option<std::time:
     // `resolve_stall_timeout`.
     if let Some(raw) = args.stall_timeout.as_deref() {
         claudine::harness::parse_timeout_allow_zero(raw, Path::new("<--stall-timeout>"))
-            .map_err(|e| eyre!("invalid --stall-timeout value: {e}"))?;
+            .wrap_err("invalid --stall-timeout value")?;
     }
 
     Ok(cli_timeout_duration)
@@ -120,7 +120,7 @@ pub(crate) fn apply_opencode_yolo_config_overlay(
         current,
         claudine::opencode_config::yolo_permission_block(),
     )
-    .map_err(|e| eyre!("failed to merge OPENCODE_CONFIG_CONTENT: {e}"))?;
+    .wrap_err("failed to merge OPENCODE_CONFIG_CONTENT")?;
     env_plan
         .env
         .insert(key.to_os_string(), std::ffi::OsString::from(merged.clone()));
@@ -386,6 +386,7 @@ pub(crate) fn detect_wrapper_harness(
             &source_path,
             base_prompt.clone(),
             Some(child_cwd),
+            std::sync::Arc::new(claudine::composition::RuntimeState::new()),
         )?;
         let harness_enabled = claudine::harness::has_harness_properties(&seed.frontmatter);
         if harness_enabled {
@@ -447,6 +448,11 @@ pub(crate) fn run_execution_stage(
             next_resume_session_id: None,
             // Direct-wrapper passthrough runs carry no compose params.
             rematerialize: Default::default(),
+            // A direct wrapper run is one invocation with no caller-owned
+            // accumulator, so it owns its own cell.
+            runtime_state: std::sync::Arc::clone(&initial_materialized.runtime_state),
+            suppress_output_commit: false,
+            last_final_output: None,
         };
 
         let mut harness_base_args = child_args.to_vec();
@@ -511,6 +517,8 @@ pub(crate) fn run_execution_stage(
             &mut lifecycle_guard,
             None,
             true,
+            // Wrapper passthrough: no sequence task owns this stream.
+            None,
         )?;
         if let (Some(collector), Some(perf)) = (perf_collector.as_mut(), harness_perf) {
             collector.set_agent_perf(perf);

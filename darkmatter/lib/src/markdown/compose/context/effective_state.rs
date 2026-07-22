@@ -109,6 +109,30 @@ pub(crate) fn merge_replace_maps(
     }
 }
 
+/// Coerces a named-object value to its `name` string in inline string context.
+///
+/// Returns `Some(name)` only when `path` exactly matches one of the
+/// caller-supplied `keys` (so a dotted path such as `state.age` never matches
+/// `state`), `value` is an object, and its `name` field is a string. Any other
+/// shape returns `None`, leaving the normal scalar coercion in charge. This is
+/// the opt-in hook behind [`ComposeOptions::with_name_coercion_keys`]; it is
+/// applied on the inline `get_string` surfaces only, never on the typed `get`
+/// path, so whole-value spans, dotted paths, and comparisons keep the object.
+///
+/// [`ComposeOptions::with_name_coercion_keys`]: super::ComposeOptions::with_name_coercion_keys
+pub(crate) fn coerce_named_object(path: &str, value: &Value, keys: &[String]) -> Option<String> {
+    if !keys.iter().any(|k| k == path) {
+        return None;
+    }
+    match value {
+        Value::Object(obj) => match obj.get("name") {
+            Some(Value::String(name)) => Some(name.clone()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// Resolved state available to replacement and interpolation stages.
 ///
 /// This struct holds the merged result of:
@@ -126,6 +150,11 @@ pub struct EffectiveState {
 
     /// Diagnostics from context capture and merge.
     ctx_diagnostics: Vec<ContextMergeDiagnostic>,
+
+    /// Frontmatter keys whose object values render their `name` field when
+    /// interpolated in inline string context. Empty by default; only the
+    /// inline `get_string` path consults it.
+    name_coercion_keys: Vec<String>,
 }
 
 impl EffectiveState {
@@ -158,6 +187,7 @@ impl EffectiveState {
             data,
             context,
             ctx_diagnostics: Vec::new(),
+            name_coercion_keys: Vec::new(),
         }
     }
 
@@ -208,7 +238,13 @@ impl EffectiveState {
     /// - `bool` -> `"true"` or `"false"`
     /// - `array/object` -> JSON string
     pub fn get_string(&self, path: &str) -> String {
-        match self.get(path) {
+        let value = self.get(path);
+        if let Some(resolved) = &value
+            && let Some(name) = coerce_named_object(path, resolved, &self.name_coercion_keys)
+        {
+            return name;
+        }
+        match value {
             None => String::new(),
             Some(Value::Null) => String::new(),
             Some(Value::String(s)) => s,
@@ -393,6 +429,7 @@ pub struct EffectiveStateBuilder {
     replace_parent_wins: bool,
     context: Option<ComposeContext>,
     allow_ctx_override: bool,
+    name_coercion_keys: Vec<String>,
 }
 
 impl EffectiveStateBuilder {
@@ -405,6 +442,7 @@ impl EffectiveStateBuilder {
             replace_parent_wins: false,
             context: None,
             allow_ctx_override: false,
+            name_coercion_keys: Vec::new(),
         }
     }
 
@@ -448,6 +486,17 @@ impl EffectiveStateBuilder {
     #[must_use]
     pub fn with_allow_ctx_override(mut self, allow: bool) -> Self {
         self.allow_ctx_override = allow;
+        self
+    }
+
+    /// Sets the frontmatter keys whose object values render their `name` field
+    /// when interpolated in inline string context (`{{key}}`).
+    ///
+    /// Empty by default (no behavior change). See
+    /// [`coerce_named_object`] for the exact coercion rule.
+    #[must_use]
+    pub fn with_name_coercion_keys(mut self, keys: Vec<String>) -> Self {
+        self.name_coercion_keys = keys;
         self
     }
 
@@ -516,6 +565,7 @@ impl EffectiveStateBuilder {
             data,
             context,
             ctx_diagnostics,
+            name_coercion_keys: self.name_coercion_keys,
         })
     }
 }
@@ -995,6 +1045,96 @@ mod tests {
         let base = to_map(json!({"a": 1, "b": {"c": 2}}));
         let effective = apply_set_overrides(&base, None, &[]);
         assert_eq!(Value::Object(effective), Value::Object(base));
+    }
+
+    // ── coerce_named_object (Sequence Plus name coercion) ─────────────
+
+    #[test]
+    fn coerce_named_object_exact_key_with_string_name() {
+        let keys = vec!["state".to_string()];
+        let value = json!({ "name": "alpha", "index": 1 });
+        assert_eq!(
+            coerce_named_object("state", &value, &keys),
+            Some("alpha".to_string())
+        );
+    }
+
+    #[test]
+    fn coerce_named_object_non_matching_key_is_none() {
+        let keys = vec!["state".to_string()];
+        let value = json!({ "name": "alpha" });
+        assert_eq!(coerce_named_object("other", &value, &keys), None);
+    }
+
+    #[test]
+    fn coerce_named_object_object_without_string_name_is_none() {
+        let keys = vec!["state".to_string()];
+        // name is a number, not a string
+        assert_eq!(
+            coerce_named_object("state", &json!({ "name": 7 }), &keys),
+            None
+        );
+        // no name field at all
+        assert_eq!(
+            coerce_named_object("state", &json!({ "index": 1 }), &keys),
+            None
+        );
+    }
+
+    #[test]
+    fn coerce_named_object_non_object_value_is_none() {
+        let keys = vec!["state".to_string()];
+        assert_eq!(coerce_named_object("state", &json!("alpha"), &keys), None);
+        assert_eq!(coerce_named_object("state", &json!(42), &keys), None);
+    }
+
+    #[test]
+    fn coerce_named_object_dotted_path_does_not_match_exact_key() {
+        // `state.age` must NOT match the `state` key — exact match only.
+        let keys = vec!["state".to_string()];
+        let value = json!({ "name": "alpha" });
+        assert_eq!(coerce_named_object("state.age", &value, &keys), None);
+    }
+
+    fn state_with_name_coercion(fm: HashMap<String, Value>, keys: Vec<String>) -> EffectiveState {
+        EffectiveStateBuilder::new()
+            .with_frontmatter(fm)
+            .with_context(test_context())
+            .with_name_coercion_keys(keys)
+            .build()
+            .unwrap()
+    }
+
+    #[test]
+    fn get_string_coerces_named_object_when_key_is_set() {
+        let mut fm = HashMap::new();
+        fm.insert("state".to_string(), json!({ "name": "alpha", "index": 1 }));
+
+        let state = state_with_name_coercion(fm, vec!["state".to_string()]);
+
+        // Inline string context renders the `name` field.
+        assert_eq!(state.get_string("state"), "alpha");
+        // Dotted path is unaffected — the age scalar still coerces normally.
+        // (Here `state.index` is the scalar under the object.)
+        assert_eq!(state.get_string("state.index"), "1");
+        // Typed lookup keeps the full object.
+        assert_eq!(
+            state.get("state"),
+            Some(json!({ "name": "alpha", "index": 1 }))
+        );
+    }
+
+    #[test]
+    fn get_string_without_coercion_keys_renders_json() {
+        let value = json!({ "name": "alpha", "index": 1 });
+        let mut fm = HashMap::new();
+        fm.insert("state".to_string(), value.clone());
+
+        // Empty keys → legacy behavior: the whole object as a JSON string
+        // (byte-identical to the value's own `to_string`, whatever key order
+        // serde_json is configured for).
+        let state = state_with_name_coercion(fm, Vec::new());
+        assert_eq!(state.get_string("state"), value.to_string());
     }
 
     #[test]

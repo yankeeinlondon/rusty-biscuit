@@ -91,6 +91,113 @@ fn explicit_file_not_found_errors() {
     }
 }
 
+/// A `@`-prefixed `--append-system-prompt` reference is a magic-root search,
+/// resolving under the supplied repository root — the migration added `@`
+/// support the former `cwd.join` grammar lacked.
+#[test]
+fn explicit_append_at_prefix_searches_repository_root() {
+    let repo = TempDir::new().unwrap();
+    let target = repo.path().join("prompts").join("sys.md");
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    std::fs::write(&target, "# repo sys\n").unwrap();
+    let sub = repo.path().join("area");
+    std::fs::create_dir_all(&sub).unwrap();
+
+    let args = SystemPromptArgs {
+        append_file: Some("@prompts/sys.md".to_string()),
+        ..Default::default()
+    };
+    let context = LaunchContext {
+        agent: None,
+        cwd: sub,
+        repo_root: Some(repo.path().to_path_buf()),
+        package_area_root: None,
+        package_root: None,
+    };
+
+    let (source, text) = resolve_system_prompt_source(&args, &context)
+        .unwrap()
+        .expect("magic reference resolves under the repository root");
+    match source {
+        SystemPromptSource::ExplicitFile { path, .. } => {
+            assert_eq!(path.canonicalize().unwrap(), target.canonicalize().unwrap());
+        }
+        _ => panic!("expected ExplicitFile source, got {source:?}"),
+    }
+    assert_eq!(text, "# repo sys\n");
+}
+
+/// A `~`-prefixed `--append-system-prompt` reference is home-pinned through the
+/// shared `Home` kind — support the former grammar lacked.
+#[test]
+#[serial]
+fn explicit_append_tilde_resolves_against_home() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(home.join("sys.md"), "# home sys\n").unwrap();
+
+    unsafe {
+        std::env::set_var("HOME", &home);
+    }
+    let args = SystemPromptArgs {
+        append_file: Some("~/sys.md".to_string()),
+        ..Default::default()
+    };
+    let context = LaunchContext {
+        agent: None,
+        cwd: tmp.path().to_path_buf(),
+        repo_root: None,
+        package_area_root: None,
+        package_root: None,
+    };
+    let result = resolve_system_prompt_source(&args, &context);
+    unsafe {
+        std::env::remove_var("HOME");
+    }
+
+    let (source, text) = result.unwrap().expect("~ reference resolves against HOME");
+    match source {
+        SystemPromptSource::ExplicitFile { path, .. } => {
+            assert_eq!(path, home.join("sys.md"));
+        }
+        _ => panic!("expected ExplicitFile source, got {source:?}"),
+    }
+    assert_eq!(text, "# home sys\n");
+}
+
+/// A bare (implicit) `--append-system-prompt` reference is repository-first
+/// (D4): with the same basename at the repository root and the launch
+/// directory, the repository-root copy wins.
+#[test]
+fn explicit_append_implicit_is_repository_first() {
+    let repo = TempDir::new().unwrap();
+    std::fs::write(repo.path().join("sys.md"), "# repo\n").unwrap();
+    let sub = repo.path().join("area");
+    std::fs::create_dir_all(&sub).unwrap();
+    std::fs::write(sub.join("sys.md"), "# area\n").unwrap();
+
+    let args = SystemPromptArgs {
+        append_file: Some("sys.md".to_string()),
+        ..Default::default()
+    };
+    let context = LaunchContext {
+        agent: None,
+        cwd: sub,
+        repo_root: Some(repo.path().to_path_buf()),
+        package_area_root: None,
+        package_root: None,
+    };
+
+    let (_source, text) = resolve_system_prompt_source(&args, &context)
+        .unwrap()
+        .expect("implicit reference resolves");
+    assert_eq!(
+        text, "# repo\n",
+        "implicit reference must resolve repository-first, not launch-relative",
+    );
+}
+
 #[test]
 fn explicit_skips_standard_discovery() {
     let tmp = TempDir::new().unwrap();

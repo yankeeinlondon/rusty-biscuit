@@ -68,7 +68,7 @@ use biscuit_terminal::terminal::Terminal;
 use claudine::composition::InstalledProviderSnapshot;
 use claudine::provider::Provider;
 use claudine::stream::stderr::Verbosity;
-use color_eyre::eyre::{Result, eyre};
+use color_eyre::eyre::{Result, WrapErr, eyre};
 use profile::{OutputFormat, WrapperProfile};
 use sniff::programs::InstalledAiClients;
 use std::collections::HashMap;
@@ -168,27 +168,27 @@ fn bootstrap_mcp_state(repo_root: Option<&std::path::Path>) -> Result<bool> {
     }
 
     let mut catalog = claudine::mcp::catalog::McpCatalogStore::load()
-        .map_err(|e| eyre!("failed to load MCP catalog for bootstrap: {e}"))?;
+        .wrap_err("failed to load MCP catalog for bootstrap")?;
     let mut state = McpProviderStateStore::load()
-        .map_err(|e| eyre!("failed to load MCP provider-state for bootstrap: {e}"))?;
+        .wrap_err("failed to load MCP provider-state for bootstrap")?;
     let mut importer = McpImporter::new(&mut catalog, &mut state);
     let _ = importer.import_all(repo_root);
     catalog
         .save()
-        .map_err(|e| eyre!("failed to save bootstrapped MCP catalog: {e}"))?;
+        .wrap_err("failed to save bootstrapped MCP catalog")?;
     state
         .save()
-        .map_err(|e| eyre!("failed to save bootstrapped MCP provider-state: {e}"))?;
+        .wrap_err("failed to save bootstrapped MCP provider-state")?;
 
     if !defaults_path().exists() {
         save_user_defaults(&McpDefaults::default())
-            .map_err(|e| eyre!("failed to create bootstrapped MCP defaults: {e}"))?;
+            .wrap_err("failed to create bootstrapped MCP defaults")?;
     }
     if let Some(repo_root) = repo_root
         && !repo_defaults_path(repo_root).exists()
     {
         save_repo_defaults(repo_root, &McpDefaults::default())
-            .map_err(|e| eyre!("failed to create bootstrapped repo MCP defaults: {e}"))?;
+            .wrap_err("failed to create bootstrapped repo MCP defaults")?;
     }
 
     Ok(true)

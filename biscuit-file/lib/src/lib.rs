@@ -96,6 +96,7 @@
 mod detect;
 mod error;
 mod format;
+mod list_format;
 
 #[cfg(feature = "toml")]
 pub mod toml_impl;
@@ -121,6 +122,9 @@ pub use detect::{FileType, detect_file_type, detect_file_type_from_bytes};
 // Re-export data format enum
 pub use format::DataFormat;
 
+// Re-export list-shape classification and conversion
+pub use list_format::{ListFormat, classify_list};
+
 // Re-export format-specific types
 #[cfg(feature = "toml")]
 pub use self::toml_impl::{Toml, TomlError, TomlSource};
@@ -136,7 +140,9 @@ pub use self::pdf::{Pdf, PdfConfig, PdfError, PdfMarkdown, PdfToc};
 
 #[cfg(feature = "file-reference")]
 pub use self::file_reference::{
-    CompletionEntryForm, FileReference, FileReferenceError, PartialCompletion, PathPosition,
+    CompletionEntryForm, DetailedOutcome, DetailedResolution, FileReference, FileReferenceClass,
+    FileReferenceError, FileReferenceKind, FileResolutionContext, PartialCompletion, PathPosition,
+    ProbeDisposition, ProbedCandidate, ResolutionCandidate, ResolutionFailure, RootProvenance,
     find_git_root, find_package_area, home_dir,
 };
 

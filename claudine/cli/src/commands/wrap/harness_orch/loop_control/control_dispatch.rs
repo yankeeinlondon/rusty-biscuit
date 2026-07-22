@@ -147,7 +147,7 @@ pub(super) fn dispatch_terminal_control(
                 profile.supports_resume(),
                 session_id,
             ) {
-                return TerminalControlAction::Abort(eyre!("{e}"));
+                return TerminalControlAction::Abort(e);
             }
             prompt_state.next_resume_session_id = session_id.map(|id| id.to_string());
             prompt_state.next_prompt_override = Some(message);
@@ -174,22 +174,63 @@ pub(super) fn dispatch_terminal_control(
             )
         }
         LifecycleTransitionDecision::ProxyHandoff { target } => {
-            let resolve_ctx = claudine::harness::HarnessResolutionContext {
-                source_path: &prompt_state.source_path,
-                repo_root,
+            // Every proxy route funnels through `resolve_proxy_target` (D5/D6):
+            // the shared existence-checking resolver anchored on the current
+            // source document. This route previously called
+            // `resolve_harness_path` directly and swapped `source_path` to a
+            // path it never probed, so a `failure`-stack proxy to a missing
+            // file only failed later in pre-flight.
+            let resolution = match prompt_state.rematerialize.file_resolution_context.as_ref() {
+                Some(context) => claudine::composition::resolve_proxy_target_in_context(
+                    &target,
+                    &prompt_state.source_path,
+                    context,
+                ),
+                None => claudine::composition::resolve_proxy_target(
+                    &target,
+                    &prompt_state.source_path,
+                    repo_root,
+                ),
             };
-            let resolved = match claudine::harness::resolve_harness_path(&target, &resolve_ctx) {
+            let resolved = match resolution {
                 Ok(path) => path,
-                Err(e) => return TerminalControlAction::Abort(eyre!("lifecycle proxy: {e}")),
+                Err(e) => {
+                    // Name the terminal event whose stack authored the `proxy`
+                    // so the property is a stable `event.stack[*].proxy` path
+                    // rather than a bare `proxy` (spec §D3/§D6). The exact stack
+                    // index is not threaded back here, hence the wildcard.
+                    // Event and property remain independent diagnostic fields.
+                    let event = lifecycle_guard
+                        .terminal_signal()
+                        .unwrap_or(LifecycleSignal::Finalize)
+                        .property_name();
+                    return TerminalControlAction::Abort(
+                        CompositionError::InvalidFileReference {
+                            context: Box::new(claudine::composition::FileReferenceContext {
+                                source_path: prompt_state.source_path.clone(),
+                                event: Some(event.to_string()),
+                                property: format!("{event}.stack[*].proxy"),
+                                reference: target.clone(),
+                                hint: crate::commands::wrap::composition::PROXY_TARGET_HINT
+                                    .to_string(),
+                            }),
+                            source: e,
+                        }
+                        .into(),
+                    );
+                }
             };
             // Cycle / hop-limit guard: a `failure` stack that proxies back to a
             // document whose own `failure` stack proxies again would loop
             // forever. Reject a self-proxy, an A->B->A cycle, or an
             // over-long chain with a typed error rather than hanging.
-            if !proxy.chain.iter().any(|p| p == &prompt_state.source_path) {
-                proxy.chain.push(prompt_state.source_path.clone());
+            let source_identity =
+                claudine::composition::proxy_path_identity(&prompt_state.source_path);
+            let target_identity = claudine::composition::proxy_path_identity(&resolved);
+            if !proxy.chain.iter().any(|path| path == &source_identity) {
+                proxy.chain.push(source_identity);
             }
-            if !claudine::composition::proxy_handoff_allowed(&proxy.chain, &resolved) {
+            if !claudine::composition::proxy_handoff_allowed(&proxy.chain, &target_identity) {
                 return TerminalControlAction::Abort(
                     CompositionError::LifecycleProxyCycle {
                         source_path: prompt_state.source_path.clone(),
@@ -206,7 +247,7 @@ pub(super) fn dispatch_terminal_control(
             }
             // Swap the running document for the target and reset per-iteration
             // guard state so the target runs a fresh `initialize`/pre-flight.
-            prompt_state.source_path = resolved.clone();
+            prompt_state.adopt_resolved_proxy_source(target_identity.clone());
             prompt_state.original_ref = target.clone();
             prompt_state.prompt_tail.clear();
             prompt_state.next_prompt_override = None;
@@ -217,7 +258,7 @@ pub(super) fn dispatch_terminal_control(
             // this the target's events would run against the proxying
             // document's lifecycle (and the original `failure`/`proxy` stack
             // would re-fire, looping forever).
-            proxy.chain.push(resolved.clone());
+            proxy.chain.push(target_identity);
             proxy.pending = true;
             // The loop's pending-adoption point announces the hand-off via
             // `report_proxy_handoff` on re-entry, so no message here.

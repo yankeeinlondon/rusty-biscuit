@@ -233,8 +233,7 @@ fn run() -> Result<()> {
     // Ownership partition (replaces the retired Rule 3): split composition argv
     // into the Claudine argv handed to clap and the agent tail forwarded to the
     // provider. Non-composition argv passes through unchanged with an empty tail.
-    let (argv, provider_tail) = argv::partition_composition_tail(normalized)
-        .map_err(|e| color_eyre::eyre::eyre!("{e}"))?;
+    let (argv, provider_tail) = argv::partition_composition_tail(normalized)?;
 
     // Pre-scan the normalized argv for --plain so clap's ANSI styling is
     // disabled before parsing. Uses the same token stream the parse will see.

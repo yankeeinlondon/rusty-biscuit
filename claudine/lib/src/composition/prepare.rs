@@ -99,6 +99,23 @@ pub struct PrepareOptions {
     /// default) preserves the legacy ambient-CWD behavior for library-only
     /// callers and tests.
     pub file_ref_fallback_dir: Option<PathBuf>,
+    /// Immutable request-scoped file-resolution snapshot shared with
+    /// Darkmatter and retained across harness re-materialization.
+    pub file_resolution_context: Option<biscuit_file::FileResolutionContext>,
+    /// Frontmatter keys whose object values render their `name` field in inline
+    /// string context (`{{state}}` → the name). Sequence preparation sets this
+    /// to the reserved overlay keys (`state`/`previous`/`next`); every other
+    /// caller leaves it empty, so this is a no-op for `compose`/`inline-compose`.
+    pub name_coercion_keys: Vec<String>,
+    /// Accept a composition whose body is empty instead of raising
+    /// [`CompositionError::ComposedBodyEmpty`].
+    ///
+    /// Set only by a sequence step that declares an executable field: such a
+    /// step runs its task *instead of* the document body, and a directly
+    /// invoked `kind: sequence` YAML file has no body at all. Every other
+    /// caller leaves this `false`, because an empty prompt reaching a provider
+    /// is otherwise a bug the provider would report far less usefully.
+    pub allow_empty_body: bool,
 }
 
 /// Walk up from a file path to find the nearest `.git` directory.
@@ -111,6 +128,19 @@ fn find_git_root_from_path(path: &Path) -> Option<PathBuf> {
         }
         dir = dir.parent()?;
     }
+}
+
+fn effective_source_repo_root(
+    configured: Option<PathBuf>,
+    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
+    source_path: &Path,
+) -> Option<PathBuf> {
+    configured.or_else(|| {
+        file_resolution_context
+            .is_none()
+            .then(|| find_git_root_from_path(source_path))
+            .flatten()
+    })
 }
 
 use super::error::CompositionError;
@@ -181,11 +211,17 @@ pub fn prepare_direct(
     let rematerialize = super::RematerializeInputs {
         set_overrides: options.set_overrides.clone(),
         file_ref_fallback_dir: options.file_ref_fallback_dir.clone(),
+        file_resolution_context: options.file_resolution_context.clone(),
         pre_approved_commands: options.pre_approved_commands.clone(),
         env_overrides: options.env_overrides.clone(),
     };
-    if let Some(overrides) = options.set_overrides {
-        compose_opts = compose_opts.with_set_overrides(overrides);
+    // `outputs` is initialized for *every* composition, not just sequences, so
+    // a document written with `{{ last(outputs) }}` behaves identically
+    // standalone and mid-sequence (spec → *The `outputs` Array*).
+    compose_opts = compose_opts
+        .with_set_overrides(super::runtime_state::with_initialized_outputs(options.set_overrides));
+    if !options.name_coercion_keys.is_empty() {
+        compose_opts = compose_opts.with_name_coercion_keys(options.name_coercion_keys.clone());
     }
     if let Some(approved) = options.pre_approved_commands {
         compose_opts = compose_opts.with_pre_approved_commands(approved);
@@ -193,13 +229,16 @@ pub fn prepare_direct(
     if let Some(fallback) = options.file_ref_fallback_dir.clone() {
         compose_opts = compose_opts.with_file_ref_fallback_dir(fallback);
     }
+    if let Some(context) = options.file_resolution_context.clone() {
+        compose_opts = compose_opts.with_file_resolution_context(context);
+    }
     let (composed, report) = source
         .markdown
         .compose_with(compose_opts)
         .map_err(|e| map_compose_error(&source.resolved_path, e))?;
 
     let prompt = composed.content().to_string();
-    if prompt.trim().is_empty() {
+    if prompt.trim().is_empty() && !options.allow_empty_body {
         return Err(CompositionError::ComposedBodyEmpty {
             source_path: source.resolved_path.clone(),
             mode: CompositionMode::ChainedDocument,
@@ -252,6 +291,7 @@ pub fn prepare_direct(
         &effective_frontmatter,
         &ctx,
         &source.resolved_path,
+        options.file_resolution_context.as_ref(),
         options.file_ref_fallback_dir.as_deref(),
     )?;
     // Lifecycle communication/action strings are deferred by design (C1): they
@@ -265,9 +305,11 @@ pub fn prepare_direct(
     // binding time.
     validate_no_err_in_no_error_events(&lifecycle, &source.resolved_path)?;
 
-    let source_repo_root = options
-        .source_repo_root
-        .or_else(|| find_git_root_from_path(&source.resolved_path));
+    let source_repo_root = effective_source_repo_root(
+        options.source_repo_root,
+        options.file_resolution_context.as_ref(),
+        &source.resolved_path,
+    );
 
     Ok(PreparedComposition {
         mode: CompositionMode::ChainedDocument,
@@ -357,17 +399,26 @@ pub fn prepare_inline(
     let rematerialize = super::RematerializeInputs {
         set_overrides: options.set_overrides.clone(),
         file_ref_fallback_dir: options.file_ref_fallback_dir.clone(),
+        file_resolution_context: options.file_resolution_context.clone(),
         pre_approved_commands: options.pre_approved_commands.clone(),
         env_overrides: options.env_overrides.clone(),
     };
-    if let Some(overrides) = options.set_overrides {
-        compose_opts = compose_opts.with_set_overrides(overrides);
+    // `outputs` is initialized for *every* composition, not just sequences, so
+    // a document written with `{{ last(outputs) }}` behaves identically
+    // standalone and mid-sequence (spec → *The `outputs` Array*).
+    compose_opts = compose_opts
+        .with_set_overrides(super::runtime_state::with_initialized_outputs(options.set_overrides));
+    if !options.name_coercion_keys.is_empty() {
+        compose_opts = compose_opts.with_name_coercion_keys(options.name_coercion_keys.clone());
     }
     if let Some(approved) = options.pre_approved_commands {
         compose_opts = compose_opts.with_pre_approved_commands(approved);
     }
     if let Some(fallback) = options.file_ref_fallback_dir.clone() {
         compose_opts = compose_opts.with_file_ref_fallback_dir(fallback);
+    }
+    if let Some(context) = options.file_resolution_context.clone() {
+        compose_opts = compose_opts.with_file_resolution_context(context);
     }
     let (composed, report) = temp_md
         .compose_with(compose_opts)
@@ -414,6 +465,7 @@ pub fn prepare_inline(
         &effective_frontmatter,
         &ctx,
         &source.resolved_path,
+        options.file_resolution_context.as_ref(),
         options.file_ref_fallback_dir.as_deref(),
     )?;
     // Deferred lifecycle strings resolve at event-time (C2); the prepare-time
@@ -421,7 +473,7 @@ pub fn prepare_inline(
     validate_no_err_in_no_error_events(&lifecycle, &source.resolved_path)?;
 
     let mut prompt = composed.content().to_string();
-    if prompt.trim().is_empty() {
+    if prompt.trim().is_empty() && !options.allow_empty_body {
         return Err(CompositionError::ComposedBodyEmpty {
             source_path: source.resolved_path.clone(),
             mode: CompositionMode::InlineFrontmatterPrompt,
@@ -429,9 +481,11 @@ pub fn prepare_inline(
         });
     }
 
-    let source_repo_root = options
-        .source_repo_root
-        .or_else(|| find_git_root_from_path(&source.resolved_path));
+    let source_repo_root = effective_source_repo_root(
+        options.source_repo_root,
+        options.file_resolution_context.as_ref(),
+        &source.resolved_path,
+    );
 
     // Append guardrails with the new inline contract
     let guardrails = load_or_create_guardrails(source_repo_root.as_deref());

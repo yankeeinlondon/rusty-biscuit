@@ -28,6 +28,16 @@ impl BlockError for CompositionError {
                 inner.status_block(term)
             }
 
+            // Semantic over a typed Darkmatter cause: this layer owns the code
+            // (a Darkmatter error supplies no facets), but the cause is what
+            // holds the path, line, and source excerpt — so the block comes
+            // from it. Owning the identity and borrowing the pixels is the
+            // split `ShellExpansionFailed` already makes.
+            CompositionError::ComposeFailed(md)
+            | CompositionError::FrontmatterParse(md)
+            | CompositionError::InlineHashMalformed(md)
+            | CompositionError::PreFlightDiscoveryFailed(md) => md.status_block(term),
+
             // Lifecycle authoring / evaluation family.
             CompositionError::LifecycleInvalid { .. }
             | CompositionError::LifecycleInterpolationLeak { .. }
@@ -35,6 +45,7 @@ impl BlockError for CompositionError {
             | CompositionError::LifecycleEvaluationError { .. }
             | CompositionError::RemovedValidationKey { .. }
             | CompositionError::LifecycleStackInvalidShape { .. }
+            | CompositionError::LifecycleWhenExpressionInvalid { .. }
             | CompositionError::LifecycleActionInvalidShortForm { .. }
             | CompositionError::LifecycleActionInvalidLongForm { .. }
             | CompositionError::LifecycleUnknownVerb { .. }
@@ -47,7 +58,8 @@ impl BlockError for CompositionError {
             | CompositionError::LifecycleMultipleLifecycleActions { .. }
             | CompositionError::LifecycleActionOrder { .. }
             | CompositionError::LifecycleInvalidArgs { .. }
-            | CompositionError::LifecycleErrNotAvailable { .. } => lifecycle::status_block(self),
+            | CompositionError::LifecycleErrNotAvailable { .. }
+            | CompositionError::InvalidFileReference { .. } => lifecycle::status_block(self),
 
             // Schema / frontmatter validation family.
             CompositionError::SchemaLoad { .. }
@@ -138,6 +150,12 @@ pub(super) fn render_file_link(path: &std::path::Path) -> String {
     )
 }
 
+/// Project a 1-based line number, or `null` for the `0` sentinel the
+/// composition layer uses to mean "the source carried no line".
+fn optional_line(line: usize) -> Value {
+    if line > 0 { json!(line) } else { Value::Null }
+}
+
 pub(super) fn escape_prose_path(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     for ch in input.chars() {
@@ -153,8 +171,12 @@ pub(super) fn escape_prose_path(input: &str) -> String {
 }
 
 /// Map a `ComposeFailed`'s inner [`MarkdownError`] to a composition code,
-/// delegating an interpolation failure to its deepest typed cause (design §9:
-/// the code follows the same deepest-meaningful-cause walk as rendering).
+/// reading an interpolation failure's typed cause for a finer one.
+///
+/// This is a match over Darkmatter's own error tree, not the selection walk: a
+/// `MarkdownError` is not a `Diagnostic`, so `select_effective_diagnostic`
+/// cannot see inside it. `ComposeFailed` is `Semantic` and owns whichever code
+/// this returns (decisions.md §D-3).
 fn compose_failed_code(md: &MarkdownError) -> &'static str {
     match md {
         MarkdownError::Interpolation { cause, .. } => match cause.as_ref() {
@@ -174,13 +196,21 @@ fn compose_failed_code(md: &MarkdownError) -> &'static str {
 /// Build the `composition.invalid_file_reference` `detail` payload from a
 /// [`FileReferenceDiagnostic`].
 ///
-/// Emits exactly the field set the registry declares (`reference`, `kind`,
-/// `base_dir`, `suggestions`, `fallback_dir`). `kind` is the catalog snake_case
-/// slug, never the `Debug` form. `suggestions` reuses the **same** render-time
-/// did-you-mean computation as the interpolation block (a missing reference,
-/// `base_dir`-joined, ranked against its siblings) so `err.detail.suggestions`
-/// is byte-for-byte what the human report shows. `fallback_dir` is omitted (it
-/// projects to `null`) when the resolution context carried none.
+/// Emits the full field set the registry declares, seeding it from
+/// [`null_detail_for`] so every declared key is present. `kind` is the catalog
+/// snake_case slug, never the `Debug` form. `suggestions` reuses the **same**
+/// render-time did-you-mean computation as the interpolation block (a missing
+/// reference, `base_dir`-joined, ranked against its siblings) so
+/// `err.detail.suggestions` is byte-for-byte what the human report shows.
+///
+/// The `FileReferenceDiagnostic` this projects from carries no authoring
+/// context, no root provenance, and no probe record, so `source_path`,
+/// `property`, `event`, `repository_root`, `candidates`, and `failure` keep
+/// their seeded `null`. In particular `failure` is **not** derived from `kind`:
+/// Darkmatter's `FileRefFailure::classify` folds permission and missing-context
+/// errors into `NotFound`, so projecting `no_match` from it would assert a
+/// classification the resolver never made (spec §D3). The file-resolution
+/// feature replaces these nulls with typed values.
 fn file_reference_detail(diagnostic: &FileReferenceDiagnostic) -> Value {
     // Mirror the render gate (errors/blocks.rs): suggestions are computed only
     // for a *missing* reference — a malformed/remote reference has no sibling
@@ -191,25 +221,55 @@ fn file_reference_detail(diagnostic: &FileReferenceDiagnostic) -> Value {
     } else {
         Vec::new()
     };
-    json!({
-        "reference": diagnostic.reference,
-        "kind": diagnostic.kind.as_str(),
-        "base_dir": diagnostic.base_dir.to_string_lossy(),
-        "suggestions": suggestions,
-        "fallback_dir": diagnostic
+    let mut base = null_detail_for("composition.invalid_file_reference");
+    base["reference"] = json!(diagnostic.reference);
+    base["kind"] = json!(diagnostic.kind.as_str());
+    base["base_dir"] = json!(diagnostic.base_dir.to_string_lossy());
+    base["suggestions"] = json!(suggestions);
+    base["fallback_dir"] = json!(
+        diagnostic
             .fallback_dir
             .as_ref()
-            .map(|p| p.to_string_lossy().into_owned()),
-    })
+            .map(|p| p.to_string_lossy().into_owned())
+    );
+    base
 }
 
 impl Diagnostic for CompositionError {
+    fn role(&self) -> DiagnosticRole {
+        match self {
+            // The only two variants that forward `code`, `detail`, *and*
+            // `status_block` to `inner` — they add a render appendix and an
+            // emission marker respectively, never an identity of their own.
+            CompositionError::WithFrontmatter { .. }
+            | CompositionError::LifecycleEvaluationAlreadyEmitted { .. } => {
+                DiagnosticRole::Transparent
+            }
+            // Every other variant owns its code, including the ones that carry
+            // a typed `MarkdownError`: a Darkmatter cause supplies no facets,
+            // so delegating to it would leave the failure unclassified.
+            _ => DiagnosticRole::Semantic,
+        }
+    }
+
+    fn diagnostic_source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            CompositionError::WithFrontmatter { inner, .. }
+            | CompositionError::LifecycleEvaluationAlreadyEmitted { inner } => Some(inner.as_ref()),
+            other => std::error::Error::source(other),
+        }
+    }
+
     fn code(&self) -> &'static str {
         match self {
-            // Transparent wrapper: classify by the cause it carries (§6).
-            CompositionError::WithFrontmatter { inner, .. } => inner.code(),
+            // Transparent wrappers: classify by the cause they carry (§6), the
+            // same delegation their `status_block` and `Display` already do.
+            CompositionError::WithFrontmatter { inner, .. }
+            | CompositionError::LifecycleEvaluationAlreadyEmitted { inner } => inner.code(),
             CompositionError::ComposeFailed(md) => compose_failed_code(md),
-            CompositionError::InvalidReference { .. } | CompositionError::FileNotFound { .. } => {
+            CompositionError::InvalidReference { .. }
+            | CompositionError::FileNotFound { .. }
+            | CompositionError::InvalidFileReference { .. } => {
                 "composition.invalid_file_reference"
             }
             CompositionError::SchemaLoad { .. } => "composition.schema_load",
@@ -220,6 +280,13 @@ impl Diagnostic for CompositionError {
             | CompositionError::SequenceMissingProperties { .. } => "composition.missing_properties",
             CompositionError::FrontmatterParse(_) => "composition.frontmatter_parse",
             CompositionError::ShellExpansionFailed { .. } => "composition.shell_expansion",
+            // The approval family: a user declining and the catalog refusing
+            // are the same authoring problem with the same fix, so they share a
+            // code and `err.detail.reason` tells them apart. `PreFlightFailed`
+            // is deliberately *not* here — it is prose, and claiming this code
+            // would mean parsing its `Display` to find its reason.
+            CompositionError::ShellCommandDenied { .. }
+            | CompositionError::ShellApprovalUnavailable { .. } => "composition.shell_approval",
             CompositionError::AtomicWriteFailed { .. } => "io.write_failed",
             // The lifecycle-stack family shares one authoring-error code; the
             // `variant` facet still distinguishes them for finer handlers.
@@ -229,6 +296,7 @@ impl Diagnostic for CompositionError {
             | CompositionError::LifecycleInterpolationLeak { .. }
             | CompositionError::LifecycleUndefinedVariable { .. }
             | CompositionError::LifecycleStackInvalidShape { .. }
+            | CompositionError::LifecycleWhenExpressionInvalid { .. }
             | CompositionError::LifecycleActionInvalidShortForm { .. }
             | CompositionError::LifecycleActionInvalidLongForm { .. }
             | CompositionError::LifecycleUnknownVerb { .. }
@@ -271,7 +339,10 @@ impl Diagnostic for CompositionError {
         let mut base = null_detail_for(self.code());
 
         match self {
-            CompositionError::WithFrontmatter { inner, .. } => return inner.detail(),
+            CompositionError::WithFrontmatter { inner, .. }
+            | CompositionError::LifecycleEvaluationAlreadyEmitted { inner } => {
+                return inner.detail();
+            }
             CompositionError::ComposeFailed(MarkdownError::Interpolation {
                 cause,
                 expression,
@@ -292,6 +363,25 @@ impl Diagnostic for CompositionError {
                     base["message"] = json!(other.to_string());
                 }
             },
+            // The semantic wrapper owns the code, so its payload is the union
+            // of what the resolver knew (`reference`, `failure`, `source_path`
+            // — taken from the typed source's own projection, never re-derived)
+            // and the authoring context only this layer has. `event` and
+            // `property` are what tell the surfaces apart, which is why no
+            // surface needs a code of its own.
+            CompositionError::InvalidFileReference { context, source } => {
+                if let Value::Object(from_source) = source.detail() {
+                    for (key, value) in from_source {
+                        if !value.is_null() {
+                            base[&key] = value;
+                        }
+                    }
+                }
+                base["reference"] = json!(context.reference);
+                base["source_path"] = json!(context.source_path.to_string_lossy());
+                base["property"] = json!(context.property);
+                base["event"] = json!(context.event);
+            }
             // The remaining `composition.invalid_file_reference` constructors
             // (the typed-source and resolved-not-found variants) carry no
             // `FileReferenceDiagnostic`, so only `reference` is recoverable.
@@ -365,6 +455,30 @@ impl Diagnostic for CompositionError {
             CompositionError::AtomicWriteFailed { path, .. } => {
                 base["path"] = json!(path.to_string_lossy());
             }
+            // `composition.shell_approval` declares `command`, `source_path`,
+            // `line`, `reason`. A `line` of 0 means the source carried none, so
+            // it projects `null` rather than a line number that does not exist.
+            CompositionError::ShellCommandDenied {
+                command,
+                source_file,
+                line,
+            } => {
+                base["command"] = json!(command);
+                base["source_path"] = json!(source_file.to_string_lossy());
+                base["line"] = optional_line(*line);
+                base["reason"] = json!("denied");
+            }
+            CompositionError::ShellApprovalUnavailable {
+                command,
+                source_file,
+                line,
+                failure,
+            } => {
+                base["command"] = json!(command);
+                base["source_path"] = json!(source_file.to_string_lossy());
+                base["line"] = optional_line(*line);
+                base["reason"] = json!(failure.as_str());
+            }
             // `composition.lifecycle_invalid` declares `property`, `message`.
             // The lifecycle family threads a `property` (and usually a
             // `message`); project both where the variant carries them.
@@ -375,6 +489,9 @@ impl Diagnostic for CompositionError {
                 base["message"] = json!(message);
             }
             CompositionError::LifecycleStackInvalidShape {
+                property, message, ..
+            }
+            | CompositionError::LifecycleWhenExpressionInvalid {
                 property, message, ..
             }
             | CompositionError::LifecycleStackAmbiguous {

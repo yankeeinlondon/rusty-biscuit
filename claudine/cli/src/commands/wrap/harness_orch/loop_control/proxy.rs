@@ -18,6 +18,7 @@ pub(super) fn run_target_initialize(
     repo_root: Option<&Path>,
     term: &Terminal,
     effect_engine: &EffectEngine,
+    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
     loop_start: std::time::Instant,
 ) -> TargetInitializeAction {
     lifecycle_guard.reset_for_proxy();
@@ -79,16 +80,41 @@ pub(super) fn run_target_initialize(
                 unreachable!("the catch protocol consumes initialize error control")
             }
             StackControl::Proxy { target } => {
-                let resolved = match claudine::composition::resolve_proxy_target(
-                    target,
-                    source_path,
-                    repo_root,
-                ) {
+                let resolution = match file_resolution_context {
+                    Some(context) => claudine::composition::resolve_proxy_target_in_context(
+                        target,
+                        source_path,
+                        context,
+                    ),
+                    None => claudine::composition::resolve_proxy_target(
+                        target,
+                        source_path,
+                        repo_root,
+                    ),
+                };
+                let resolved = match resolution {
                     Ok(path) => path,
                     Err(e) => {
-                        return TargetInitializeAction::Abort(eyre!(
-                            "lifecycle initialize proxy: {e}"
-                        ))
+                        return TargetInitializeAction::Abort(
+                            claudine::composition::CompositionError::InvalidFileReference {
+                                context: Box::new(
+                                    claudine::composition::FileReferenceContext {
+                                        source_path: source_path.to_path_buf(),
+                                        event: Some("initialize".to_string()),
+                                        // Wildcard index: the authoring stack
+                                        // position is not threaded back here, so
+                                        // name the stable path (spec §D3/§D6).
+                                        property: "initialize.stack[*].proxy".to_string(),
+                                        reference: target.clone(),
+                                        hint:
+                                            crate::commands::wrap::composition::PROXY_TARGET_HINT
+                                                .to_string(),
+                                    },
+                                ),
+                                source: e,
+                            }
+                            .into(),
+                        );
                     }
                 };
                 TargetInitializeAction::Repoint { resolved }

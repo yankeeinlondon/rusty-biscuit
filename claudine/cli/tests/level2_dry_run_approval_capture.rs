@@ -45,7 +45,7 @@ use std::time::{Duration, Instant};
 use test_toolkit::{Level, require_level};
 
 mod common;
-use common::{TestWorkspace, augmented_path, write_executable};
+use common::{TestWorkspace, augmented_path, clear_no_color, write_executable};
 
 /// A document whose body holds one unapproved `::shell` command, so composing
 /// it surfaces the approval prompt. The `echo` marker also lets the
@@ -158,6 +158,10 @@ fn prompt_region(frame: &CapturedFrame) -> (Vec<String>, Vec<String>) {
 /// prior run's prompt (still on screen) would be the one `prompt_region`
 /// extracts.
 fn capture_prompt_in_mode(harness: &mut TmuxHarness, staged: &Staged, dry_run: bool) -> CapturedFrame {
+    // This fixture asserts a *colored* surface under `FORCE_COLOR=1`, which an
+    // ambient `NO_COLOR` out-votes — see `common::clear_no_color`.
+    clear_no_color(harness);
+
     let home = staged.workspace.path().to_string_lossy().into_owned();
     let path = augmented_path(&staged.bin_dir);
     let path = path.to_string_lossy().into_owned();

@@ -203,6 +203,38 @@ pub fn compute_backoff_delay(
 /// treated as runaway control flow and stopped with a typed error.
 pub const MAX_PROXY_HOPS: usize = 16;
 
+/// Return the stable lexical identity used for one proxy-chain entry.
+///
+/// This removes `.` and collapses `..` without consulting the filesystem, so
+/// retry/proxy re-materialization cannot change identity through a different
+/// spelling of the same path. Symlinks remain unresolved: authored/worktree
+/// identity is lexical and this function is not a sandbox boundary.
+#[must_use]
+pub fn proxy_path_identity(path: &std::path::Path) -> std::path::PathBuf {
+    use std::path::Component;
+
+    let mut normalized = std::path::PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => match normalized.components().next_back() {
+                Some(Component::Normal(_)) => {
+                    normalized.pop();
+                }
+                Some(Component::ParentDir) | None if !normalized.has_root() => {
+                    normalized.push(component.as_os_str());
+                }
+                Some(Component::Prefix(_)) if !normalized.has_root() => {
+                    normalized.push(component.as_os_str());
+                }
+                _ => {}
+            },
+            _ => normalized.push(component.as_os_str()),
+        }
+    }
+    normalized
+}
+
 /// Whether a `proxy` hand-off to `target` is permitted given the chain of
 /// documents already proxied to in this run.
 ///
@@ -218,38 +250,67 @@ pub fn proxy_handoff_allowed(chain: &[std::path::PathBuf], target: &std::path::P
     if chain.len() >= MAX_PROXY_HOPS {
         return false;
     }
-    !chain.iter().any(|p| p == target)
+    let target = proxy_path_identity(target);
+    !chain
+        .iter()
+        .any(|path| proxy_path_identity(path) == target)
 }
 
 /// Resolve a `Proxy` target reference to an existing prompt file.
 ///
-/// Wraps [`crate::harness::resolve_harness_path`] (which handles `@repo/…`,
-/// relative, and absolute forms) with an existence check so a hand-off to a
-/// missing document fails loudly rather than producing an empty/garbage run.
+/// Delegates to [`crate::harness::resolve_harness_path`], the thin adapter over
+/// the shared [`biscuit_file::FileReference`] grammar: implicit references are
+/// repository-first then source-relative, `@` is a magic-root search, `~` is
+/// home-pinned, and explicit `./`/`../` stay pinned to the source. Resolution
+/// probes the filesystem, so a hand-off to a missing document fails loudly with
+/// a typed [`crate::harness::HarnessError`] rather than producing an
+/// empty/garbage run. The proxied target document is the source for its own
+/// nested references (D6): callers must pass the *target's* path as
+/// `source_path` on the next hop.
 ///
 /// ## Errors
 ///
-/// Returns a [`crate::harness::HarnessError`] when the reference cannot be
-/// resolved (e.g. an `@`-prefixed reference with no `repo_root`, propagated
-/// directly from [`crate::harness::resolve_harness_path`]) or when the resolved
-/// path is not an existing file.
+/// Returns a [`crate::harness::HarnessError`] when the reference is empty, has
+/// no anchoring directory, resolves to no existing file, or the shared resolver
+/// rejects it (invalid syntax, absent context anchor, I/O failure, remote URL).
 pub fn resolve_proxy_target(
     target: &str,
     source_path: &std::path::Path,
     repo_root: Option<&std::path::Path>,
 ) -> Result<std::path::PathBuf, crate::harness::HarnessError> {
+    let package_area = package_area_for_source(source_path, repo_root);
     let ctx = crate::harness::HarnessResolutionContext {
         source_path,
         repo_root,
+        package_area: package_area.as_deref(),
     };
-    let resolved = crate::harness::resolve_harness_path(target, &ctx)?;
-    if !resolved.is_file() {
-        return Err(crate::harness::HarnessError::PathResolutionFailed {
-            raw: target.to_string(),
-            detail: format!("proxy target does not exist: {}", resolved.display()),
-        });
-    }
-    Ok(resolved)
+    crate::harness::resolve_harness_path(target, &ctx)
+}
+
+/// Snapshot-preserving proxy resolver used by Claudine orchestration routes.
+pub fn resolve_proxy_target_in_context(
+    target: &str,
+    source_path: &std::path::Path,
+    request_context: &biscuit_file::FileResolutionContext,
+) -> Result<std::path::PathBuf, crate::harness::HarnessError> {
+    crate::harness::resolve_harness_path_in_context(target, source_path, request_context)
+}
+
+fn package_area_for_source(
+    source_path: &std::path::Path,
+    repo_root: Option<&std::path::Path>,
+) -> Option<std::path::PathBuf> {
+    let root = repo_root?;
+    let source_dir = source_path.parent()?;
+    let repo = sniff::filesystem::repo::detect_repo_structure(root)
+        .ok()
+        .flatten()?;
+    let area = repo.package_area_label_for_dir(source_dir)?;
+    Some(if area.as_ref() == "root" {
+        root.to_path_buf()
+    } else {
+        root.join(area.as_ref())
+    })
 }
 
 /// Parse a lifecycle delay string (e.g. `"5m"`, `"0s"`, `"30 sec"`) into a

@@ -6,9 +6,9 @@ phase. Owners are architectural responsibilities, not branch preferences.
 
 | Path or surface | Preview/source | Cluster | Owner | Status | Rationale | Evidence |
 |---|---|---|---|---|---|---|
-| `.claudine/memory/commits.md` | seed↔foundation; foundation↔proxy | Architecture & records | Repository history | open | — | — |
-| `CLAUDE.md` | all three previews | Architecture & records | Repository guidance | open | Must also remove the two baseline markers | `marker-baseline.txt` |
-| `prompts/_implement/implement-suggestions.md` | seed↔foundation | Architecture & records | Shared implementation prompts | open | — | — |
+| `.claudine/memory/commits.md` | seed↔foundation; foundation↔proxy | Architecture & records | Repository history | foundation resolved; Phase 3 open | Correct `--only` semantics plus bounded lock retry | `phase2-audit.md` |
+| `CLAUDE.md` | all three previews | Architecture & records | Repository guidance | foundation resolved; Phase 3 open | Baseline markers removed; current count retained pending index refresh | `marker-baseline.txt`; `phase2-audit.md` |
+| `prompts/_implement/implement-suggestions.md` | seed↔foundation | Architecture & records | Shared implementation prompts | resolved | Trunk workflow plus foundation iteration default | `phase2-audit.md` |
 | `.claude/skills/claudine/SKILL.md` | foundation↔proxy | Architecture & records | Final Claudine architecture | open | — | — |
 | `.claude/skills/claudine/architecture.md` | foundation↔proxy | Architecture & records | Final Claudine architecture | open | — | — |
 | `claudine/cli/src/commands/compose/prep.rs` | foundation↔proxy | CLI prep & composition | Canonical preparation service | open | — | — |
@@ -48,10 +48,10 @@ phase. Owners are architectural responsibilities, not branch preferences.
 
 | Path or surface | Preview/source | Cluster | Owner | Status | Rationale | Evidence |
 |---|---|---|---|---|---|---|
-| `claudine/cli/src/commands/wrap/composition/pipeline.rs` | seed previews | CLI prep & composition | Canonical preparation service | open | Clean merge is not semantic proof | — |
-| `claudine/cli/src/commands/wrap/wrapper_stages.rs` | seed previews | CLI prep & composition | Canonical preparation service | open | Clean merge is not semantic proof | — |
-| `claudine/docs/topics/composition.md` | seed previews | Generated/docs | Final merged behavior | open | — | — |
-| `claudine/docs/topics/system-prompt.md` | seed↔foundation | Generated/docs | Invocation-fixed prompt content | open | — | — |
+| `claudine/cli/src/commands/wrap/composition/pipeline.rs` | seed previews | CLI prep & composition | Canonical preparation service | foundation audited | Five ordered phases retained; typed causes and request context threaded without duplicate preparation | `phase2-audit.md`; focused composition tests |
+| `claudine/cli/src/commands/wrap/wrapper_stages.rs` | seed previews | CLI prep & composition | Canonical preparation service | foundation audited | Wrapper passthrough retained with explicit no-task stream ownership | `phase2-audit.md`; focused wrapper tests |
+| `claudine/docs/topics/composition.md` | seed previews | Generated/docs | Final merged behavior | foundation audited | Documents foundation grammar only; Phase 3 reconciliation remains open | `phase2-audit.md` |
+| `claudine/docs/topics/system-prompt.md` | seed↔foundation | Generated/docs | Invocation-fixed prompt content | foundation audited | Shared resolution grammar added; invocation-fixed contract retained | `phase2-audit.md` |
 | `.config/nextest.toml` | foundation↔proxy | Harness/testing | Test-tier contract | open | — | — |
 | `claudine/cli/Cargo.toml` | foundation↔proxy | Harness/testing | CLI dependency boundary | open | — | — |
 | `claudine/cli/src/commands/compose/mod.rs` | foundation↔proxy | CLI prep & composition | Canonical preparation service | open | — | — |

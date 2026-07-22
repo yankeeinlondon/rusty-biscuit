@@ -46,7 +46,7 @@ fn stack_action_sees_prior_set_frontmatter() {
 /// — each built from a separate context sharing the same cell — interpolate
 /// the MUTATED value, not the original composed value. This is the harness
 /// orchestration contract (`start` → `success`/`finalize`) driven at the
-/// `StackExecutionContext` + shared `RefCell` seam.
+/// `StackExecutionContext` + shared live-frontmatter cell seam.
 #[test]
 fn frontmatter_mutation_in_start_is_visible_to_later_events() {
     let config = parse_lifecycle_config(
@@ -62,7 +62,7 @@ fn frontmatter_mutation_in_start_is_visible_to_later_events() {
     // Composed base frontmatter (the original value the harness would carry
     // immutably) and the shared live cell seeded from it.
     let base = map(json!({"status": "pending"}));
-    let live = std::cell::RefCell::new(base.clone());
+    let live = std::sync::Mutex::new(base.clone());
 
     let (dir, engine) = temp_engine();
     std::fs::write(dir.path().join("t.md"), "---\nstatus: pending\n---\nbody\n").unwrap();
@@ -86,7 +86,7 @@ fn frontmatter_mutation_in_start_is_visible_to_later_events() {
         assert_eq!(outcome, LifecycleEventOutcome::default());
     }
     // The mutation persisted into the shared cell.
-    assert_eq!(live.borrow().get("status"), Some(&json!("running")));
+    assert_eq!(live.lock().unwrap().get("status"), Some(&json!("running")));
 
     // success: a separate context sharing the same live cell sees `running`.
     {

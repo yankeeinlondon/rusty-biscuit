@@ -131,7 +131,9 @@ fn materialized(frontmatter: serde_json::Value) -> MaterializedHarnessPrompt {
         prompt: String::new(),
         env_overrides: Vec::new(),
         inline_closure_plan: None,
+        file_resolution_context: None,
         live_frontmatter,
+        runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
     }
 }
 
@@ -201,6 +203,9 @@ fn prompt_state(source: &Path) -> HarnessPromptState {
         next_prompt_override: None,
         next_resume_session_id: None,
         rematerialize: Default::default(),
+        runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
+        suppress_output_commit: false,
+        last_final_output: None,
     }
 }
 

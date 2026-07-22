@@ -4,11 +4,74 @@ status: draft
 reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-07-16
+review_iterations: 9
 depends_on:
     - ../2026-07-13-error-propogation/spec.md
 ---
 
 # Unified File-Reference Resolution
+
+## Upstream Dependency Status — typed transport has LANDED
+
+The [`2026-07-13-error-propogation`](../2026-07-13-error-propogation/spec.md)
+feature this spec depends on is **complete**. Two things it finished are now
+this feature's inputs, and one thing it could not finish is now this feature's
+job.
+
+### The reserved nulls are ready to fill
+
+`composition.invalid_file_reference` was extended additively and already declares
+the fields a real resolver will supply. They project `null` today by ruling, not
+by oversight — see
+[decisions.md §D-5](../2026-07-13-error-propogation/decisions.md):
+
+| Field | Waiting for |
+|---|---|
+| `failure` | a typed classification that distinguishes `permission_io` / `missing_context` from `no_match`. **Do not derive it from `kind`** — Darkmatter's `FileRefFailure::classify` folds I/O, permission, and missing-context failures into `NotFound`, so `NotFound → no_match` would assert "no candidate matched" for a permission error that never probed a candidate |
+| `candidates` | the ordered, provenance-carrying probe record this feature's search produces |
+| `repository_root` | the resolved root the implicit-relative search anchored on |
+| `source_path`, `property`, `event` | supplied today by the semantic wrapper; a resolver-side value must agree with it, not duplicate it |
+
+`base_dir` and `fallback_dir` are **compatibility projections** of the pre-
+`candidates` payload, retained so existing `when:` clauses keep matching.
+`candidates` supersedes them; neither may be removed or re-typed.
+
+The transport itself is done: a typed resolution error reaches the surface with
+its facets and its rendered block intact, so this feature only has to produce the
+typed value — not carry it. See
+[`docs/topics/error-architecture.md`](../../docs/topics/error-architecture.md)
+for the wrapper rules a new resolver error must follow.
+
+### AC5 handoff — the two proxy resolvers must converge here
+
+Error-propagation Acceptance Criterion 5 ("the same proxy failure has identical
+diagnostic identity, headline, hint, and typed resolution detail regardless of
+which lifecycle route initiated it") is **confirmed unsatisfiable** without a
+routing change, and that change belongs to this feature
+([decisions.md §D-12](../2026-07-13-error-propogation/decisions.md)).
+
+Both routes are now typed and both render a `StatusBlock`. But they still fail at
+different stages against different resolvers — the `initialize` route through
+`resolve_proxy_target` at resolution time, the terminal route through
+`resolve_harness_path`, which resolves successfully and only fails later reading
+the adopted document. Wrapping cannot make those agree; converging the resolvers
+can, and that convergence is exactly this feature's D-goal.
+
+> ⚠️ **`level2_proxy_routes_share_a_typed_surface_but_diverge_on_identity_in_tmux`
+> will fail when this feature lands.** That is by design. It pins the current
+> divergence so the convergence cannot land silently and leave AC5 unverified
+> forever. When it fails, do not weaken it — **promote** its assertions to full
+> AC5 parity (identical code, headline, hint, and typed detail across both
+> routes), keeping the event/property context assertions separate so
+> intentional route-specific detail is not mistaken for drift.
+
+### Known debt this feature may inherit
+
+`error_guards/transport-allow.toml` carries 71 entries tagged
+`error-propagation-followup` — pre-existing lossy boundaries frozen rather than
+fixed ([decisions.md §D-11](../2026-07-13-error-propogation/decisions.md)). Any
+that sit on a file-resolution path are fair game to close here; the rest need
+their own spec.
 
 ## Motivating Incident
 
@@ -622,19 +685,47 @@ Deleting `<repo>/shared.md` makes bare `shared.md` fall back to
 - No production Claudine resolver manually classifies file-reference prefixes
   or directly joins/expands document reference strings.
 
-### Claudine/Darkmatter L2
+### Claudine/Darkmatter L2 — terminal-rendering claims only
+
+Level 2 is reserved for behavior that only a real terminal exercises: the
+rendered failure block and its ordered candidate list. Everything else in this
+feature is deterministic in-process resolution, which Level 1 verifies with full
+fidelity and none of the terminal flakiness (see the L1 note below).
 
 - The motivating `prompts/implement.md` router successfully resolves the bare
   `prompts/_implement/implement-suggestions.md` reference.
 - A paired fixture proves `./prompts/_implement/implement-suggestions.md`
   remains source-relative and fails when that exact source-local path is absent.
+- A no-color/TTY implicit no-match renders the ordered attempted candidates in
+  repository-then-source order through the typed error pipeline (the two-candidate
+  ordered capture, not just the repository winner).
+
+### Cross-surface parity and completion round trip — L1 process integration
+
+The remaining strategy items are **resolution semantics**, not terminal
+rendering, so their strongest faithful verification is Level 1. Every
+document-backed Claudine/Darkmatter surface — lifecycle `proxy`, composition and
+sequence sources, schema `file(...)`, expression `file(...)`, transclusion, and
+local link resolution — builds its context through the single
+`document_resolution_context` seam and resolves through
+`FileReference::resolve_in_context`. Cross-surface parity is therefore a property
+of that one shared builder; a shared-fixture Level 2 matrix would drive an
+identical in-process algorithm through five terminals for no added fidelity.
+Ordered rendering is the only part that genuinely needs a terminal, and it is
+covered above.
+
 - Schema `file(...)`, expression functions, sequence references, and
-  transclusions resolve shared fixtures identically.
+  transclusions resolve shared fixtures identically. The shared seam is proven
+  repository-first on a real collision fixture, and each surface has a
+  per-surface L1 adapter test that routes through it; the Claudine transclusion
+  collision test additionally discriminates end-to-end through `claudine compose`.
 - Nested transclusion/schema fixtures prove each authored document supplies its
   own base without losing the request's worktree context.
-- Completion-produced references execute successfully without rewriting.
-- No-color/TTY errors show the ordered attempted candidates through the typed
-  error pipeline.
+- A value emitted by completion resolves unchanged through the same candidate
+  builder: completion consumes the request-scoped `FileResolutionContext`
+  (`complete_partial_in_context`), and an L1 round trip enumerates an emitted
+  value and executes it through `resolve_in_context` to the same file — including
+  a magic reference through a configured magic root shared with execution.
 
 ## Acceptance Criteria
 

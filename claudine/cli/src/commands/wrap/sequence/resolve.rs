@@ -4,7 +4,7 @@
 //! ([`super::super::composition`]) so a sequence resolves its shared
 //! document-level `agent` hint exactly like `compose` does.
 
-use color_eyre::eyre::{Result, eyre};
+use color_eyre::eyre::{Result, WrapErr, eyre};
 
 use claudine::composition;
 
@@ -25,14 +25,14 @@ pub(super) fn apply_user_set_to_hints(
     if let Some(agent_value) = map.get("agent") {
         let mut fm = darkmatter::markdown::Frontmatter::new();
         fm.insert("agent", agent_value.clone())
-            .map_err(|e| eyre!("invalid --set agent: {e}"))?;
+            .wrap_err("invalid --set agent")?;
         let parsed = composition::parse_selection_hints_from_frontmatter(&fm)?;
         hints.agent = parsed.agent;
     }
     if let Some(model_value) = map.get("model") {
         let mut fm = darkmatter::markdown::Frontmatter::new();
         fm.insert("model", model_value.clone())
-            .map_err(|e| eyre!("invalid --set model: {e}"))?;
+            .wrap_err("invalid --set model")?;
         let parsed = composition::parse_selection_hints_from_frontmatter(&fm)?;
         hints.model = parsed.model;
     }

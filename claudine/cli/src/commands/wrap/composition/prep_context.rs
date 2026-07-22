@@ -24,6 +24,8 @@ use claudine::composition::{
     InstalledProviderSnapshot, LaunchWorkspaceContext, build_installed_snapshot,
     detect_installed_providers,
 };
+use claudine::diagnostics::DiagnosticSnapshot;
+use claudine::error::ClaudineError;
 use claudine::events::{EnvironmentContext, environment_context_from_sniff_result};
 use claudine::provider::Provider;
 use claudine::system_prompt::LaunchContext;
@@ -69,7 +71,7 @@ pub(crate) struct CompositionPrepContext {
     /// both the header env plan and the child env build reuse it instead
     /// of calling `resolve_launch_workspace_context` again.
     pub launch_workspace: LaunchWorkspaceContext,
-    /// Captured error message from the shared sniff scan, if it failed.
+    /// Diagnostic snapshot of the shared sniff scan failure, if it failed.
     ///
     /// The shared scan uses `unwrap_or_default()` to keep prep best-
     /// effort, but the legacy non-prep path treated launch-context
@@ -78,7 +80,13 @@ pub(crate) struct CompositionPrepContext {
     /// `--repo` is set and the sniff scan failed, the run is aborted
     /// with the captured error rather than silently launching with an
     /// empty launch context. `None` means the scan succeeded.
-    pub launch_detection_error: Option<String>,
+    ///
+    /// The typed `sniff::SniffError` is retained through
+    /// `ClaudineError::LaunchContextDetection` and projected once into a
+    /// [`DiagnosticSnapshot`] (the §D9 recovery-record boundary) so the
+    /// `Clone` record can carry the facets without holding a non-`Clone`
+    /// `ClaudineError`.
+    pub launch_detection_error: Option<DiagnosticSnapshot>,
 }
 
 impl CompositionPrepContext {
@@ -151,7 +159,12 @@ impl CompositionPrepContext {
             // consumers continue to read the defaulted contexts below.
             let (sniff_result, launch_detection_error) = match sniff::detect_with_plan(plan) {
                 Ok(result) => (result, None),
-                Err(error) => (sniff::SniffResult::default(), Some(error.to_string())),
+                Err(error) => (
+                    sniff::SniffResult::default(),
+                    Some(DiagnosticSnapshot::from_diagnostic(
+                        &ClaudineError::LaunchContextDetection(Box::new(error)),
+                    )),
+                ),
             };
             let launch_context = LaunchContext::from_sniff_result(&sniff_result, &cwd);
 
@@ -282,6 +295,39 @@ mod tests {
 
     use super::*;
     use claudine::config::claudine_config::ClaudineConfig;
+
+    /// Site C: the captured launch-detection failure is now a
+    /// `DiagnosticSnapshot` projected from the typed `sniff::SniffError`
+    /// (retained through `ClaudineError::LaunchContextDetection`), so the
+    /// `Clone` prep/request record carries the facets and message rather than a
+    /// flattened `String`. The snapshot must clone and round-trip through serde.
+    #[test]
+    fn launch_detection_failure_projects_a_clonable_serializable_snapshot() {
+        let sniff_error = sniff::SniffError::NotARepository(PathBuf::from("/no/such/repo"));
+        let snapshot = DiagnosticSnapshot::from_diagnostic(&ClaudineError::LaunchContextDetection(
+            Box::new(sniff_error),
+        ));
+
+        // The typed facets survive: `LaunchContextDetection` classifies as
+        // `internal.bug`, and its message retains the sniff error text.
+        assert_eq!(snapshot.code, "internal.bug");
+        assert!(
+            snapshot.message.contains("/no/such/repo"),
+            "snapshot message must retain the sniff error text, got: {}",
+            snapshot.message
+        );
+
+        // The record field is `Option<DiagnosticSnapshot>`; the `.clone()` sites
+        // in `compose/prep.rs` and `sequence/iterate.rs` rely on this.
+        let stored: Option<DiagnosticSnapshot> = Some(snapshot.clone());
+        assert_eq!(stored.clone(), Some(snapshot.clone()));
+
+        // Serialize round-trip (the §D9 snapshot boundary).
+        let json = serde_json::to_string(&snapshot).expect("snapshot serializes");
+        let restored: DiagnosticSnapshot =
+            serde_json::from_str(&json).expect("snapshot round-trips");
+        assert_eq!(restored, snapshot);
+    }
 
     #[test]
     fn resolve_source_repo_root_reuses_launch_root_when_source_inside() {

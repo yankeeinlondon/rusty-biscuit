@@ -11,7 +11,7 @@
 
 use std::path::{Path, PathBuf};
 
-use biscuit_file::FileReference;
+use biscuit_file::{FileReference, FileResolutionContext};
 use indexmap::IndexMap;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -42,11 +42,37 @@ pub struct DetectOptions {
 /// `opts.merge` is true, types are widened along the spec's hierarchy and a
 /// property is `required` only if it appears in every source.
 pub fn detect_schema(sources: &[&Markdown], opts: DetectOptions) -> SimplifiedSchema {
+    let contexts: Vec<FileResolutionContext> = sources
+        .iter()
+        .map(|md| compatibility_detection_context(md))
+        .collect();
+    detect_schema_with_contexts(sources, opts, &contexts)
+}
+
+/// Detects a schema using one explicit resolution snapshot per source.
+///
+/// The contexts and sources must have the same length. Each context is derived
+/// to its corresponding document before `file` inference, and resolution uses
+/// the shared detailed candidate/probe contract without ambient reads.
+///
+/// ## Panics
+///
+/// Panics when `contexts.len() != sources.len()`.
+pub fn detect_schema_with_contexts(
+    sources: &[&Markdown],
+    opts: DetectOptions,
+    contexts: &[FileResolutionContext],
+) -> SimplifiedSchema {
+    assert_eq!(sources.len(), contexts.len(), "one resolution context is required per source");
     if sources.is_empty() {
         return SimplifiedSchema::Single(SchemaShape::default());
     }
 
-    let shapes: Vec<SchemaShape> = sources.iter().map(|md| detect_from_document(md)).collect();
+    let shapes: Vec<SchemaShape> = sources
+        .iter()
+        .zip(contexts)
+        .map(|(md, context)| detect_from_document_with_context(md, context))
+        .collect();
 
     if shapes.len() == 1 {
         return SimplifiedSchema::Single(shapes.into_iter().next().unwrap());
@@ -65,19 +91,52 @@ pub fn detect_schema(sources: &[&Markdown], opts: DetectOptions) -> SimplifiedSc
 /// `$schema` is skipped because it is reserved by Darkmatter; all other
 /// top-level keys are mapped to base types.
 pub fn detect_from_document(md: &Markdown) -> SchemaShape {
-    let base_dir = base_dir_for(md);
+    let context = compatibility_detection_context(md);
+    detect_from_document_with_context(md, &context)
+}
+
+/// Detects one document's schema using an explicit resolution snapshot.
+pub fn detect_from_document_with_context(
+    md: &Markdown,
+    request_context: &FileResolutionContext,
+) -> SchemaShape {
+    let context = match md.source() {
+        Some(ComposeSource::File(path)) => request_context.for_source(path),
+        _ => request_context.for_base(request_context.base_dir()),
+    };
     let mut properties: IndexMap<String, PropertyDef> = IndexMap::new();
     for (key, value) in md.frontmatter().as_map() {
         if key == "$schema" {
             continue;
         }
-        let atom = detect_value_atom(value, &base_dir);
+        let atom = detect_value_atom(value, &context);
         properties.insert(key.clone(), PropertyDef::Single(atom));
     }
     SchemaShape {
         properties,
         ..Default::default()
     }
+}
+
+/// Compatibility policy for the context-free detection API.
+///
+/// Detection is an authoring heuristic, so invalid references and probe errors
+/// classify as strings rather than becoming schema-detection failures. The
+/// legacy entry points capture their CWD/environment inputs once here, then use
+/// the same repository-first detailed resolver as explicit callers.
+fn compatibility_detection_context(md: &Markdown) -> FileResolutionContext {
+    let base_dir = base_dir_for(md);
+    let repository_root = crate::markdown::compose::find_git_root_from(&base_dir);
+    crate::markdown::compose::document_resolution_context(
+        &base_dir,
+        match md.source() {
+            Some(ComposeSource::File(path)) => Some(path.as_path()),
+            _ => None,
+        },
+        &[],
+        repository_root.as_deref(),
+        None,
+    )
 }
 
 fn base_dir_for(md: &Markdown) -> PathBuf {
@@ -90,7 +149,7 @@ fn base_dir_for(md: &Markdown) -> PathBuf {
     }
 }
 
-fn detect_value_atom(value: &Value, base_dir: &Path) -> PropertyAtom {
+fn detect_value_atom(value: &Value, context: &FileResolutionContext) -> PropertyAtom {
     match value {
         Value::Bool(_) => PropertyAtom::bare(SimplifiedType::Boolean),
         Value::Number(n) => {
@@ -106,14 +165,14 @@ fn detect_value_atom(value: &Value, base_dir: &Path) -> PropertyAtom {
                 PropertyAtom::bare(SimplifiedType::Number)
             }
         }
-        Value::String(s) => PropertyAtom::bare(classify_string(s, base_dir)),
-        Value::Array(items) => detect_array_atom(items, base_dir),
+        Value::String(s) => PropertyAtom::bare(classify_string(s, context)),
+        Value::Array(items) => detect_array_atom(items, context),
         Value::Object(_) => PropertyAtom::bare(SimplifiedType::Object),
         Value::Null => PropertyAtom::bare(SimplifiedType::Any),
     }
 }
 
-fn detect_array_atom(items: &[Value], base_dir: &Path) -> PropertyAtom {
+fn detect_array_atom(items: &[Value], context: &FileResolutionContext) -> PropertyAtom {
     if items.is_empty() {
         return PropertyAtom {
             ty: TypeExpr::Primitive(SimplifiedType::Any),
@@ -125,11 +184,11 @@ fn detect_array_atom(items: &[Value], base_dir: &Path) -> PropertyAtom {
     }
 
     let mut iter = items.iter();
-    let first = detect_value_atom(iter.next().unwrap(), base_dir);
+    let first = detect_value_atom(iter.next().unwrap(), context);
     let mut item_ty = first.ty;
     let mut item_constraints = first.constraints;
     for v in iter {
-        let next = detect_value_atom(v, base_dir);
+        let next = detect_value_atom(v, context);
         match unify_types(&item_ty, &next.ty) {
             Some(t) => {
                 if t != SimplifiedType::Number {
@@ -164,7 +223,7 @@ fn detect_array_atom(items: &[Value], base_dir: &Path) -> PropertyAtom {
     }
 }
 
-fn classify_string(value: &str, base_dir: &Path) -> SimplifiedType {
+fn classify_string(value: &str, context: &FileResolutionContext) -> SimplifiedType {
     if is_date(value) {
         return SimplifiedType::Date;
     }
@@ -180,7 +239,7 @@ fn classify_string(value: &str, base_dir: &Path) -> SimplifiedType {
     if is_url(value) {
         return SimplifiedType::Url;
     }
-    if resolves_to_existing_file(value, base_dir) {
+    if resolves_to_existing_file(value, context) {
         return SimplifiedType::File;
     }
     SimplifiedType::String
@@ -221,14 +280,11 @@ fn is_url(s: &str) -> bool {
     }
 }
 
-/// Detection asymmetry: resolves the candidate file reference relative to the
-/// **document's** directory (`base_dir`) so that drafts in a project sub-folder
-/// can still infer the `file` type. Validation, on the other hand, resolves
-/// `file`-typed property values from the live process CWD (see
-/// [`crate::markdown::schemas::format`]). A property that detection labels as
-/// `file` may therefore validate only when the consumer runs validation from a
-/// CWD that exposes the same relative path.
-fn resolves_to_existing_file(value: &str, base_dir: &Path) -> bool {
+/// File inference is deliberately best-effort: an invalid reference, no match,
+/// or probe failure remains a `string` because detection has no error channel.
+/// Candidate order and ambient-state policy still come from the shared detailed
+/// resolver rather than a manual join or existence check.
+fn resolves_to_existing_file(value: &str, context: &FileResolutionContext) -> bool {
     // Avoid expensive resolution for short / unlikely paths. We require at
     // least one path-like character.
     if !value.chars().any(|c| c == '/' || c == '.' || c == '\\') {
@@ -237,7 +293,7 @@ fn resolves_to_existing_file(value: &str, base_dir: &Path) -> bool {
     let Ok(reference) = FileReference::new(value) else {
         return false;
     };
-    matches!(reference.resolve_from(base_dir), Ok(Some(path)) if path.exists())
+    reference.resolve_detailed(context).matched_path().is_some()
 }
 
 // ── Multi-file merging ────────────────────────────────────────────────────
@@ -642,6 +698,45 @@ mod tests {
                 TypeExpr::Primitive(SimplifiedType::Email),
             ]
         );
+    }
+
+    #[test]
+    fn explicit_context_detection_uses_repository_first_candidates() {
+        let repo = tempfile::TempDir::new().unwrap();
+        let docs = repo.path().join("docs");
+        std::fs::create_dir_all(&docs).unwrap();
+        std::fs::write(repo.path().join("asset.txt"), "root").unwrap();
+        let source = docs.join("page.md");
+        let md = md_with_frontmatter("asset: asset.txt\n")
+            .with_source(ComposeSource::File(source));
+        let context = FileResolutionContext::from_snapshot(
+            repo.path(),
+            None,
+            std::collections::HashMap::new(),
+        )
+        .with_repository_root(repo.path());
+
+        let shape = detect_from_document_with_context(&md, &context);
+        let PropertyDef::Single(asset) = shape.properties.get("asset").unwrap() else {
+            panic!("expected one detected file property");
+        };
+        assert_eq!(asset.ty, TypeExpr::Primitive(SimplifiedType::File));
+    }
+
+    #[test]
+    fn explicit_context_detection_keeps_invalid_reference_as_string() {
+        let context = FileResolutionContext::from_snapshot(
+            "/nonexistent/darkmatter-detection",
+            None,
+            std::collections::HashMap::new(),
+        );
+        let md = md_with_frontmatter("asset: '{{}}'\n");
+
+        let shape = detect_from_document_with_context(&md, &context);
+        let PropertyDef::Single(asset) = shape.properties.get("asset").unwrap() else {
+            panic!("expected one detected string property");
+        };
+        assert_eq!(asset.ty, TypeExpr::Primitive(SimplifiedType::String));
     }
 
     #[test]

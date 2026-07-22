@@ -1,7 +1,7 @@
 ---
 total_phases: 6
 created: 2026-07-21
-phase: 1
+phase: 2
 agent: "opencode/zai-coding-plan/glm-5.2"
 yolo: "false"
 reviewed: true
@@ -28,8 +28,80 @@ docs_created_during_phase_1:
   - claudine/fixes/2026-07-20-claudine-mega-merge/sha-ledger.md
   - claudine/fixes/2026-07-20-claudine-mega-merge/user-owned-worktree.patch
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - .config/nextest.toml
+  - biscuit-file/cli/tests/cli_tests.rs
+  - biscuit-file/lib/Cargo.toml
+  - biscuit-file/lib/src/**/*.rs
+  - biscuit-file/lib/tests/**/*.rs
+  - biscuit-test-harness/Cargo.toml
+  - biscuit-test-harness/src/**/*.rs
+  - claudine/cli/Cargo.toml
+  - claudine/cli/src/**/*.rs
+  - claudine/cli/tests/**/*.rs
+  - claudine/contract/src/**/*.rs
+  - claudine/docs/providers/dispatch-inventory.json
+  - claudine/gen/tests/**/*
+  - claudine/justfile
+  - claudine/lib/Cargo.toml
+  - claudine/lib/benches/**/*.rs
+  - claudine/lib/src/**/*.rs
+  - claudine/lib/tests/**/*.rs
+  - claudine/rendezvous/daemon/src/**/*.rs
+  - claudine/reviews/_completed/2026-07-14-module-assessment/generated-artifact-baseline.json
+  - darkmatter/lib/src/**/*.rs
+  - darkmatter/lib/tests/**/*.rs
+  - just/devops.just
+  - scripts/check-error-transport.allow
+  - scripts/check-error-transport.sh
+  - scripts/check-lifecycle-doc-facets.sh
+docs_updated_during_phase_2:
+  - .claudine/memory/commits.md
+  - .claudine/non-interactive.md
+  - CLAUDE.md
+  - biscuit-file/docs/**/*.md
+  - biscuit-test-harness/README.md
+  - claudine/docs/rendezvous/local-ipc.md
+  - claudine/docs/topics/**/*.md
+  - claudine/features/2026-07-11-sequence-plus/{plan,spec}.md
+  - claudine/features/2026-07-13-error-propogation/{plan,spec}.md
+  - claudine/features/2026-07-13-file-resolution/{plan,spec}.md
+  - claudine/features/_completed/2026-06-14-auto-complete/*.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/{conflict-checklist,impact-review,plan}.md
+  - darkmatter/docs/**/*.md
+  - prompts/_implement/implement-suggestions.md
+  - prompts/faster-builds-and-tests.md
+docs_created_during_phase_2:
+  - claudine/docs/topics/error-architecture.md
+  - claudine/features/2026-07-11-sequence-plus/{gate-run-*.md,l3-ctrl-c-runbook.md,phase-1-baseline.md,review-*.md,validation-matrix.md}
+  - claudine/features/2026-07-13-error-propogation/{burndown-triage.md,decisions.md,inventory.md,review-*.md}
+  - claudine/features/2026-07-13-file-resolution/{decisions.md,inventory.md,review-*.md}
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation-merge-detect.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/phase2-audit.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/phase2-gates.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/phase2-test-map.md
+  - claudine/fixes/_unscheduled/1-windows-compose-interrupt-guard/spec.md
+  - prompts/_implement/implement-review-findings-plan.md
+  - prompts/_implement/review-findings-plan.md
+  - ~/features/2026-07-20-router-fixture/log.md
+skills_files_updated_during_phase_2:
+  - .claude/skills/biscuit-file/references/file-references.md
+  - .claude/skills/biscuit-test-harness/SKILL.md
+  - .claude/skills/claudine/SKILL.md
+  - .claude/skills/claudine/architecture.md
+  - .claude/skills/claudine/cli-reference.md
+  - .claude/skills/claudine/error-architecture.md
+  - .claude/skills/claudine/timeline.md
 packages:
+  - biscuit-file
+  - biscuit-file-cli
+  - biscuit-test-harness
   - claudine
+  - claudine-cli
+  - claudine-contract
+  - claudine-gen
+  - darkmatter
+  - rendezvous-daemon
 ---
 
 # Claudine Mega-Merge Execution Plan
@@ -117,40 +189,40 @@ Spec mapping: spec Phase 1. Goal: a known-good foundation merge commit carrying 
 
 ### Tasks
 
-- [ ] Re-read the impact reports queued for foundation-side symbols from `impact/`. Resolve or de-scope each HIGH/CRITICAL item with a recorded rationale before touching the corresponding file.
-- [ ] Start the merge non-fast-forward and uncommitted: `git merge --no-ff --no-commit 43c23c6`.
-- [ ] Resolve the three predicted trunk conflicts in repository records and shared prompts:
-    - [ ] `.claudine/memory/commits.md` — reconcile history, keep it factual and final-architecture-aligned.
-    - [ ] `CLAUDE.md` — reconcile the surviving guidance and remove the two pre-existing marker lines recorded in `marker-baseline.txt`; `AGENTS.md` exposes this file through a symlink and needs no separate edit.
-    - [ ] `prompts/_implement/implement-suggestions.md` (and any other shared prompt files surfaced by the refreshed preview).
-- [ ] Manually audit the auto-merged composition pipeline, wrapper stages, composition/system-prompt topics. A clean textual merge is not semantic compatibility (R7).
-- [ ] Verify the trunk's transient system-prompt `.gitignore` fix survives (I11). Re-apply if the merge dropped it.
-- [ ] Verify trunk lifecycle-schema scaffolding, local-runner schemas/research, shared prompt changes, and topic documentation are present (I11).
-- [ ] Prove the typed diagnostic subsystem before any consumer edit (I1):
-    - [ ] Run focused tests for the diagnostic registry, snapshots/restoration, and source/transport guards.
-    - [ ] Confirm `DiagnosticSnapshot` is the effective selector across renderer, `err.*`, and serialization paths.
-- [ ] Prove the Biscuit File authority (I2):
-    - [ ] Grammar, kind classification, candidate planning, probes — focused tests pass.
-    - [ ] Repository-first bare resolution and strict explicit-relative (no fallback) — focused tests pass.
-    - [ ] `FileResolutionContext` derivation and completion/execution round trips — focused tests pass.
-    - [ ] Rooted payloads after a magic `@` prefix are rejected on every host (I2) — focused tests pass.
-- [ ] Prove Darkmatter composition/schema/reference/transclusion paths on the foundation side (I3, I9):
-    - [ ] Composition, schema, reference, transclusion focused tests pass.
-- [ ] Prove Sequence Plus retained behavior at its applicable tiers:
-    - [ ] JIT state visibility, tasks/groups, deterministic merges, process ownership.
-    - [ ] Source/list grammar, exact approved shell bytes, serial/parallel ordering.
-- [ ] Run supporting-package L1 + lint gates *(parallelizable across packages)*:
-    - [ ] From `biscuit-file/`, run `just test` and `just lint` independently.
-    - [ ] From `darkmatter/`, run `just test` and `just lint` independently.
-    - [ ] From the repository root, run `just test biscuit-test-harness` and `just _lint biscuit-test-harness` independently.
-    - [ ] From `claudine/rendezvous/`, run `just check`, `just test`, and `just lint` independently.
-- [ ] From `claudine/`, run full Claudine L1 and lint as independent commands: `just test`, then `just lint`.
-- [ ] Run `git diff --check`, then scan both worktree and index with the anchored marker expression from Phase 1 (`git grep ...` and `git grep --cached ...`). Both scans must be empty after classified fixture exclusions, and the known `CLAUDE.md` markers must be gone (R16).
-- [ ] Inspect staged changes: `git diff --cached --stat`. Confirm only intended files are present; investigate any surprise.
-- [ ] Run GitNexus `detect_changes({scope: "compare", base_ref: "main"})`. Review affected symbols, processes, and modules; record in `impact/foundation-merge-detect.md`.
-- [ ] Create the foundation merge commit with ancestry preserved and capture its SHA.
-- [ ] Refresh `git merge-tree --write-tree --name-only <foundation-merge-sha> e348486c` against the exact sequential inputs. Save command/output/status under `merge-previews/post-foundation-proxy/`, update `sha-ledger.md`, `conflict-checklist.md`, and any newly implicated impact reports. Do not treat the earlier feature-tip-to-feature-tip preview as the exact Phase 3 conflict list.
-- [ ] Run change detection and staged-diff/marker review for those planning-only updates, then create a documentation-only checkpoint commit so Phase 3 starts clean.
+- [x] Re-read the impact reports queued for foundation-side symbols from `impact/`. Resolve or de-scope each HIGH/CRITICAL item with a recorded rationale before touching the corresponding file.
+- [ ] Start the merge non-fast-forward and uncommitted: `git merge --no-ff --no-commit 43c23c6`. (Blocked in this execution by the explicit no-stage/no-commit instruction. The exact `git merge-tree` candidate was materialized into the worktree without changing the index; see `phase2-audit.md`.)
+- [x] Resolve the three predicted trunk conflicts in repository records and shared prompts:
+    - [x] `.claudine/memory/commits.md` — reconcile history, keep it factual and final-architecture-aligned.
+    - [x] `CLAUDE.md` — reconcile the surviving guidance and remove the two pre-existing marker lines recorded in `marker-baseline.txt`; `AGENTS.md` exposes this file through a symlink and needs no separate edit.
+    - [x] `prompts/_implement/implement-suggestions.md` (and any other shared prompt files surfaced by the refreshed preview).
+- [x] Manually audit the auto-merged composition pipeline, wrapper stages, composition/system-prompt topics. A clean textual merge is not semantic compatibility (R7).
+- [x] Verify the trunk's transient system-prompt `.gitignore` fix survives (I11). Re-apply if the merge dropped it.
+- [x] Verify trunk lifecycle-schema scaffolding, local-runner schemas/research, shared prompt changes, and topic documentation are present (I11).
+- [x] Prove the typed diagnostic subsystem before any consumer edit (I1):
+    - [x] Run focused tests for the diagnostic registry, snapshots/restoration, and source/transport guards.
+    - [x] Confirm `DiagnosticSnapshot` is the effective selector across renderer, `err.*`, and serialization paths.
+- [x] Prove the Biscuit File authority (I2):
+    - [x] Grammar, kind classification, candidate planning, probes — focused tests pass.
+    - [x] Repository-first bare resolution and strict explicit-relative (no fallback) — focused tests pass.
+    - [x] `FileResolutionContext` derivation and completion/execution round trips — focused tests pass.
+    - [x] Rooted payloads after a magic `@` prefix are rejected on every host (I2) — focused tests pass.
+- [x] Prove Darkmatter composition/schema/reference/transclusion paths on the foundation side (I3, I9):
+    - [x] Composition, schema, reference, transclusion focused tests pass.
+- [x] Prove Sequence Plus retained behavior at its applicable tiers:
+    - [x] JIT state visibility, tasks/groups, deterministic merges, process ownership.
+    - [x] Source/list grammar, exact approved shell bytes, serial/parallel ordering.
+- [x] Run supporting-package L1 + lint gates *(parallelizable across packages)*:
+    - [x] From `biscuit-file/`, run `just test` and `just lint` independently.
+    - [x] From `darkmatter/`, run `just test` and `just lint` independently. (The complete L1 set ran as four deterministic `just test --partition hash:N/4` invocations to honor the non-interactive command ceiling.)
+    - [x] From the repository root, run `just test biscuit-test-harness` and `just _lint biscuit-test-harness` independently.
+    - [x] From `claudine/rendezvous/`, run `just check`, `just test`, and `just lint` independently.
+- [x] From `claudine/`, run full Claudine L1 and lint as independent commands: `just test`, then `just lint`. (The complete L1 set ran as eight deterministic `just test --partition hash:N/8` invocations after the monolithic command exceeded the non-interactive ceiling.)
+- [ ] Run `git diff --check`, then scan both worktree and index with the anchored marker expression from Phase 1 (`git grep ...` and `git grep --cached ...`). Both scans must be empty after classified fixture exclusions, and the known `CLAUDE.md` markers must be gone (R16). (`git diff --check` and the precise worktree scan are clean. The untouched index still has the two classified Phase 1 lines because staging is prohibited; see `phase2-audit.md`.)
+- [x] Inspect staged changes: `git diff --cached --stat`. Confirm only intended files are present; investigate any surprise. (Inspected: the staged diff is empty under the explicit no-stage instruction.)
+- [x] Run GitNexus `detect_changes({scope: "compare", base_ref: "main"})`. Review affected symbols, processes, and modules; record in `impact/foundation-merge-detect.md`. (The cumulative foundation comparison was CRITICAL: 6,082 changed symbols across 737 files and 64 affected indexed processes; the review found that breadth consistent with the planned foundation scope.)
+- [ ] Create the foundation merge commit with ancestry preserved and capture its SHA. (Requires the separately authorized history operation.)
+- [ ] Refresh `git merge-tree --write-tree --name-only <foundation-merge-sha> e348486c` against the exact sequential inputs. Save command/output/status under `merge-previews/post-foundation-proxy/`, update `sha-ledger.md`, `conflict-checklist.md`, and any newly implicated impact reports. Do not treat the earlier feature-tip-to-feature-tip preview as the exact Phase 3 conflict list. (Requires the foundation merge SHA.)
+- [ ] Run change detection and staged-diff/marker review for those planning-only updates, then create a documentation-only checkpoint commit so Phase 3 starts clean. (Requires separate staging/commit authorization.)
 
 ### Validation Checkpoint (Phase 2 exit)
 

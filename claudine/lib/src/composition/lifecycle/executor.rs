@@ -70,6 +70,10 @@ use super::context::{
 use crate::events::GlobalSettings;
 use crate::messaging::RuntimeMessagingSettings;
 
+/// A poisoned live-frontmatter cell means a task panicked mid-stack; there is
+/// no partial document state worth recovering.
+const LIVE_POISONED: &str = "live frontmatter mutex poisoned by a panicking task";
+
 /// A resolved lifecycle control action — the runtime-flow effect a stack item
 /// requested, with every expression argument already evaluated.
 ///
@@ -174,15 +178,78 @@ impl LifecycleEventOutcome {
     }
 }
 
+/// Why an event-time lifecycle expression failed.
+///
+/// The `Err` type of the executor's expression layer: `when:` guards,
+/// interpolation, control-argument evaluation, and side-effect argument
+/// evaluation all fail through it. Every arm reaches
+/// [`LifecycleErrorInfo::from_error_or_action`], the §D9 snapshot boundary, so
+/// the typed value is projected once rather than pre-flattened into prose at
+/// each raise site.
+///
+/// Like [`MarkdownLoadCause`][super::super::error::MarkdownLoadCause], the
+/// lower-layer arms are `transparent`: they *replace* the concrete error in the
+/// chain rather than adding a hop to it, so a handler recovers the stage by
+/// downcasting to this enum and matching its arm.
+///
+/// The heavy Darkmatter members are boxed to keep the enum (and the `Result`s
+/// carrying it) small — `clippy::result_large_err` fires on these hot helpers
+/// otherwise.
+#[derive(Debug, thiserror::Error)]
+pub enum LifecycleExprError {
+    /// A parsed expression could not be evaluated.
+    #[error(transparent)]
+    Evaluate(#[from] Box<darkmatter::markdown::compose::expression::ExpressionError>),
+
+    /// Event-time interpolation (DM2 subtree compose) raised.
+    #[error(transparent)]
+    Compose(#[from] Box<darkmatter::markdown::MarkdownError>),
+
+    /// A failure the expression layer describes itself, with no lower-layer
+    /// error in hand: an undefined-variable rejection, the post-DM2 leak guard,
+    /// or a control argument of the wrong shape.
+    #[error("{0}")]
+    Prose(String),
+}
+
+impl LifecycleExprError {
+    /// Build a [`Self::Prose`] arm from anything string-shaped.
+    fn prose(message: impl Into<String>) -> Self {
+        LifecycleExprError::Prose(message.into())
+    }
+}
+
+/// A shell command that could not be started at all.
+///
+/// Distinct from a command that ran and exited non-zero: that is an exit code,
+/// reported through [`ShellRunner::run`]'s `Ok` arm. This is the failure to
+/// spawn.
+///
+/// `command` is carried so the `Display` is self-contained — the executor used
+/// to build this prose itself from an untyped runner error, which is what left
+/// the underlying [`std::io::Error`] unrecoverable.
+#[derive(Debug, thiserror::Error)]
+pub enum ShellRunError {
+    /// The shell process could not be spawned or waited on.
+    #[error("command `{command}` failed to run: {source}")]
+    Spawn {
+        /// The approved command that was attempted.
+        command: String,
+        /// The underlying spawn/wait failure.
+        #[source]
+        source: std::io::Error,
+    },
+}
+
 /// Abstraction over running an approved shell command.
 ///
 /// Lifecycle shell actions are audited against Claudine's command whitelist
 /// during pre-flight; this trait runs an already-approved command. Injectable
 /// so tests can assert command dispatch without spawning real processes.
-pub trait ShellRunner {
-    /// Run `command`. Returns the process exit code (or an error string when
-    /// the process could not be spawned at all).
-    fn run(&self, command: &str) -> Result<i32, String>;
+pub trait ShellRunner: Sync {
+    /// Run `command`. Returns the process exit code, or [`ShellRunError`] when
+    /// the process could not be spawned at all.
+    fn run(&self, command: &str) -> Result<i32, ShellRunError>;
 }
 
 /// Production [`ShellRunner`] that runs commands through the system shell.
@@ -190,9 +257,12 @@ pub trait ShellRunner {
 pub struct SystemShellRunner;
 
 impl ShellRunner for SystemShellRunner {
-    fn run(&self, command: &str) -> Result<i32, String> {
+    fn run(&self, command: &str) -> Result<i32, ShellRunError> {
         let mut cmd = system_shell_command(command);
-        let status = cmd.status().map_err(|e| e.to_string())?;
+        let status = cmd.status().map_err(|source| ShellRunError::Spawn {
+            command: command.to_string(),
+            source,
+        })?;
         Ok(status.code().unwrap_or(-1))
     }
 }
@@ -232,13 +302,28 @@ pub struct StackExecutionContext<'a> {
     /// fires" contract across events. When `None`, behavior is exactly as for a
     /// single-event caller: `frontmatter` is the only base state and stack
     /// mutations are visible intra-stack only.
-    pub live_frontmatter: Option<&'a std::cell::RefCell<Map<String, Value>>>,
+    pub live_frontmatter: Option<&'a std::sync::Mutex<Map<String, Value>>>,
+    /// The invocation-local runtime state cell.
+    ///
+    /// `live_frontmatter` is per-*attempt*; this cell spans the whole
+    /// invocation, so a `set` written by one lifecycle event survives loop
+    /// rematerialization and (from phase 8) later sequence steps. When `None`,
+    /// `set` still validates its key and mutates the intra-stack working state,
+    /// but the write is not accumulated beyond this event.
+    pub runtime_state: Option<&'a super::super::runtime_state::RuntimeState>,
     /// The `err` global snapshot (only meaningful for error-carrying events).
     pub err: Option<&'a LifecycleErrorInfo>,
     /// The `timing` global snapshot.
     pub timing: Option<&'a LifecycleTiming>,
     /// The `current` global snapshot (lazy `ctx`/`env` capture).
     pub current: Option<&'a LifecycleCurrent>,
+    /// The `group` global: a sequence group's variables, in scope only while
+    /// that group's tasks run.
+    ///
+    /// Unlike `err`/`timing`/`current`, this is not event-derived — it is a
+    /// lexical scope the group scheduler enters and leaves, which is why it
+    /// arrives as a borrowed map rather than a snapshot type.
+    pub group: Option<&'a Map<String, Value>>,
     /// Base directory for read-side expression functions and file references.
     pub base_dir: Option<&'a Path>,
     /// Base directory for `ctx.*` capture only (the launch area); when `None`,
@@ -250,6 +335,8 @@ pub struct StackExecutionContext<'a> {
     /// `None`, it falls back to a demand-driven capture rooted at
     /// `ctx_base_dir`/`base_dir`.
     pub prepared_context: Option<&'a ComposeContext>,
+    /// Immutable request snapshot used by document-authored file expressions.
+    pub file_resolution_context: Option<&'a biscuit_file::FileResolutionContext>,
     /// Darkmatter side-effect engine.
     pub effect_engine: &'a EffectEngine,
     /// Approved-shell runner.
@@ -389,6 +476,88 @@ impl StackExecutionContext<'_> {
         None
     }
 
+    /// Run one already-parsed action stack — a task's `setup:` or `teardown:`.
+    ///
+    /// A task stack has no event block of its own, so it never emits top-level
+    /// communication; only the items run. Mutations reach the live cell exactly
+    /// as they do for an event stack.
+    pub fn execute_action_stack(
+        &self,
+        items: &[super::actions::LifecycleStackItem],
+    ) -> LifecycleEventOutcome {
+        self.execute_stack(items)
+    }
+
+    /// Dispatch one action as a task's `side_effect:` primary and return the
+    /// value the effect produced.
+    ///
+    /// Only a side-effect action is executable work: the standard grammar also
+    /// admits communication and flow-control verbs, and those are rejected here
+    /// rather than silently succeeding with no effect.
+    ///
+    /// `no_error: true` keeps its dispatch-only meaning — a failed effect is
+    /// suppressed and yields `Value::Null`, while an expression-layer raise
+    /// still surfaces.
+    ///
+    /// ## Errors
+    ///
+    /// Returns the error snapshot for an unsuppressed dispatch failure, an
+    /// expression-layer raise, or a non-side-effect action.
+    pub fn dispatch_task_side_effect(
+        &self,
+        action: &LifecycleAction,
+    ) -> Result<Value, LifecycleErrorInfo> {
+        let mut working: Map<String, Value> = match self.live_frontmatter {
+            Some(cell) => cell.lock().expect(LIVE_POISONED).clone(),
+            None => self.frontmatter.clone(),
+        };
+        let result = self.dispatch_task_side_effect_inner(action, &mut working);
+        if let Some(cell) = self.live_frontmatter {
+            *cell.lock().expect(LIVE_POISONED) = working;
+        }
+        result
+    }
+
+    /// The dispatch half of [`Self::dispatch_task_side_effect`], against a
+    /// caller-owned working map.
+    fn dispatch_task_side_effect_inner(
+        &self,
+        action: &LifecycleAction,
+        working: &mut Map<String, Value>,
+    ) -> Result<Value, LifecycleErrorInfo> {
+        let dispatched = match &action.kind {
+            LifecycleActionKind::SideEffect(effect) => {
+                self.dispatch_side_effect(&effect.verb, &effect.args, working)
+            }
+            LifecycleActionKind::ExpressionFunction(func)
+                if is_known_side_effect(&func.function) =>
+            {
+                self.dispatch_side_effect(&func.function, &func.args, working)
+            }
+            _ => {
+                return Err(LifecycleErrorInfo::from_action_failure(
+                    "side_effect",
+                    "value is not a side-effect action",
+                ));
+            }
+        };
+        match dispatched {
+            Ok(value) => Ok(value),
+            Err(ActionFailure::Dispatch(info)) if action.no_error => {
+                warn!(
+                    kind = info.kind,
+                    variant = %info.variant,
+                    message = %info.msg,
+                    "task side effect errored (no_error: suppressed)"
+                );
+                Ok(Value::Null)
+            }
+            Err(failure) => Err(match failure {
+                ActionFailure::Evaluation(info) | ActionFailure::Dispatch(info) => info,
+            }),
+        }
+    }
+
     /// Return a copy of this context targeting a different lifecycle signal.
     ///
     /// Used by [`LifecycleRunGuard::execute_event`](super::lifecycle::LifecycleRunGuard::execute_event)
@@ -398,12 +567,15 @@ impl StackExecutionContext<'_> {
             signal,
             frontmatter: self.frontmatter,
             live_frontmatter: self.live_frontmatter,
+            runtime_state: self.runtime_state,
             err: self.err,
             timing: self.timing,
             current: self.current,
+            group: self.group,
             base_dir: self.base_dir,
             ctx_base_dir: self.ctx_base_dir,
             prepared_context: self.prepared_context,
+            file_resolution_context: self.file_resolution_context,
             effect_engine: self.effect_engine,
             shell_runner: self.shell_runner,
             emitter: self.emitter,
@@ -428,12 +600,15 @@ impl StackExecutionContext<'_> {
             signal: self.signal,
             frontmatter: self.frontmatter,
             live_frontmatter: self.live_frontmatter,
+            runtime_state: self.runtime_state,
             err: Some(err),
             timing: self.timing,
             current: self.current,
+            group: self.group,
             base_dir: self.base_dir,
             ctx_base_dir: self.ctx_base_dir,
             prepared_context: self.prepared_context,
+            file_resolution_context: self.file_resolution_context,
             effect_engine: self.effect_engine,
             shell_runner: self.shell_runner,
             emitter: self.emitter,
@@ -445,31 +620,65 @@ impl StackExecutionContext<'_> {
         }
     }
 
-    /// Build the event-time injected-globals layer (`err`/`timing`/`current`)
-    /// handed to Darkmatter's subtree compose and layered lookup.
-    fn injected_globals(&self) -> HashMap<String, InjectedGlobal> {
-        lifecycle_injected_globals(self.err, self.timing, self.current)
+    /// Return a copy of this context with a group's variables in scope.
+    ///
+    /// The scope lives exactly as long as the returned context: a group's
+    /// tasks read `group.*`, and the sequence step after it cannot, because it
+    /// runs against the original context.
+    pub fn with_group<'a>(
+        &'a self,
+        variables: &'a Map<String, Value>,
+    ) -> StackExecutionContext<'a> {
+        StackExecutionContext {
+            group: Some(variables),
+            ..self.with_signal(self.signal)
+        }
     }
 
-    /// Resolution context for read-side expression functions.
+    /// Redirect this context's runtime accumulation to a different cell.
     ///
-    /// Resolution order: `base_dir` (the prompt document's parent, or the
-    /// current directory when unknown) is the primary anchor for
-    /// document-authored references; the captured launch area
-    /// (`ctx_base_dir`) is the explicit fallback for caller-supplied file
-    /// references so resolution is independent of the mutated ambient
-    /// process CWD after the wrapper's `chdir`.
-    fn resolution_context(&self) -> ResolutionContext {
-        let dir = self
-            .base_dir
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."));
-        match self.ctx_base_dir {
-            Some(launch_area) => {
-                ResolutionContext::new(dir).with_file_ref_fallback_dir(launch_area.to_path_buf())
-            }
-            None => ResolutionContext::new(dir),
+    /// A parallel group member runs against a private buffer, so its lifecycle
+    /// `set` must land there rather than in the sequence's cell — otherwise the
+    /// write is visible to a sibling mid-group and the deterministic
+    /// declaration-order merge has nothing left to merge.
+    pub fn with_runtime_state<'a>(
+        &'a self,
+        runtime_state: &'a super::super::runtime_state::RuntimeState,
+    ) -> StackExecutionContext<'a> {
+        StackExecutionContext {
+            runtime_state: Some(runtime_state),
+            ..self.with_signal(self.signal)
         }
+    }
+
+    /// Build the event-time injected-globals layer (`err`/`timing`/`current`,
+    /// plus `group` inside a sequence group) handed to Darkmatter's subtree
+    /// compose and layered lookup.
+    fn injected_globals(&self) -> HashMap<String, InjectedGlobal> {
+        let mut globals = lifecycle_injected_globals(self.err, self.timing, self.current);
+        if let Some(variables) = self.group {
+            globals.insert(
+                "group".to_string(),
+                InjectedGlobal::eager(Value::Object(variables.clone())),
+            );
+        }
+        globals
+    }
+
+    /// Build resolution state for expressions authored by `source_path`.
+    ///
+    /// Implicit references resolve repository-first, then source-relative. The
+    /// launch-area `ctx_base_dir` is retained as `file_ref_fallback_dir`
+    /// diagnostic metadata; it is not a third resolution candidate. Top-level
+    /// CLI references are resolved from launch context before this executor is
+    /// entered.
+    fn resolution_context(&self) -> ResolutionContext {
+        super::super::document_expression_resolution_context(
+            self.source_path,
+            self.prepared_context,
+            self.file_resolution_context,
+            self.ctx_base_dir,
+        )
     }
 
     /// The early-binding `ctx.*`/`env.*` snapshot for this event.
@@ -520,12 +729,12 @@ impl StackExecutionContext<'_> {
 
     /// Evaluate a parsed expression at event-time against the live document
     /// state plus the injected globals, through Darkmatter's layered lookup.
-    fn eval_expr(&self, expr: &Expr, fm: &Map<String, Value>) -> Result<Value, String> {
+    fn eval_expr(&self, expr: &Expr, fm: &Map<String, Value>) -> Result<Value, LifecycleExprError> {
         let hint = ctx_scan_hint(expr);
         let state = self.build_state(fm, &hint);
         let globals = self.injected_globals();
         let lookup = LayeredLookup::new(&state, &globals, Some(self.resolution_context()));
-        evaluate(expr, &lookup).map_err(|e| e.to_string())
+        evaluate(expr, &lookup).map_err(|error| LifecycleExprError::Evaluate(Box::new(error)))
     }
 
     /// Interpolate a string's `{{ … }}` spans at event-time through Darkmatter's
@@ -541,7 +750,11 @@ impl StackExecutionContext<'_> {
     /// After resolution, the post-DM2 leak guard rejects any recognized
     /// `{{ … }}` span surviving in the result (e.g. a frontmatter value that is
     /// itself raw template text), so no raw span reaches a dispatched side effect.
-    fn resolve_string_value(&self, s: &str, fm: &Map<String, Value>) -> Result<Value, String> {
+    fn resolve_string_value(
+        &self,
+        s: &str,
+        fm: &Map<String, Value>,
+    ) -> Result<Value, LifecycleExprError> {
         let state = self.build_state(fm, s);
         let globals = self.injected_globals();
         let value = Value::String(s.to_string());
@@ -550,7 +763,7 @@ impl StackExecutionContext<'_> {
             .with_resolution_context(self.resolution_context())
             .strict()
             .compose()
-            .map_err(|e| e.to_string())?;
+            .map_err(|error| LifecycleExprError::Compose(Box::new(error)))?;
         reject_surviving_spans(resolved)
     }
 
@@ -645,14 +858,16 @@ impl StackExecutionContext<'_> {
         // Top-level fields read the live cross-event document state when present
         // so they observe frontmatter mutations made by *earlier* events in the
         // same attempt; otherwise the composed base frontmatter is used.
-        let borrowed = self.live_frontmatter.map(std::cell::RefCell::borrow);
+        let borrowed = self
+            .live_frontmatter
+            .map(|cell| cell.lock().expect(LIVE_POISONED));
         let fm = borrowed.as_deref().unwrap_or(self.frontmatter);
         self.resolve_string_value(text, fm)
             .map(|value| Some(scalar_string(&value)))
-            .map_err(|e| {
-                ActionFailure::Evaluation(LifecycleErrorInfo::from_action_failure(
+            .map_err(|error| {
+                ActionFailure::Evaluation(LifecycleErrorInfo::from_error_or_action(
                     "interpolation",
-                    e,
+                    &error,
                 ))
             })
     }
@@ -672,12 +887,12 @@ impl StackExecutionContext<'_> {
     /// already hit disk).
     fn execute_stack(&self, items: &[super::actions::LifecycleStackItem]) -> LifecycleEventOutcome {
         let mut working: Map<String, Value> = match self.live_frontmatter {
-            Some(cell) => cell.borrow().clone(),
+            Some(cell) => cell.lock().expect(LIVE_POISONED).clone(),
             None => self.frontmatter.clone(),
         };
         let outcome = self.execute_stack_inner(items, &mut working);
         if let Some(cell) = self.live_frontmatter {
-            *cell.borrow_mut() = working;
+            *cell.lock().expect(LIVE_POISONED) = working;
         }
         outcome
     }
@@ -761,7 +976,7 @@ impl StackExecutionContext<'_> {
         }
         self.eval_expr(expr, fm)
             .map(|value| is_truthy(&value))
-            .map_err(|e| LifecycleErrorInfo::from_action_failure("when", e))
+            .map_err(|error| LifecycleErrorInfo::from_error_or_action("when", &error))
     }
 
     /// Run one action, applying the `no_error` escape hatch.
@@ -821,19 +1036,21 @@ impl StackExecutionContext<'_> {
             LifecycleActionKind::LifecycleControl(control) => self
                 .resolve_control(control, working)
                 .map(Some)
-                .map_err(|msg| {
-                    ActionFailure::Evaluation(LifecycleErrorInfo::from_action_failure(
+                .map_err(|error| {
+                    ActionFailure::Evaluation(LifecycleErrorInfo::from_error_or_action(
                         control.verb(),
-                        msg,
+                        &error,
                     ))
                 }),
             LifecycleActionKind::Communication(comm) => {
-                let message = self.render_message(&comm.message, working).map_err(|msg| {
-                    ActionFailure::Evaluation(LifecycleErrorInfo::from_action_failure(
-                        comm.channel.verb(),
-                        msg,
-                    ))
-                })?;
+                let message = self
+                    .render_message(&comm.message, working)
+                    .map_err(|error| {
+                        ActionFailure::Evaluation(LifecycleErrorInfo::from_error_or_action(
+                            comm.channel.verb(),
+                            &error,
+                        ))
+                    })?;
                 // Deferred effect validation (C4): an `effect` positional
                 // action's name is only known after interpolation, so validate
                 // the resolved name before dispatch. The interpolation already
@@ -862,10 +1079,10 @@ impl StackExecutionContext<'_> {
                 }
                 self.invoke_expression_function(&func.function, &func.args, working)
                     .map(|_| None)
-                    .map_err(|msg| {
-                        ActionFailure::Evaluation(LifecycleErrorInfo::from_action_failure(
+                    .map_err(|error| {
+                        ActionFailure::Evaluation(LifecycleErrorInfo::from_error_or_action(
                             func.function.clone(),
-                            msg,
+                            &error,
                         ))
                     })
             }
@@ -884,9 +1101,15 @@ impl StackExecutionContext<'_> {
     /// a genuinely-unknown frontmatter root — a typo — errors before dispatch
     /// rather than evaluating leniently to `null`/empty, matching the `when:`
     /// guard. A *known* root resolving to `null`/empty still renders empty.
-    fn render_message(&self, expr: &Expr, fm: &Map<String, Value>) -> Result<String, String> {
+    fn render_message(
+        &self,
+        expr: &Expr,
+        fm: &Map<String, Value>,
+    ) -> Result<String, LifecycleExprError> {
         if let Some(variable) = first_undefined_stack_variable(expr, Some(fm)) {
-            return Err(format!("references undefined variable `{variable}`"));
+            return Err(LifecycleExprError::prose(format!(
+                "references undefined variable `{variable}`"
+            )));
         }
         let value = self.eval_expr(expr, fm)?;
         let rendered = scalar_string(&value);
@@ -930,8 +1153,8 @@ impl StackExecutionContext<'_> {
         shell: &super::actions::ShellAction,
         fm: &Map<String, Value>,
     ) -> Result<(), ActionFailure> {
-        let command = self.render_message(&shell.command, fm).map_err(|msg| {
-            ActionFailure::Evaluation(LifecycleErrorInfo::from_action_failure("shell", msg))
+        let command = self.render_message(&shell.command, fm).map_err(|error| {
+            ActionFailure::Evaluation(LifecycleErrorInfo::from_error_or_action("shell", &error))
         })?;
         match self.shell_runner.run(&command) {
             Ok(0) => Ok(()),
@@ -946,11 +1169,11 @@ impl StackExecutionContext<'_> {
                     format!("command `{command}` exited with code {code}"),
                 )))
             }
+            // `ShellRunError` owns the "command `…` failed to run: …" prose, so
+            // the snapshot projects it rather than the executor rebuilding it
+            // around an untyped runner error.
             Err(spawn_err) => Err(ActionFailure::Dispatch(
-                LifecycleErrorInfo::from_action_failure(
-                    "shell",
-                    format!("command `{command}` failed to run: {spawn_err}"),
-                ),
+                LifecycleErrorInfo::from_error_or_action("shell", &spawn_err),
             )),
         }
     }
@@ -982,9 +1205,9 @@ impl StackExecutionContext<'_> {
                 }
                 Ok(value)
             })
-            .collect::<Result<Vec<_>, String>>()
-            .map_err(|msg| {
-                ActionFailure::Evaluation(LifecycleErrorInfo::from_action_failure(verb, msg))
+            .collect::<Result<Vec<_>, LifecycleExprError>>()
+            .map_err(|error| {
+                ActionFailure::Evaluation(LifecycleErrorInfo::from_error_or_action(verb, &error))
             })?;
         // From here on, an error is a side-effect dispatch failure (a missing
         // argument, an unknown verb, or an effect-engine error).
@@ -1003,6 +1226,22 @@ impl StackExecutionContext<'_> {
                 .cloned()
                 .ok_or_else(|| dispatch_err(format!("`{verb}` is missing a required argument")))
         };
+
+        // `set` is the in-memory counterpart of `set_frontmatter`: it targets
+        // the runtime mutation layer rather than a file, so it takes
+        // `(key, value)` instead of `(file, prop, value)` and never reaches the
+        // effect engine's path-based verbs below.
+        if verb == "set" {
+            let key = s(0)?;
+            let value = v(1)?;
+            let prior = self
+                .apply_runtime_set(&key, value.clone(), working)
+                .map_err(|error| {
+                    ActionFailure::Dispatch(LifecycleErrorInfo::from_error_or_action(verb, &error))
+                })?;
+            working.insert(key, value);
+            return Ok(prior);
+        }
 
         let result = match verb {
             "set_frontmatter" => engine.set_frontmatter(&s(0)?, &s(1)?, v(2)?),
@@ -1025,9 +1264,34 @@ impl StackExecutionContext<'_> {
             "http_post" => engine.http_post(&s(0)?, s(1)?.into_bytes()),
             other => return Err(dispatch_err(format!("unknown side effect `{other}`"))),
         };
-        let out = result.map_err(|e| dispatch_err(e.to_string()))?;
+        // The effect engine's error is the §D9 snapshot boundary's input: hand
+        // it over typed so the projection reads it, rather than pre-flattening
+        // it here and handing the snapshot prose.
+        let out = result.map_err(|error| {
+            ActionFailure::Dispatch(LifecycleErrorInfo::from_error_or_action(verb, &error))
+        })?;
         self.mirror_frontmatter_mutation(verb, &values, working);
         Ok(out)
+    }
+
+    /// Apply one `set` write to the invocation-local runtime layer and report
+    /// the value it replaced.
+    ///
+    /// Without a runtime cell the write is still key-checked — an author must
+    /// get the same typed refusal for `set: [outputs, …]` whether or not the
+    /// caller wired an accumulator — and the prior value is read from the
+    /// caller's working state.
+    fn apply_runtime_set(
+        &self,
+        key: &str,
+        value: Value,
+        working: &Map<String, Value>,
+    ) -> Result<Value, super::super::runtime_state::RuntimeMutationError> {
+        let state = match self.runtime_state {
+            Some(state) => return state.set(self.effect_engine, key, value, working),
+            None => super::super::runtime_state::RuntimeState::new(),
+        };
+        state.set(self.effect_engine, key, value, working)
     }
 
     /// Mirror a successful frontmatter-verb mutation onto the in-memory
@@ -1116,7 +1380,7 @@ impl StackExecutionContext<'_> {
         function: &str,
         args: &[Expr],
         fm: &Map<String, Value>,
-    ) -> Result<Value, String> {
+    ) -> Result<Value, LifecycleExprError> {
         let call = Expr::FunctionCall {
             name: function.to_string(),
             args: args.to_vec(),
@@ -1136,7 +1400,7 @@ impl StackExecutionContext<'_> {
         &self,
         control: &LifecycleControlAction,
         fm: &Map<String, Value>,
-    ) -> Result<StackControl, String> {
+    ) -> Result<StackControl, LifecycleExprError> {
         use LifecycleControlAction as C;
         Ok(match control {
             C::Stop => StackControl::Stop,
@@ -1177,7 +1441,7 @@ impl StackExecutionContext<'_> {
         &self,
         expr: Option<&Expr>,
         fm: &Map<String, Value>,
-    ) -> Result<Option<String>, String> {
+    ) -> Result<Option<String>, LifecycleExprError> {
         match expr {
             Some(expr) => Ok(Some(self.render_message(expr, fm)?)),
             None => Ok(None),
@@ -1189,16 +1453,18 @@ impl StackExecutionContext<'_> {
         &self,
         expr: Option<&Expr>,
         fm: &Map<String, Value>,
-    ) -> Result<Option<u32>, String> {
+    ) -> Result<Option<u32>, LifecycleExprError> {
         let Some(expr) = expr else {
             return Ok(None);
         };
         let value = self.eval_expr(expr, fm)?;
         let n = value
             .as_f64()
-            .ok_or_else(|| format!("expected a number, got {value}"))?;
+            .ok_or_else(|| LifecycleExprError::prose(format!("expected a number, got {value}")))?;
         if n < 0.0 || n.fract() != 0.0 {
-            return Err(format!("expected a non-negative whole number, got {n}"));
+            return Err(LifecycleExprError::prose(format!(
+                "expected a non-negative whole number, got {n}"
+            )));
         }
         Ok(Some(n as u32))
     }
@@ -1263,12 +1529,12 @@ fn collect_variable_paths(expr: &Expr, paths: &mut Vec<String>) {
 /// holds literal template text (e.g. `set_frontmatter` stored `"{{x}}"`). This
 /// catches that surviving span before the string reaches a side effect, so no
 /// messenger/TTS/sound/stderr/stdout/notify dispatch ever sends raw syntax.
-fn reject_surviving_spans(value: Value) -> Result<Value, String> {
+fn reject_surviving_spans(value: Value) -> Result<Value, LifecycleExprError> {
     if let Value::String(s) = &value {
         if !ExpressionFinder::find_all_plain(s).is_empty() {
-            return Err(format!(
+            return Err(LifecycleExprError::prose(format!(
                 "unresolved interpolation survived event-time resolution: `{s}`"
-            ));
+            )));
         }
     }
     Ok(value)

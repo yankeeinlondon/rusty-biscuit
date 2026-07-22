@@ -44,6 +44,17 @@ use super::{
 use super::exec::switch_process_cwd;
 use crate::log;
 
+/// Remediation for an unresolvable lifecycle `proxy(...)` target.
+///
+/// Names the shared `FileReference` grammar `resolve_harness_path` delegates
+/// to, so the hint stays accurate to the contract rather than to one failure's
+/// text.
+pub(crate) const PROXY_TARGET_HINT: &str =
+    "A `proxy` target must name an existing Markdown document: an absolute path, \
+     an explicit `./` or `../` path relative to the document that declares it, a \
+     bare path (tried at the repository root first, then next to the document), \
+     `@`-prefixed for a magic-root search, or `~`-prefixed for a home path.";
+
 pub(crate) mod dry_run;
 pub(crate) mod launch;
 mod preflight;
@@ -103,6 +114,15 @@ pub(crate) struct SingleCompositionOutcome {
     /// Used by the loop engine to apply `fail_fast` semantics and to sequence
     /// the post-`finalize` loop gate.
     pub terminal_signal: Option<LifecycleSignal>,
+    /// The entry this execution committed to `outputs`, when it committed one.
+    ///
+    /// The provider's final assistant text as identified by the semantic stream
+    /// pipeline (or the capture-path parsed output), decoded with the same
+    /// invalid-byte policy as every other wrapped execution and stripped of one
+    /// trailing transport newline. Terminal status rendering, stderr, lifecycle
+    /// messages, and protocol records are never part of it. `None` for a
+    /// dry-run, a `skip`, or a failed run — a failure commits no entry.
+    pub final_output: Option<String>,
 }
 
 /// Execute a composition request through the wrapper-grade pipeline.

@@ -675,10 +675,10 @@ fn path_label(path: &Path, ctx: &ScopeContext) -> String {
 
 fn resolve_file_value(path: &Path) -> io::Result<serde_json::Value> {
     let reference = FileReference::new(path.to_str().unwrap_or(""))
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
     let resolved = reference
         .resolve()
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?
         .ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::NotFound,

@@ -38,8 +38,7 @@ fn kinds(events: &[SemanticEvent]) -> Vec<&'static str> {
 fn thread_started_emits_session_start() {
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"thread.started","thread_id":"thrd-1"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"thread.started","thread_id":"thrd-1"}"#);
     let collected = events.lock().unwrap().clone();
     assert!(matches!(
         collected[0],
@@ -51,12 +50,11 @@ fn thread_started_emits_session_start() {
 #[test]
 fn turn_lifecycle_emits_turn_start_and_complete() {
     let (events, mut parser) = new_parser();
-    parser.feed_line(r#"{"type":"turn.started"}"#).unwrap();
+    parser.feed_line(r#"{"type":"turn.started"}"#);
     parser
         .feed_line(
             r#"{"type":"turn.completed","usage":{"input_tokens":100,"output_tokens":50},"duration_ms":1200,"status":"completed"}"#,
-        )
-        .unwrap();
+        );
     let ks = kinds(&events.lock().unwrap());
     assert_eq!(ks, vec!["turn_start", "turn_complete"]);
 
@@ -72,8 +70,7 @@ fn reasoning_item_emits_reasoning_event() {
     parser
         .feed_line(
             r#"{"type":"item.completed","item":{"id":"r1","type":"reasoning","text":"long thought"}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     assert!(matches!(
         collected[0],
@@ -87,8 +84,7 @@ fn item_updated_reasoning_emits_reasoning_event() {
     parser
         .feed_line(
             r#"{"type":"item.updated","item":{"id":"r1","type":"reasoning","text":"still thinking"}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     match &collected[0] {
         SemanticEvent::Reasoning { text, .. } => assert_eq!(text, "still thinking"),
@@ -102,8 +98,7 @@ fn item_updated_todo_list_emits_plan_update() {
     parser
         .feed_line(
             r#"{"type":"item.updated","item":{"id":"p1","type":"todo_list","message":"step 2 done"}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     match &collected[0] {
         SemanticEvent::PlanUpdate { message, .. } => {
@@ -119,8 +114,7 @@ fn item_updated_command_execution_is_suppressed() {
     parser
         .feed_line(
             r#"{"type":"item.updated","item":{"id":"cmd1","type":"command_execution","command":"make","aggregated_output":"partial"}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     assert!(
         collected.is_empty(),
@@ -132,8 +126,7 @@ fn item_updated_command_execution_is_suppressed() {
 fn item_updated_unknown_item_is_suppressed() {
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"item.updated","item":{"id":"x1","type":"brand_new_kind"}}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"item.updated","item":{"id":"x1","type":"brand_new_kind"}}"#);
     let collected = events.lock().unwrap().clone();
     assert!(
         collected.is_empty(),
@@ -147,8 +140,7 @@ fn file_change_item_emits_file_change_event() {
     parser
         .feed_line(
             r#"{"type":"item.completed","item":{"id":"f1","type":"file_change","path":"src/lib.rs","change_kind":"modified"}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     match &collected[0] {
         SemanticEvent::FileChange {
@@ -167,8 +159,7 @@ fn file_change_item_fans_out_per_changes_entry() {
     parser
         .feed_line(
             r#"{"type":"item.completed","item":{"id":"f1","type":"file_change","changes":[{"path":"src/lib.rs","kind":"update"},{"path":"tests/smoke.rs","kind":"add"}],"status":"completed"}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     let file_changes: Vec<_> = collected
         .iter()
@@ -192,8 +183,7 @@ fn file_change_item_fans_out_per_changes_entry() {
 fn file_change_item_without_path_or_kind_is_suppressed() {
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"item.started","item":{"id":"f1","type":"file_change"}}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"item.started","item":{"id":"f1","type":"file_change"}}"#);
     let collected = events.lock().unwrap().clone();
     assert!(
         !collected
@@ -209,8 +199,7 @@ fn plan_update_item_emits_plan_update_event() {
     parser
         .feed_line(
             r#"{"type":"item.completed","item":{"id":"p1","type":"plan_update","message":"Step 2 of 5"}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     match &collected[0] {
         SemanticEvent::PlanUpdate { message, .. } => {
@@ -226,8 +215,7 @@ fn todo_list_routed_as_plan_update() {
     parser
         .feed_line(
             r#"{"type":"item.completed","item":{"id":"t1","type":"todo_list","title":"next steps"}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     assert!(matches!(collected[0], SemanticEvent::PlanUpdate { .. }));
 }
@@ -239,14 +227,12 @@ fn command_execution_status_and_exit_code_preserved() {
     parser
         .feed_line(
             r#"{"type":"item.started","item":{"id":"cmd1","type":"command_exec","tool_name":"bash","input":{"command":"false"}}}"#,
-        )
-        .unwrap();
+        );
     // Completed: brings status + exit_code
     parser
         .feed_line(
             r#"{"type":"item.completed","item":{"id":"cmd1","type":"command_exec","status":"failure","exit_code":1,"output":"boom"}}"#,
-        )
-        .unwrap();
+        );
 
     let collected = events.lock().unwrap().clone();
     let ks = kinds(&collected);
@@ -275,18 +261,15 @@ fn codex_command_execution_populates_tool_call_and_result_fields() {
     // just inside `extra`). Locks the contract for every tool-item type.
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"thread.started","thread_id":"th-1"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"thread.started","thread_id":"th-1"}"#);
     parser
         .feed_line(
             r#"{"type":"item.started","item":{"id":"cmd1","type":"command_execution","tool_name":"bash","input":{"command":"ls"}}}"#,
-        )
-        .unwrap();
+        );
     parser
         .feed_line(
             r#"{"type":"item.completed","item":{"id":"cmd1","type":"command_execution","tool_name":"bash","status":"success","exit_code":0,"output":"file.txt"}}"#,
-        )
-        .unwrap();
+        );
 
     let evs = events.lock().unwrap().clone();
 
@@ -331,8 +314,7 @@ fn permission_request_emits_permission_request_event() {
     parser
         .feed_line(
             r#"{"type":"item.started","item":{"id":"perm-1","type":"permission_request","name":"bash"}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     assert!(matches!(
         collected[0],
@@ -349,8 +331,7 @@ fn user_input_request_increments_separate_counter() {
     parser
         .feed_line(
             r#"{"type":"item.started","item":{"id":"inp-1","type":"user_input_request","name":"clarify"}}"#,
-        )
-        .unwrap();
+        );
     assert_eq!(kinds(&events.lock().unwrap()), vec!["permission_request"]);
     let summary = parser.finish(0);
     assert_eq!(summary.user_input_prompts, Some(1));
@@ -363,8 +344,7 @@ fn error_event_marks_summary_and_emits_error() {
     parser
         .feed_line(
             r#"{"type":"error","error_type":"rate_limit","error_message":"Too many requests"}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     assert!(matches!(
         collected[0],
@@ -425,8 +405,7 @@ fn turn_failed_capacity_message_maps_to_api_remote() {
     parser
         .feed_line(
             r#"{"type":"turn.failed","error":{"message":"Selected model is at capacity. Please try a different model."}}"#,
-        )
-        .unwrap();
+        );
 
     let collected = events.lock().unwrap().clone();
     match &collected[0] {
@@ -443,8 +422,7 @@ fn capacity_related_prose_does_not_match_narrow_codex_needle() {
     parser
         .feed_line(
             r#"{"type":"turn.failed","error":{"message":"Capacity planning completed for the selected model."}}"#,
-        )
-        .unwrap();
+        );
 
     let collected = events.lock().unwrap().clone();
     match &collected[0] {
@@ -469,8 +447,7 @@ fn error_event_carries_typed_kind_in_semantic_event() {
     _parser
         .feed_line(
             r#"{"type":"error","error_type":"rate_limit","error_message":"Too many requests"}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     match &collected[0] {
         SemanticEvent::Error { kind, .. } => {
@@ -490,13 +467,11 @@ fn duplicate_terminal_errors_are_deduplicated() {
     parser
         .feed_line(
             r#"{"type":"turn.failed","error":{"type":"rate_limit","message":"You've hit your usage limit."}}"#,
-        )
-        .unwrap();
+        );
     parser
         .feed_line(
             r#"{"type":"error","error_type":"rate_limit","error_message":"You've hit your usage limit."}"#,
-        )
-        .unwrap();
+        );
     let error_count = events
         .lock()
         .unwrap()
@@ -515,13 +490,11 @@ fn distinct_terminal_errors_are_both_emitted() {
     parser
         .feed_line(
             r#"{"type":"stream.error","error":{"type":"network","message":"socket closed"}}"#,
-        )
-        .unwrap();
+        );
     parser
         .feed_line(
             r#"{"type":"error","error_type":"rate_limit","error_message":"Too many requests"}"#,
-        )
-        .unwrap();
+        );
     let error_count = events
         .lock()
         .unwrap()
@@ -537,8 +510,7 @@ fn agent_message_accumulates_text_without_emitting_output() {
     parser
         .feed_line(
             r#"{"type":"item.completed","item":{"id":"a1","type":"agent_message","text":"hello from stream"}}"#,
-        )
-        .unwrap();
+        );
     let ks = kinds(&events.lock().unwrap());
     // No OutputText (file-based text source owns that), and no
     // ProviderExtension leak — the raw JSONL log preserves the event.
@@ -552,8 +524,7 @@ fn agent_message_accumulates_text_without_emitting_output() {
 fn unknown_top_level_event_becomes_provider_extension() {
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"future.event.kind","payload":{"k":1}}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"future.event.kind","payload":{"k":1}}"#);
     let collected = events.lock().unwrap().clone();
     match &collected[0] {
         SemanticEvent::ProviderExtension {
@@ -572,9 +543,8 @@ fn unknown_top_level_event_becomes_provider_extension() {
 #[test]
 fn malformed_json_emits_warning_and_continues() {
     let (events, mut parser) = new_parser();
-    let result = parser.feed_line("not json");
-    assert!(result.is_ok());
-    parser.feed_line(r#"{"type":"turn.started"}"#).unwrap();
+    parser.feed_line("not json");
+    parser.feed_line(r#"{"type":"turn.started"}"#);
     let ks = kinds(&events.lock().unwrap());
     assert_eq!(ks, vec!["warning", "turn_start"]);
 }
@@ -583,13 +553,11 @@ fn malformed_json_emits_warning_and_continues() {
 fn top_level_tool_use_and_result() {
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"item.tool_use","name":"bash","input":{"cmd":"ls"}}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"item.tool_use","name":"bash","input":{"cmd":"ls"}}"#);
     parser
         .feed_line(
             r#"{"type":"item.tool_result","name":"bash","status":"success","exit_code":0}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     assert_eq!(kinds(&collected), vec!["tool_call", "tool_result"]);
     match &collected[1] {
@@ -606,8 +574,8 @@ fn top_level_tool_use_and_result() {
 #[test]
 fn empty_lines_emit_nothing() {
     let (events, mut parser) = new_parser();
-    parser.feed_line("").unwrap();
-    parser.feed_line("   ").unwrap();
+    parser.feed_line("");
+    parser.feed_line("   ");
     assert!(events.lock().unwrap().is_empty());
 }
 
@@ -625,7 +593,7 @@ fn round_trip_fidelity_mixed_fixture() {
         r#"{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":5},"duration_ms":42,"status":"completed"}"#,
         r#"{"type":"future.unknown","k":1}"#,
     ] {
-        parser.feed_line(line).unwrap();
+        parser.feed_line(line);
     }
     for event in events.lock().unwrap().iter() {
         let v = serde_json::to_value(event).unwrap();
@@ -639,11 +607,9 @@ fn round_trip_fidelity_mixed_fixture() {
 fn codex_fixture_command_execution_routes_to_tool_pair() {
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"item.started","item":{"id":"cmd1","type":"command_execution","command":"ls","aggregated_output":""}}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"item.started","item":{"id":"cmd1","type":"command_execution","command":"ls","aggregated_output":""}}"#);
     parser
-        .feed_line(r#"{"type":"item.completed","item":{"id":"cmd1","type":"command_execution","command":"ls","aggregated_output":"file.txt\n","exit_code":0,"status":"success"}}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"item.completed","item":{"id":"cmd1","type":"command_execution","command":"ls","aggregated_output":"file.txt\n","exit_code":0,"status":"success"}}"#);
 
     let captured = events.lock().unwrap().clone();
     let ks = kinds(&captured);
@@ -683,8 +649,7 @@ fn codex_fixture_command_execution_routes_to_tool_pair() {
 fn codex_fixture_agent_message_does_not_leak_as_provider_extension() {
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"Looking at the repo..."}}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"Looking at the repo..."}}"#);
 
     let captured = events.lock().unwrap().clone();
     let ks = kinds(&captured);
@@ -703,14 +668,12 @@ fn codex_fixture_full_replay_produces_no_provider_extensions() {
     .expect("codex.ndjson must exist — Task 1 should have created it");
 
     let (events, mut parser) = new_parser();
-    for (i, line) in fixture.lines().enumerate() {
+    for line in fixture.lines() {
         let line = line.trim();
         if line.is_empty() {
             continue;
         }
-        parser
-            .feed_line(line)
-            .unwrap_or_else(|e| panic!("line {}: {:?}", i + 1, e));
+        parser.feed_line(line);
     }
 
     let captured = events.lock().unwrap().clone();
@@ -733,8 +696,7 @@ fn badges_derived_on_rate_limit_error() {
     parser
         .feed_line(
             r#"{"type":"error","error_type":"rate_limit","error_message":"Too many requests"}"#,
-        )
-        .unwrap();
+        );
     let summary = parser.finish(1);
     assert_eq!(summary.badges.len(), 1);
     assert_eq!(
@@ -751,11 +713,9 @@ fn tool_call_extra_includes_status_when_present_on_started() {
     // the symmetric behavior.
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"thread.started","thread_id":"th-1"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"thread.started","thread_id":"th-1"}"#);
     parser
-        .feed_line(r#"{"type":"item.started","item":{"id":"cmd1","type":"command_execution","tool_name":"bash","status":"in_progress","input":{"command":"ls"}}}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"item.started","item":{"id":"cmd1","type":"command_execution","tool_name":"bash","status":"in_progress","input":{"command":"ls"}}}"#);
     let call = events
         .lock()
         .unwrap()
@@ -775,7 +735,7 @@ fn tool_call_extra_includes_status_when_present_on_started() {
 #[test]
 fn missing_discriminator_falls_through_to_provider_extension() {
     let (events, mut parser) = new_parser();
-    parser.feed_line(r#"{"payload":{"k":1}}"#).unwrap();
+    parser.feed_line(r#"{"payload":{"k":1}}"#);
     let collected = events.lock().unwrap().clone();
     assert_eq!(collected.len(), 1);
     match &collected[0] {
@@ -796,8 +756,7 @@ fn missing_discriminator_falls_through_to_provider_extension() {
 fn tool_input_string_fallback_parses_without_panic() {
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"item.tool_use","name":"bash","input":"ls -la"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"item.tool_use","name":"bash","input":"ls -la"}"#);
     let collected = events.lock().unwrap().clone();
     assert_eq!(kinds(&collected), vec!["tool_call"]);
     match &collected[0] {
@@ -811,9 +770,8 @@ fn tool_input_string_fallback_parses_without_panic() {
 #[test]
 fn truncated_json_line_emits_warning_and_continues() {
     let (events, mut parser) = new_parser();
-    let result = parser.feed_line(r#"{"type":"turn.started"#);
-    assert!(result.is_ok());
-    parser.feed_line(r#"{"type":"turn.started"}"#).unwrap();
+    parser.feed_line(r#"{"type":"turn.started"#);
+    parser.feed_line(r#"{"type":"turn.started"}"#);
     let ks = kinds(&events.lock().unwrap());
     assert_eq!(ks, vec!["warning", "turn_start"]);
 }

@@ -83,6 +83,26 @@ shell-words = "1"
 # Enum variant-name reflection for the render dispatch-table completeness test
 strum = { version = "0.28", features = ["derive"] }
 
+[target.'cfg(unix)'.dependencies]
+# Process-group termination for task shell commands: `kill(-pgid, …)` is the
+# only way to reach descendants a command backgrounded (see
+# `composition/sequence/task/shell.rs`).
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+# Job Object ownership of a task shell command's process tree, mirroring the
+# CLI wrap path. No `Win32_System_Console`: this path terminates the Job
+# directly and sends no console control events.
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+    # Thread enumeration for the suspended-spawn → Job-assign → resume
+    # sequence: std exposes no thread handle, so the initial thread is found
+    # via a Toolhelp snapshot (see `composition/sequence/task/shell.rs`).
+    "Win32_System_Diagnostics_ToolHelp",
+] }
+
 [dev-dependencies]
 tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros", "sync", "time"] }
 serial_test = "3"

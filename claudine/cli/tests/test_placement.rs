@@ -1,6 +1,9 @@
-//! Structural analyzer for Claudine's inline-test placement convention.
+//! Structural analyzers for Claudine's test-placement conventions.
 //!
-//! The repository assertion is a Level 1 hard gate for Claudine's package area.
+//! Two Level 1 hard gates for Claudine's package area:
+//!
+//! - inline `#[cfg(test)]` modules must stay under a line budget, and
+//! - focus-stealing terminal APIs must stay inside `level3_*` files.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -19,6 +22,27 @@ const SOURCE_ROOTS: &[&str] = &[
     "rendezvous/client/src",
     "rendezvous/daemon/src",
 ];
+
+const TEST_ROOTS: &[&str] = &[
+    "cli/tests",
+    "lib/tests",
+    "contract/tests",
+    "gen/tests",
+    "rendezvous/client/tests",
+    "rendezvous/daemon/tests",
+];
+
+/// Harness APIs that place a GUI terminal window in front of the user's own.
+///
+/// `SpawnVisibility::Foreground` skips WezTerm's off-screen `biscuit-bg`
+/// workspace (and Kitty's `--keep-focus`); `focus_spawned_pane` then AXRaises
+/// that window and polls until it is the frontmost macOS application. Both are
+/// prerequisites for OS keyboard injection, which delivers to whatever app owns
+/// focus — and both are therefore hostile to anyone using the machine while the
+/// suite runs. Confining them to `level3_*` keeps them behind the `level3_`
+/// nextest filterset and the `RUN_LEVEL3=1` opt-in, so `just test` and
+/// `just test-l2` can never take focus.
+const FOCUS_STEALING_APIS: &[&str] = &["SpawnVisibility::Foreground", "focus_spawned_pane"];
 
 struct Exception {
     path: &'static str,
@@ -529,6 +553,99 @@ fn report(violations: &[Violation]) -> String {
          inline-tests-only={tests_only})\n{details}",
         violations.len()
     )
+}
+
+/// Names the focus-stealing APIs used in `source` as executable code.
+///
+/// Runs against [`sanitize`]d bytes so the module docs of the legitimate
+/// `level3_*` tests — which name these APIs while explaining why they need
+/// them — do not register as uses.
+fn focus_stealing_apis(source: &str) -> Vec<&'static str> {
+    let code = String::from_utf8_lossy(&sanitize(source)).into_owned();
+    FOCUS_STEALING_APIS
+        .iter()
+        .filter(|api| code.contains(**api))
+        .copied()
+        .collect()
+}
+
+fn is_level3_file(relative: &str) -> bool {
+    relative
+        .rsplit('/')
+        .next()
+        .is_some_and(|name| name.starts_with("level3_"))
+}
+
+fn scan_focus_stealing(area_root: &Path) -> Result<Vec<String>, String> {
+    let mut files = Vec::new();
+    for root in TEST_ROOTS {
+        let directory = area_root.join(root);
+        if !directory.exists() {
+            continue;
+        }
+        collect_rust_files(&directory, &mut files)
+            .map_err(|error| format!("failed to scan {root}: {error}"))?;
+    }
+    files.sort();
+
+    let mut violations = Vec::new();
+    for file in files {
+        let relative = normalized(file.strip_prefix(area_root).map_err(|error| error.to_string())?);
+        if is_level3_file(&relative) {
+            continue;
+        }
+        let source = fs::read_to_string(&file)
+            .map_err(|error| format!("failed to read {relative}: {error}"))?;
+        let used = focus_stealing_apis(&source);
+        if !used.is_empty() {
+            violations.push(format!("{relative}: {}", used.join(", ")));
+        }
+    }
+    Ok(violations)
+}
+
+// Test names must not contain `level3_`: the L1 and L2 filtersets exclude
+// `test(/level3_/)` by substring, so such a name silently skips itself out of
+// every recipe that would run it.
+#[test]
+fn focus_stealing_apis_stay_in_keyboard_tier_files() {
+    let area_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("CLI crate should be inside the Claudine package area");
+    let violations = scan_focus_stealing(area_root).expect("focus-stealing scan");
+    assert!(
+        violations.is_empty(),
+        "focus-stealing harness APIs outside a `level3_` file — these raise a GUI \
+         terminal over the user's own window and run under `just test` / \
+         `just test-l2`, which carry no `RUN_LEVEL3=1` opt-in. Drive the terminal \
+         headlessly (`TmuxHarness`, or `WezTermHarness` at its default \
+         `SpawnVisibility::Background`), or rename the file to `level3_*`:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
+fn focus_stealing_detection_ignores_comments_and_honors_tier_naming() {
+    assert!(is_level3_file("cli/tests/level3_wrap_ctrl_c.rs"));
+    assert!(!is_level3_file("cli/tests/level2_perf_capture.rs"));
+    assert!(!is_level3_file("cli/tests/sequence_overlay_pty.rs"));
+
+    // A module doc naming the API is how the legitimate L3 tests explain
+    // themselves; only executable use counts.
+    assert!(
+        focus_stealing_apis("//! Pairs `SpawnVisibility::Foreground` with `focus_spawned_pane`.\n")
+            .is_empty()
+    );
+    assert_eq!(
+        focus_stealing_apis(
+            "let h = WezTermHarness::new().with_spawn_visibility(SpawnVisibility::Foreground);\n"
+        ),
+        ["SpawnVisibility::Foreground"]
+    );
+    assert_eq!(
+        focus_stealing_apis("let coords = harness.focus_spawned_pane().unwrap();\n"),
+        ["focus_spawned_pane"]
+    );
 }
 
 #[test]

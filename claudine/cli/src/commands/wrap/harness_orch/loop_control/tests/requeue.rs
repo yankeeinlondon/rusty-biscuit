@@ -19,6 +19,9 @@ fn requeue_prompt_state(source: &Path) -> HarnessPromptState {
         next_prompt_override: None,
         next_resume_session_id: None,
         rematerialize: Default::default(),
+        runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
+        suppress_output_commit: false,
+        last_final_output: None,
     }
 }
 
@@ -32,7 +35,9 @@ fn requeue_materialized(prompt: &str) -> MaterializedHarnessPrompt {
         prompt: prompt.to_string(),
         env_overrides: Vec::new(),
         inline_closure_plan: None,
+        file_resolution_context: None,
         live_frontmatter,
+        runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
     }
 }
 
@@ -236,4 +241,3 @@ async fn enqueue_requeue_entry_falls_back_when_endpoint_override_is_empty() {
     let contents = std::fs::read_to_string(&fallback_path).expect("fallback file written");
     assert_eq!(contents.lines().count(), 1);
 }
-

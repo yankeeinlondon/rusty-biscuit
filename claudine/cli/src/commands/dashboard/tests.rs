@@ -235,9 +235,10 @@ fn report_html_fragment_carries_the_figures() {
 /// then drive the command's own `fetch_snapshot` against it. Guards the
 /// RPC-response → fold field mapping the unit tests above stub out.
 ///
-/// Unix-only: spawns the real `rendezvous-daemon`, a `cfg(unix)`-gated
-/// dev-dependency (its server binds a `UnixListener`). The Windows
-/// named-pipe daemon server is a tracked follow-up.
+/// Spawns the real `rendezvous-daemon`, which is not a dev-dependency on
+/// `x86_64-pc-windows-gnu` — its bundled `duckdb` cannot clear GNU `as`' COFF
+/// section cap. See the gate comment in `claudine/cli/Cargo.toml`.
+#[cfg(not(all(windows, target_env = "gnu")))]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fetch_snapshot_reflects_a_live_session() {
     use rendezvous_core::local_endpoint::test_support::private_endpoint;

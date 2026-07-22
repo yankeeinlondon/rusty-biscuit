@@ -81,6 +81,8 @@ pub fn scan_removed_validation_keys(
 ///   deserialize (typically an unknown field).
 /// - [`CompositionError::LifecycleStackInvalidShape`]: A stack item is
 ///   malformed (not an object, missing `action`, unknown key).
+/// - [`CompositionError::LifecycleWhenExpressionInvalid`]: A stack item's
+///   `when:` clause is not a valid condition expression.
 /// - [`CompositionError::LifecycleActionInvalidShortForm`] /
 ///   [`CompositionError::LifecycleActionInvalidLongForm`]: An action could
 ///   not be parsed.
@@ -276,6 +278,74 @@ fn parse_event_block(
     Ok((notification, typed_stack))
 }
 
+/// Parse a task's `setup:` / `teardown:` value into a typed action stack.
+///
+/// A task stack is the same grammar as a lifecycle event's `stack:` — a list of
+/// `{when?, action, no_error?}` items — with no surrounding event block, so this
+/// is the entry point for callers that hold the bare list. `property` names the
+/// authoring key in diagnostics (`setup` / `teardown`).
+///
+/// ## Errors
+///
+/// Returns the same [`CompositionError`] shape-violation family
+/// [`parse_lifecycle_config`] raises for an event stack, plus
+/// [`CompositionError::LifecycleStackInvalidShape`] when the value is not a
+/// list.
+pub fn parse_task_action_stack(
+    signal: LifecycleSignal,
+    raw: &serde_json::Value,
+    source_file: &Path,
+    property: &str,
+) -> Result<Vec<LifecycleStackItem>, CompositionError> {
+    let serde_json::Value::Array(items) = raw else {
+        return Err(CompositionError::LifecycleStackInvalidShape {
+            source_path: source_file.to_path_buf(),
+            property: property.to_string(),
+            message: format!(
+                "`{property}` must be a list of action-stack items, got {}",
+                json_type_name(raw)
+            ),
+        });
+    };
+    let mut parsed = Vec::with_capacity(items.len());
+    for (idx, raw_item) in items.iter().enumerate() {
+        let item = parse_lifecycle_stack_item(signal, raw_item, source_file)
+            .map_err(|e| annotate_stack_error(e, property, idx))?;
+        parsed.push(item);
+    }
+    Ok(parsed)
+}
+
+/// Parse a single action written in the standard positional/key-value grammar.
+///
+/// A task's `side_effect:` value is one action rather than a stack, so it is
+/// parsed here instead of through [`parse_task_action_stack`]. `property` names
+/// the authoring key in diagnostics.
+///
+/// ## Errors
+///
+/// Returns [`CompositionError::LifecycleStackInvalidShape`] when the value is
+/// not an action object, and the standard unknown-verb / argument-shape
+/// rejections otherwise.
+pub fn parse_single_action(
+    signal: LifecycleSignal,
+    raw: &serde_json::Value,
+    source_file: &Path,
+    property: &str,
+) -> Result<LifecycleAction, CompositionError> {
+    let serde_json::Value::Object(obj) = raw else {
+        return Err(CompositionError::LifecycleStackInvalidShape {
+            source_path: source_file.to_path_buf(),
+            property: property.to_string(),
+            message: format!(
+                "`{property}` must be an action object, got {}",
+                json_type_name(raw)
+            ),
+        });
+    };
+    parse_stack_item_action_object(signal, obj, source_file, property)
+}
+
 /// Parse a raw stack (`Vec<Value>`) into typed form for the given event.
 fn parse_lifecycle_stack(
     signal: LifecycleSignal,
@@ -322,11 +392,13 @@ fn annotate_stack_error(err: CompositionError, property: &str, idx: usize) -> Co
             property: _,
             action,
             message,
+            source,
         } => CompositionError::LifecycleActionInvalidLongForm {
             source_path,
             property: dotted,
             action,
             message,
+            source,
         },
         CompositionError::LifecycleActionPlacement {
             source_path,
@@ -406,13 +478,17 @@ fn parse_lifecycle_stack_item(
     // `until`, and `while` are always boolean expressions and must never be
     // routed through `action_value_to_expr`.
     let when = match obj.get("when") {
-        Some(serde_json::Value::String(s)) => {
-            Some(parse_condition(s).map_err(|e| CompositionError::LifecycleStackInvalidShape {
+        Some(serde_json::Value::String(s)) => Some(parse_condition(s).map_err(|source| {
+            // The one stack-shape rejection that holds a typed cause. It renders
+            // and classifies exactly as `LifecycleStackInvalidShape` does — the
+            // sibling variant adds only the recoverable `ParseError`.
+            CompositionError::LifecycleWhenExpressionInvalid {
                 source_path: source_file.to_path_buf(),
                 property: property_name.to_string(),
-                message: format!("`when` is not a valid expression: {e}"),
-            })?)
-        }
+                message: format!("`when` is not a valid expression: {source}"),
+                source,
+            }
+        })?),
         Some(other) => {
             return Err(CompositionError::LifecycleStackInvalidShape {
                 source_path: source_file.to_path_buf(),
@@ -743,6 +819,7 @@ fn parse_long_form_action_object(
             property: property_name.to_string(),
             action: "<missing>".to_string(),
             message: "long-form action object must have an `action` key".to_string(),
+            source: None,
         }
     })?;
     let verb = match verb_value {
@@ -756,6 +833,7 @@ fn parse_long_form_action_object(
                     "`action` must be a string, got {}",
                     json_type_name(other)
                 ),
+                source: None,
             });
         }
     };
@@ -783,6 +861,7 @@ fn parse_long_form_action_object(
                     "`no_error` must be a boolean, got {}",
                     json_type_name(other)
                 ),
+                source: None,
             });
         }
         None => false,
@@ -803,12 +882,13 @@ fn parse_long_form_action_object(
                 param: key.clone(),
             });
         }
-        let expr = action_value_to_expr(value).map_err(|message| {
+        let expr = action_value_to_expr(value).map_err(|source| {
             CompositionError::LifecycleActionInvalidLongForm {
                 source_path: source_file.to_path_buf(),
                 property: property_name.to_string(),
                 action: verb.clone(),
-                message: format!("`{key}` is not a valid value: {message}"),
+                message: format!("`{key}` is not a valid value: {source}"),
+                source: Some(source),
             }
         })?;
         params.push((key.clone(), expr));

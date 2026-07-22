@@ -12,12 +12,20 @@
 //!   through the real terminal's display path so glyph-width / SGR /
 //!   scroll-handling regressions are observable in captured pane text.
 //!   Input is injected as bytes via the terminal's CLI.
-//! - **Level 3** — OS-level keyboard injection (not covered by this
-//!   harness; see individual test suites for platform-specific tools).
+//! - **Level 3** — OS-level keyboard injection. The key event enters
+//!   where a physical keypress enters, so the terminal's *input encoder*
+//!   fires — the only way to observe what bytes a terminal emits for a
+//!   given chord. One injector module per platform: [`cliclick`] (macOS
+//!   Quartz events), [`xdotool`] (Linux X11 XTEST), and [`win_input`]
+//!   (Windows `SendKeys`/`SendInput` via PowerShell).
 //!
-//! Every harness's `available()` probe returns `false` cleanly when its
-//! required tooling is missing — tests then print `skipping: requires`
-//! and return `ok` without exercising the harness.
+//! Every harness's — and every Level-3 injector's — `available()` probe
+//! returns `false` cleanly when its required tooling or platform is
+//! missing; tests then print `skipping: requires` and return `ok`
+//! without exercising it. [`cliclick::available`] is the one exception:
+//! it only proves the binary is on `$PATH`, checking neither the host
+//! platform nor macOS Accessibility trust. Pair it with
+//! [`cliclick::accessibility_trusted`], which covers both.
 
 #![allow(dead_code)]
 
@@ -33,6 +41,8 @@ pub mod layout_invariants;
 pub mod shared;
 pub mod tmux;
 pub mod wezterm;
+pub mod win_input;
+pub mod xdotool;
 
 /// Prefix used to mark resources owned by this test harness.
 ///

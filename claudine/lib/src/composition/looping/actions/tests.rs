@@ -109,7 +109,42 @@ fn render_invalid_template_returns_invalid_action_error() {
     let value = Value::String("{{ a &&& b }}".into());
     let err = render_action_value(&value, Some(&lookup), ctx()).unwrap_err();
     assert!(
-        matches!(err, CompositionError::InvalidAction { ref message, .. } if message.contains("invalid template")),
+        matches!(
+            err,
+            CompositionError::LoopActionExpressionInvalid {
+                source: LoopExpressionCause::Parse(_),
+                ..
+            }
+        ),
+        "got {err}"
+    );
+    assert!(err.to_string().contains("invalid template"), "got {err}");
+
+    // The Darkmatter `ParseError` stays recoverable through the chain rather
+    // than surviving only inside the rendered prose (spec §L1).
+    let cause = std::error::Error::source(&err).expect("the typed cause is on the chain");
+    assert!(cause.downcast_ref::<LoopExpressionCause>().is_some());
+}
+
+/// A template that parses but cannot be evaluated reports through the same
+/// variant, discriminated by the cause's arm.
+#[test]
+fn render_unevaluable_template_carries_the_evaluate_cause() {
+    let lookup = MapLookup(object(json!({})));
+    let value = Value::String("{{ no_such_function() }}".into());
+    let err = render_action_value(&value, Some(&lookup), ctx()).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            CompositionError::LoopActionExpressionInvalid {
+                source: LoopExpressionCause::Evaluate(_),
+                ..
+            }
+        ),
+        "got {err}"
+    );
+    assert!(
+        err.to_string().contains("failed to evaluate template"),
         "got {err}"
     );
 }

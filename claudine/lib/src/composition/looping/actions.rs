@@ -13,7 +13,7 @@ use darkmatter::markdown::compose::expression::{
 };
 use serde_json::{Map, Number, Value};
 
-use super::super::error::CompositionError;
+use super::super::error::{CompositionError, LoopExpressionCause};
 use super::super::json_util::json_type_name;
 use super::super::types::{AmbientVariable, LoopAction};
 
@@ -215,16 +215,14 @@ fn render_string_with_lookup(
     for loc in &locations {
         output.push_str(&raw[cursor..loc.start]);
         let expr_text = loc.expression.trim();
-        let expr = parse(expr_text).map_err(|e| {
-            invalid_action(
-                context,
-                format!("invalid template `{{{{{expr_text}}}}}` in loop action: {e}"),
-            )
+        let expr = parse(expr_text).map_err(|error| {
+            invalid_action_expression(context, expr_text, LoopExpressionCause::Parse(error))
         })?;
-        let value = evaluate(&expr, &sized_lookup).map_err(|e| {
-            invalid_action(
+        let value = evaluate(&expr, &sized_lookup).map_err(|error| {
+            invalid_action_expression(
                 context,
-                format!("failed to evaluate template `{{{{{expr_text}}}}}`: {e}"),
+                expr_text,
+                LoopExpressionCause::Evaluate(Box::new(error)),
             )
         })?;
         if single_span {
@@ -458,6 +456,23 @@ fn invalid_action(context: ActionContext, message: String) -> CompositionError {
         action_index: context.action_index,
         total_actions: context.total_actions,
         message,
+    }
+}
+
+/// The [`invalid_action`] sibling for the two failures that hold a typed
+/// Darkmatter error: the `LoopExpressionCause` arm both selects the stage and
+/// renders the prose `InvalidAction` used to carry in its `message`.
+fn invalid_action_expression(
+    context: ActionContext,
+    expression: &str,
+    source: LoopExpressionCause,
+) -> CompositionError {
+    CompositionError::LoopActionExpressionInvalid {
+        iteration: context.iteration,
+        action_index: context.action_index,
+        total_actions: context.total_actions,
+        expression: expression.to_string(),
+        source,
     }
 }
 

@@ -11,6 +11,8 @@
 //! validations, handlers, and provider selection across `compose`,
 //! `inline-compose`, and `sequence`.
 
+use std::path::Path;
+
 pub mod agent_message;
 pub mod closure;
 mod error;
@@ -33,6 +35,7 @@ pub mod preflight;
 mod prepare;
 mod resolve;
 mod reserved;
+pub mod runtime_state;
 pub mod schema;
 mod select;
 pub mod sequence;
@@ -41,9 +44,11 @@ mod types;
 pub use agent_message::{agent_state_breakdown, invalid_agent_message};
 pub use darkmatter::markdown::compose::shell_expansion::{ShellCommandOrigin, ShellExpansionError};
 pub use error::{
-    CompositionError, DroppedOptional, DroppedOptionalSource, DroppedOptionalStage,
-    InteractiveShape, LOOP_RATE_LIMITED_EXIT_CODE, MarkdownLoadCause, MissingProperty,
-    SequenceLoadCause, SequenceMissingPropertiesStep, SequenceSelectionFailure, TextFormat,
+    ActionExprError, CompositionError, DroppedOptional, DroppedOptionalSource, DroppedOptionalStage,
+    FileReferenceContext, InteractiveShape, LOOP_RATE_LIMITED_EXIT_CODE, LoopExpressionCause,
+    MarkdownLoadCause, MissingProperty,
+    SequenceExpressionCause, SequenceLoadCause, SequenceMissingPropertiesStep,
+    SequenceSelectionFailure, SequenceShellCause, ShellApprovalFailure, TextFormat,
 };
 pub use file_detail::{FileDetail, extract_markdown_detail, extract_yaml_sequence_detail};
 pub use frontmatter_excerpt::FrontmatterExcerpt;
@@ -64,10 +69,12 @@ pub use lifecycle_context::{
 };
 pub use lifecycle_control::{
     ControlDispatch, MAX_PROXY_HOPS, compute_backoff_delay, control_budget_for, decide_control,
-    parse_delay, proxy_handoff_allowed, resolve_proxy_target,
+    parse_delay, proxy_handoff_allowed, proxy_path_identity, resolve_proxy_target,
+    resolve_proxy_target_in_context,
 };
 pub use lifecycle_executor::{
-    LifecycleEventOutcome, ShellRunner, StackControl, StackExecutionContext, SystemShellRunner,
+    LifecycleEventOutcome, LifecycleExprError, ShellRunError, ShellRunner, StackControl,
+    StackExecutionContext, SystemShellRunner,
 };
 pub use lifecycle::runtime::{
     IterationSummarySignals, LifecycleTransitionAbort, LifecycleTransitionDecision,
@@ -86,11 +93,20 @@ pub use looping::{
 };
 pub use looping::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
 pub use mismatch::{capture_frontmatter_yaml, is_inline_sequence_mismatch};
-pub use preflight::{PreFlightResult, resolve_shell_approvals};
+pub use preflight::{PreFlightResult, resolve_graph_shell_approvals, resolve_shell_approvals};
 pub use hints::{parse_interactive_hint, parse_selection_hints_from_frontmatter};
 pub use prepare::{PrepareOptions, bind_agent_workspace, prepare_direct, prepare_inline};
+pub use runtime_state::{
+    OUTPUTS_KEY, RuntimeMutationError, RuntimeSnapshot, RuntimeState, layered_set_overrides,
+    trim_transport_newline, with_initialized_outputs,
+};
 pub use resolve::{
-    enrich_composition_source_load_error, resolve_composition_source, validate_file_permissions,
+    build_prompt_reference, capture_file_resolution_context, derive_request_context_for_source,
+    enrich_composition_source_load_error, enrich_composition_source_load_error_in_context,
+    is_yaml_source,
+    load_yaml_document, prompt_magic_roots, reload_composition_source,
+    resolve_composition_source, resolve_composition_source_in_context,
+    validate_file_permissions, without_formal_sequence_keys,
 };
 pub use schema::{
     InteractiveSchemaOptions, PreValidatedSchema, PropertyState, PropertyStatus,
@@ -104,7 +120,23 @@ pub use select::{
     resolve_target_non_tty, resolve_target_non_tty_with_catalog, resolve_target_non_tty_with_hints,
     select_provider,
 };
-pub use sequence::{build_step_overlay, resolve_sequence_plan};
+pub use sequence::{
+    ExecutableField, ExternalTaskRef, GroupRef, OutputEntry, RuntimeMutation, SequencePlan,
+    SequenceReference, SequenceSource, SequenceSourceOptions, SequenceSourceSpec, SequenceStep,
+    SequenceStepOverlay, ShellSourceRunner, SourceOperator, StepExecutable, StepState, Strictness,
+    build_step_overlay, resolve_sequence_plan, resolve_sequence_plan_with,
+};
+pub use sequence::preflight::{
+    DiscoveredCommand, GroupExecution, PreflightAction, PreflightGraph, PreflightGroup,
+    PreflightStep, PreflightTask, PromptDocument, build_preflight_graph,
+    build_preflight_graph_with_context, build_preflight_graph_with_context_and_resolution,
+    reject_non_sequence_kind,
+};
+pub use sequence::task::{
+    DEFAULT_COMMAND_TIMEOUT, PromptRunOutcome, PromptTaskRequest, PromptTaskRunner, RunawayTrip,
+    RunawayTripKind, ShellCommandOutput, SystemTaskShell, TaskDiagnostic, TaskExecution,
+    TaskOutcome, TaskShellError, TaskShellRunner, TaskStage, TaskStatus, UnavailablePromptRunner,
+};
 pub use types::{
     AgentHint, AgentResolutionState, AmbientVariable, CompositionClosurePlan,
     CompositionExecutionRequest, CompositionMode, EffectiveSelectionHints, InlineClosurePlan,
@@ -114,6 +146,28 @@ pub use types::{
     ProviderPickerOption, ProviderPickerPlan, ProviderResolutionReason, ResolutionMode,
     ResolvedCompositionSource, ResolvedExecutionTarget, ResolvedSessionInteractivity,
     SelectedProvider, SelectionReason, SessionInteractivitySource, SequenceExecutionOptions,
-    SequencePlan, SequenceRunSummary, SequenceSource, SequenceStep, SequenceStepDraft,
-    SequenceStepOverlay, SequenceStepResult, SharedApprovalCache,
+    SequenceRunSummary, SequenceStepDraft, SequenceStepResult, SequenceTaskResult,
+    SharedApprovalCache,
 };
+
+/// Builds Darkmatter's local expression context from the request snapshot for
+/// the document that authored the expression.
+pub fn document_expression_resolution_context(
+    source_path: &Path,
+    prepared_context: Option<&darkmatter::markdown::compose::ComposeContext>,
+    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
+    file_ref_fallback_dir: Option<&Path>,
+) -> darkmatter::markdown::compose::expression::ResolutionContext {
+    let context = prepared_context.cloned().unwrap_or_else(
+        darkmatter::markdown::compose::ComposeContext::capture,
+    );
+    let mut options = darkmatter::markdown::compose::ComposeOptions::new_with_context(context)
+        .with_source_file(source_path);
+    if let Some(snapshot) = file_resolution_context {
+        options = options.with_file_resolution_context(snapshot.clone());
+    }
+    if let Some(fallback) = file_ref_fallback_dir {
+        options = options.with_file_ref_fallback_dir(fallback);
+    }
+    options.local_expression_resolution_context()
+}

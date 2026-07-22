@@ -72,7 +72,7 @@ impl McpCatalogStore {
     /// Save to a specific path.
     pub fn save_to(&self, path: &std::path::Path) -> Result<()> {
         let content = serde_json::to_string_pretty(&self.catalog)?;
-        atomic_write(path, content.as_bytes())
+        Ok(atomic_write(path, content.as_bytes())?)
     }
 
     /// Add a server to the catalog. Overwrites if the ID already exists.

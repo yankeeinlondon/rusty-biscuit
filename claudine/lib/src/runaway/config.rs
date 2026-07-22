@@ -32,7 +32,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::error::{ClaudineError, Result};
+use crate::error::{ClaudineError, ConfigCause, Result};
 use crate::provider::Provider;
 use crate::runaway::patterns::ExitExpressionInput;
 use crate::runaway::{
@@ -367,8 +367,11 @@ pub fn extract_frontmatter_exit_expressions(
     let Some(value) = frontmatter.get("exit_expressions") else {
         return Ok(None);
     };
-    let parsed: ExitExpressionsValue = serde_json::from_value(value.clone()).map_err(|e| {
-        ClaudineError::ConfigValidation(format!("frontmatter `exit_expressions` is invalid: {e}"))
+    let parsed: ExitExpressionsValue = serde_json::from_value(value.clone()).map_err(|error| {
+        ClaudineError::ConfigValidationWithCause {
+            message: format!("frontmatter `exit_expressions` is invalid: {error}"),
+            source: ConfigCause::Json(error),
+        }
     })?;
     Ok(Some(parsed))
 }

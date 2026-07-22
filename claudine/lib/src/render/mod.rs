@@ -12,6 +12,7 @@ mod final_message;
 mod metrics_report;
 mod prompt;
 mod stream;
+mod task_stream;
 mod thinking_stream;
 
 pub use assistant_stream::AssistantStream;
@@ -22,6 +23,10 @@ pub use event_renderer::{
 pub use final_message::FinalMessage;
 pub use metrics_report::MetricsReport;
 pub use stream::StreamRenderable;
+pub use task_stream::{
+    TASK_PALETTE, TaskBar, TaskFrameWriter, TaskLiveOutput, TaskStream, TaskStreamFrame,
+    TaskStreamOutcome, TaskStreamSink,
+};
 pub use thinking_stream::ThinkingStream;
 pub use prompt::{
     AgentPrompt, ReportMode, SystemPrompt, TruncationMode, parse_frontmatter_verbosity,

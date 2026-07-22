@@ -233,6 +233,13 @@ data.
 `local_transport/windows.rs` builds a tonic-compatible incoming stream from
 `tokio::net::windows::named_pipe`:
 
+- **A `PipeConnection` newtype supplies `tonic::transport::server::Connected`.**
+  tonic implements that trait for `TcpStream` and `UnixStream` but not for
+  `NamedPipeServer`, so the Windows transport wraps each connected instance
+  rather than `serve_local_incoming` loosening its bound for one platform.
+  `ConnectInfo` is `()` on purpose: a pipe has no peer address, nothing
+  downstream inspects per-connection identity, and the boundary that matters is
+  the DACL below, enforced by the kernel before a connection arrives.
 - **Byte mode**, not message mode. gRPC is a byte stream; message mode would
   frame it, wrongly.
 - **`reject_remote_clients(true)`.** A pipe reachable over SMB is a pipe a remote

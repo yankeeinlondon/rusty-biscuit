@@ -22,7 +22,7 @@
 //! Claudine proceeds with the built-in defaults.
 
 use claudine::dispatch::loader;
-use claudine::error::{ClaudineError, Result};
+use claudine::error::{ClaudineError, ConfigCause, Result};
 use claudine::events::EnvironmentContext;
 use claudine::provider::Provider;
 use claudine::runaway::{
@@ -358,8 +358,11 @@ fn extract_frontmatter_guard_settings(map: &Map<String, Value>) -> Result<Option
     let Some(value) = map.get("guard_settings") else {
         return Ok(None);
     };
-    let parsed = serde_json::from_value(value.clone()).map_err(|e| {
-        ClaudineError::ConfigValidation(format!("frontmatter `guard_settings` is invalid: {e}"))
+    let parsed = serde_json::from_value(value.clone()).map_err(|error| {
+        ClaudineError::ConfigValidationWithCause {
+            message: format!("frontmatter `guard_settings` is invalid: {error}"),
+            source: ConfigCause::Json(error),
+        }
     })?;
     Ok(Some(parsed))
 }

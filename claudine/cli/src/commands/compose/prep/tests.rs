@@ -71,9 +71,15 @@ fn assert_frontmatter_enriched(report: color_eyre::Report) {
 fn compose_source_load_error_is_frontmatter_enriched() {
     let dir = TempDir::new().unwrap();
     let file = malformed_prompt(&dir);
+    let file_resolution_context = biscuit_file::FileResolutionContext::new(dir.path());
 
-    let report =
-        resolve_composition_source(&file, CompositionKind::Direct, &shared_args()).unwrap_err();
+    let report = resolve_composition_source(
+        &file,
+        CompositionKind::Direct,
+        &shared_args(),
+        &file_resolution_context,
+    )
+    .unwrap_err();
 
     assert_frontmatter_enriched(report);
 }
@@ -82,9 +88,15 @@ fn compose_source_load_error_is_frontmatter_enriched() {
 fn inline_compose_source_load_error_is_frontmatter_enriched() {
     let dir = TempDir::new().unwrap();
     let file = malformed_prompt(&dir);
+    let file_resolution_context = biscuit_file::FileResolutionContext::new(dir.path());
 
-    let report =
-        resolve_composition_source(&file, CompositionKind::Inline, &shared_args()).unwrap_err();
+    let report = resolve_composition_source(
+        &file,
+        CompositionKind::Inline,
+        &shared_args(),
+        &file_resolution_context,
+    )
+    .unwrap_err();
 
     assert_frontmatter_enriched(report);
 }

@@ -84,11 +84,41 @@ proptest = "1.4"
 serial_test = "3"
 rstest = "0.25"
 tracing-test = "0.2"
+# The D8 lossy-boundary guard and the D2 registry-parity test read the area's
+# production sources as syntax trees rather than text: their whole premise is
+# that an interpolated binding is only lossy when it is *provably* an error
+# binding, which a grep cannot know.
+syn = { version = "2.0", features = ["full", "parsing", "visit", "extra-traits"] }
+proc-macro2 = { version = "1.0", features = ["span-locations"] }
+toml = "1.0"
+# The catalog-parity corpus needs a `url::ParseError` to reach
+# `ClaudineError::UrlError` → `io.network`. `url` is a cfg(unix) *runtime*
+# dependency, so a dev-dependency is what keeps the corpus building on Windows.
+url = "2"
+# Same reason as `url`: `commands::init` is a `#[cfg(test)]` module, so its
+# reference helpers compile on every test target while `shellexpand` itself is
+# declared only for `cfg(unix)`.
+shellexpand = "3"
 test-toolkit = { path = "../../tools/test-toolkit" }
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
-# The daemon-spawning fixtures below boot through `spawn_local_server`, which
-# binds a Unix socket or a named pipe depending on the target — so the daemon is
-# no longer a Unix-only dev-dependency. `test-support` supplies the endpoint
-# constructor those fixtures build against.
-rendezvous-daemon = { path = "../rendezvous/daemon" }
+# `test-support` supplies the endpoint constructor the daemon-spawning fixtures
+# build against. Unlike the daemon itself it carries no native dependency, so it
+# is available on every target.
 rendezvous-core = { path = "../rendezvous/core", features = ["test-support"] }
+
+# The daemon-spawning fixtures boot through `spawn_local_server`, which binds a
+# Unix socket or a named pipe depending on the target — the daemon is not
+# Unix-only, so the gate below is on the *ABI*, not the OS.
+#
+# `rendezvous-daemon` pulls `duckdb` with `features = ["bundled"]`, whose unity
+# build emits translation units of >40k COFF sections. GNU `as` caps out below
+# that ("too many sections … file too big"); clearing it would need
+# `-Wa,-mbig-obj` plumbed through `duckdb-sys`' build script, which is not ours
+# to set. MSVC's assembler has no such cap, so `x86_64-pc-windows-msvc` keeps the
+# fixtures — only the `-gnu` cross-check target drops them, and that target
+# exists here purely to type-check the Windows sources. Dropping the dependency
+# is what makes `cargo check -p claudine-cli --tests
+# --target x86_64-pc-windows-gnu` reach the Windows test suites at all: a
+# `#![cfg(unix)]` inside a test file still builds every dev-dependency.
+[target.'cfg(not(all(windows, target_env = "gnu")))'.dev-dependencies]
+rendezvous-daemon = { path = "../rendezvous/daemon" }

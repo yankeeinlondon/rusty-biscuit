@@ -7,21 +7,29 @@ use tempfile::TempDir;
 
 #[test]
 fn prompt_magic_roots_are_closest_first() {
-    // Package area before repo before HOME; the bare area root precedes
-    // its `prompts/` child so the path-shaped `@prompts/x.md` form still
-    // resolves via the existing join. `resolve_direct` returns the first
-    // existing candidate, so this order encodes "closest wins".
+    // Discrete package before package area before repo before HOME.
     let area = Path::new("/repo/claudine");
+    let package = Path::new("/repo/claudine/lib");
     let repo = Path::new("/repo");
     let home = Path::new("/home/u");
-    let got = prompt_magic_roots(Some(repo), Some(area), Some(home));
+    let got = prompt_magic_roots(Some(repo), Some(area), Some(package), Some(home));
     assert_eq!(
         got,
         vec![
+            PathBuf::from("/repo/claudine/lib"),
+            PathBuf::from("/repo/claudine/lib/prompts"),
             PathBuf::from("/repo/claudine"),
             PathBuf::from("/repo/claudine/prompts"),
             PathBuf::from("/repo/prompts"),
             PathBuf::from("/repo/.claudine/prompts"),
+            PathBuf::from("/repo/docs"),
+            PathBuf::from("/repo/.claude/skills"),
+            PathBuf::from("/repo/.codex/skills"),
+            PathBuf::from("/repo/.gemini/skills"),
+            PathBuf::from("/repo/.opencode/skills"),
+            PathBuf::from("/repo/.goose/skills"),
+            PathBuf::from("/repo/.qwen/skills"),
+            PathBuf::from("/repo/.kimi/skills"),
             PathBuf::from("/home/u/.claudine/prompts"),
         ],
     );
@@ -30,15 +38,23 @@ fn prompt_magic_roots_are_closest_first() {
 #[test]
 fn prompt_magic_roots_skip_absent_anchors() {
     // No package area, no HOME: only the repo roots are registered.
-    let got = prompt_magic_roots(Some(Path::new("/repo")), None, None);
+    let got = prompt_magic_roots(Some(Path::new("/repo")), None, None, None);
     assert_eq!(
         got,
         vec![
             PathBuf::from("/repo/prompts"),
             PathBuf::from("/repo/.claudine/prompts"),
+            PathBuf::from("/repo/docs"),
+            PathBuf::from("/repo/.claude/skills"),
+            PathBuf::from("/repo/.codex/skills"),
+            PathBuf::from("/repo/.gemini/skills"),
+            PathBuf::from("/repo/.opencode/skills"),
+            PathBuf::from("/repo/.goose/skills"),
+            PathBuf::from("/repo/.qwen/skills"),
+            PathBuf::from("/repo/.kimi/skills"),
         ],
     );
-    assert!(prompt_magic_roots(None, None, None).is_empty());
+    assert!(prompt_magic_roots(None, None, None, None).is_empty());
 }
 
 #[test]
@@ -224,7 +240,7 @@ fn validate_permissions_readonly_file() {
     let err = validate_file_permissions(&file).unwrap_err();
     assert!(matches!(
         err,
-        CompositionError::InsufficientFilePermissions(_)
+        CompositionError::InsufficientFilePermissions { .. }
     ));
 
     // Cleanup: restore permissions so TempDir can delete
@@ -246,7 +262,7 @@ fn validate_permissions_nonexistent_file() {
     let err = validate_file_permissions(Path::new("/nonexistent/path.md")).unwrap_err();
     assert!(matches!(
         err,
-        CompositionError::InsufficientFilePermissions(_)
+        CompositionError::InsufficientFilePermissions { .. }
     ));
 }
 

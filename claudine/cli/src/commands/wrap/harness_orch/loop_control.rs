@@ -78,6 +78,11 @@ struct HarnessLoopCtx<'a, 'guard> {
     lifecycle_guard: &'a mut claudine::composition::LifecycleRunGuard<'guard>,
     initial_proxy_target: Option<&'a Path>,
     emit_prompt_timing: bool,
+    /// Frames this run's live provider stdout under one sequence task's bar.
+    ///
+    /// Owned, not borrowed: the stdout reader thread takes it. `None` for the
+    /// wrapper-passthrough path, which has no task to attribute to.
+    task_frame_writer: Option<claudine::render::TaskFrameWriter>,
 }
 
 mod control_dispatch;
@@ -135,6 +140,7 @@ pub(crate) fn run_harness_loop(
     // pass `false` to suppress the header entirely; composition callers
     // pass `true`.
     emit_prompt_timing: bool,
+    task_frame_writer: Option<claudine::render::TaskFrameWriter>,
 ) -> Result<HarnessLoopResult> {
     let ctx = HarnessLoopCtx {
         provider,
@@ -166,6 +172,7 @@ pub(crate) fn run_harness_loop(
         lifecycle_guard,
         initial_proxy_target,
         emit_prompt_timing,
+        task_frame_writer,
     };
     match run_harness_loop_inner(ctx)? {
         LoopStep::Return(result) => Ok(result),
@@ -200,16 +207,19 @@ impl<'a, 'guard> HarnessLoopState<'a, 'guard> {
         );
         let mut proxy_tracking = ProxyTracking::default();
         if let Some(initial_target) = run.initial_proxy_target {
+            let source_identity = claudine::composition::proxy_path_identity(
+                run.lifecycle_guard.context().source_path,
+            );
+            let target_identity = claudine::composition::proxy_path_identity(initial_target);
             if !proxy_tracking
                 .chain
                 .iter()
-                .any(|path| path == run.lifecycle_guard.context().source_path)
+                .any(|path| path == &source_identity)
             {
-                proxy_tracking
-                    .chain
-                    .push(run.lifecycle_guard.context().source_path.to_path_buf());
+                proxy_tracking.chain.push(source_identity);
             }
-            proxy_tracking.chain.push(initial_target.to_path_buf());
+            proxy_tracking.chain.push(target_identity.clone());
+            run.prompt_state.adopt_resolved_proxy_source(target_identity);
             proxy_tracking.pending = true;
         }
         let initial_materialized = run.initial_materialized.take();
@@ -524,7 +534,7 @@ fn adopt_proxy_lifecycle_phase(
                 loop_start,
             )
             .map(color_eyre::eyre::Report::from)
-            .unwrap_or_else(|| eyre!("{error}")));
+            .unwrap_or_else(|| color_eyre::eyre::Report::from(error)));
         }
     }
     match run_target_initialize(
@@ -534,6 +544,7 @@ fn adopt_proxy_lifecycle_phase(
         repo_root,
         term,
         effect_engine,
+        prompt_state.rematerialize.file_resolution_context.as_ref(),
         loop_start,
     ) {
         TargetInitializeAction::Proceed => {}
@@ -542,13 +553,19 @@ fn adopt_proxy_lifecycle_phase(
         }
         TargetInitializeAction::Abort(error) => return Err(error),
         TargetInitializeAction::Repoint { resolved } => {
-            if !proxy_tracking.chain.contains(&prompt_state.source_path) {
-                proxy_tracking.chain.push(prompt_state.source_path.clone());
+            let source_identity =
+                claudine::composition::proxy_path_identity(&prompt_state.source_path);
+            let target_identity = claudine::composition::proxy_path_identity(&resolved);
+            if !proxy_tracking.chain.contains(&source_identity) {
+                proxy_tracking.chain.push(source_identity);
             }
-            if !claudine::composition::proxy_handoff_allowed(&proxy_tracking.chain, &resolved) {
+            if !claudine::composition::proxy_handoff_allowed(
+                &proxy_tracking.chain,
+                &target_identity,
+            ) {
                 return Err(CompositionError::LifecycleProxyCycle {
                     source_path: prompt_state.source_path.clone(),
-                    target: resolved.display().to_string(),
+                    target: target_identity.display().to_string(),
                     chain: proxy_tracking
                         .chain
                         .iter()
@@ -558,12 +575,12 @@ fn adopt_proxy_lifecycle_phase(
                 }
                 .into());
             }
-            prompt_state.source_path = resolved.clone();
-            prompt_state.original_ref = resolved.display().to_string();
+            prompt_state.adopt_resolved_proxy_source(target_identity.clone());
+            prompt_state.original_ref = target_identity.display().to_string();
             prompt_state.prompt_tail.clear();
             prompt_state.next_prompt_override = None;
             prompt_state.next_resume_session_id = None;
-            proxy_tracking.chain.push(resolved);
+            proxy_tracking.chain.push(target_identity);
             proxy_tracking.pending = true;
             *attempt = 1;
             return Ok(Some(LoopStep::NextAttempt));
@@ -587,7 +604,9 @@ fn empty_materialized_prompt() -> MaterializedHarnessPrompt {
         prompt: String::new(),
         env_overrides: Vec::new(),
         inline_closure_plan: None,
+        file_resolution_context: None,
         live_frontmatter: MaterializedHarnessPrompt::live_cell_from(&serde_json::Value::Null),
+        runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
     }
 }
 
@@ -623,8 +642,7 @@ fn preflight_pending_proxy_phase(
         preflight_proxy_target(prompt_state, harness_context.shell_options(), child_cwd)
     });
     if let Err(error) = result {
-        let err_info =
-            LifecycleErrorInfo::from_action_failure("shell_approval", error.to_string());
+        let err_info = LifecycleErrorInfo::from_error_or_action("shell_approval", error.as_ref());
         let empty = empty_materialized_prompt();
         return Err(emit_blocked_finalize_with_err(
             lifecycle_guard,
@@ -637,7 +655,11 @@ fn preflight_pending_proxy_phase(
             loop_start,
         )
         .map(color_eyre::eyre::Report::from)
-        .unwrap_or_else(|| eyre!("{error}")));
+        // Unbox before the `Report` conversion: `Report::from(Box<CompositionError>)`
+        // publishes `Box<CompositionError>` to the cause chain, and `as_diagnostic`'s
+        // downcast allowlist is keyed on the concrete type — so the boxed form is
+        // invisible to selection and the block silently degrades to `Error:` (D-7).
+        .unwrap_or_else(|| color_eyre::eyre::Report::from(*error)));
     }
     Ok(())
 }
@@ -666,8 +688,7 @@ fn materialize_attempt_prompt_phase(
     )
     .in_scope(|| materialize_harness_prompt(prompt_state, repo_root, child_cwd))
     .map_err(|error| {
-        let err_info =
-            LifecycleErrorInfo::from_action_failure("materialize", error.to_string());
+        let err_info = LifecycleErrorInfo::from_error_or_action("materialize", error.as_ref());
         let empty = empty_materialized_prompt();
         match emit_blocked_finalize_with_err(
             lifecycle_guard,
@@ -724,7 +745,7 @@ fn prepare_harness_plan_phase(
             loop_start,
         )
         .map(color_eyre::eyre::Report::from)
-        .unwrap_or_else(|| eyre!("{error}"))
+        .unwrap_or_else(|| color_eyre::eyre::Report::from(error))
     })?;
 
     if show_checks {
@@ -860,7 +881,7 @@ fn execute_attempt_phase(
         cli_stall_timeout.clone(),
     )
     .map_err(|e| {
-        let err_info = LifecycleErrorInfo::from_action_failure("harness_launch", e.to_string());
+        let err_info = LifecycleErrorInfo::from_error_or_action("harness_launch", e.as_ref());
         // A lifecycle evaluation error raised by the failure/finalize
         // stack takes precedence over the original harness-launch error —
         // the lifecycle raise is the more actionable diagnosis and must
@@ -876,7 +897,7 @@ fn execute_attempt_phase(
             loop_start,
         ) {
             Some(ce) => ce.into(),
-            None => eyre!("{e}"),
+            None => e,
         }
     })?;
     let _launch_span = info_span!(
@@ -935,6 +956,8 @@ fn execute_attempt_phase(
         term,
         &mut child_spawned,
         prompt_timing,
+        // Cloned per attempt: a retry starts with an empty partial-line buffer.
+        state.run.task_frame_writer.clone(),
     );
 
     // Mark launched as soon as spawn succeeded — before propagating
@@ -950,8 +973,7 @@ fn execute_attempt_phase(
     // failure + finalize stacks (with `err`) before propagating.
     let (outcome, perf, iteration_signals) = attempt_result
     .map_err(|e| {
-        let err_info =
-            LifecycleErrorInfo::from_action_failure("harness_attempt", e.to_string());
+        let err_info = LifecycleErrorInfo::from_error_or_action("harness_attempt", e.as_ref());
         // A lifecycle evaluation error raised by the failure/finalize
         // stack takes precedence over the original harness-attempt error —
         // the lifecycle raise is the more actionable diagnosis and must
@@ -967,7 +989,7 @@ fn execute_attempt_phase(
             loop_start,
         ) {
             Some(ce) => ce.into(),
-            None => eyre!("{e}"),
+            None => e,
         }
     })?;
     if let Some(p) = perf {
@@ -1183,6 +1205,20 @@ fn classify_attempt_phase(
             TerminalRecovery::Completed => {}
         }
         return Err(eyre!("{fail_msg}"));
+    }
+
+    // The run succeeded, so its output joins `outputs` now — before the
+    // success event fires, so `success`/`finalize` observe it and a later
+    // iteration, step, or standalone `{{ last(outputs) }}` reads it back.
+    //
+    // A task-driven run withholds the commit: its executor publishes the entry
+    // only after `teardown`, because a failing teardown owes no output. The
+    // captured text still travels out through `last_final_output`.
+    prompt_state.last_final_output = Some(
+        claudine::composition::trim_transport_newline(&outcome.final_response).to_string(),
+    );
+    if !prompt_state.suppress_output_commit {
+        commit_run_output(&materialized, &outcome.final_response);
     }
 
     // A successful provider run proceeds to the success lifecycle event.

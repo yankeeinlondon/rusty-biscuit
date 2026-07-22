@@ -3,7 +3,7 @@ $schema:
     spec: file(required; match(**/*spec*.md)) -> the specification file defining the target functionality
     design: file(match(**/*design*.md)) -> optionally, a design file which compliments the spec file with more details on the technical design
     review: file -> the review file who's findings/suggestions we will implementing
-    iteration: number(required) -> what _iteration_ of the review/implement cycle that we are on
+    iteration: number(required;default(1)) -> what _iteration_ of the review/implement cycle that we are on
     log: file -> the log file we're writing to while working on the implementation
     retry: string -> if you're retrying this prompt after a failure then pass in what you know about prior progress
 description: |-

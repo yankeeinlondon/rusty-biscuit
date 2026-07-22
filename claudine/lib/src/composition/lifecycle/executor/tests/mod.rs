@@ -90,9 +90,30 @@ impl MockShell {
 }
 
 impl ShellRunner for MockShell {
-    fn run(&self, command: &str) -> Result<i32, String> {
+    fn run(&self, command: &str) -> Result<i32, ShellRunError> {
         self.commands.lock().unwrap().push(command.to_string());
         Ok(self.code)
+    }
+}
+
+/// A [`ShellRunner`] whose command never starts, so the spawn-failure arm is
+/// reachable without depending on the host shell.
+struct SpawnFailShell;
+
+impl SpawnFailShell {
+    /// The `io::Error` every run reports, so a test can compare the projected
+    /// prose against the exact source it was built from.
+    fn io_error() -> std::io::Error {
+        std::io::Error::new(std::io::ErrorKind::NotFound, "no such file or directory")
+    }
+}
+
+impl ShellRunner for SpawnFailShell {
+    fn run(&self, command: &str) -> Result<i32, ShellRunError> {
+        Err(ShellRunError::Spawn {
+            command: command.to_string(),
+            source: Self::io_error(),
+        })
     }
 }
 
@@ -141,12 +162,15 @@ fn ctx<'a>(
         signal,
         frontmatter,
         live_frontmatter: None,
+        runtime_state: None,
         err,
         timing: None,
         current: None,
+        group: None,
         base_dir: None,
         ctx_base_dir: None,
         prepared_context: None,
+        file_resolution_context: None,
         effect_engine: engine,
         shell_runner: shell,
         emitter: recorder,
@@ -162,6 +186,26 @@ fn map(value: Value) -> Map<String, Value> {
     value.as_object().unwrap().clone()
 }
 
+/// Build a context wired to both the per-attempt `live` cell and the
+/// invocation-local `runtime` cell, modelling the harness loop's full wiring.
+#[allow(clippy::too_many_arguments)]
+fn ctx_with_runtime<'a>(
+    signal: LifecycleSignal,
+    base: &'a Map<String, Value>,
+    live: &'a std::sync::Mutex<Map<String, Value>>,
+    runtime: &'a crate::composition::RuntimeState,
+    engine: &'a EffectEngine,
+    shell: &'a dyn ShellRunner,
+    recorder: &'a Recorder,
+    harness: &'a Harness,
+    source_path: &'a Path,
+) -> StackExecutionContext<'a> {
+    StackExecutionContext {
+        runtime_state: Some(runtime),
+        ..ctx_with_live(signal, base, live, engine, shell, recorder, harness, source_path)
+    }
+}
+
 /// Build a context whose reads/writes flow through a shared cross-event
 /// `live` cell, modelling the harness loop's per-attempt live frontmatter.
 /// `base` is the immutable composed frontmatter fallback; `live` is the
@@ -170,7 +214,7 @@ fn map(value: Value) -> Map<String, Value> {
 fn ctx_with_live<'a>(
     signal: LifecycleSignal,
     base: &'a Map<String, Value>,
-    live: &'a std::cell::RefCell<Map<String, Value>>,
+    live: &'a std::sync::Mutex<Map<String, Value>>,
     engine: &'a EffectEngine,
     shell: &'a dyn ShellRunner,
     recorder: &'a Recorder,
@@ -181,12 +225,15 @@ fn ctx_with_live<'a>(
         signal,
         frontmatter: base,
         live_frontmatter: Some(live),
+        runtime_state: None,
         err: None,
         timing: None,
         current: None,
+        group: None,
         base_dir: None,
         ctx_base_dir: None,
         prepared_context: None,
+        file_resolution_context: None,
         effect_engine: engine,
         shell_runner: shell,
         emitter: recorder,
@@ -204,4 +251,4 @@ mod conditions_control;
 mod event_time_interpolation;
 mod filesystem_lookup;
 mod mutation_visibility;
-
+mod runtime_set;

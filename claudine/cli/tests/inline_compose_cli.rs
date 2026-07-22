@@ -7,7 +7,7 @@ use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use tempfile::tempdir;
 mod common;
-use common::{augmented_path, write_executable};
+use common::{augmented_path, init_git_repo, write, write_executable};
 
 // ============================================================================
 // Phase 1: convergence between non-harness and harness-enabled inline compose
@@ -75,5 +75,59 @@ fn inline_compose_writes_expected_final_body() {
     assert!(
         !doc.contains("Let me look up the answer."),
         "inline body must not contain interstitial narration; doc:\n{doc}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn inline_compose_uses_source_doc_repository_not_launch_cwd() {
+    let workspace = tempdir().unwrap();
+    let source_root = workspace.path().join("source");
+    let launch_root = workspace.path().join("launch");
+    fs::create_dir_all(&source_root).unwrap();
+    fs::create_dir_all(&launch_root).unwrap();
+    assert!(init_git_repo(&source_root));
+    assert!(init_git_repo(&launch_root));
+
+    write(
+        &source_root.join("snippet.md"),
+        "SOURCE_REPOSITORY_INLINE_MARKER\n",
+    );
+    write(
+        &launch_root.join("snippet.md"),
+        "LAUNCH_REPOSITORY_INLINE_MARKER\n",
+    );
+    let source = source_root.join("prompts/inline.md");
+    write(
+        &source,
+        "---\nprompt: |\n  ::file snippet.md\n---\nOriginal body.\n",
+    );
+
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(&launch_root)
+        .args([
+            "inline-compose",
+            "--goose",
+            "--dry-run",
+            source.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(
+        stdout.contains("SOURCE_REPOSITORY_INLINE_MARKER"),
+        "inline prompt transclusion must use the source repository; stdout:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("LAUNCH_REPOSITORY_INLINE_MARKER"),
+        "launch repository must not leak into inline prompt transclusion; stdout:\n{stdout}"
     );
 }

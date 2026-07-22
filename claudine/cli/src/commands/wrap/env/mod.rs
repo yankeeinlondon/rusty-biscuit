@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use color_eyre::eyre::{Result, eyre};
+use color_eyre::eyre::{Result, WrapErr, eyre};
 
 use super::profile::WrapperProfile;
 use super::repo_home;
@@ -60,7 +60,7 @@ pub(crate) fn detect_wrap_startup(
 
     let promptless_at_repo_root = !capture_git_status
         && sniff::filesystem::git::GitRepo::discover(cwd)
-            .map_err(|e| eyre!("startup repo discovery failed for '{}': {e}", cwd.display()))?
+            .wrap_err_with(|| format!("startup repo discovery failed for '{}'", cwd.display()))?
             .is_some_and(|repo| canonical_or_self(repo.repo_root()) == canonical_or_self(cwd));
 
     let filesystem_request = FilesystemRequest::new()
@@ -84,7 +84,7 @@ pub(crate) fn detect_wrap_startup(
         .filesystem(filesystem_request);
 
     let result = sniff::detect_with_plan(plan)
-        .map_err(|e| eyre!("startup detection failed for '{}': {e}", cwd.display()))?;
+        .wrap_err_with(|| format!("startup detection failed for '{}'", cwd.display()))?;
 
     let mut launch_context =
         claudine::system_prompt::LaunchContext::from_sniff_result(&result, cwd);
@@ -161,9 +161,8 @@ pub(crate) fn detect_wrap_startup_or_fallback(
         Ok(startup) => Ok(startup),
         Err(error) => {
             if repo_requested {
-                return Err(eyre!(
-                    "--repo requires startup repo detection, but startup detection failed: {error}"
-                ));
+                return Err(error)
+                    .wrap_err("--repo requires startup repo detection, but startup detection failed");
             }
             deferred_warnings.push(format!(
                 "startup detection failed; continuing without repo/package context: {error}"
@@ -338,9 +337,9 @@ pub(crate) fn build_child_env_with_launch(
             // sanitize — instead of overwriting it.
             let current = env.get(std::ffi::OsStr::new(key)).map(|v| v.as_os_str());
             let overlay: serde_json::Value = serde_json::from_str(value)
-                .map_err(|e| eyre!("invalid OPENCODE_CONFIG_CONTENT override: {e}"))?;
+                .wrap_err("invalid OPENCODE_CONFIG_CONTENT override")?;
             let merged = claudine::opencode_config::merge_overlay(current, overlay)
-                .map_err(|e| eyre!("failed to merge OPENCODE_CONFIG_CONTENT: {e}"))?;
+                .wrap_err("failed to merge OPENCODE_CONFIG_CONTENT")?;
             set_added_env(&mut env, &mut added, key, merged);
         } else {
             set_added_env(&mut env, &mut added, key, value.clone());

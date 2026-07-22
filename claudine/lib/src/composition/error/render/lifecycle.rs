@@ -192,6 +192,12 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             source_path,
             property,
             message,
+        }
+        | CompositionError::LifecycleWhenExpressionInvalid {
+            source_path,
+            property,
+            message,
+            ..
         } => {
             let file_link = render_file_link(source_path);
             let body = format!(
@@ -238,6 +244,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             property,
             action,
             message,
+            source: _,
         } => {
             let file_link = render_file_link(source_path);
             let body = format!(
@@ -481,6 +488,50 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                      optional). To reference a frontmatter property named `err`, write \
                      `doc.err` explicitly.",
                 )
+        }
+        CompositionError::InvalidFileReference { context, source } => {
+            let FileReferenceContext {
+                source_path,
+                event,
+                property,
+                reference,
+                hint,
+            } = context.as_ref();
+            let file_link = render_file_link(source_path);
+            let surface = match event {
+                Some(event) => format!(
+                    "<cyan>`{property}`</cyan> in the <cyan>`{event}`</cyan> event of {file_link}"
+                ),
+                None => format!("<cyan>`{property}`</cyan> in {file_link}"),
+            };
+            // `escape_prose_path` escapes `"` for `<a href="…">` attributes;
+            // it over-escapes body text, and this source's `Display` quotes
+            // the reference. `Prose::escape_text` is the body-text escape.
+            let mut body = format!(
+                "Cannot resolve <cyan>`{}`</cyan>, referenced by {surface}.\n\n{}",
+                escape_prose_path(reference),
+                Prose::escape_text(&source.to_string())
+            );
+            // Enumerate the ordered plan only when the resolver tried more than
+            // one candidate: the single-candidate `Display` above already names
+            // its one path, so a "Tried:" list adds information solely for an
+            // implicit reference that fell through repository- then
+            // source-relative candidates (spec §D8).
+            let candidates = source.resolution_candidates();
+            if candidates.len() >= 2 {
+                body.push_str("\n\nTried:");
+                for (index, probed) in candidates.iter().enumerate() {
+                    let path = probed.candidate().path().display().to_string();
+                    body.push_str(&format!("\n  {}. {}", index + 1, Prose::escape_text(&path)));
+                }
+            }
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "CompositionError",
+                    "Unresolvable file reference",
+                ))
+                .body(body)
+                .hint(escape_prose_path(hint))
         }
         // The dispatcher only routes lifecycle-family variants here.
         _ => unreachable!("non-lifecycle CompositionError routed to lifecycle renderer"),

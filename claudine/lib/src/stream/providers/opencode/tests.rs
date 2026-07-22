@@ -41,11 +41,9 @@ fn kinds(events: &[SemanticEvent]) -> Vec<&'static str> {
 fn step_start_emits_session_start_once_and_info() {
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#);
     parser
-        .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#);
     let ks = kinds(&events.lock().unwrap());
     // first step_start: session_start + info; second: just info
     assert_eq!(ks, vec!["session_start", "info", "info"]);
@@ -55,8 +53,7 @@ fn step_start_emits_session_start_once_and_info() {
 fn text_emits_output_text() {
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"text","text":"hello"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"text","text":"hello"}"#);
     let collected = events.lock().unwrap().clone();
     assert!(matches!(
         collected[0],
@@ -70,13 +67,11 @@ fn tool_use_and_result_emit_typed_events() {
     parser
         .feed_line(
             r#"{"type":"tool_start","part":{"id":"t1","tool_name":"bash","input":{"cmd":"ls"}}}"#,
-        )
-        .unwrap();
+        );
     parser
         .feed_line(
             r#"{"type":"tool_end","part":{"tool_use_id":"t1","status":"success","content":"ok"}}"#,
-        )
-        .unwrap();
+        );
     let ks = kinds(&events.lock().unwrap());
     assert_eq!(ks, vec!["tool_call", "tool_result"]);
 }
@@ -88,8 +83,7 @@ fn orphan_tool_result_emits_unmatched_result() {
     parser
         .feed_line(
             r#"{"type":"tool_end","part":{"tool_use_id":"t999","status":"success","content":"ok","tool_name":"bash"}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     match &collected[0] {
         SemanticEvent::ToolResult {
@@ -109,13 +103,11 @@ fn step_complete_emits_turn_complete_and_sums() {
     parser
         .feed_line(
             r#"{"type":"step_complete","usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15},"cost_usd":0.001,"duration_ms":200}"#,
-        )
-        .unwrap();
+        );
     parser
         .feed_line(
             r#"{"type":"step_complete","usage":{"input_tokens":20,"output_tokens":10,"total_tokens":30},"cost_usd":0.002}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     assert_eq!(kinds(&collected), vec!["turn_complete", "turn_complete"]);
     let summary = parser.finish(0);
@@ -129,8 +121,7 @@ fn step_complete_emits_turn_complete_and_sums() {
 fn error_event_emits_error() {
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"error","error_message":"API timeout"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"error","error_message":"API timeout"}"#);
     let collected = events.lock().unwrap().clone();
     assert!(matches!(
         collected[0],
@@ -144,8 +135,7 @@ fn error_event_emits_error() {
 fn unknown_event_becomes_provider_extension() {
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"some_future_event","x":1}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"some_future_event","x":1}"#);
     let collected = events.lock().unwrap().clone();
     assert!(matches!(
         collected[0],
@@ -156,7 +146,7 @@ fn unknown_event_becomes_provider_extension() {
 #[test]
 fn malformed_json_emits_warning() {
     let (events, mut parser) = new_parser();
-    assert!(parser.feed_line("garbage").is_ok());
+    parser.feed_line("garbage");
     assert!(matches!(
         events.lock().unwrap()[0],
         SemanticEvent::Warning { .. }
@@ -167,8 +157,7 @@ fn malformed_json_emits_warning() {
 fn tool_input_string_fallback_parses_without_panic() {
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"tool_start","part":{"tool_name":"bash","input":"ls -la"}}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"tool_start","part":{"tool_name":"bash","input":"ls -la"}}"#);
     let collected = events.lock().unwrap().clone();
     assert_eq!(kinds(&collected), vec!["tool_call"]);
     match &collected[0] {
@@ -182,7 +171,7 @@ fn tool_input_string_fallback_parses_without_panic() {
 #[test]
 fn missing_discriminator_falls_through_to_provider_extension() {
     let (events, mut parser) = new_parser();
-    parser.feed_line(r#"{"payload":{"k":1}}"#).unwrap();
+    parser.feed_line(r#"{"payload":{"k":1}}"#);
     let collected = events.lock().unwrap().clone();
     assert_eq!(collected.len(), 1);
     match &collected[0] {
@@ -205,8 +194,7 @@ fn step_finish_info_has_phase_marker() {
     parser
         .feed_line(
             r#"{"type":"step_finish","part":{"reason":"stop","cost":0.01,"tokens":{"input":1,"output":2,"total":3,"cache":{"read":0}}}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     match &collected[0] {
         SemanticEvent::Info { message, extra } => {
@@ -230,7 +218,7 @@ fn round_trip_fidelity_mixed_fixture() {
         r#"{"type":"step_complete","usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3},"cost_usd":0.01}"#,
         r#"{"type":"future.kind","x":1}"#,
     ] {
-        parser.feed_line(line).unwrap();
+        parser.feed_line(line);
     }
     for event in events.lock().unwrap().iter() {
         let v = serde_json::to_value(event).unwrap();
@@ -263,8 +251,7 @@ fn opencode_tool_use_emits_tool_result_only() {
         .feed_line(
             r#"{"type":"tool_use","part":{"id":"t1","tool":"bash",
              "state":{"status":"completed","input":{"command":"ls -la"},"output":"file.txt"}}}"#,
-        )
-        .unwrap();
+        );
 
     let captured = events.lock().unwrap().clone();
     let kinds: Vec<&str> = captured.iter().map(|e| e.kind_str()).collect();
@@ -288,7 +275,7 @@ fn assistant_text_in_part_text_shape_emits_output_text() {
     let raw = std::fs::read_to_string(&path).expect("fixture exists");
     let (events, mut parser) = new_parser();
     for line in raw.lines() {
-        parser.feed_line(line).unwrap();
+        parser.feed_line(line);
     }
     let has_non_empty_output_text = events
         .lock()
@@ -321,11 +308,9 @@ fn assistant_text_in_part_text_shape_emits_output_text() {
 fn tool_use_event_emits_only_tool_result_not_synthesized_call() {
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#);
     parser
-        .feed_line(r#"{"type":"tool_use","part":{"id":"t1","tool":"bash","state":{"status":"completed","input":{"command":"ls"},"output":"file.txt"}}}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"tool_use","part":{"id":"t1","tool":"bash","state":{"status":"completed","input":{"command":"ls"},"output":"file.txt"}}}"#);
     let kinds: Vec<&'static str> = events
         .lock()
         .unwrap()
@@ -348,14 +333,11 @@ fn orphan_think_close_delimiter_in_text_is_dropped() {
     // `reasoning` events. The lone delimiter must not surface as output.
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"text","text":"</think>"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"text","text":"</think>"}"#);
     parser
-        .feed_line(r#"{"type":"text","text":"\n</think>\n"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"text","text":"\n</think>\n"}"#);
     parser
-        .feed_line(r#"{"type":"text","text":"<think>"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"text","text":"<think>"}"#);
     let collected = events.lock().unwrap().clone();
     assert!(
         collected.is_empty(),
@@ -372,8 +354,7 @@ fn orphan_think_close_delimiter_in_text_is_dropped() {
 fn think_delimiter_packed_with_content_strips_only_the_delimiter_line() {
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"text","text":"</think>\n\nNow I'll commit."}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"text","text":"</think>\n\nNow I'll commit."}"#);
     let collected = events.lock().unwrap().clone();
     let texts: Vec<&str> = collected
         .iter()
@@ -398,8 +379,7 @@ fn inline_think_mention_in_text_is_preserved() {
     parser
         .feed_line(
             r#"{"type":"text","text":"The </think> token closes a reasoning block."}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     match &collected[0] {
         SemanticEvent::OutputText { text, .. } => {
@@ -413,8 +393,7 @@ fn inline_think_mention_in_text_is_preserved() {
 fn reasoning_event_emits_semantic_reasoning() {
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"reasoning","text":"weighing options"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"reasoning","text":"weighing options"}"#);
     let collected = events.lock().unwrap().clone();
     let kinds: Vec<&'static str> = collected.iter().map(|e| e.kind_str()).collect();
     assert_eq!(
@@ -433,12 +412,10 @@ fn reasoning_event_emits_semantic_reasoning() {
 fn reasoning_with_empty_text_emits_nothing() {
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"reasoning","text":""}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"reasoning","text":""}"#);
     parser
-        .feed_line(r#"{"type":"reasoning","part":{"text":""}}"#)
-        .unwrap();
-    parser.feed_line(r#"{"type":"reasoning"}"#).unwrap();
+        .feed_line(r#"{"type":"reasoning","part":{"text":""}}"#);
+    parser.feed_line(r#"{"type":"reasoning"}"#);
     let collected = events.lock().unwrap().clone();
     assert!(
         collected.is_empty(),
@@ -456,13 +433,11 @@ fn tool_start_tool_end_pair_preserves_cached_input_on_result() {
     parser
         .feed_line(
             r#"{"type":"tool_start","part":{"id":"t1","tool_name":"bash","input":{"command":"ls -la"}}}"#,
-        )
-        .unwrap();
+        );
     parser
         .feed_line(
             r#"{"type":"tool_end","part":{"tool_use_id":"t1","status":"success","content":"ok"}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     let result = collected
         .iter()
@@ -486,13 +461,11 @@ fn tool_end_wire_input_wins_over_cached_input() {
     parser
         .feed_line(
             r#"{"type":"tool_start","part":{"id":"t1","tool_name":"bash","input":{"command":"ls"}}}"#,
-        )
-        .unwrap();
+        );
     parser
         .feed_line(
             r#"{"type":"tool_end","part":{"tool_use_id":"t1","status":"success","content":"ok","input":{"command":"pwd"}}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     let result = collected
         .iter()
@@ -517,14 +490,11 @@ fn tool_use_event_still_increments_tool_calls_counter() {
     // `tool_calls += 1` even though no ToolCall event is emitted.
     let (_events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#);
     parser
-        .feed_line(r#"{"type":"tool_use","part":{"id":"t1","tool":"bash","state":{"status":"completed","input":{"command":"ls"},"output":"file.txt"}}}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"tool_use","part":{"id":"t1","tool":"bash","state":{"status":"completed","input":{"command":"ls"},"output":"file.txt"}}}"#);
     parser
-        .feed_line(r#"{"type":"tool_use","part":{"id":"t2","tool":"bash","state":{"status":"completed","input":{"command":"pwd"},"output":"/"}}}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"tool_use","part":{"id":"t2","tool":"bash","state":{"status":"completed","input":{"command":"pwd"},"output":"/"}}}"#);
     let summary = Box::new(parser).finish(0);
     assert_eq!(summary.tool_calls, Some(2), "both completions must count");
 }
@@ -533,8 +503,7 @@ fn tool_use_event_still_increments_tool_calls_counter() {
 fn task_started_becomes_subagent_start() {
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"task_started","task_id":"sa1","name":"researcher"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"task_started","task_id":"sa1","name":"researcher"}"#);
     let collected = events.lock().unwrap().clone();
     match &collected[0] {
         SemanticEvent::SubagentStart { id, name, .. } => {
@@ -551,8 +520,7 @@ fn task_completed_becomes_subagent_stop() {
     parser
         .feed_line(
             r#"{"type":"task_completed","task_id":"sa1","name":"researcher","status":"success"}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     match &collected[0] {
         SemanticEvent::SubagentStop {
@@ -570,8 +538,7 @@ fn task_completed_becomes_subagent_stop() {
 fn task_progress_becomes_info() {
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"task_progress","message":"working"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"task_progress","message":"working"}"#);
     let collected = events.lock().unwrap().clone();
     match &collected[0] {
         SemanticEvent::Info { message, .. } => assert_eq!(message, "working"),
@@ -589,8 +556,7 @@ fn opencode_task_completion_no_longer_synthesizes_subagent_lifecycle() {
     // record on stderr.
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#);
     parser
         .feed_line(
             r#"{"type":"tool_use","part":{"id":"t1","tool":"task",
@@ -599,8 +565,7 @@ fn opencode_task_completion_no_longer_synthesizes_subagent_lifecycle() {
                       "metadata":{"sessionId":"child-ses-1"},
                       "time":{"start":1715340000000},
                       "output":"ok"}}}"#,
-        )
-        .unwrap();
+        );
 
     let collected = events.lock().unwrap().clone();
     let ks: Vec<&str> = collected.iter().map(|e| e.kind_str()).collect();
@@ -636,8 +601,7 @@ fn opencode_task_error_completion_no_longer_synthesizes_subagent_lifecycle() {
     // the stderr `exiting loop` record for the child session.
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#);
     parser
         .feed_line(
             r#"{"type":"tool_use","part":{"id":"t-err","tool":"task",
@@ -646,8 +610,7 @@ fn opencode_task_error_completion_no_longer_synthesizes_subagent_lifecycle() {
                       "metadata":{"sessionId":"child-ses-err"},
                       "error":"agent crashed",
                       "output":""}}}"#,
-        )
-        .unwrap();
+        );
 
     let collected = events.lock().unwrap().clone();
     let ks: Vec<&str> = collected.iter().map(|e| e.kind_str()).collect();
@@ -680,14 +643,12 @@ fn opencode_task_error_completion_no_longer_synthesizes_subagent_lifecycle() {
 fn opencode_non_task_tool_does_not_synthesize_subagent_lifecycle() {
     let (events, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#);
     parser
         .feed_line(
             r#"{"type":"tool_use","part":{"id":"t1","tool":"bash",
              "state":{"status":"completed","input":{"command":"ls -la"},"output":"file.txt"}}}"#,
-        )
-        .unwrap();
+        );
 
     let collected = events.lock().unwrap().clone();
     let ks: Vec<&str> = collected.iter().map(|e| e.kind_str()).collect();
@@ -726,7 +687,7 @@ fn classify_error_line_with_vocabulary(
         provider,
         vocabulary_for,
     )?;
-    parser.feed_line(line).unwrap();
+    parser.feed_line(line);
     let collected = events.lock().unwrap().clone();
     let SemanticEvent::Error { kind, extra, .. } = collected
         .into_iter()
@@ -774,8 +735,7 @@ fn kilo_identity_stamps_kilo_and_classifies_via_kilo_vocabulary() {
     let mut parser =
         OpenCodeSemanticStreamParser::new(sink, None, Provider::Kilo).unwrap();
     parser
-        .feed_line(r#"{"type":"error","error_message":"rate limit exceeded"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"error","error_message":"rate limit exceeded"}"#);
     let summary = Box::new(parser).finish(1);
     assert_eq!(summary.provider, Provider::Kilo);
 }

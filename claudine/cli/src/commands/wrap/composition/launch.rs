@@ -8,7 +8,8 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use color_eyre::eyre::{Result, eyre};
+use claudine::diagnostics::{DiagnosticSnapshot, RestoredDiagnostic};
+use color_eyre::eyre::Result;
 
 use super::env;
 
@@ -70,14 +71,28 @@ pub(crate) fn reset_launch_workspace_fallbacks_for_tests() {
 /// **and** `--repo` is set, surface the captured sniff error as a hard
 /// run abort, matching the behavior of the legacy non-prep path that
 /// called `LaunchContext::from_cwd` directly.
+///
+/// The captured failure arrives as a [`DiagnosticSnapshot`] because the prep
+/// record is `Clone` and a concrete error is not. Restoring it — rather than
+/// lifting `snapshot.message` into an `eyre!` string — is what keeps the
+/// original `code`, `category`, `disposition`, `origin`, `detail`, and cause
+/// available to effective-diagnostic selection, `err.*`, and `StatusBlock`
+/// rendering at the point the run actually aborts.
 pub(super) fn enforce_repo_launch_detection(
     repo: bool,
-    prep_launch_detection_error: Option<&str>,
+    prep_launch_detection_error: Option<&DiagnosticSnapshot>,
 ) -> Result<()> {
-    if repo && let Some(error) = prep_launch_detection_error {
-        return Err(eyre!(
-            "--repo requires startup repo detection, but launch-context detection failed: {error}"
-        ));
+    if repo && let Some(captured) = prep_launch_detection_error {
+        return Err(RestoredDiagnostic::new(captured.clone())
+            .with_context(REPO_LAUNCH_DETECTION_CONTEXT)
+            .into());
     }
     Ok(())
 }
+
+/// The `--repo` framing prefixed onto the restored message.
+///
+/// A user-visible surface predating the typed restoration; the text is held
+/// byte-identical to the prose the previous `eyre!` produced.
+const REPO_LAUNCH_DETECTION_CONTEXT: &str =
+    "--repo requires startup repo detection, but launch-context detection failed";

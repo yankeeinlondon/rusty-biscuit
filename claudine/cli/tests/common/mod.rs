@@ -90,6 +90,44 @@ pub fn augmented_path(fake_bin: &Path) -> std::ffi::OsString {
     std::env::join_paths(paths).expect("join_paths")
 }
 
+/// Clear an inherited `NO_COLOR` from a pane's interactive shell before a
+/// color fixture runs in it.
+///
+/// `send_command_with_env` cannot express this: it renders env as `VAR='' cmd`,
+/// and claudine treats `NO_COLOR` as *present* rather than as truthy
+/// (`cli/src/log.rs` — `colors_disabled()` short-circuits `force_color_enabled()`),
+/// so an empty value still disables color and `FORCE_COLOR=1` cannot out-vote
+/// it. A host that exports `NO_COLOR=1` — as review environments legitimately
+/// do — would otherwise turn every L2 color assertion into a false failure, or
+/// worse, a vacuous pass.
+///
+/// The unset lands in the shell the caller then drives, so it survives any
+/// `clear`/`cd` sent afterwards.
+pub fn clear_no_color<H: biscuit_test_harness::TerminalHarness>(harness: &mut H) {
+    harness
+        .send_text(b"unset NO_COLOR\n")
+        .expect("unset NO_COLOR");
+    let _ = biscuit_test_harness::wait_for_prompt(harness);
+}
+
+/// Assert that the captured pane row carrying `needle` is itself styled.
+///
+/// The weaker `frame.raw.contains('\u{1b}')` this replaces is satisfied by *any*
+/// escape anywhere in the pane — a colored shell prompt, or tmux's own
+/// re-emission — so it can hold on a run that rendered the diagnostic with no
+/// styling at all. Anchoring on the row that carries the diagnostic text makes
+/// the assertion fail when the thing under test loses its color.
+pub fn assert_row_is_styled(raw: &str, needle: &str, what: &str) {
+    let row = raw
+        .lines()
+        .find(|line| strip_ansi(line).contains(needle))
+        .unwrap_or_else(|| panic!("no captured row contains {needle:?}.\nraw:\n{raw}"));
+    assert!(
+        row.contains('\u{1b}'),
+        "{what}: the row carrying {needle:?} reached the pane unstyled.\nrow: {row:?}"
+    );
+}
+
 pub fn strip_ansi(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();

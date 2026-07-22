@@ -1,5 +1,7 @@
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+
+use biscuit_file::{FileReference, FileResolutionContext};
 
 use crate::system_prompt::context::LaunchContext;
 use crate::system_prompt::types::*;
@@ -49,7 +51,7 @@ pub fn resolve_system_prompt_source(
 ) -> Result<Option<(SystemPromptSource, String)>, crate::error::ClaudineError> {
     // 1. Explicit --append-system-prompt
     if let Some(ref file) = args.append_file {
-        let path = resolve_file_ref(file, &context.cwd)?;
+        let path = resolve_file_ref(file, context)?;
         let text = std::fs::read_to_string(&path)?;
         return Ok(Some((
             SystemPromptSource::ExplicitFile {
@@ -62,7 +64,7 @@ pub fn resolve_system_prompt_source(
 
     // 2. Explicit --replace-system-prompt
     if let Some(ref file) = args.replace_file {
-        let path = resolve_file_ref(file, &context.cwd)?;
+        let path = resolve_file_ref(file, context)?;
         let text = std::fs::read_to_string(&path)?;
         return Ok(Some((
             SystemPromptSource::ExplicitFile {
@@ -77,6 +79,13 @@ pub fn resolve_system_prompt_source(
     discover_standard_file(context)
 }
 
+/// Discover a `system-prompt.md` by filename over the launch context's known
+/// anchors (package → package-area → repo, then user home).
+///
+/// This is filename **discovery** over a fixed set of directories, not
+/// file-reference *resolution* (D5): it never parses `@`/`~`/`vault:` grammar
+/// and never consults [`FileReference`]. It is deliberately distinct from
+/// [`resolve_file_ref`], which resolves an author-supplied reference string.
 fn discover_standard_file(
     context: &LaunchContext,
 ) -> Result<Option<(SystemPromptSource, String)>, crate::error::ClaudineError> {
@@ -186,20 +195,45 @@ fn build_scope_list(context: &LaunchContext) -> Vec<(PathBuf, StandardPromptScop
     }
 }
 
-/// Resolve a file reference relative to the CWD.
-fn resolve_file_ref(file_ref: &str, cwd: &Path) -> Result<PathBuf, crate::error::ClaudineError> {
-    let path = Path::new(file_ref);
-    let resolved = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        cwd.join(path)
-    };
-    if !resolved.is_file() {
-        return Err(crate::error::ClaudineError::SystemPromptFileNotFound(
-            resolved.display().to_string(),
-        ));
+/// Resolve a `--append`/`--replace-system-prompt` file reference against the
+/// launch context.
+///
+/// Delegates all grammar and candidate ordering to [`FileReference`] and the
+/// shared [`FileResolutionContext`] rather than the former absolute-or-`cwd.join`
+/// grammar (D5/D11): implicit references are repository-first then
+/// launch-relative (D4), `@foo` is a magic-root search, `~`/`~/foo` is
+/// home-pinned (`~user` unsupported), explicit `./`/`../` stay pinned to the launch directory, and an
+/// absolute path resolves to itself. The launch context has no source document,
+/// so its directory is the base and the caller-supplied repository root anchors
+/// implicit references first (when it contains that base). Resolution probes the
+/// filesystem, so only an existing regular file is a match.
+///
+/// ## Errors
+///
+/// Returns [`ClaudineError::SystemPromptFileNotFound`](crate::error::ClaudineError::SystemPromptFileNotFound)
+/// when the reference is malformed or resolves to no existing file.
+fn resolve_file_ref(
+    file_ref: &str,
+    context: &LaunchContext,
+) -> Result<PathBuf, crate::error::ClaudineError> {
+    let not_found =
+        || crate::error::ClaudineError::SystemPromptFileNotFound(file_ref.to_string());
+
+    let reference = FileReference::new(file_ref).map_err(|_| not_found())?;
+
+    let mut resolution_ctx = FileResolutionContext::new(context.cwd.clone());
+    if let Some(root) = context
+        .repo_root
+        .as_deref()
+        .filter(|root| context.cwd.starts_with(root))
+    {
+        resolution_ctx = resolution_ctx.with_repository_root(root);
     }
-    Ok(resolved)
+
+    reference
+        .resolve_in_context(&resolution_ctx)
+        .map_err(|_| not_found())?
+        .ok_or_else(not_found)
 }
 
 #[cfg(test)]
