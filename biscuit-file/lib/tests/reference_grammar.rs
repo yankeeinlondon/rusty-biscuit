@@ -37,6 +37,32 @@ fn special_kinds_classify() {
 }
 
 #[test]
+fn magic_payload_must_remain_relative_after_the_documented_sigil() {
+    for raw in [
+        "@//etc/hosts",
+        "@///etc/hosts",
+        "%@//etc/hosts",
+        r"@C:\Windows\win.ini",
+        r"@/C:\Windows\win.ini",
+        r"%@C:\Windows\win.ini",
+        r"@C:Windows\win.ini",
+        r"@\Windows\win.ini",
+        r"@/\Windows\win.ini",
+        r"@\\server\share\file.md",
+        r"@/\\server\share\file.md",
+        r"%@\\server\share\file.md",
+    ] {
+        assert!(
+            matches!(
+                FileReference::new(raw),
+                Err(FileReferenceError::InvalidSyntax(_))
+            ),
+            "rooted magic payload must be rejected on every host: {raw:?}",
+        );
+    }
+}
+
+#[test]
 fn home_kind_is_observable() {
     assert_eq!(kind("~"), FileReferenceKind::Home);
     assert_eq!(kind("~/notes.md"), FileReferenceKind::Home);

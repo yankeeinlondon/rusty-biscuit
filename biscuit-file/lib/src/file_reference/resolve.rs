@@ -1019,7 +1019,7 @@ pub(crate) fn complete_partial(
     token: &str,
     base: &Path,
 ) -> Result<Option<PartialCompletion>, FileReferenceError> {
-    let Some((form, path_part)) = classify_token(token) else {
+    let Some((form, path_part)) = classify_token(token)? else {
         return Ok(None);
     };
 
@@ -1055,7 +1055,7 @@ pub(crate) fn complete_partial_in_context(
     token: &str,
     ctx: &FileResolutionContext,
 ) -> Result<Option<PartialCompletion>, FileReferenceError> {
-    let Some((form, path_part)) = classify_token(token) else {
+    let Some((form, path_part)) = classify_token(token)? else {
         return Ok(None);
     };
     ctx.validate()?;
@@ -1150,35 +1150,49 @@ fn push_unique(roots: &mut Vec<PathBuf>, root: PathBuf) {
 /// Classify a raw token into an entry form plus the path portion following
 /// the sigil (if any).
 ///
-/// Returns `None` for any form the supplement does not support.
-fn classify_token(token: &str) -> Option<(CompletionEntryForm, &str)> {
+/// Returns `Ok(None)` for any form the supplement does not support.
+///
+/// ## Errors
+///
+/// Returns [`FileReferenceError::InvalidSyntax`] when a direct or recursive
+/// magic token remains rooted after the documented `@` or `@/` sigil.
+fn classify_token(
+    token: &str,
+) -> Result<Option<(CompletionEntryForm, &str)>, FileReferenceError> {
     // Recursive (`%`) wraps another form; completion support would need to
     // deal with it explicitly, so opt out.
     if token.starts_with('%') {
-        return None;
+        if token.starts_with("%@") {
+            parse::parse(token)?;
+        }
+        return Ok(None);
     }
     // Vault, package, absolute, explicit-relative, and interpolation forms
     // are all deliberately out of scope.
     if token.starts_with("vault:") {
-        return None;
+        return Ok(None);
     }
     if token.starts_with('!') {
-        return None;
+        return Ok(None);
     }
     if token.starts_with('/') {
-        return None;
+        return Ok(None);
     }
     if token.starts_with("./") || token.starts_with("../") || token == "." || token == ".." {
-        return None;
+        return Ok(None);
     }
     if token.starts_with("{{") {
-        return None;
+        return Ok(None);
     }
 
     if let Some(rest) = token.strip_prefix('@') {
-        Some((CompletionEntryForm::Magic, rest))
+        parse::parse(token)?;
+        Ok(Some((
+            CompletionEntryForm::Magic,
+            rest.strip_prefix('/').unwrap_or(rest),
+        )))
     } else {
-        Some((CompletionEntryForm::ImplicitRelative, token))
+        Ok(Some((CompletionEntryForm::ImplicitRelative, token)))
     }
 }
 
@@ -1413,55 +1427,66 @@ mod tests {
 
     #[test]
     fn classify_token_magic_empty_tail() {
-        let (form, tail) = classify_token("@").unwrap();
+        let (form, tail) = classify_token("@").unwrap().unwrap();
         assert_eq!(form, CompletionEntryForm::Magic);
         assert_eq!(tail, "");
     }
 
     #[test]
     fn classify_token_magic_with_partial_name() {
-        let (form, tail) = classify_token("@pr").unwrap();
+        let (form, tail) = classify_token("@pr").unwrap().unwrap();
         assert_eq!(form, CompletionEntryForm::Magic);
         assert_eq!(tail, "pr");
     }
 
     #[test]
     fn classify_token_magic_with_scope_and_partial() {
-        let (form, tail) = classify_token("@prompts/p").unwrap();
+        let (form, tail) = classify_token("@prompts/p").unwrap().unwrap();
+        assert_eq!(form, CompletionEntryForm::Magic);
+        assert_eq!(tail, "prompts/p");
+    }
+
+    #[test]
+    fn classify_token_magic_optional_separator_matches_parser() {
+        let (form, tail) = classify_token("@/prompts/p").unwrap().unwrap();
         assert_eq!(form, CompletionEntryForm::Magic);
         assert_eq!(tail, "prompts/p");
     }
 
     #[test]
     fn classify_token_empty_string_is_implicit_relative() {
-        let (form, tail) = classify_token("").unwrap();
+        let (form, tail) = classify_token("").unwrap().unwrap();
         assert_eq!(form, CompletionEntryForm::ImplicitRelative);
         assert_eq!(tail, "");
     }
 
     #[test]
     fn classify_token_bare_subdir_is_implicit_relative() {
-        let (form, tail) = classify_token("prompts/p").unwrap();
+        let (form, tail) = classify_token("prompts/p").unwrap().unwrap();
         assert_eq!(form, CompletionEntryForm::ImplicitRelative);
         assert_eq!(tail, "prompts/p");
     }
 
     #[test]
     fn classify_token_rejects_recursive() {
-        assert!(classify_token("%foo").is_none());
-        assert!(classify_token("%@foo").is_none());
+        assert!(classify_token("%foo").unwrap().is_none());
+        assert!(classify_token("%@foo").unwrap().is_none());
+        assert!(matches!(
+            classify_token("%@//etc/hosts"),
+            Err(FileReferenceError::InvalidSyntax(_))
+        ));
     }
 
     #[test]
     fn classify_token_rejects_unsupported_forms() {
-        assert!(classify_token("!foo").is_none());
-        assert!(classify_token("/abs/path").is_none());
-        assert!(classify_token("./rel").is_none());
-        assert!(classify_token("../rel").is_none());
-        assert!(classify_token(".").is_none());
-        assert!(classify_token("..").is_none());
-        assert!(classify_token("vault:notes").is_none());
-        assert!(classify_token("{{DIR}}/x").is_none());
+        assert!(classify_token("!foo").unwrap().is_none());
+        assert!(classify_token("/abs/path").unwrap().is_none());
+        assert!(classify_token("./rel").unwrap().is_none());
+        assert!(classify_token("../rel").unwrap().is_none());
+        assert!(classify_token(".").unwrap().is_none());
+        assert!(classify_token("..").unwrap().is_none());
+        assert!(classify_token("vault:notes").unwrap().is_none());
+        assert!(classify_token("{{DIR}}/x").unwrap().is_none());
     }
 
     #[test]

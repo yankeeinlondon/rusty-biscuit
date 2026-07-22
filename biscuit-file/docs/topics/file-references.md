@@ -28,7 +28,7 @@ compatibility resolver is called.
 | _(none)_              | **Implicit Relative** | Git repository root, then CWD (or `base`)                | `README.md`, `docs/spec.md`  |
 | `/`, drive, or UNC    | **Absolute**          | Used verbatim                                            | `/etc/config.toml`, `C:\\cfg.toml` |
 | `~` or `~/`           | **Home**              | The user's home directory only (`~user` unsupported)     | `~/.config/app.toml`         |
-| `@`                   | **Magic**             | Configurable search roots (git root, HOME, custom paths) | `@docs/spec.md`              |
+| `@` or `@/`           | **Magic**             | Configurable search roots (git root, HOME, custom paths) | `@docs/spec.md`              |
 | `!`                   | **Package**           | Cargo workspace package area (or git root fallback)      | `!README.md`                 |
 | `vault:` or `vault::` | **Vault**             | Configured vault root directories                        | `vault:notes/today.md`       |
 | `http://`, `https://` | **Remote URL**        | A typed remote target; never a local candidate           | `https://example.com/a.md`   |
@@ -121,9 +121,13 @@ it is home-pinned with no other candidate.
 
 ## Magic References (`@`)
 
-Magic references search a prioritized list of root directories. This is the
-most flexible kind -- useful for finding files that could live at the project
-root, in your home directory, or in custom search paths.
+Magic references search a prioritized list of root directories. `@docs/spec.md`
+and `@/docs/spec.md` are equivalent authored spellings. The grammar consumes
+exactly one optional `/`; the remaining payload must be relative. Repeated
+POSIX separators and Windows drive-qualified, rooted, or UNC payloads are
+rejected with `InvalidSyntax` instead of replacing a configured magic root.
+This is the most flexible kind -- useful for finding files that could live at
+the project root, in your home directory, or in custom search paths.
 
 ### Default Search Order
 
@@ -528,7 +532,9 @@ Every `ResolutionCandidate` exposes `path()` and `provenance()`. The
 tokens. Other entry forms return `Ok(None)` rather than being reinterpreted. A
 `PartialCompletion` exposes `entry_form()`, ordered `roots()`, the
 `active_segment()`, and the `rendered_prefix()` a completion consumer uses to
-construct an emitted token.
+construct an emitted token. A rooted magic token is invalid grammar and returns
+`InvalidSyntax`, including when `%` makes the otherwise unsupported token
+recursive.
 
 With one shared `FileResolutionContext`, completion and execution consume the
 same captured roots and precedence: implicit roots are repository then base;
@@ -545,7 +551,7 @@ The complete current error vocabulary is:
 
 | Variant | Trigger |
 |---------|---------|
-| `InvalidSyntax(message)` | Empty/malformed syntax, invalid interpolation, or an injected grammar sigil |
+| `InvalidSyntax(message)` | Empty/malformed syntax, a rooted magic payload, invalid interpolation, or an injected grammar sigil |
 | `MissingEnvironmentVariable { name }` | `{{NAME}}` is absent from the selected environment snapshot |
 | `CurrentDirectory(source)` | An ambient compatibility operation could not read CWD |
 | `Git(source)` | Ambient repository discovery failed for a reason other than “not a repository” |

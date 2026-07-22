@@ -723,9 +723,11 @@ impl FileReference {
     ///
     /// ## Errors
     ///
-    /// Returns an error only if the caller passes a relative `base` and
-    /// the ambient CWD cannot be read, or if git discovery itself fails.
-    /// A missing git repository is **not** an error.
+    /// Returns [`FileReferenceError::InvalidSyntax`] when a direct or recursive
+    /// magic token remains rooted after the documented `@` or `@/` sigil.
+    /// Also returns an error if the caller passes a relative `base` and the
+    /// ambient CWD cannot be read, or if git discovery itself fails. A missing
+    /// git repository is **not** an error.
     pub fn complete_partial(
         token: &str,
         base: &Path,
@@ -757,6 +759,8 @@ impl FileReference {
     ///
     /// Returns [`FileReferenceError::RepositoryRootNotContainingSource`] when the
     /// context's repository root does not contain its base directory.
+    /// Returns [`FileReferenceError::InvalidSyntax`] when a direct or recursive
+    /// magic token remains rooted after the documented `@` or `@/` sigil.
     ///
     /// [`complete_partial`]: Self::complete_partial
     /// [`resolve_detailed`]: Self::resolve_detailed

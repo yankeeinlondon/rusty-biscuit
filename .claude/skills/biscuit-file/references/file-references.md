@@ -14,7 +14,7 @@ contract, see [the topic doc](../../../../biscuit-file/docs/topics/file-referenc
 | _(none)_ | `ImplicitRelative` | Repository root, then authoring base |
 | POSIX root, Windows drive/UNC | `Absolute` | Authored absolute path only |
 | `~`, `~/` (`~\` on Windows) | `Home` | Captured home only; `~user` is rejected |
-| `@` | `Magic` | Configured prepends → repository → home → configured appends |
+| `@`, `@/` | `Magic` | Configured prepends → repository → home → configured appends |
 | `!` | `Package` | Package area, or repository fallback |
 | `vault:`, `vault::` | `Vault` | Configured roots → captured `VAULT` paths |
 | `http://`, `https://` | `Url` | Remote target; no local candidate |
@@ -23,6 +23,11 @@ contract, see [the topic doc](../../../../biscuit-file/docs/topics/file-referenc
 Recursive `%` is a modifier, not another kind. It traverses the same ordered
 roots, does not follow directory symlinks, sorts all matches lexically, and
 records roots as `ProbeDisposition::SearchRoot`.
+
+Magic consumes exactly the authored `@` or `@/` sigil form. Its remaining
+payload must be relative: repeated POSIX separators and Windows
+drive-qualified, rooted, or UNC payloads return `InvalidSyntax` rather than
+replacing a configured magic root. This also applies under recursive `%`.
 
 ### Authoritative explicit context
 
@@ -152,7 +157,9 @@ The completion roots mirror execution: implicit is repository then base; magic
 is configured prepends, repository, home, then configured appends, with stable
 deduplication. Enumerate roots in order and execute the emitted string unchanged
 through `FileReference::new()` plus `resolve_in_context()` so the displayed and
-executed candidate cannot diverge.
+executed candidate cannot diverge. Completion rejects rooted magic tokens with
+`InvalidSyntax`, including invalid recursive magic tokens that completion does
+not otherwise support.
 
 ### Complete `FileReferenceError` vocabulary
 
@@ -174,7 +181,8 @@ RemoteNotLocal(String)
 InvalidUrl(String)                    # with `url`
 ```
 
-`InvalidSyntax` also covers interpolation-injected sigils.
+`InvalidSyntax` also covers rooted magic payloads and interpolation-injected
+sigils.
 `RepositoryRootNotContainingSource` is the lexical containment check on the
 request base and normal derived authoring bases. `MissingPackageContext` means
 neither package-area nor repository fallback was supplied. `RemoteNotLocal`

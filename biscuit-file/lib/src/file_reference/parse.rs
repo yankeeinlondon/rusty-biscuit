@@ -73,6 +73,8 @@ enum DetectedKind {
 ///
 /// Returns [`FileReferenceError::UnsupportedUserHome`] for a `~user` form,
 /// which is not portable and must never fall through to magic or implicit.
+/// Returns [`FileReferenceError::InvalidSyntax`] when a magic payload remains
+/// rooted after the documented `@` or `@/` sigil.
 fn detect_kind(s: &str) -> Result<(DetectedKind, &str), FileReferenceError> {
     // URL scheme is matched ASCII case-insensitively and before any drive/path
     // classifier so `HTTP://host` is never mistaken for a Windows path.
@@ -87,7 +89,13 @@ fn detect_kind(s: &str) -> Result<(DetectedKind, &str), FileReferenceError> {
         return Ok((DetectedKind::Vault, rest));
     }
     if let Some(rest) = s.strip_prefix('@') {
-        return Ok((DetectedKind::Magic, rest));
+        let payload = rest.strip_prefix('/').unwrap_or(rest);
+        if is_rooted_magic_payload(payload) {
+            return Err(FileReferenceError::InvalidSyntax(format!(
+                "magic reference payload must be relative after `@` or `@/`: `{s}`"
+            )));
+        }
+        return Ok((DetectedKind::Magic, payload));
     }
     if let Some(rest) = s.strip_prefix('!') {
         return Ok((DetectedKind::Package, rest));
@@ -143,6 +151,19 @@ pub(crate) fn is_absolute_reference(s: &str) -> bool {
         && bytes[0].is_ascii_alphabetic()
         && bytes[1] == b':'
         && (bytes[2] == b'\\' || bytes[2] == b'/')
+}
+
+/// Whether a magic payload can replace its configured root on any host.
+///
+/// A Windows drive-qualified path can reset a `PathBuf` even without a root
+/// separator (`C:foo`), and a single leading backslash is rooted on the active
+/// drive. Both therefore need stricter handling than absolute-path
+/// classification alone.
+fn is_rooted_magic_payload(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    is_absolute_reference(s)
+        || s.starts_with('\\')
+        || (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
 }
 
 /// Explicit-relative classification, accepting Windows backslash spellings
@@ -218,6 +239,41 @@ mod tests {
         let parsed = parse("%./foo.md").unwrap();
         assert!(parsed.recursive);
         assert!(matches!(parsed.kind, ReferenceKind::Relative(_)));
+    }
+
+    #[test]
+    fn magic_root_separator_is_part_of_the_shared_grammar() {
+        let compact = parse("@docs/spec.md").unwrap();
+        let rooted = parse("@/docs/spec.md").unwrap();
+
+        assert_eq!(
+            compact.kind.template().segments,
+            rooted.kind.template().segments
+        );
+        assert!(matches!(rooted.kind, ReferenceKind::Magic(_)));
+    }
+
+    #[test]
+    fn rooted_magic_payloads_are_rejected_portably() {
+        for raw in [
+            "@//etc/hosts",
+            "@///etc/hosts",
+            "%@//etc/hosts",
+            r"@C:\Windows\win.ini",
+            r"@/C:\Windows\win.ini",
+            r"%@C:\Windows\win.ini",
+            r"@C:Windows\win.ini",
+            r"@\Windows\win.ini",
+            r"@/\Windows\win.ini",
+            r"@\\server\share\file.md",
+            r"@/\\server\share\file.md",
+            r"%@\\server\share\file.md",
+        ] {
+            assert!(
+                matches!(parse(raw), Err(FileReferenceError::InvalidSyntax(_))),
+                "rooted magic payload must be rejected: {raw:?}",
+            );
+        }
     }
 
     #[test]

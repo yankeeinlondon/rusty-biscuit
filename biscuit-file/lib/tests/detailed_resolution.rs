@@ -160,6 +160,37 @@ fn explicit_relative_plan_is_exactly_one_source_candidate() {
 }
 
 #[test]
+fn rooted_magic_payloads_never_reach_planning_or_resolution() {
+    let tmp = TempDir::new().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let ctx = FileResolutionContext::new(&base)
+        .with_repository_root(&base)
+        .with_home_dir(&base);
+
+    for raw in [
+        "@//etc/hosts",
+        "%@///etc/hosts",
+        r"@C:\Windows\win.ini",
+        r"%@/C:\Windows\win.ini",
+        r"@\Windows\win.ini",
+        r"%@/\\server\share\file.md",
+    ] {
+        let plan = FileReference::new(raw).and_then(|file_ref| file_ref.candidate_plan(&ctx));
+        assert!(
+            matches!(plan, Err(FileReferenceError::InvalidSyntax(_))),
+            "candidate planning must reject rooted magic payload: {raw:?}",
+        );
+
+        let resolution =
+            FileReference::new(raw).and_then(|file_ref| file_ref.resolve_in_context(&ctx));
+        assert!(
+            matches!(resolution, Err(FileReferenceError::InvalidSyntax(_))),
+            "resolution must reject rooted magic payload: {raw:?}",
+        );
+    }
+}
+
+#[test]
 fn legacy_projection_agrees_with_detailed_outcome() {
     let tmp = TempDir::new().unwrap();
     let repo = tmp.path().canonicalize().unwrap();

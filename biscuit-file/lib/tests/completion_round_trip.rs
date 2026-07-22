@@ -18,7 +18,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use biscuit_file::{FileReference, FileResolutionContext, PathPosition};
+use biscuit_file::{FileReference, FileReferenceError, FileResolutionContext, PathPosition};
 use tempfile::TempDir;
 
 /// Initialize a fresh git repository at `path` using gix (no system git binary).
@@ -175,6 +175,34 @@ fn magic_completion_value_resolves_through_a_shared_configured_root() {
         Some(emitted.displayed.as_path()),
         "the emitted magic value must execute through the same configured magic root",
     );
+}
+
+#[test]
+fn completion_rejects_rooted_magic_payloads_before_enumerating_roots() {
+    let tmp = TempDir::new().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let ctx = FileResolutionContext::new(&base)
+        .with_repository_root(&base)
+        .with_home_dir(&base);
+
+    for token in [
+        "@//etc/ho",
+        "@///etc/ho",
+        "%@//etc/ho",
+        r"@C:\Windows\wi",
+        r"%@/C:\Windows\wi",
+        r"@\Windows\wi",
+        r"@/\\server\share\fi",
+        r"%@\\server\share\fi",
+    ] {
+        assert!(
+            matches!(
+                FileReference::complete_partial_in_context(token, &ctx),
+                Err(FileReferenceError::InvalidSyntax(_))
+            ),
+            "completion must reject rooted magic token: {token:?}",
+        );
+    }
 }
 
 /// The context-aware completer performs no live discovery: with no repository
