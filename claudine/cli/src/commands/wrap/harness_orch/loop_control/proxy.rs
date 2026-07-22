@@ -7,18 +7,22 @@ use super::*;
 /// lifecycle, respecting target-side `Skip`, `Proxy`, `Error`, and action-error
 /// routing.
 ///
-/// Called when `proxy_tracking.pending` is consumed at the top of the harness
-/// loop. Resets the guard so the target gets a fresh `initialize` emission
-/// before pre-flight checks run.
+/// Called when the coordinator's bootstrap-pending flag is consumed at the top
+/// of the harness loop. Resets the guard so the target gets a fresh
+/// `initialize` emission before pre-flight checks run.
+///
+/// A target that proxies on returns a request, never a resolved path: chaining
+/// a second hop is the same commit the first one went through, so it goes
+/// through the same coordinator.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run_target_initialize(
     lifecycle_guard: &mut claudine::composition::LifecycleRunGuard<'_>,
     materialized: &MaterializedHarnessPrompt,
     source_path: &Path,
     repo_root: Option<&Path>,
+    chain: &[std::path::PathBuf],
     term: &Terminal,
     effect_engine: &EffectEngine,
-    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
     loop_start: std::time::Instant,
 ) -> TargetInitializeAction {
     lifecycle_guard.reset_for_proxy();
@@ -63,15 +67,21 @@ pub(super) fn run_target_initialize(
         ));
     }
     if let Some(setup_error) = catch_result.setup_error.as_ref() {
-        let message = if matches!(
-            catch_result.control,
-            Some(StackControl::Error { .. })
-        ) {
+        // `LifecycleInitializeFailed` already exists for exactly this and is
+        // what the non-loop route returns, so the two agree on the typed
+        // identity of "the target's `initialize` raised".
+        let reason = if matches!(catch_result.control, Some(StackControl::Error { .. })) {
             setup_error.msg.clone()
         } else {
             "lifecycle initialize failed".to_string()
         };
-        return TargetInitializeAction::Abort(eyre!(message));
+        return TargetInitializeAction::Abort(
+            CompositionError::LifecycleInitializeFailed {
+                source_path: source_path.to_path_buf(),
+                reason,
+            }
+            .into(),
+        );
     }
     if let Some(control) = catch_result.control.as_ref() {
         match control {
@@ -79,70 +89,48 @@ pub(super) fn run_target_initialize(
             StackControl::Error { .. } => {
                 unreachable!("the catch protocol consumes initialize error control")
             }
-            StackControl::Proxy { target } => {
-                let resolution = match file_resolution_context {
-                    Some(context) => claudine::composition::resolve_proxy_target_in_context(
-                        target,
-                        source_path,
-                        context,
-                    ),
-                    None => claudine::composition::resolve_proxy_target(
-                        target,
-                        source_path,
-                        repo_root,
-                    ),
-                };
-                let resolved = match resolution {
-                    Ok(path) => path,
-                    Err(e) => {
-                        return TargetInitializeAction::Abort(
-                            claudine::composition::CompositionError::InvalidFileReference {
-                                context: Box::new(
-                                    claudine::composition::FileReferenceContext {
-                                        source_path: source_path.to_path_buf(),
-                                        event: Some("initialize".to_string()),
-                                        // Wildcard index: the authoring stack
-                                        // position is not threaded back here, so
-                                        // name the stable path (spec §D3/§D6).
-                                        property: "initialize.stack[*].proxy".to_string(),
-                                        reference: target.clone(),
-                                        hint:
-                                            crate::commands::wrap::composition::PROXY_TARGET_HINT
-                                                .to_string(),
-                                    },
-                                ),
-                                source: e,
-                            }
-                            .into(),
-                        );
-                    }
-                };
-                TargetInitializeAction::Repoint { resolved }
-            }
+            StackControl::Proxy {
+                target,
+                overlay,
+                location,
+            } => TargetInitializeAction::Reproxy(EvaluatedProxyRequest::new(
+                target.clone(),
+                overlay.clone(),
+                ProxyProvenance::new(source_path.to_path_buf(), *location, chain.to_vec()),
+            )),
             StackControl::Stop => TargetInitializeAction::Proceed,
+            // Authored placement is legal — `is_valid_for` makes every control
+            // except `skip` universally placeable — but there is no provider
+            // attempt at `initialize` for these to act on. So the diagnostic
+            // names the stage rather than calling the action invalid, which
+            // would send the user looking for an authoring mistake they did
+            // not make.
             StackControl::Retry { .. }
             | StackControl::Resume { .. }
-            | StackControl::Defer { .. } => TargetInitializeAction::Abort(eyre!(
-                "lifecycle control action {control:?} is not valid at initialize"
-            )),
+            | StackControl::Defer { .. } => TargetInitializeAction::Abort(
+                CompositionError::LifecycleTransitionUnownedAtStage {
+                    source_path: source_path.to_path_buf(),
+                    // Only `proxy` carries an `ActionLocation`, so these name
+                    // the event rather than the exact action index. The event
+                    // is the actionable part regardless: `initialize` is where
+                    // the stack is.
+                    property: "initialize.stack".to_string(),
+                    verb: match control {
+                        StackControl::Retry { .. } => "retry",
+                        StackControl::Resume { .. } => "resume",
+                        _ => "defer",
+                    },
+                    stage: "initialize",
+                    reason: "no provider attempt has run yet, so there is nothing to \
+                             retry, resume, or defer"
+                        .to_string(),
+                }
+                .into(),
+            ),
         }
     } else {
         TargetInitializeAction::Proceed
     }
-}
-
-/// Proxy hand-off bookkeeping for one `run_harness_loop` call.
-///
-/// `chain` is the ordered list of resolved documents visited by proxy,
-/// including the originating document once the first hand-off is accepted; it
-/// drives the cycle/hop-limit guard.
-/// `pending` is set by the `Proxy` dispatch arm and consumed at the loop top,
-/// signalling that the guard's lifecycle config must be re-parsed from the
-/// newly materialized target before its events fire.
-#[derive(Default)]
-pub(super) struct ProxyTracking {
-    pub(super) chain: Vec<std::path::PathBuf>,
-    pub(super) pending: bool,
 }
 
 /// What the loop should do after running a proxy target document's
@@ -155,6 +143,6 @@ pub(super) enum TargetInitializeAction {
     ExitCleanly,
     /// Target's `initialize` could not be honored; abort with this error.
     Abort(color_eyre::eyre::Report),
-    /// Target's `initialize` proxied again; repoint the loop and continue.
-    Repoint { resolved: std::path::PathBuf },
+    /// Target's `initialize` proxied on; hand the request to the coordinator.
+    Reproxy(EvaluatedProxyRequest),
 }

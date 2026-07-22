@@ -5,10 +5,9 @@
 //! ([`super::engine`]); the engine module holds the execution/routing/gate
 //! logic proper.
 
-use std::path::PathBuf;
-
 use serde_json::{Map, Value};
 
+use super::super::coordinator::SurfacedHandoff;
 use super::super::error::CompositionError;
 use super::super::lifecycle::LifecycleSignal;
 use super::super::types::OnRateLimit;
@@ -104,6 +103,13 @@ pub struct LoopIterationOutput {
     /// Used by the engine to enrich [`CompositionError::LoopRateLimited`]
     /// with attribution.
     pub model_id: Option<String>,
+    /// A proxy handoff this iteration's lifecycle surfaced, when one fired.
+    ///
+    /// Set by the executor when the iteration's `start`/terminal/`finalize`
+    /// stack selected `proxy`. The engine ends the loop immediately — the
+    /// target is not an extra iteration of the source loop (R7) — and moves
+    /// the handoff onto [`LoopExecutionResult::handoff`].
+    pub handoff: Option<SurfacedHandoff>,
 }
 
 impl LoopIterationOutput {
@@ -118,6 +124,7 @@ impl LoopIterationOutput {
             exit_reason: None,
             provider_id: None,
             model_id: None,
+            handoff: None,
         }
     }
 
@@ -132,6 +139,7 @@ impl LoopIterationOutput {
             exit_reason: None,
             provider_id: None,
             model_id: None,
+            handoff: None,
         }
     }
 
@@ -182,11 +190,27 @@ pub struct LoopExecutionResult {
     pub last_output: String,
     /// Optional loop, action, or iteration execution error.
     pub error: Option<CompositionError>,
-    /// Resolved target document when `initialize` returned `Proxy`. The caller
-    /// re-enters with this document so the target's own `initialize` (and its
-    /// `Skip`/`Proxy`/`Error` controls) get a chance to run. `None` in every
-    /// other case.
-    pub init_proxy_target: Option<PathBuf>,
+    /// The proxy handoff the caller's active-document coordinator must
+    /// consume, when any loop lifecycle event handed the run off.
+    ///
+    /// `None` for an ordinary loop end. `Some` when the document's
+    /// `initialize`, an iteration's terminal/`finalize`/`start` stack, or the
+    /// post-`finalize` loop gate selected `proxy`: the loop ends at once (the
+    /// target is not an extra iteration of the source loop, R7) and the
+    /// handoff travels here. An initialize/gate handoff is an uncommitted
+    /// [`SurfacedHandoff::Request`] — the engine has no run ledger, so it
+    /// cannot answer the hop/cycle question, and a resolved-but-unapproved
+    /// target is exactly the half-committed state the two-stage handoff
+    /// exists to prevent. A terminal-stack handoff arrives
+    /// [`SurfacedHandoff::Committed`] because the provider harness committed
+    /// it against the shared invocation ledger while the source's stacks
+    /// could still catch a refusal.
+    ///
+    /// This is a typed channel, not an `Option<PathBuf>`: an unhandled
+    /// handoff is a compile-time-visible omission, whereas an ignored
+    /// optional target is the silently-dropped proxy that motivated this
+    /// feature.
+    pub handoff: Option<SurfacedHandoff>,
 }
 
 impl LoopExecutionResult {
@@ -202,7 +226,7 @@ impl LoopExecutionResult {
             iteration_count,
             last_output,
             error: None,
-            init_proxy_target: None,
+            handoff: None,
         }
     }
 
@@ -219,14 +243,14 @@ impl LoopExecutionResult {
             iteration_count,
             last_output,
             error: Some(error),
-            init_proxy_target: None,
+            handoff: None,
         }
     }
 
-    /// Attach a resolved proxy target for the caller to hand off to.
+    /// Attach the handoff the caller's coordinator must consume.
     #[must_use]
-    pub fn with_init_proxy_target(mut self, target: PathBuf) -> Self {
-        self.init_proxy_target = Some(target);
+    pub fn with_handoff(mut self, handoff: SurfacedHandoff) -> Self {
+        self.handoff = Some(handoff);
         self
     }
 }

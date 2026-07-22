@@ -11,6 +11,10 @@ path = "src/main.rs"
 
 [dependencies]
 biscuit-file = { path = "../../biscuit-file/lib" }
+# Non-crypto content hashing authority (xxHash) for the resume session-
+# compatibility key's content digests. Same hasher the `claudine` library uses
+# for MCP catalog IDs, so digests are comparable across the two crates.
+biscuit-hash = { path = "../../biscuit-hash/lib", features = ["xx_hash"] }
 biscuit-speaks = { path = "../../biscuit-speaks/lib" }
 claudine = { path = "../lib" }
 playa = { path = "../../playa/lib", features = ["sound-effects"] }

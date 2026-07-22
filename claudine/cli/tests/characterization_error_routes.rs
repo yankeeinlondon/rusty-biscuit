@@ -190,10 +190,10 @@ fn find_events_log(dir: &Path) -> Option<PathBuf> {
 /// underlying resolution error as its `#[source]`), which renders as a
 /// source-aware component block.
 ///
-/// Baseline: the resolution failure aborts the run **before** `start`, so no
-/// terminal event fires — `initialize` is the only marker. The typed wrapper
-/// and its block rendering must not run `failure`/`finalize` here, nor change
-/// the exit code (exit 1, surfaced exactly once).
+/// The resolution failure aborts the run **before** `start`, then closes the
+/// source through `finalize`. The typed wrapper and its block rendering must
+/// not run `failure`, duplicate `finalize`, or change the exit code (exit 1,
+/// surfaced exactly once).
 #[test]
 fn characterize_initialize_proxy_resolution_failure() {
     let outcome = run_route(
@@ -227,9 +227,9 @@ Body
     );
     assert_eq!(
         outcome.events,
-        vec!["initialize"],
-        "the resolution failure aborts before `start`, so `initialize` must be \
-         the only marker — no terminal event may fire; stderr:\n{}",
+        vec!["initialize", "finalize"],
+        "the resolution failure aborts before `start`, then source-owned \
+         `finalize` must close it exactly once; stderr:\n{}",
         outcome.stderr_plain
     );
     assert_eq!(
@@ -316,10 +316,10 @@ Body
 /// because that is the property the file-resolution feature changed when it
 /// converged the proxy routes. This test closes that gap from below: it asserts
 /// the surface is now the shared `CompositionError::InvalidFileReference`
-/// block (the same surface `level2_proxy_routes_share_identity_across_routes_in_tmux`
-/// proves in a real terminal), so any future regression that pushes the route
-/// back to the legacy `failed to load Markdown` pre-flight failure trips both
-/// this runtime assertion and the prose above in the same change.
+/// component block (the same surface the lifecycle route-parity tests prove in
+/// a real terminal), so any future regression that pushes the route back to
+/// the legacy `failed to load Markdown` pre-flight failure trips both this
+/// runtime assertion and the prose above in the same change.
 #[test]
 fn characterize_terminal_proxy_fails_at_resolution_with_invalid_file_reference() {
     let outcome = run_route(
@@ -355,11 +355,18 @@ Body
         outcome.stderr_plain
     );
     assert!(
-        outcome.stderr_plain.contains("Unresolvable file reference"),
-        "the terminal-proxy route must fail at resolution with the shared \
-         `Unresolvable file reference` headline — the typed \
-         `CompositionError::InvalidFileReference` surface converged on by the \
-         file-resolution feature; stderr:\n{}",
+        outcome
+            .stderr_plain
+            .contains("CompositionError: Unresolvable file reference")
+            && outcome
+                .stderr_plain
+                .contains("Cannot resolve `no/such/target.md`")
+            && outcome
+                .stderr_plain
+                .contains("path resolution failed for \"no/such/target.md\"")
+            && outcome.stderr_plain.contains("target does not exist"),
+        "the terminal-proxy route must retain the shared typed diagnostic \
+         code, original reference, and resolution cause; stderr:\n{}",
         outcome.stderr_plain
     );
     assert!(

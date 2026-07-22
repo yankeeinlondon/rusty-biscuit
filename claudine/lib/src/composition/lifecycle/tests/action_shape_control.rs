@@ -1,6 +1,7 @@
 //! action shape control lifecycle tests.
 
 use super::*;
+use super::actions::ProxyWithValue;
 use darkmatter::markdown::compose::expression::{EvaluationLookup, evaluate};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -1488,6 +1489,543 @@ fn action_value_to_expr_rejects_direct_object() {
         "error should mention whole-value interpolation: {err}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// `proxy.with` authoring surface
+// ---------------------------------------------------------------------------
+
+/// Pull the single `Proxy` control action out of a parsed stack.
+fn proxy_action(fm: &Value, signal: LifecycleSignal) -> (Expr, ProxyWith) {
+    let config = parse_lifecycle_config(fm, dummy_path()).expect("config parses");
+    let stack = config.stack(signal).expect("stack present");
+    let action = stack[0].actions.last().expect("at least one action");
+    match &action.kind {
+        LifecycleActionKind::LifecycleControl(LifecycleControlAction::Proxy { target, with }) => {
+            (target.clone(), with.clone())
+        }
+        other => panic!("expected a proxy control action, got: {other:?}"),
+    }
+}
+
+#[test]
+fn proxy_with_omitted_yields_empty_overlay() {
+    let fm = json!({
+        "initialize": {
+            "stack": [{"action": {"action": "proxy", "target": "@next.md"}}]
+        }
+    });
+    let (target, with) = proxy_action(&fm, LifecycleSignal::Initialize);
+    assert_eq!(target, Expr::StringLiteral("@next.md".into()));
+    assert!(with.is_empty(), "omitted `with:` installs an empty overlay");
+}
+
+#[test]
+fn proxy_with_empty_mapping_equals_omission() {
+    // `with: {}` parses and is equivalent to omitting `with:` — the spec makes
+    // this an explicit equivalence, so compare the whole parsed action rather
+    // than only asserting emptiness.
+    let omitted = json!({
+        "initialize": {
+            "stack": [{"action": {"action": "proxy", "target": "@next.md"}}]
+        }
+    });
+    let empty = json!({
+        "initialize": {
+            "stack": [{"action": {"action": "proxy", "target": "@next.md", "with": {}}}]
+        }
+    });
+    assert_eq!(
+        proxy_action(&omitted, LifecycleSignal::Initialize),
+        proxy_action(&empty, LifecycleSignal::Initialize),
+    );
+}
+
+#[test]
+fn positional_proxy_yields_empty_overlay() {
+    let fm = json!({
+        "initialize": {
+            "stack": [{"action": {"proxy": "@next.md"}}]
+        }
+    });
+    let (_, with) = proxy_action(&fm, LifecycleSignal::Initialize);
+    assert!(with.is_empty(), "positional proxy carries no overlay");
+}
+
+#[test]
+fn proxy_with_types_authored_scalar_and_nested_values() {
+    // Every authored JSON shape types through the shared action-value rule,
+    // recursed into arrays and objects. Mixed strings stay literals for
+    // event-time DM2; a whole-value span keeps its parsed expression, which is
+    // what preserves its resolved type at the handoff.
+    let fm = json!({
+        "failure": {
+            "stack": [{"action": {
+                "action": "proxy",
+                "target": "@next.md",
+                "with": {
+                    "label": "phase-{{ iteration }}",
+                    "attempt": "{{ iteration }}",
+                    "ready": true,
+                    "count": 3,
+                    "cleared": null,
+                    "files": ["a.md", "{{ changed }}"],
+                    "metadata": {"source": "router", "area": "{{ ctx.area }}"}
+                }
+            }}]
+        }
+    });
+    let (_, with) = proxy_action(&fm, LifecycleSignal::Failure);
+    assert_eq!(with.len(), 7);
+    assert_eq!(
+        with.get("label"),
+        Some(&ProxyWithValue::Scalar(Expr::StringLiteral(
+            "phase-{{ iteration }}".into()
+        )))
+    );
+    assert_eq!(
+        with.get("attempt"),
+        Some(&ProxyWithValue::Scalar(Expr::Variable("iteration".into())))
+    );
+    assert_eq!(
+        with.get("ready"),
+        Some(&ProxyWithValue::Scalar(Expr::BoolLiteral(true)))
+    );
+    assert_eq!(
+        with.get("count"),
+        Some(&ProxyWithValue::Scalar(Expr::NumberLiteral(3.0)))
+    );
+    assert_eq!(with.get("cleared"), Some(&ProxyWithValue::Null));
+    assert_eq!(
+        with.get("files"),
+        Some(&ProxyWithValue::Array(vec![
+            ProxyWithValue::Scalar(Expr::StringLiteral("a.md".into())),
+            ProxyWithValue::Scalar(Expr::Variable("changed".into())),
+        ]))
+    );
+    let Some(ProxyWithValue::Object(metadata)) = with.get("metadata") else {
+        panic!("nested mapping types as an object: {:?}", with.get("metadata"));
+    };
+    assert_eq!(
+        metadata.get("source"),
+        Some(&ProxyWithValue::Scalar(Expr::StringLiteral("router".into())))
+    );
+    assert_eq!(
+        metadata.get("area"),
+        Some(&ProxyWithValue::Scalar(Expr::Variable("ctx.area".into())))
+    );
+    assert_eq!(with.get("absent"), None);
+}
+
+#[test]
+fn proxy_with_rejects_unparseable_whole_value_span() {
+    // A whole-value span is parsed at authoring time, so a malformed expression
+    // is a parse error naming the exact nested path — not an event-time
+    // surprise.
+    let fm = json!({
+        "initialize": {
+            "stack": [{"action": {
+                "action": "proxy",
+                "target": "@next.md",
+                "with": {"metadata": {"area": "{{ && }}"}}
+            }}]
+        }
+    });
+    let err = parse_lifecycle_config(&fm, dummy_path()).expect_err("malformed span rejected");
+    match &err {
+        CompositionError::LifecycleActionInvalidLongForm {
+            action, message, ..
+        } => {
+            assert_eq!(action, "proxy");
+            assert!(
+                message.contains("action[0].with.metadata.area"),
+                "names the exact nested path: {message}"
+            );
+        }
+        other => panic!("expected LifecycleActionInvalidLongForm, got: {other:?}"),
+    }
+}
+
+#[test]
+fn proxy_with_iteration_is_deterministic_and_complete() {
+    // Frontmatter parsing normalizes a nested mapping's keys to sorted order
+    // before the overlay is built, so iteration is sorted rather than
+    // authored. Locked here so a future `preserve_order` change is a visible
+    // decision rather than silent drift.
+    let fm = json!({
+        "initialize": {
+            "stack": [{"action": {
+                "action": "proxy",
+                "target": "@next.md",
+                "with": {"zebra": 1, "apple": 2, "mango": 3}
+            }}]
+        }
+    });
+    let (_, with) = proxy_action(&fm, LifecycleSignal::Initialize);
+    let keys: Vec<&str> = with.iter().map(|(k, _)| k.as_str()).collect();
+    assert_eq!(keys, ["apple", "mango", "zebra"]);
+}
+
+#[test]
+fn rejects_non_mapping_proxy_with() {
+    // Each non-mapping JSON shape names its own type in the diagnostic.
+    for (value, expected) in [
+        (json!(7), "number"),
+        (json!(true), "boolean"),
+        (json!(null), "null"),
+        (json!(["a", "b"]), "array"),
+        (json!("plain text"), "string"),
+        (json!("phase-{{ x }} suffix"), "string"),
+    ] {
+        let fm = json!({
+            "initialize": {
+                "stack": [{"action": {"action": "proxy", "target": "@n.md", "with": value}}]
+            }
+        });
+        let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
+        match err {
+            CompositionError::LifecycleProxyWithNotMapping { actual, path, .. } => {
+                assert_eq!(actual, expected, "value: {value}");
+                assert_eq!(path, "action[0].with");
+            }
+            other => panic!("expected LifecycleProxyWithNotMapping for {value}, got: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn rejects_whole_mapping_interpolation_proxy_with() {
+    // A lone whole-value span reads as "supply the entire mapping from one
+    // expression" — a named v1 non-goal with its own diagnostic, distinct from
+    // the generic non-mapping error a mixed string produces.
+    for raw in ["{{ payload }}", "  {{ payload }}  "] {
+        let fm = json!({
+            "initialize": {
+                "stack": [{"action": {"action": "proxy", "target": "@n.md", "with": raw}}]
+            }
+        });
+        let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
+        match err {
+            CompositionError::LifecycleProxyWithWholeMapping { raw: got, path, .. } => {
+                assert_eq!(got, raw);
+                assert_eq!(path, "action[0].with");
+            }
+            other => panic!("expected LifecycleProxyWithWholeMapping for `{raw}`, got: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn rejects_dynamic_proxy_with_key() {
+    // A key carrying a span has no honest dotted representation, so the path
+    // stays rooted at `with` and the key travels in its own field.
+    for key in ["{{ dynamic }}", "prefix-{{ x }}", "$(echo k)"] {
+        let fm = json!({
+            "initialize": {
+                "stack": [{"action": {
+                    "action": "proxy",
+                    "target": "@n.md",
+                    "with": {key: "value"}
+                }}]
+            }
+        });
+        let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
+        match err {
+            CompositionError::LifecycleProxyWithDynamicKey { key: got, path, .. } => {
+                assert_eq!(got, key);
+                assert_eq!(
+                    path, "action[0].with",
+                    "an unrepresentable key must not be appended to the dotted path"
+                );
+            }
+            other => panic!("expected LifecycleProxyWithDynamicKey for `{key}`, got: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn static_keys_with_punctuation_are_accepted() {
+    // Only interpolation makes a key dynamic. A key that merely fails the
+    // safe-path-segment test (a dot) is still a legal static key; it just
+    // cannot be appended to a dotted path.
+    let fm = json!({
+        "initialize": {
+            "stack": [{"action": {
+                "action": "proxy",
+                "target": "@n.md",
+                "with": {"dotted.key": 1, "with_underscore": 2, "with-dash": 3}
+            }}]
+        }
+    });
+    let (_, with) = proxy_action(&fm, LifecycleSignal::Initialize);
+    assert_eq!(with.len(), 3);
+    assert_eq!(
+        with.get("dotted.key"),
+        Some(&ProxyWithValue::Scalar(Expr::NumberLiteral(1.0)))
+    );
+}
+
+#[test]
+fn rejects_with_on_every_other_action() {
+    // `with:` is proxy-only. Cover a control verb, a shell action, and a
+    // side-effect so the rule is not accidentally scoped to one category.
+    for action in [
+        json!({"action": "retry", "max_attempts": 2, "with": {"a": 1}}),
+        json!({"action": "resume", "message": "again", "with": {"a": 1}}),
+        json!({"action": "shell", "command": "ls", "with": {"a": 1}}),
+        json!({"action": "message", "message": "hi", "with": {"a": 1}}),
+        json!({"action": "set_frontmatter", "file": "s.md", "prop": "p", "value": "v", "with": {"a": 1}}),
+    ] {
+        let verb = action["action"].as_str().unwrap().to_string();
+        let fm = json!({"failure": {"stack": [{"action": action}]}});
+        let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
+        match err {
+            CompositionError::LifecycleProxyOnlyParameter {
+                verb: got, param, ..
+            } => {
+                assert_eq!(got, verb);
+                assert_eq!(param, "with");
+            }
+            other => panic!("expected LifecycleProxyOnlyParameter for `{verb}`, got: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn positional_proxy_plus_sibling_with_stays_ambiguous() {
+    // Acceptance criterion 19: the existing ambiguous-action diagnostic is
+    // already correct here and its rewrite must point at key/value form.
+    let fm = json!({
+        "initialize": {
+            "stack": [{"action": {"proxy": "prompts/next.md", "with": {"spec": "{{ spec }}"}}}]
+        }
+    });
+    let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
+    match err {
+        CompositionError::LifecycleStackAmbiguous { message, .. } => {
+            assert!(message.contains("action: proxy"), "got: {message}");
+            assert!(message.contains("`proxy: ...`"), "got: {message}");
+        }
+        other => panic!("expected LifecycleStackAmbiguous, got: {other:?}"),
+    }
+}
+
+#[test]
+fn proxy_with_exception_does_not_widen_the_object_parameter_rule() {
+    // The exception is exact: `with` on `proxy` only. Another proxy field
+    // still hits the generic "direct parameter maps are unsupported" rule.
+    let fm = json!({
+        "initialize": {
+            "stack": [{"action": {
+                "action": "proxy",
+                "target": {"nested": "map"},
+                "with": {"a": 1}
+            }}]
+        }
+    });
+    let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
+    match err {
+        CompositionError::LifecycleObjectDataThroughInterpolationParameter { param, verb, .. } => {
+            assert_eq!(param, "target");
+            assert_eq!(verb, "proxy");
+        }
+        other => panic!("expected object-data rejection for `target`, got: {other:?}"),
+    }
+}
+
+#[test]
+fn proxy_with_diagnostic_names_stack_and_action_index() {
+    // The dotted path must locate the exact action: second stack item, second
+    // action in its array.
+    let fm = json!({
+        "failure": {
+            "stack": [
+                {"action": {"info": "first"}},
+                {"action": [
+                    {"info": "noise"},
+                    {"action": "proxy", "target": "@n.md", "with": "not a mapping"}
+                ]}
+            ]
+        }
+    });
+    let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
+    match err {
+        CompositionError::LifecycleProxyWithNotMapping { property, path, .. } => {
+            assert_eq!(property, "failure.stack[1]");
+            assert_eq!(path, "action[1].with");
+        }
+        other => panic!("expected LifecycleProxyWithNotMapping, got: {other:?}"),
+    }
+}
+
+/// Parse `markdown` the way composition does — real YAML frontmatter through
+/// Darkmatter — and hand the resulting frontmatter to the lifecycle parser.
+///
+/// The `json!` fixtures above skip YAML entirely, so they cannot see how an
+/// authored scalar is typed or how YAML normalizes a mapping key. This is the
+/// shipped read path.
+fn lifecycle_from_markdown(markdown: &str) -> Result<LifecycleConfig, CompositionError> {
+    let md = darkmatter::markdown::Markdown::try_from_content(markdown.to_string())
+        .expect("fixture frontmatter is well-formed YAML");
+    let fm = serde_json::Value::Object(
+        md.frontmatter()
+            .as_map()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
+    );
+    parse_lifecycle_config(&fm, dummy_path())
+}
+
+#[test]
+fn proxy_with_authored_yaml_preserves_native_and_quoted_scalar_types() {
+    // Native YAML scalars keep their types; quoting makes them strings. The
+    // overlay is the pre-schema handoff input, so this distinction must
+    // survive parse rather than be flattened to text.
+    let config = lifecycle_from_markdown(
+        "---\n\
+         failure:\n\
+         \x20   stack:\n\
+         \x20       - action:\n\
+         \x20             action: proxy\n\
+         \x20             target: \"@next.md\"\n\
+         \x20             with:\n\
+         \x20                 native_bool: true\n\
+         \x20                 quoted_bool: \"true\"\n\
+         \x20                 native_number: 3\n\
+         \x20                 quoted_number: \"3\"\n\
+         \x20                 native_null: null\n\
+         \x20                 span_bool: \"{{ true }}\"\n\
+         \x20                 mixed: \"phase-{{ iteration }}\"\n\
+         \x20                 nested:\n\
+         \x20                     area: \"{{ ctx.area }}\"\n\
+         \x20                 list:\n\
+         \x20                     - a\n\
+         \x20                     - \"{{ b }}\"\n\
+         ---\nbody\n",
+    )
+    .expect("authored YAML parses");
+
+    let stack = config.stack(LifecycleSignal::Failure).expect("failure stack");
+    let LifecycleActionKind::LifecycleControl(LifecycleControlAction::Proxy { with, .. }) =
+        &stack[0].actions[0].kind
+    else {
+        panic!("expected a proxy control action");
+    };
+
+    let scalar = |key: &str| match with.get(key) {
+        Some(ProxyWithValue::Scalar(expr)) => expr.clone(),
+        other => panic!("`{key}` should type as a scalar, got: {other:?}"),
+    };
+
+    assert_eq!(scalar("native_bool"), Expr::BoolLiteral(true));
+    assert_eq!(scalar("quoted_bool"), Expr::StringLiteral("true".into()));
+    assert_eq!(scalar("native_number"), Expr::NumberLiteral(3.0));
+    assert_eq!(scalar("quoted_number"), Expr::StringLiteral("3".into()));
+    assert_eq!(with.get("native_null"), Some(&ProxyWithValue::Null));
+    // The whole-value span parses to the expression, not to its raw text —
+    // that is what lets it resolve to a bool rather than the string "true".
+    assert_eq!(scalar("span_bool"), Expr::BoolLiteral(true));
+    assert_eq!(
+        scalar("mixed"),
+        Expr::StringLiteral("phase-{{ iteration }}".into())
+    );
+    let Some(ProxyWithValue::Object(nested)) = with.get("nested") else {
+        panic!("`nested` should type as an object: {:?}", with.get("nested"));
+    };
+    assert_eq!(
+        nested.get("area"),
+        Some(&ProxyWithValue::Scalar(Expr::Variable("ctx.area".into())))
+    );
+    assert_eq!(
+        with.get("list"),
+        Some(&ProxyWithValue::Array(vec![
+            ProxyWithValue::Scalar(Expr::StringLiteral("a".into())),
+            ProxyWithValue::Scalar(Expr::Variable("b".into())),
+        ]))
+    );
+}
+
+#[test]
+fn proxy_with_authored_yaml_rejects_dynamic_key() {
+    // The dynamic-key rule must survive real YAML quoting, where a key
+    // carrying a span has to be quoted to parse at all.
+    let err = lifecycle_from_markdown(
+        "---\n\
+         initialize:\n\
+         \x20   stack:\n\
+         \x20       - action:\n\
+         \x20             action: proxy\n\
+         \x20             target: \"@next.md\"\n\
+         \x20             with:\n\
+         \x20                 \"{{ key }}\": 1\n\
+         ---\nbody\n",
+    )
+    .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            CompositionError::LifecycleProxyWithDynamicKey { ref key, .. } if key == "{{ key }}"
+        ),
+        "got: {err:?}"
+    );
+}
+
+#[test]
+fn proxy_with_authored_yaml_non_string_key_is_normalized_to_a_static_string() {
+    // YAML permits a non-string mapping key (`1:`). Frontmatter parsing
+    // normalizes it to the string `"1"` before the lifecycle parser runs, so
+    // there is no unrepresentable-key case to diagnose here — it is simply a
+    // static key naming a target property called `1`.
+    let config = lifecycle_from_markdown(
+        "---\n\
+         initialize:\n\
+         \x20   stack:\n\
+         \x20       - action:\n\
+         \x20             action: proxy\n\
+         \x20             target: \"@next.md\"\n\
+         \x20             with:\n\
+         \x20                 1: one\n\
+         ---\nbody\n",
+    )
+    .expect("a numeric YAML key normalizes to a static string key");
+    let stack = config
+        .stack(LifecycleSignal::Initialize)
+        .expect("initialize stack");
+    let LifecycleActionKind::LifecycleControl(LifecycleControlAction::Proxy { with, .. }) =
+        &stack[0].actions[0].kind
+    else {
+        panic!("expected a proxy control action");
+    };
+    assert_eq!(
+        with.get("1"),
+        Some(&ProxyWithValue::Scalar(Expr::StringLiteral("one".into())))
+    );
+}
+
+#[test]
+fn proxy_with_authored_yaml_empty_mapping_is_accepted() {
+    let config = lifecycle_from_markdown(
+        "---\n\
+         initialize:\n\
+         \x20   stack:\n\
+         \x20       - action:\n\
+         \x20             action: proxy\n\
+         \x20             target: \"@next.md\"\n\
+         \x20             with: {}\n\
+         ---\nbody\n",
+    )
+    .expect("`with: {}` parses");
+    let stack = config
+        .stack(LifecycleSignal::Initialize)
+        .expect("initialize stack");
+    let LifecycleActionKind::LifecycleControl(LifecycleControlAction::Proxy { with, .. }) =
+        &stack[0].actions[0].kind
+    else {
+        panic!("expected a proxy control action");
+    };
+    assert!(with.is_empty());
+}
+
 
 #[test]
 fn action_value_to_expr_rejects_direct_array() {

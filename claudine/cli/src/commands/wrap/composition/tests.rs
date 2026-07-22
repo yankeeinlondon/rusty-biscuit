@@ -1846,3 +1846,10 @@ mod projected_rate_limit_bridge {
         assert_eq!(merged.message.as_deref(), Some("raw provider message"));
     }
 }
+
+// The former `proxy_target_declares_loop_follows_the_adopted_target` test was
+// removed with the pipeline peek it exercised: every committed `initialize`
+// proxy on a live run now surfaces up to the composition coordinator regardless
+// of whether the target loops, so there is no pre-commit loop peek to test. Loop
+// ownership is decided from the fully prepared target after re-entry (R7),
+// covered by the harness-orchestration and L2 equivalence suites.

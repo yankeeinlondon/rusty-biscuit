@@ -41,6 +41,7 @@ fn control_action_validity_matrix() {
     ];
     let proxy = A::Proxy {
         target: Expr::StringLiteral("@other.md".into()),
+        with: ProxyWith::default(),
     };
     let retry = A::Retry {
         max_attempts: None,

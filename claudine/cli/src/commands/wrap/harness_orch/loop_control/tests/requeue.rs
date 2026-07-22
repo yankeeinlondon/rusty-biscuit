@@ -1,8 +1,6 @@
 //! requeue harness-loop tests.
 
 use super::*;
-
-use super::*;
 use indexmap::IndexMap;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -16,12 +14,11 @@ fn requeue_prompt_state(source: &Path) -> HarnessPromptState {
         base_prompt: None,
         overlay: IndexMap::new(),
         prompt_tail: Vec::new(),
-        next_prompt_override: None,
-        next_resume_session_id: None,
-        rematerialize: Default::default(),
         runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
         suppress_output_commit: false,
         last_final_output: None,
+        input_layers: Default::default(),
+        entry: claudine::composition::DocumentEntryReason::Direct,
     }
 }
 
@@ -34,10 +31,13 @@ fn requeue_materialized(prompt: &str) -> MaterializedHarnessPrompt {
         frontmatter,
         prompt: prompt.to_string(),
         env_overrides: Vec::new(),
+        selection_hints: claudine::composition::EffectiveSelectionHints::default(),
         inline_closure_plan: None,
         file_resolution_context: None,
         live_frontmatter,
         runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
+        lifecycle: None,
+        mcp_body_tags: Vec::new(),
     }
 }
 

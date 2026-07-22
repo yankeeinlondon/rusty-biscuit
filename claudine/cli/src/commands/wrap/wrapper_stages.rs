@@ -404,6 +404,57 @@ pub(crate) fn detect_wrapper_harness(
     }
 }
 
+/// Launch identity a direct wrapper passthrough rebuilds on each attempt.
+///
+/// A passthrough is invoked *as* a provider (`claudine claude …`), so the
+/// provider is explicit invocation intent that no re-read can move, and the
+/// passthrough document is a provider memory file carrying no selection hints.
+/// The MCP facet is the one part that is not fixed by the document: the wrapper
+/// exposes `--mcp` and `--use`, and when either is present a refreshed body is
+/// lexed for `#tag`s the same way a composed prompt is. Deriving the flag from
+/// the wrapper's own switches keeps that facet honest instead of pinning it to
+/// the MCP-off shape.
+fn passthrough_launch_intent(
+    provider: Provider,
+    binary_path: &Path,
+    effective_non_interactive: bool,
+    args: &WrapperArgs,
+    // The argv the passthrough actually launches with, recorded as this path's
+    // whole launch plan. Every facet but MCP is pinned here, and a moved MCP
+    // facet is refused rather than replayed from slices this path never
+    // recorded — see [`launch_plan::LaunchPlanInputs::recorded_only`].
+    harness_base_args: &[String],
+    codex_last_message: Option<PathBuf>,
+) -> harness_orch::LaunchRebuildIntent {
+    harness_orch::LaunchRebuildIntent {
+        explicit_provider: Some(provider),
+        fallback_provider: provider,
+        fallback_binary: binary_path.to_path_buf(),
+        installed_snapshot: None,
+        default_non_interactive: effective_non_interactive,
+        cli_yolo: args.yolo,
+        is_inline: false,
+        mcp_enabled: args.mcp || !args.mcp_use.is_empty(),
+        // A passthrough is invoked *as* the provider, so this is the reason a
+        // rebuilt fallback would republish — though the empty dispatch context
+        // below means the passthrough publishes no selection metadata at all.
+        fallback_provider_reason: claudine::composition::ProviderResolutionReason::ExplicitFlag,
+        dispatch_context: std::collections::HashMap::new(),
+        launch_plan_inputs: crate::commands::wrap::launch_plan::LaunchPlanInputs::recorded_only(
+            crate::commands::wrap::launch_plan::DocumentLaunchFacets {
+                provider,
+                non_interactive: effective_non_interactive,
+                yolo_requested: args.yolo,
+                is_inline: false,
+                model: args.model.clone(),
+                mcp_body_tags: Vec::new(),
+            },
+            harness_base_args.to_vec(),
+            codex_last_message,
+        ),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_execution_stage(
     wrapper_harness: Option<(
@@ -444,15 +495,13 @@ pub(crate) fn run_execution_stage(
             base_prompt: Some(base_prompt),
             overlay: indexmap::IndexMap::new(),
             prompt_tail: Vec::new(),
-            next_prompt_override: None,
-            next_resume_session_id: None,
-            // Direct-wrapper passthrough runs carry no compose params.
-            rematerialize: Default::default(),
             // A direct wrapper run is one invocation with no caller-owned
             // accumulator, so it owns its own cell.
             runtime_state: std::sync::Arc::clone(&initial_materialized.runtime_state),
             suppress_output_commit: false,
             last_final_output: None,
+            input_layers: Default::default(),
+            entry: claudine::composition::DocumentEntryReason::Direct,
         };
 
         let mut harness_base_args = child_args.to_vec();
@@ -487,39 +536,66 @@ pub(crate) fn run_execution_stage(
             &default_lifecycle_emitter,
         );
 
-        let (harness_code, harness_perf, _harness_signals) = harness_orch::run_harness_loop(
+        let (harness_code, harness_perf, _harness_signals, surfaced_handoff) = harness_orch::run_harness_loop(
             provider,
             profile,
-            binary_path,
             child_cwd,
             effective_non_interactive,
             args.timeout.clone(),
             cli_step_timeout.clone(),
             args.stall_timeout.clone(),
-            &harness_base_args,
+            args.model.clone(),
+            passthrough_launch_intent(
+                provider,
+                binary_path,
+                effective_non_interactive,
+                args,
+                &harness_base_args,
+                structured_codex_output.map(|output| output.last_message_path.clone()),
+            ),
             &env_plan.env,
             &mut prompt_state,
             env_plan.repo_root.as_deref(),
             shell_options,
-            use_structured,
-            structured_codex_output,
-            stdout_noise,
-            stderr_noise,
-            profile.suppress_structured_stderr_on_success(),
             stream_verbosity != Verbosity::Silent,
             stream_verbosity,
             detail_requested,
             stream_verbosity == Verbosity::Silent,
             env_context,
-            dispatch_context,
             Some(initial_materialized),
             term,
             &mut lifecycle_guard,
+            // A direct wrapper passthrough has no `initialize` route to hand
+            // off from; the run starts on the document it was given.
+            claudine::composition::DocumentTransition::Continue,
+            // The direct passthrough prepares no active document, so it owns no
+            // coordinator that could bring a proxy target up under the target's
+            // own launch bundle. The harness refuses such a hand-off with a typed
+            // diagnostic (R3/R6/AC10) instead of adopting it against this
+            // invocation's profile/argv/MCP, so no handoff can surface here.
             None,
+            // No proxy reached this document, so there is no committed handoff to
+            // adopt: the passthrough runs the document it was given directly.
+            None,
+            // The passthrough prompt comes from argv or stdin; the document is a
+            // provider memory file, judged (if at all) where it was prepared. No
+            // deferred verdict, so nothing to stabilize.
+            false,
+            // Has a prompt file (the passthrough document), so it emits the
+            // prompt-scoped timing header like a composition caller.
             true,
             // Wrapper passthrough: no sequence task owns this stream.
             None,
         )?;
+        // The passthrough passes `None` for the ledger and `Continue` for the
+        // initial transition, so a hand-off is refused inside the harness and the
+        // loop can never produce a surfaced one. If one ever arrives, an
+        // invariant upstream broke; reject it rather than silently discarding it.
+        if let Some(handoff) = surfaced_handoff {
+            return Err(eyre!(
+                "direct wrapper passthrough surfaced an impossible proxy handoff: {handoff:?}"
+            ));
+        }
         if let (Some(collector), Some(perf)) = (perf_collector.as_mut(), harness_perf) {
             collector.set_agent_perf(perf);
         }
@@ -655,6 +731,38 @@ mod tests {
             assert!(
                 parse_cli_timeouts(&args).is_ok(),
                 "--stall-timeout {value} should be accepted"
+            );
+        }
+    }
+
+    /// The rebuilt launch identity's MCP facet must track the switches the
+    /// wrapper was actually invoked with. Pinning it to `false` is invisible
+    /// while the direct-wrapper lifecycle stays empty, but it silently
+    /// activates a stale compatibility path the moment retry/resume becomes
+    /// reachable here — a refreshed body's `#tag`s would stop moving the facet.
+    #[test]
+    fn passthrough_launch_intent_mcp_tracks_wrapper_switches() {
+        let cases: [(&[&str], bool); 5] = [
+            (&[], false),
+            (&["--mcp"], true),
+            (&["--use", "context7"], true),
+            (&["--use", "context7,gitnexus"], true),
+            (&["--mcp", "--use", "context7"], true),
+        ];
+
+        for (switches, expected) in cases {
+            let args = wrapper_args_from(switches);
+            let intent = passthrough_launch_intent(
+                Provider::Claude,
+                Path::new("/usr/local/bin/claude"),
+                true,
+                &args,
+                &[],
+                None,
+            );
+            assert_eq!(
+                intent.mcp_enabled, expected,
+                "mcp_enabled for {switches:?} should be {expected}"
             );
         }
     }

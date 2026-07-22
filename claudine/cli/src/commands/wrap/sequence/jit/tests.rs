@@ -76,9 +76,10 @@ fn template_preflight_resolves_against_document_dir() {
     let _cwd = CwdGuard::enter(unrelated.path());
 
     let env_overrides: BTreeMap<String, String> = BTreeMap::new();
-    let opts = build_template_preflight_options(
+    let (opts, _) = build_template_preflight_options(
         &env_overrides,
         &source_path,
+        &md,
         &overrides,
         Some(launch_dir.path()),
         None,
@@ -128,9 +129,10 @@ fn template_preflight_does_not_resolve_launch_only_file() {
     let _cwd = CwdGuard::enter(unrelated.path());
 
     let env_overrides: BTreeMap<String, String> = BTreeMap::new();
-    let opts = build_template_preflight_options(
+    let (opts, _) = build_template_preflight_options(
         &env_overrides,
         &source_path,
+        &md,
         &overrides,
         None,
         None,

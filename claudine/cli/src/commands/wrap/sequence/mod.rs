@@ -229,7 +229,10 @@ pub(crate) fn execute_sequence(
     let graph = composition::build_preflight_graph_with_context_and_resolution(
         &plan,
         source,
-        darkmatter::markdown::compose::ComposeContext::capture(),
+        darkmatter::markdown::compose::ComposeContext::capture_for_document(
+            prep_context.launch_workspace.launch_cwd.as_path(),
+            &source.markdown,
+        ),
         Some(&file_resolution_context),
     )?;
     let preflight_approved = approve_preflight_graph(

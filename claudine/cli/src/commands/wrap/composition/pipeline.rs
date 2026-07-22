@@ -5,9 +5,12 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use super::*;
+use super::preflight::{PreflightBlockedOutcome, emit_preflight_blocked_and_finalize};
 use claudine::composition::{
-    LifecycleCatchProtocol, LifecycleCatchResult, LifecycleCatchState, LifecycleTransitionAbort,
-    LifecycleTransitionDecision, LifecycleTransitionError, LifecycleTransitionInput, decide_lifecycle_transition,
+    DocumentTransition, EvaluatedProxyRequest, LifecycleCatchProtocol, LifecycleCatchResult,
+    LifecycleCatchState, LifecycleErrorInfo, LifecycleTransitionAbort, LifecycleTransitionDecision,
+    LifecycleTransitionError, LifecycleTransitionInput, ProxyProvenance, SurfacedHandoff,
+    commit_proxy, decide_lifecycle_transition,
 };
 
 enum CompositionPhaseResult<T> {
@@ -95,16 +98,55 @@ struct EnvironmentPhase {
     env_plan: env::EnvPlan,
     effective_prompt: String,
     mcp_extra_args: Vec<String>,
+    /// R8 — the MCP inputs a per-attempt rebuild recomputes injection from,
+    /// with the invocation's ambiguity resolutions already baked in so a retry
+    /// never has to prompt. `None` when MCP is not in play.
+    mcp_rebuild: Option<crate::commands::wrap::launch_plan::McpRebuildInputs>,
+    /// `OPENCODE_CONFIG_CONTENT` as it stood before the MCP fold.
+    opencode_config_base: Option<String>,
+    /// R8 — the child environment as it stood before any provider-shaped stage
+    /// wrote to it. Diffed against the final plan at the launch-plan record site
+    /// to produce [`crate::commands::wrap::launch_plan::LaunchPlanInputs::provider_env_baseline`],
+    /// the invocation-neutral base a per-attempt rebuild restores from.
+    pre_provider_env: std::collections::HashMap<std::ffi::OsString, std::ffi::OsString>,
+    /// R6/R8 — the ambient credential environment and explicit `--include`
+    /// intent, captured before the opening profile's allow-list narrowed it. A
+    /// per-attempt rebuild re-sanitizes this for its own profile; see
+    /// [`crate::commands::wrap::launch_plan::CredentialPolicyInputs`].
+    credential_policy: crate::commands::wrap::launch_plan::CredentialPolicyInputs,
 }
 
 struct CommandPhase {
     effective_sp: claudine::system_prompt::ResolvedSystemPrompt,
     args_before_prompt: Vec<String>,
+    /// R8 — the re-entrant launch-plan builder's invocation-fixed half. The
+    /// per-attempt rebuilt bundle derives every provider-dependent execution
+    /// adapter (noise policy, stderr suppression, the Codex output artifact)
+    /// from this, so the invocation records no separate copies of them.
+    launch_plan_inputs: crate::commands::wrap::launch_plan::LaunchPlanInputs,
     use_structured: bool,
-    structured_codex_output: Option<crate::commands::wrap::policy::StructuredCodexOutput>,
-    stdout_noise: &'static [&'static str],
-    stderr_noise: &'static [&'static str],
     stream_verbosity: Verbosity,
+    /// The temp files this phase's own system-prompt delivery wrote.
+    ///
+    /// [`Self::args_before_prompt`] and the recorded environment overlay carry
+    /// only their *paths* — Gemini's `GEMINI_SYSTEM_MD`, Claude's file flag, and
+    /// Codex's `model_instructions_file` all hand the child a path, never the
+    /// content. Holding the artifacts here binds their RAII cleanup to the
+    /// phase, which outlives [`provider_run_handoff`] and therefore every
+    /// attempt the invocation spawns. Dropping them at the end of
+    /// [`construct_argv_and_system_prompt`] unlinked the file before the first
+    /// child started, so the provider silently received no system prompt
+    /// (review-11 finding 1).
+    ///
+    /// This is the invocation-level counterpart of
+    /// [`RebuiltLaunchIdentity::system_prompt_artifacts`]: a retry whose facets
+    /// are unchanged takes the verbatim shortcut, which re-uses this phase's
+    /// argv and so keeps naming *these* files. They therefore cannot be handed
+    /// to a per-attempt owner.
+    ///
+    /// [`RebuiltLaunchIdentity::system_prompt_artifacts`]: crate::commands::wrap::harness_orch::loop_control::target_launch::RebuiltLaunchIdentity::system_prompt_artifacts
+    #[allow(dead_code)]
+    system_prompt_artifacts: Vec<super::super::system_prompt::SystemPromptArtifact>,
 }
 
 struct LifecyclePhase {
@@ -157,6 +199,24 @@ pub(super) fn execute_composition_request_inner_with_guard<'guard, 'runtime>(
 
     let prepare_span = tracing::info_span!("composition_prepare").entered();
     let selection = proceed_phase!(resolve_selection_and_launch(&mut attempt));
+
+    // --dry-run seam. Composition, shell expansion, and body/frontmatter
+    // finalization have all happened in `prepare`; provider/model selection has
+    // just resolved. Stop here — before MCP shadow-HOME materialization, argv
+    // and system-prompt overlay construction, the child-CWD switch, and every
+    // lifecycle event — and emit the composed artifacts.
+    //
+    // The seam sits *ahead of* lifecycle dispatch because dry run is
+    // contractually side-effect free: it fires no lifecycle event, so a stack
+    // carrying `append_line`/`set_frontmatter`/`shell` cannot touch the
+    // workspace, and no dynamic `proxy` route can be traversed. See
+    // `2026-07-13-proxy-with/spec.md` ("Existing dry-run behavior remains
+    // side-effect-free") and its non-goal of turning dry run into lifecycle
+    // simulation.
+    if attempt.request.dry_run {
+        return Ok(emit_dry_run_outcome(&mut attempt, selection.provider));
+    }
+
     let mut environment =
         proceed_phase!(prepare_environment_and_mcp(&mut attempt, &selection));
     let command = proceed_phase!(construct_argv_and_system_prompt(
@@ -184,36 +244,72 @@ pub(super) fn execute_composition_request_inner_with_guard<'guard, 'runtime>(
     Ok(outcome)
 }
 
+/// Render the `--dry-run` artifacts and build the terminal outcome.
+///
+/// Emits the composed body to stdout (the pipeable data product) and the
+/// finalized frontmatter plus the metadata table to stderr. `--quiet` /
+/// `--silent` do not suppress this render: the dry-run output *is* the
+/// command's purpose.
+///
+/// `provider` only labels the outcome; when the target never resolved the
+/// caller passes a placeholder, because the rendered agent cell — not the
+/// outcome — carries the real resolution state.
+///
+/// ## Notes
+///
+/// Callers must invoke this before any lifecycle event is dispatched. Firing
+/// `initialize` first would let a stack mutate the workspace (or hand the run
+/// off through `proxy`) during a run the user asked to be a rehearsal.
+fn emit_dry_run_outcome(
+    attempt: &mut CompositionAttempt<'_, '_>,
+    provider: Provider,
+) -> SingleCompositionOutcome {
+    let term = &attempt.term;
+    let render = dry_run::DryRunRender::from_request(&attempt.request);
+    crate::log::data(&render.body);
+    crate::log::message(&dry_run::render_hr(term));
+    crate::log::message(&dry_run::render_frontmatter_heading(term));
+    crate::log::message("");
+    crate::log::message(&dry_run::render_frontmatter(&render.frontmatter, term));
+    crate::log::message(&dry_run::render_metadata_table(&render, term));
+
+    if let Some(collector) = attempt.perf_collector.as_mut() {
+        collector.set_dry_run();
+    }
+    // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
+    if let Some(collector) = attempt.perf_collector.take() {
+        crate::perf::emit_report(&collector.into_report());
+    }
+
+    SingleCompositionOutcome {
+        exit_code: 0,
+        provider,
+        agent_perf: None,
+        // Dry-run never produces a per-iteration summary.
+        iteration_signals: None,
+        terminal_signal: None,
+        initialize_handoff: None,
+        final_output: None,
+    }
+}
+
 fn resolve_selection_and_launch(
     attempt: &mut CompositionAttempt<'_, '_>,
 ) -> CompositionPhaseResult<SelectionPhase> {
-    let request = &attempt.request;
-    let term = &attempt.term;
-    if request.dry_run && request.resolved_target.is_none() {
-        let render = dry_run::DryRunRender::from_request(request);
-        crate::log::data(&render.body);
-        crate::log::message(&dry_run::render_hr(term));
-        crate::log::message(&dry_run::render_frontmatter_heading(term));
-        crate::log::message("");
-        crate::log::message(&dry_run::render_frontmatter(&render.frontmatter, term));
-        crate::log::message(&dry_run::render_metadata_table(&render, term));
-        if let Some(collector) = attempt.perf_collector.as_mut() {
-            collector.set_dry_run();
-        }
-        let outcome = SingleCompositionOutcome {
-            exit_code: 0,
-            provider: Provider::Claude,
-            agent_perf: None,
-            iteration_signals: None,
-            terminal_signal: None,
-            final_output: None,
-        };
-        if let Some(collector) = attempt.perf_collector.take() {
-            crate::perf::emit_report(&collector.into_report());
-        }
-        return CompositionPhaseResult::Completed(Box::new(outcome));
+    // An unresolved target means provider selection would have to prompt, which
+    // a dry run must never do — so this variant of the seam fires before target
+    // resolution and reports the unresolved state instead. `Provider::Claude` is
+    // an inert placeholder in the outcome; the rendered agent cell carries the
+    // real (unresolved) state.
+    if attempt.request.dry_run && attempt.request.resolved_target.is_none() {
+        return CompositionPhaseResult::Completed(Box::new(emit_dry_run_outcome(
+            attempt,
+            Provider::Claude,
+        )));
     }
 
+    let request = &attempt.request;
+    let term = &attempt.term;
     CompositionPhaseResult::from_result((|| -> Result<SelectionPhase> {
         let verbose = attempt.verbose;
         let perf_collector = &mut attempt.perf_collector;
@@ -345,6 +441,14 @@ fn prepare_environment_and_mcp(
         let needs_repo_shadow_home = request.repo;
         let raw_agent_params: Vec<String> = std::env::args().skip(1).collect();
         let yolo_enabled = request.yolo;
+        // Taken before the allow-list runs: once `build_child_env_with_launch`
+        // has sanitized for this profile, a credential it stripped is
+        // unrecoverable, and a rebuild onto a provider entitled to it could only
+        // guess.
+        let credential_policy = crate::commands::wrap::launch_plan::CredentialPolicyInputs {
+            ambient: env::ambient_sensitive_env(),
+            explicit_include: env::validate_include_names(&request.include)?,
+        };
         let mut env_plan = env::build_child_env_with_launch(
             profile,
             provider,
@@ -392,8 +496,33 @@ fn prepare_environment_and_mcp(
             *last_checkpoint = std::time::Instant::now();
         }
 
+        // R8 — the invocation-neutral base a per-attempt rebuild restores the
+        // provider-owned half of the environment from. Captured here because
+        // everything that follows (MCP injection, YOLO, model, system-prompt
+        // delivery) is provider-shaped, and a refreshed document that lands on a
+        // different provider must not inherit those writes.
+        let mut pre_provider_env = env_plan.env.clone();
+        if needs_mcp_shadow_home && !needs_repo_shadow_home {
+            // `HOME` is the one provider-shaped key written before this point:
+            // `build_child_env_with_launch` materializes the MCP shadow home for
+            // the providers whose injector needs one. Under `--repo` the shadow
+            // home is invocation intent instead, and stays put.
+            match std::env::var_os("HOME") {
+                Some(home) => pre_provider_env.insert("HOME".into(), home),
+                None => pre_provider_env.remove(std::ffi::OsStr::new("HOME")),
+            };
+        }
+
         let mut effective_prompt = request.prepared.prompt.clone();
         let mut mcp_extra_args = Vec::new();
+        // Captured before any fold so a per-attempt rebuild can reassemble the
+        // MCP → YOLO → system-prompt chain from the same base this invocation
+        // folded onto.
+        let opencode_config_base = env_plan
+            .env
+            .get(std::ffi::OsStr::new("OPENCODE_CONFIG_CONTENT"))
+            .map(|v| v.to_string_lossy().into_owned());
+        let mut mcp_rebuild: Option<crate::commands::wrap::launch_plan::McpRebuildInputs> = None;
         if request.mcp || !request.mcp_use.is_empty() {
             use claudine::mcp::catalog::McpCatalogStore;
             use claudine::mcp::inject::injector_for_provider;
@@ -407,6 +536,12 @@ fn prepare_environment_and_mcp(
             let prompt_is_interactive = request.session_interactive
                 && std::io::stdin().is_terminal()
                 && std::io::stdout().is_terminal();
+            // Ambiguity is resolved exactly once, here, where an operator may
+            // still be present. Every resolution is recorded so a per-attempt
+            // rebuild can replay this decision by lookup — `Select` must never
+            // be reachable from a retry, which has no terminal to prompt on.
+            let mut ambiguity_resolutions: std::collections::HashMap<String, String> =
+                std::collections::HashMap::new();
             let session = compute_session_set(
                 &catalog,
                 repo_root_ref,
@@ -416,12 +551,16 @@ fn prepare_environment_and_mcp(
                     if request.strict || effective_non_interactive || !prompt_is_interactive {
                         return None;
                     }
-                    Select::new(
+                    let chosen = Select::new(
                         &format!("`#{tag}` matched multiple MCP servers. Choose one:"),
                         candidates.to_vec(),
                     )
                     .prompt()
-                    .ok()
+                    .ok();
+                    if let Some(id) = chosen.as_ref() {
+                        ambiguity_resolutions.insert(tag.to_string(), id.clone());
+                    }
+                    chosen
                 },
             )
             .wrap_err("MCP session error")?;
@@ -467,6 +606,23 @@ fn prepare_environment_and_mcp(
 
             effective_prompt = session.cleaned_prompt.unwrap_or(cleaned_prompt);
 
+            // Materialized whenever MCP is in play, not only when *this*
+            // provider's injector needs one: a refreshed document can move the
+            // provider to a shadow-HOME injector at a retry boundary, and the
+            // rebuild must find one already on disk rather than create it.
+            let mcp_repo_root = repo_root_ref.map(std::path::Path::to_path_buf);
+            crate::commands::exec_prep::ensure_shadow_home(
+                provider,
+                !session.servers.is_empty(),
+                &mut env_plan,
+            )?;
+            mcp_rebuild = Some(crate::commands::wrap::launch_plan::McpRebuildInputs {
+                explicit_use: request.mcp_use.clone(),
+                repo_root: mcp_repo_root,
+                shadow_home: env_plan.shadow_home_path.clone(),
+                ambiguity_resolutions,
+            });
+
             if let Some(injector) = injector_for_provider(provider) {
                 if !session.servers.is_empty() {
                     crate::commands::exec_prep::ensure_shadow_home(
@@ -506,6 +662,10 @@ fn prepare_environment_and_mcp(
             env_plan,
             effective_prompt,
             mcp_extra_args,
+            mcp_rebuild,
+            opencode_config_base,
+            pre_provider_env,
+            credential_policy,
         })
     })())
 }
@@ -538,6 +698,10 @@ fn construct_argv_and_system_prompt(
             env_plan,
             effective_prompt,
             mcp_extra_args,
+            mcp_rebuild,
+            opencode_config_base,
+            pre_provider_env,
+            credential_policy,
         } = environment;
         let silent = request.silent;
         let quiet = request.quiet;
@@ -650,6 +814,12 @@ fn construct_argv_and_system_prompt(
             )
             .map_err(crate::commands::exec_prep::ModelStageError::into_report)?;
 
+        // R8 — from here to the MCP fold, no document surface moves `--output`,
+        // the system prompt, or `--sandbox`. What a per-attempt rebuild records
+        // is the *intent* for the two flags (which is what stays fixed) and the
+        // rendered slice only for the system prompt, whose already-composed
+        // content is the immutable part.
+
         // Universal --output flag
         if let Some(ref output_str) = request.output {
             let format: super::super::profile::OutputFormat = (*output_str).into();
@@ -660,6 +830,7 @@ fn construct_argv_and_system_prompt(
                 log::warn(&warn);
             }
         }
+        let argv_after_output = child_args.len();
 
         record_substage(perf_collector, last_checkpoint, "argv assembly");
 
@@ -709,6 +880,10 @@ fn construct_argv_and_system_prompt(
         let scoped_tmp = super::super::system_prompt::scoped_tmp_dir(launch_workspace);
 
         let mut sp_artifacts: Vec<super::super::system_prompt::SystemPromptArtifact> = Vec::new();
+        // OpenCode delivers its system prompt through the same inline config the
+        // MCP and YOLO producers write; recorded so a rebuild can re-fold it
+        // last, exactly as the invocation does.
+        let mut system_prompt_opencode_config: Option<String> = None;
 
         match &effective_sp {
             claudine::system_prompt::ResolvedSystemPrompt::None
@@ -733,6 +908,7 @@ fn construct_argv_and_system_prompt(
                     // prevent. Route it through the same merge the MCP fold uses so
                     // `instructions`, `mcp`, and `permission` coexist.
                     if k == std::ffi::OsStr::new("OPENCODE_CONFIG_CONTENT") {
+                        system_prompt_opencode_config = Some(v.to_string_lossy().into_owned());
                         let injected = std::collections::HashMap::from([(
                             "OPENCODE_CONFIG_CONTENT".to_string(),
                             v.to_string_lossy().to_string(),
@@ -753,7 +929,7 @@ fn construct_argv_and_system_prompt(
                 }
             }
         }
-        let _ = &sp_artifacts;
+        let system_prompt_args = child_args[argv_after_output..].to_vec();
 
         // Universal --sandbox flag
         if request.sandbox
@@ -808,21 +984,10 @@ fn construct_argv_and_system_prompt(
         child_args.append(mcp_extra_args);
 
         // -- Structured streaming decision ------------------------------------
-
-        let stdout_noise = if effective_non_interactive {
-            profile.stdout_noise_prefixes()
-        } else {
-            &[]
-        };
-        // Interactive TUIs (Codex, OpenCode, etc.) must inherit stderr directly.
-        // A non-empty stderr filter causes `exec::run_child` to pipe stderr,
-        // which flips `isolate_process_group` on and leaves the child in a
-        // background pgroup — it then hangs on SIGTTIN when reading the TTY.
-        let stderr_noise = if effective_non_interactive {
-            profile.stderr_noise_prefixes()
-        } else {
-            &[]
-        };
+        // The stdout/stderr noise policies are not computed here: every attempt
+        // (including the first) reads them from its rebuilt launch bundle, which
+        // derives them from the rebuilt profile and session mode
+        // (`harness_orch::loop_control::target_launch`).
 
         let use_structured = profile.supports_structured_stream() && effective_non_interactive;
         let stream_verbosity = structured_verbosity(silent, quiet);
@@ -847,6 +1012,95 @@ fn construct_argv_and_system_prompt(
         // Snapshot args before prompt delivery so the harness loop gets a
         // prompt-free base (the harness manages prompt delivery itself).
         let args_before_prompt = child_args.clone();
+
+        // R8 — record the inputs and the resulting plan so a per-attempt rebuild
+        // can re-derive one for a refreshed document without repeating any of the
+        // effects above (temp-file writes, shadow-HOME materialization, warnings,
+        // the ambiguity prompt). An unchanged document's facets compare equal and
+        // get `args_before_prompt` back verbatim.
+        let launch_plan_inputs = {
+            use crate::commands::wrap::launch_plan as lp;
+            // The harness manages prompt delivery itself, so the plan it compares
+            // against is the harness base argv (`runner.rs`), not this one.
+            let mut recorded_args = args_before_prompt.clone();
+            if !use_structured {
+                profile.prepare_captured_output(&mut recorded_args);
+            }
+            let mut env_overlay: Vec<(std::ffi::OsString, std::ffi::OsString)> = Vec::new();
+            for key in ["YOLO", "MODEL", "OPENCODE_CONFIG_CONTENT"] {
+                if let Some(value) = env_plan.env.get(std::ffi::OsStr::new(key)) {
+                    env_overlay.push((key.into(), value.clone()));
+                }
+            }
+            let mut mcp_body_tags: Vec<String> = mcp_rebuild
+                .as_ref()
+                .map(|_| {
+                    claudine::mcp::session::lex_tags(&request.prepared.prompt).1
+                })
+                .unwrap_or_default();
+            mcp_body_tags.sort();
+            mcp_body_tags.dedup();
+            // Every key whose value the provider-shaped stages added or changed,
+            // paired with what it held beforehand. A rebuild restores from here
+            // rather than laying an additive overlay over the opening provider's
+            // writes (review-9 finding 2).
+            let mut provider_env_baseline: std::collections::HashMap<
+                std::ffi::OsString,
+                Option<std::ffi::OsString>,
+            > = std::collections::HashMap::new();
+            for (key, value) in &env_plan.env {
+                if pre_provider_env.get(key) != Some(value) {
+                    provider_env_baseline.insert(key.clone(), pre_provider_env.get(key).cloned());
+                }
+            }
+            for key in pre_provider_env.keys() {
+                if !env_plan.env.contains_key(key) {
+                    provider_env_baseline
+                        .insert(key.clone(), pre_provider_env.get(key).cloned());
+                }
+            }
+            lp::LaunchPlanInputs {
+                provider_args_tail: request.provider_args.clone(),
+                output_format: request.output.map(Into::into),
+                system_prompt_args,
+                system_prompt_opencode_config,
+                system_prompt: Some(effective_sp.clone()),
+                system_prompt_cwd: launch_cwd.clone(),
+                system_prompt_scoped_tmp: scoped_tmp.clone(),
+                sandbox_requested: request.sandbox,
+                provider_env_baseline,
+                credential_policy: credential_policy.clone(),
+                has_model_env: env_plan
+                    .env
+                    .contains_key(&std::ffi::OsString::from("MODEL")),
+                mcp: mcp_rebuild.clone(),
+                opencode_config_base: opencode_config_base.clone(),
+                codex_last_message_path: structured_codex_output
+                    .as_ref()
+                    .map(|o| o.last_message_path.clone())
+                    .unwrap_or_else(|| {
+                        std::env::temp_dir().join(format!(
+                            "claudine-codex-last-message-{}.txt",
+                            uuid::Uuid::new_v4()
+                        ))
+                    }),
+                invocation: lp::RecordedLaunch {
+                    facets: lp::DocumentLaunchFacets {
+                        provider,
+                        non_interactive: effective_non_interactive,
+                        yolo_requested: request.yolo,
+                        is_inline,
+                        model: target.model.clone(),
+                        mcp_body_tags,
+                    },
+                    args: recorded_args,
+                    env_overlay,
+                    structured_codex: structured_codex_output.is_some(),
+                },
+                replay_supported: true,
+            }
+        };
+
         let prompt_source = super::super::profile::PromptSource::Inline(effective_prompt.clone());
         let delivery =
             profile.prompt_delivery(&child_args, effective_prompt, effective_non_interactive)?;
@@ -878,11 +1132,6 @@ fn construct_argv_and_system_prompt(
             collector.mark_env_setup_complete();
         }
 
-        // --dry-run no longer exits here. The seam now sits *after* the harness
-        // shell-approval preflight block below, so shell-approval decisions
-        // participate in the dry-run gate before the composed output is rendered.
-        // See the `request.dry_run` early-return after preflight.
-
         switch_process_cwd(child_cwd)?;
 
         if !silent && !quiet {
@@ -898,11 +1147,10 @@ fn construct_argv_and_system_prompt(
         Ok(CommandPhase {
             effective_sp,
             args_before_prompt,
+            launch_plan_inputs,
             use_structured,
-            structured_codex_output,
-            stdout_noise,
-            stderr_noise,
             stream_verbosity,
+            system_prompt_artifacts: sp_artifacts,
         })
     })())
 }
@@ -1082,16 +1330,20 @@ fn execute_initialize_catch(
     .into())
 }
 
+/// Run the launched document's `initialize` event and translate its control
+/// into the transition the harness loop's coordinator will consume.
+///
+/// This route decides *what* should happen; it never commits it. A `Proxy`
+/// control leaves here as an unresolved request, so the target is resolved and
+/// hop-checked in the one place that owns the invocation-wide chain.
 fn route_initialize(
     guard: &mut LifecycleRunGuard<'_>,
     init_ctx: &StackExecutionContext<'_>,
     source_path: &Path,
-    effective_repo_root: Option<&Path>,
     provider: Provider,
     term: &Terminal,
-    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
-) -> CompositionPhaseResult<Option<PathBuf>> {
-    let routed = (|| -> Result<CompositionPhaseResult<Option<PathBuf>>> {
+) -> CompositionPhaseResult<DocumentTransition> {
+    let routed = (|| -> Result<CompositionPhaseResult<DocumentTransition>> {
         let init_outcome = guard.execute_event(LifecycleSignal::Initialize, init_ctx);
         let init_result = execute_initialize_catch(
             guard,
@@ -1124,10 +1376,7 @@ fn route_initialize(
             proxy_target_seen: false,
             finalize_emitted: false,
         });
-        // Set by an `initialize` Proxy control: the resolved target document the
-        // run is handed off to. Threaded into `run_composition_body` so the harness loop
-        // re-composes and runs the target instead of the original document.
-        let mut init_proxy_target: Option<std::path::PathBuf> = None;
+        let mut transition = DocumentTransition::Continue;
         if let Some(ref control) = init_result.control {
             match (&init_decision, control) {
                 (_, StackControl::Skip) => {
@@ -1142,58 +1391,32 @@ fn route_initialize(
                             iteration_signals: None,
                             terminal_signal: None,
                             final_output: None,
+                            initialize_handoff: None,
                         },
                     )));
                 }
                 (
                     LifecycleTransitionDecision::ProxyHandoff { target },
-                    StackControl::Proxy { .. },
+                    StackControl::Proxy {
+                        overlay, location, ..
+                    },
                 ) => {
-                    // Hand off to the target document. Resolve the reference
-                    // (`@repo/…`, relative, or absolute) against the source so
-                    // `run_composition_body` runs the target via the harness loop's
-                    // re-materialize path. The harness loop resets the lifecycle
-                    // guard and re-emits the target's own `initialize` before its
-                    // pre-flight / start / terminal / finalize lifecycle runs.
-                    let resolved = match file_resolution_context {
-                        Some(context) => claudine::composition::resolve_proxy_target_in_context(
-                            target,
-                            source_path,
-                            context,
+                    // Hand off to the target document. The harness loop's
+                    // coordinator commits this request — resolving the
+                    // reference (`@repo/…`, relative, or absolute) against the
+                    // source, deciding the hop, then re-materializing and
+                    // running the target: its body, frontmatter, harness
+                    // pre-checks, and its own `initialize` before
+                    // start/terminal/finalize.
+                    transition = DocumentTransition::Proxy(EvaluatedProxyRequest::new(
+                        target.clone(),
+                        overlay.clone(),
+                        ProxyProvenance::new(
+                            source_path.to_path_buf(),
+                            *location,
+                            vec![source_path.to_path_buf()],
                         ),
-                        None => claudine::composition::resolve_proxy_target(
-                            target,
-                            source_path,
-                            effective_repo_root,
-                        ),
-                    }
-                    .map_err(|e| CompositionError::InvalidFileReference {
-                        context: Box::new(claudine::composition::FileReferenceContext {
-                            source_path: source_path.to_path_buf(),
-                            event: Some("initialize".to_string()),
-                            // Wildcard index: the stack position that authored
-                            // the `proxy` is not threaded back through the
-                            // outcome, so name the stable path, not a concrete
-                            // `[0]` we cannot verify (spec §D3/§D6).
-                            property: "initialize.stack[*].proxy".to_string(),
-                            reference: target.clone(),
-                            hint: PROXY_TARGET_HINT.to_string(),
-                        }),
-                        source: e,
-                    })?;
-                    if !claudine::composition::proxy_handoff_allowed(
-                        std::slice::from_ref(&source_path.to_path_buf()),
-                        &resolved,
-                    ) {
-                        return Err(CompositionError::LifecycleProxyCycle {
-                            source_path: source_path.to_path_buf(),
-                            target: target.clone(),
-                            chain: vec![source_path.display().to_string()],
-                            limit: claudine::composition::MAX_PROXY_HOPS,
-                        }
-                        .into());
-                    }
-                    init_proxy_target = Some(resolved);
+                    ));
                 }
                 (LifecycleTransitionDecision::Continue, StackControl::Stop) => {}
                 (
@@ -1233,7 +1456,7 @@ fn route_initialize(
                 _ => unreachable!("initialize control and transition decision diverged"),
             }
         }
-        Ok(CompositionPhaseResult::Proceed(init_proxy_target))
+        Ok(CompositionPhaseResult::Proceed(transition))
     })();
     match routed {
         Ok(result) => result,
@@ -1270,15 +1493,14 @@ fn provider_run_handoff(
     let CommandPhase {
         effective_sp,
         args_before_prompt,
+        launch_plan_inputs,
         use_structured,
-        structured_codex_output,
-        stdout_noise,
-        stderr_noise,
         stream_verbosity,
+        // Borrowed, never moved: the caller owns the phase for the whole run, so
+        // the files the argv/environment name stay on disk past every spawn.
+        system_prompt_artifacts: _,
     } = command;
     let use_structured = *use_structured;
-    let stdout_noise = *stdout_noise;
-    let stderr_noise = *stderr_noise;
     let stream_verbosity = *stream_verbosity;
     let LifecyclePhase {
         shell_options,
@@ -1325,11 +1547,9 @@ fn provider_run_handoff(
         profile,
         effective_non_interactive,
         args_before_prompt,
+        launch_plan_inputs,
         child_cwd,
         use_structured,
-        structured_codex_output,
-        stdout_noise,
-        stderr_noise,
         show_checks,
         stream_verbosity,
         detail_requested,
@@ -1342,12 +1562,15 @@ fn provider_run_handoff(
     // emitted `initialize` and owns the lifecycle runtime context. Run only
     // the per-iteration body and return.
     if let Some(guard) = attempt.external_guard.take() {
+        // Loop re-entry: `initialize` already ran for this document on the
+        // first iteration, so there is no initialize-route transition to
+        // consume here.
         return runner::run_composition_body(
             &ctx,
             guard,
             perf_collector,
             skip_preflight,
-            None,
+            DocumentTransition::Continue,
         );
     }
 
@@ -1404,7 +1627,7 @@ fn provider_run_handoff(
         base_dir,
         ctx_base_dir: Some(launch_workspace.launch_cwd.as_path()),
         prepared_context: Some(lifecycle_context),
-        file_resolution_context: request.prepared.rematerialize.file_resolution_context.as_ref(),
+        file_resolution_context: request.prepared.input_layers.file_resolution_context.as_ref(),
         effect_engine: lifecycle_effect_engine,
         shell_runner: &SystemShellRunner,
         emitter,
@@ -1414,23 +1637,118 @@ fn provider_run_handoff(
         messaging: lifecycle_messaging,
         settings: lifecycle_settings,
     };
-    let init_proxy_target = proceed_phase!(route_initialize(
+    // An adopted proxy target's `initialize` is NOT routed here: the command
+    // coordinator already committed the hop, and the harness loop's staged
+    // bootstrap owns the target's narrow initialize-shell gate, its own
+    // `initialize`, the stabilized reread, and the full audit — the one
+    // canonical R4 staging shared with an in-harness adoption. Routing
+    // `initialize` here as well would fire it twice and audit a bootstrap read
+    // the target's `initialize` may replace, so hand straight to the body, which
+    // adopts the committed handoff into the loop.
+    if request.adopted_handoff.is_some() {
+        return runner::run_composition_body(
+            &ctx,
+            &mut guard,
+            perf_collector,
+            false,
+            DocumentTransition::Continue,
+        );
+    }
+
+    let initial_transition = proceed_phase!(route_initialize(
         &mut guard,
         &init_ctx,
         &request.prepared.resolved_path,
-        effective_repo_root,
         provider,
         term,
-        request.prepared.rematerialize.file_resolution_context.as_ref(),
     ));
 
-    runner::run_composition_body(
-        &ctx,
-        &mut guard,
-        perf_collector,
-        false,
-        init_proxy_target.as_deref(),
-    )
+    // R1/R7 — an `initialize` proxy on a live run that carries a command-owned
+    // coordinator ledger is committed against that shared ledger **here**, while
+    // the source's `initialize` guard is still live, then surfaced up as an
+    // already-committed handoff. The command coordinator re-prepares the target
+    // through the *same* canonical launch pipeline a direct invocation uses —
+    // rebuilding the complete launch bundle rather than inheriting the router's —
+    // and adopts it into the harness loop's staged bootstrap for its own
+    // `initialize`/reread/audit. This mirrors the terminal-proxy route's
+    // `surface_or_adopt_terminal_proxy`: one commit point, one set of resolution
+    // and cycle semantics.
+    //
+    // Committing while the guard is live is what makes a refused hop (missing
+    // target, cycle, or hop-limit) route through the source's still-legal
+    // `blocked`/`finalize` — the atomic-handoff contract and AC29 — instead of
+    // `?`-propagating out of the command past the closure the source still owes.
+    // A clean commit synthesizes no source terminal/`finalize`; the source is
+    // transferred, not completed.
+    //
+    // Both the top-level `compose`/`inline-compose` coordinator
+    // (`compose/prep.rs`) and each sequence step's contained coordinator
+    // (`sequence/iterate.rs`) provide that ledger (R1). The `!dry_run` term is a
+    // defensive backstop only: a dry run returns at the seam in
+    // `execute_composition_request_inner_with_guard`, so it never reaches
+    // `initialize` and cannot produce a handoff to commit.
+    match initial_transition {
+        DocumentTransition::Proxy(handoff)
+            if !request.dry_run && request.handoff_ledger.is_some() =>
+        {
+            let ledger = request
+                .handoff_ledger
+                .as_ref()
+                .expect("handoff_ledger.is_some() checked in the match guard");
+            match commit_proxy(
+                &mut ledger.lock().expect("run ledger mutex poisoned"),
+                handoff,
+                effective_repo_root,
+            ) {
+                Ok(committed) => Ok(SingleCompositionOutcome {
+                    exit_code: 0,
+                    provider,
+                    agent_perf: None,
+                    iteration_signals: None,
+                    terminal_signal: None,
+                    final_output: None,
+                    initialize_handoff: Some(SurfacedHandoff::Committed(Box::new(committed))),
+                }),
+                // A refused hop leaves the source active; route the typed commit
+                // failure through its still-live `blocked`/`finalize` stacks with
+                // the concrete cause as `err`, exactly as the terminal route's
+                // `route_handoff_failure` does.
+                Err(commit_error) => {
+                    let info = LifecycleErrorInfo::from_proxy_commit_error(&commit_error);
+                    let outcome = emit_preflight_blocked_and_finalize(
+                        &mut guard,
+                        lifecycle_effect_engine,
+                        emitter,
+                        lifecycle_settings,
+                        lifecycle_messaging,
+                        term,
+                        &request.prepared.resolved_path,
+                        effective_repo_root,
+                        base_dir,
+                        Some(launch_workspace.launch_cwd.as_path()),
+                        Some(lifecycle_context),
+                        fm_map.unwrap_or(&empty_frontmatter),
+                        document_start,
+                        info,
+                    );
+                    match outcome {
+                        // A raise inside the catch stacks supersedes the hand-off
+                        // failure.
+                        PreflightBlockedOutcome::EvaluationError(ce) => Err(ce.into()),
+                        // No flow-control recovery exists for a pre-launch
+                        // `initialize` blocked; surface the typed commit error so
+                        // the renderer walks `source()` to the concrete cause.
+                        PreflightBlockedOutcome::Control(_) => {
+                            Err(color_eyre::eyre::Report::new(commit_error))
+                        }
+                    }
+                }
+            }
+        }
+        // Dry-run proxies (and every other transition) stay on the in-harness
+        // coordinator.
+        other => runner::run_composition_body(&ctx, &mut guard, perf_collector, false, other),
+    }
 }
 
 #[cfg(test)]

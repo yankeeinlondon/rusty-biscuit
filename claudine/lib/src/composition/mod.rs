@@ -15,6 +15,7 @@ use std::path::Path;
 
 pub mod agent_message;
 pub mod closure;
+pub mod coordinator;
 mod error;
 pub mod file_detail;
 pub mod frontmatter_excerpt;
@@ -42,6 +43,14 @@ pub mod sequence;
 mod types;
 
 pub use agent_message::{agent_state_breakdown, invalid_agent_message};
+pub use coordinator::{
+    ActionLocation, ActiveDocumentState, AttemptOutcome, CommandOutputPolicy, ControlBudget,
+    ControlBudgetKind, DocumentIteration, DocumentOverlay, DocumentTransition,
+    EvaluatedProxyRequest, HopApproval, HopRejection, InvocationInputs, InvocationInputsDraft,
+    LaunchDiscovery, LedgerMut, PreparedDocument, ProviderAttempt, ProxyCommitError, ProxyHandoff,
+    ProxyProvenance, ResolvedProxyTarget, RunLedger, SessionCompatibilityKey, SharedRunLedger,
+    SurfacedHandoff, TransitionAbort, TransitionRecord, commit_proxy,
+};
 pub use darkmatter::markdown::compose::shell_expansion::{ShellCommandOrigin, ShellExpansionError};
 pub use error::{
     ActionExprError, CompositionError, DroppedOptional, DroppedOptionalSource, DroppedOptionalStage,
@@ -93,12 +102,20 @@ pub use looping::{
 };
 pub use looping::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
 pub use mismatch::{capture_frontmatter_yaml, is_inline_sequence_mismatch};
-pub use preflight::{PreFlightResult, resolve_graph_shell_approvals, resolve_shell_approvals};
-pub use hints::{parse_interactive_hint, parse_selection_hints_from_frontmatter};
-pub use prepare::{PrepareOptions, bind_agent_workspace, prepare_direct, prepare_inline};
 pub use runtime_state::{
     OUTPUTS_KEY, RuntimeMutationError, RuntimeSnapshot, RuntimeState, layered_set_overrides,
     trim_transport_newline, with_initialized_outputs,
+};
+pub use preflight::{
+    PreFlightResult, resolve_graph_shell_approvals, resolve_lifecycle_shell_approvals,
+    resolve_shell_approvals,
+};
+pub use hints::{parse_interactive_hint, parse_selection_hints_from_frontmatter};
+pub use prepare::{
+    DocumentEntryReason, DocumentPreparation, LoopOwnership, PrepareOptions, PreparationStages,
+    PromptSource, SchemaStage, SourceBasis, bind_agent_workspace, prepare_direct,
+    prepare_document,
+    prepare_inline, preflight_document_shell,
 };
 pub use resolve::{
     build_prompt_reference, capture_file_resolution_context, derive_request_context_for_source,
@@ -111,7 +128,8 @@ pub use resolve::{
 pub use schema::{
     InteractiveSchemaOptions, PreValidatedSchema, PropertyState, PropertyStatus,
     SchemaStatusReport, build_schema_status_report, drop_invalid_optionals,
-    pre_validate_schema, prepare_direct_with_schema, prepare_inline_with_schema,
+    pre_validate_schema, prepare_direct_with_schema, prepare_direct_with_schema_and_prompt,
+    prepare_inline_with_schema,
 };
 pub use select::{
     build_candidate_set, build_installed_snapshot, build_picker_plan, build_picker_plan_with_hints,
@@ -138,11 +156,10 @@ pub use sequence::task::{
     TaskOutcome, TaskShellError, TaskShellRunner, TaskStage, TaskStatus, UnavailablePromptRunner,
 };
 pub use types::{
-    AgentHint, AgentResolutionState, AmbientVariable, CompositionClosurePlan,
+    AgentHint, AgentResolutionState, AmbientVariable, CallerInputLayers, CompositionClosurePlan,
     CompositionExecutionRequest, CompositionMode, EffectiveSelectionHints, InlineClosurePlan,
     InstalledProviderSnapshot, LoopAction, LoopCondition, LoopConfig, ModelHint,
     ModelResolutionReason, OnRateLimit, OutputFormat, PickerInfluence, PreparedComposition,
-    RematerializeInputs,
     ProviderPickerOption, ProviderPickerPlan, ProviderResolutionReason, ResolutionMode,
     ResolvedCompositionSource, ResolvedExecutionTarget, ResolvedSessionInteractivity,
     SelectedProvider, SelectionReason, SessionInteractivitySource, SequenceExecutionOptions,

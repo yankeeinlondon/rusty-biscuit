@@ -39,7 +39,6 @@ fn committed_generated_artifacts_match_phase_1_byte_baseline() {
     });
     let baseline: serde_json::Value =
         serde_json::from_slice(&raw).expect("phase 1 artifact baseline must be valid JSON");
-
     assert_eq!(baseline["algorithm"], "xxh64");
     assert_eq!(baseline["seed"], 0);
     let artifacts = baseline["artifacts"]

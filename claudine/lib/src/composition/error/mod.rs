@@ -739,6 +739,109 @@ pub enum CompositionError {
         param: String,
     },
 
+    /// `proxy.with` was authored with something other than a YAML mapping.
+    #[error(
+        "`{property}.{path}` must be a mapping, got {actual} ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleProxyWithNotMapping {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event name (e.g. `"start"`); the stack annotator upgrades
+        /// this to `"{event}.stack[{i}]"`.
+        property: String,
+        /// The `with`-rooted path within the stack item (e.g.
+        /// `"action[0].with"`). Joined to `property` for the rendered
+        /// property path.
+        path: String,
+        /// The JSON type name of the authored value.
+        actual: String,
+    },
+
+    /// `proxy.with` was supplied as a single whole-mapping interpolation
+    /// (`with: "{{ payload }}"`) rather than explicit keys.
+    ///
+    /// Named out-of-scope for v1: authors write the mapping explicitly and may
+    /// inject typed object or array values at individual keys.
+    #[error(
+        "`{property}.{path}` cannot be supplied as a whole-mapping interpolation `{raw}` ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleProxyWithWholeMapping {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event name; upgraded to `"{event}.stack[{i}]"` by the stack
+        /// annotator.
+        property: String,
+        /// The `with`-rooted path within the stack item.
+        path: String,
+        /// The authored string, verbatim.
+        raw: String,
+    },
+
+    /// A `proxy.with` key carries an interpolation span. Keys name target
+    /// frontmatter properties and are never interpolated.
+    #[error(
+        "`{property}.{path}` has a dynamic key `{key}`; `with:` keys must be static strings ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleProxyWithDynamicKey {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event name; upgraded to `"{event}.stack[{i}]"` by the stack
+        /// annotator.
+        property: String,
+        /// The `with`-rooted path within the stack item. It gains a trailing
+        /// `.{key}` segment only when the key is a safe path segment — a
+        /// dotted path built from an unrepresentable key would point at a
+        /// property that does not exist.
+        path: String,
+        /// The offending key, verbatim.
+        key: String,
+    },
+
+    /// A `proxy.with` value could not be resolved at event time.
+    ///
+    /// The message carries the underlying expression-layer reason. Neither it
+    /// nor any other field echoes a resolved overlay value: an overlay may
+    /// carry secrets, so a diagnostic names properties, not contents.
+    #[error(
+        "`{property}.{path}` could not be resolved for the proxy to `{target}`: {message} \
+         ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleProxyWithEvaluationFailed {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// The `"{event}.stack[{i}]"` property that fired.
+        property: String,
+        /// The failing path within the stack item, rooted at the action and
+        /// carried down to the exact nested value (e.g.
+        /// `"action[0].with.metadata.area"`).
+        path: String,
+        /// The evaluated proxy target the overlay was being built for.
+        target: String,
+        /// The expression-layer reason.
+        message: String,
+    },
+
+    /// A parameter that only `proxy` accepts was authored on another action.
+    #[error(
+        "lifecycle action `{verb}` in `{property}` does not accept a `{param}` parameter; \
+         `{param}` is only valid on `proxy` ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleProxyOnlyParameter {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event name (e.g. `"start"`).
+        property: String,
+        /// The action verb that received the parameter.
+        verb: String,
+        /// The proxy-only parameter name.
+        param: String,
+    },
+
     /// A positional lifecycle action received the wrong number of arguments.
     #[error(
         "lifecycle action `{verb}` in `{property}` has the wrong arity ({source_path}): {message}",
@@ -947,6 +1050,30 @@ pub enum CompositionError {
         source_path: PathBuf,
     },
 
+    /// A `resume` retained a live provider session, but a canonical refresh of
+    /// the document changed a launch property the provider fixed when the
+    /// session was opened (spec R8). Feeding the refreshed launch plan into the
+    /// old session would run it under a stale contract, so the resume refuses.
+    ///
+    /// Raised at runtime, after the refresh and before any provider attempt:
+    /// the session-compatibility key of the launch that opened the session no
+    /// longer matches the key of the freshly prepared plan.
+    #[error(
+        "lifecycle `resume` cannot reuse the live session: a canonical refresh \
+         changed incompatible launch propert{plural} ({facets}); retry instead \
+         to start a fresh session ({source_path})",
+        plural = if facets.len() == 1 { "y" } else { "ies" },
+        facets = facets.join(", "),
+        source_path = source_path.display()
+    )]
+    LifecycleResumeIncompatible {
+        /// The prompt file whose stack requested resume.
+        source_path: PathBuf,
+        /// The launch facets that changed across the refresh, named for the
+        /// operator.
+        facets: Vec<String>,
+    },
+
     /// A flow-control action is valid in the event (placement is universal),
     /// but its runtime effect — run-loop re-entry (`retry`), hand-off
     /// (`proxy`), or the deferred-queue (`requeue`) — is not wired for events
@@ -1030,6 +1157,88 @@ pub enum CompositionError {
         chain: Vec<String>,
         /// The maximum number of proxy hops permitted.
         limit: usize,
+    },
+
+    /// A lifecycle stack returned a transition that is real and well-formed,
+    /// but that no coordinator at this point in the run can consume.
+    ///
+    /// `retry`, `resume`, and `defer` all need a provider attempt to act on —
+    /// there is nothing to retry before one has run. Reaching this means the
+    /// authored control is valid everywhere (`is_valid_for` makes every control
+    /// except `skip` universally placeable) but meaningless *here*, so the
+    /// diagnostic names the stage rather than claiming the action is invalid.
+    #[error(
+        "lifecycle `{verb}` cannot be honored at `{stage}`: {reason} ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleTransitionUnownedAtStage {
+        /// The document whose stack returned the transition.
+        source_path: PathBuf,
+        /// The dotted `"{event}.stack[{i}].action[{j}]"` location.
+        property: String,
+        /// The control verb, as authored (`retry`, `resume`, `defer`).
+        verb: &'static str,
+        /// The run stage that has no coordinator for it.
+        stage: &'static str,
+        /// Why this stage cannot own it.
+        reason: String,
+    },
+
+    /// A lifecycle `proxy` hand-off is well-formed, but the command that
+    /// launched this run owns no active-document coordinator able to consume
+    /// it.
+    ///
+    /// The direct provider wrappers (`claudine claude`, `claudine goose`, …)
+    /// run a provider memory file as their harness document and take the prompt
+    /// from argv or stdin. They carry no run ledger and no composition
+    /// coordinator, so there is nothing to re-enter the canonical
+    /// selection/MCP/argv pipeline with. Adopting the target in place instead
+    /// would run it against the *invocation's* launch bundle — the reduced path
+    /// R3 forbids and R6/AC10 require rebuilt — so the hand-off is refused
+    /// rather than silently mis-run. The composition commands (`compose`,
+    /// `inline-compose`, `sequence`) do own a coordinator and consume the same
+    /// hand-off normally.
+    #[error(
+        "lifecycle `proxy` hand-off to `{target}` has no owning coordinator: \
+         `{command}` prepares no active document to hand off to ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleProxyWithoutOwningCoordinator {
+        /// The document whose stack authored the proxy.
+        source_path: PathBuf,
+        /// The dotted `"{event}.stack[{i}].action[{j}]"` location.
+        property: String,
+        /// The proxy target, as the source authored it.
+        target: String,
+        /// The invoked command that owns no coordinator (e.g. `claudine claude`).
+        command: String,
+    },
+
+    /// A proxy target could not be brought up far enough to run: the
+    /// coordinator committed the hand-off, but the target's staged boot could
+    /// not produce the surface the next stage requires.
+    ///
+    /// Carries the source and the action location so a bootstrap failure is
+    /// attributable to the `proxy` that requested it — the target itself is
+    /// often blameless, and without provenance the user sees a document they
+    /// never named failing for a reason they cannot trace. This is the typed
+    /// replacement for what was a bare `eyre!` string on the adoption path.
+    #[error(
+        "proxy target `{target_path}` could not be prepared: {reason} \
+         (requested by {property} in {source_path})",
+        target_path = target_path.display(),
+        source_path = source_path.display()
+    )]
+    LifecycleProxyTargetBootstrapFailed {
+        /// The resolved target that failed to bootstrap.
+        target_path: PathBuf,
+        /// The document whose lifecycle requested the hand-off.
+        source_path: PathBuf,
+        /// The dotted `"{event}.stack[{i}].action[{j}]"` location of the
+        /// `proxy` action.
+        property: String,
+        /// What the staged boot could not produce.
+        reason: String,
     },
 
     /// A lifecycle `initialize` stack raised an explicit `error(...)` (or an
@@ -2744,11 +2953,26 @@ impl CompositionError {
             | CompositionError::LifecycleMultipleLifecycleActions { property, .. }
             | CompositionError::LifecycleActionOrder { property, .. }
             | CompositionError::LifecycleInvalidArgs { property, .. }
-            | CompositionError::LifecycleErrNotAvailable { property, .. } => {
+            | CompositionError::LifecycleErrNotAvailable { property, .. }
+            | CompositionError::LifecycleProxyOnlyParameter { property, .. }
+            // The target failed, but the `proxy` that named it is the line the
+            // user can act on — and the only one in a document they authored.
+            | CompositionError::LifecycleProxyTargetBootstrapFailed { property, .. }
+            | CompositionError::LifecycleProxyWithoutOwningCoordinator { property, .. }
+            | CompositionError::LifecycleTransitionUnownedAtStage { property, .. } => {
                 Some(FrontmatterHighlight::Property(property.clone()))
             }
             CompositionError::InvalidFileReference { context, .. } => {
                 Some(FrontmatterHighlight::Property(context.property.clone()))
+            }
+            // The `with`-rooted family names the deepest representable path;
+            // the excerpt renderer walks back to the most specific line it can
+            // locate.
+            CompositionError::LifecycleProxyWithNotMapping { property, path, .. }
+            | CompositionError::LifecycleProxyWithWholeMapping { property, path, .. }
+            | CompositionError::LifecycleProxyWithDynamicKey { property, path, .. }
+            | CompositionError::LifecycleProxyWithEvaluationFailed { property, path, .. } => {
+                Some(FrontmatterHighlight::Property(format!("{property}.{path}")))
             }
             CompositionError::LifecycleSayConflict(property)
             | CompositionError::LifecycleUnknownEffect(property, _) => {

@@ -1,6 +1,6 @@
 //! Wrapper-grade composition executor.
 //!
-//! [`execute_composition_request`] is the single execution pipeline for
+//! [`execute_composition_request_inner`] is the single execution pipeline for
 //! both `claudine compose` and `claudine inline-compose`. It provides
 //! full wrapper-grade behavior: environment setup, harness detection from
 //! effective (composed) frontmatter, structured streaming, and inline
@@ -44,17 +44,6 @@ use super::{
 use super::exec::switch_process_cwd;
 use crate::log;
 
-/// Remediation for an unresolvable lifecycle `proxy(...)` target.
-///
-/// Names the shared `FileReference` grammar `resolve_harness_path` delegates
-/// to, so the hint stays accurate to the contract rather than to one failure's
-/// text.
-pub(crate) const PROXY_TARGET_HINT: &str =
-    "A `proxy` target must name an existing Markdown document: an absolute path, \
-     an explicit `./` or `../` path relative to the document that declares it, a \
-     bare path (tried at the repository root first, then next to the document), \
-     `@`-prefixed for a magic-root search, or `~`-prefixed for a home path.";
-
 pub(crate) mod dry_run;
 pub(crate) mod launch;
 mod preflight;
@@ -72,8 +61,8 @@ pub(crate) use selection::{
 };
 pub(crate) use target::{
     agent_prompt_message, composition_dispatch_context, eagerly_resolve_target,
-    install_agent_env_for_composition, refresh_for_model_validation, resolve_execution_target,
-    scoped_picker_plan_for_state,
+    install_agent_env_for_composition, provider_for_state_non_tty, refresh_for_model_validation,
+    resolve_execution_target, scoped_picker_plan_for_state,
 };
 pub(crate) use timeouts::{
     TimeoutResolutionInput, build_prompt_timing_context, format_interactive_timeout_conflict,
@@ -123,30 +112,44 @@ pub(crate) struct SingleCompositionOutcome {
     /// messages, and protocol records are never part of it. `None` for a
     /// dry-run, a `skip`, or a failed run — a failure commits no entry.
     pub final_output: Option<String>,
+    /// An `initialize`-time proxy handoff the document requested before its
+    /// first provider attempt, surfaced to the composition command's
+    /// active-document coordinator (`compose/prep.rs`) instead of being run
+    /// inside the provider harness.
+    ///
+    /// This is how loop recognition follows document identity (R7): the router's
+    /// `initialize` is evaluated here, and if it hands off, the coordinator
+    /// re-prepares the target as a fresh document and decides loop-vs-single on
+    /// the *target*. `None` on every ordinary run. Populated on any live
+    /// (non-dry-run) run that carries a command-owned coordinator ledger — both
+    /// the top-level `compose`/`inline-compose` path and each `sequence` step's
+    /// contained coordinator, which surfaces the proxy to the step's own scope.
+    ///
+    /// Carries a [`SurfacedHandoff`]: an `initialize`-route proxy arrives as a
+    /// [`SurfacedHandoff::Request`] awaiting commit by the command ledger; a
+    /// terminal-recovery / target-initialize-chain proxy arrives as a
+    /// [`SurfacedHandoff::Committed`] the harness already committed against the
+    /// shared invocation ledger. Either way the composition command's
+    /// active-document coordinator re-prepares the resolved target through the
+    /// same canonical launch pipeline a direct invocation uses.
+    ///
+    /// [`SurfacedHandoff`]: claudine::composition::SurfacedHandoff
+    /// [`SurfacedHandoff::Request`]: claudine::composition::SurfacedHandoff::Request
+    /// [`SurfacedHandoff::Committed`]: claudine::composition::SurfacedHandoff::Committed
+    pub initialize_handoff: Option<claudine::composition::SurfacedHandoff>,
 }
 
-/// Execute a composition request through the wrapper-grade pipeline.
+/// Execute a composition request through the wrapper-grade pipeline, returning
+/// the full [`SingleCompositionOutcome`].
 ///
 /// Handles provider selection, environment setup, harness detection from
 /// the effective (composed) frontmatter, structured streaming, and inline
 /// closure. All downstream decisions read from
 /// `request.prepared.effective_frontmatter`, never from raw source state.
-pub(crate) fn execute_composition_request(
-    request: CompositionExecutionRequest,
-    verbose: u8,
-    startup_timings: Option<crate::perf::StartupTimings>,
-    perf_enabled: bool,
-) -> Result<i32> {
-    let outcome =
-        execute_composition_request_inner(request, verbose, startup_timings, perf_enabled)?;
-    Ok(outcome.exit_code)
-}
-
-/// Inner implementation that returns the full [`SingleCompositionOutcome`].
 ///
-/// The public [`execute_composition_request`] wraps this to return just
-/// the exit code; callers that need provider/reason metadata (e.g. the
-/// sequence orchestrator) can call this directly.
+/// The outcome carries provider/reason metadata (used by the sequence
+/// orchestrator) and any surfaced [`SingleCompositionOutcome::initialize_handoff`]
+/// the composition command's active-document coordinator must commit.
 pub(crate) fn execute_composition_request_inner(
     request: CompositionExecutionRequest,
     verbose: u8,

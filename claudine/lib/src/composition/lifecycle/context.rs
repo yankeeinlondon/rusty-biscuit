@@ -202,6 +202,27 @@ impl LifecycleErrorInfo {
         DiagnosticSnapshot::select(error)
     }
 
+    /// Build the snapshot from a [`ProxyCommitError`], keeping whichever
+    /// concrete error the failed hand-off carried.
+    ///
+    /// A refused hand-off is routed through the source's `failure`/`finalize`
+    /// like any other setup failure, so its `err.*` facets must be as typed as
+    /// a resolution or cycle failure reached any other way — a proxy cycle
+    /// projects `err.code` off its [`CompositionError`], not off a rendered
+    /// string. Resolution failures carry the authoring-context
+    /// [`CompositionError::InvalidFileReference`] wrapper; its typed resolver
+    /// remains the source.
+    ///
+    /// [`ProxyCommitError`]: crate::composition::ProxyCommitError
+    pub fn from_proxy_commit_error(err: &crate::composition::ProxyCommitError) -> Self {
+        match err {
+            crate::composition::ProxyCommitError::Resolution { error, .. }
+            | crate::composition::ProxyCommitError::Rejected(error) => {
+                Self::from_composition_error(error)
+            }
+        }
+    }
+
     /// Build a snapshot for a failed lifecycle stack action (a side-effect,
     /// shell, or expression-function action that errored at runtime).
     ///

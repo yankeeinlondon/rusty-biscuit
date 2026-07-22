@@ -134,13 +134,21 @@ fn stage(frontmatter_body: &str, provider_exit: i32) -> Staged {
 /// the trailing sentinel, so callers can pass flags like `--dry-run` without
 /// restating the env/session plumbing.
 fn run_compose_in_tmux(staged: &Staged, done_marker: &str) -> String {
-    run_compose_in_tmux_with_args(staged, done_marker, "")
+    run_compose_in_tmux_with_args(staged, Some(done_marker), "")
 }
 
-/// `run_compose_in_tmux` variant that injects extra CLI flags.
+/// `run_compose_in_tmux` variant that injects extra CLI flags and can wait on
+/// process exit instead of a lifecycle marker.
+///
+/// `done_marker == None` selects the process-exit barrier: the shell touches a
+/// `run-done` file after `claudine` returns, and the poll waits on that file.
+/// A test asserting that *no* lifecycle marker is written has no marker to poll
+/// for, so it cannot use the `events.log` barrier — waiting on process exit is
+/// the only barrier that distinguishes "finished, wrote nothing" from
+/// "hasn't got there yet".
 fn run_compose_in_tmux_with_args(
     staged: &Staged,
-    done_marker: &str,
+    done_marker: Option<&str>,
     extra_claudine_args: &str,
 ) -> String {
     static SEQ: AtomicU32 = AtomicU32::new(0);
@@ -192,10 +200,12 @@ fn run_compose_in_tmux_with_args(
     } else {
         format!(" {extra_claudine_args}")
     };
+    let run_done = staged.workspace.path().join("run-done");
     let cmd = format!(
-        "cd {ws} && {env_prefix}{claudine} compose --goose{extra} {md} ; echo {sentinel}",
+        "cd {ws} && {env_prefix}{claudine} compose --goose{extra} {md} ; : > {done} ; echo {sentinel}",
         ws = staged.workspace.path().display(),
         md = staged.md_file.display(),
+        done = run_done.display(),
     );
     harness
         .send_command_with_env(&cmd, &[])
@@ -206,7 +216,11 @@ fn run_compose_in_tmux_with_args(
     // file + pane).
     let deadline = Instant::now() + Duration::from_secs(30);
     while Instant::now() < deadline {
-        if event_lines(staged).iter().any(|l| l == done_marker) {
+        let finished = match done_marker {
+            Some(marker) => event_lines(staged).iter().any(|l| l == marker),
+            None => run_done.exists(),
+        };
+        if finished {
             // Give the post-terminal `finalize` a brief settle so the whole
             // tail is flushed before we read (finalize fires after the marker
             // on the terminal-event paths, but blocked/finalize order writes
@@ -401,26 +415,37 @@ fn level2_lifecycle_blocked_preflight_shell_audit_fires_blocked_and_finalize_sta
     );
 }
 
-/// Composition-preflight dry-run blocked path: a `start.stack` carrying a
-/// blacklisted shell command fails shell audit during composition preflight.
-/// Before Finding 1's fix this failure path called
-/// `guard.emit_blocked_or_failure()`, skipping the typed `blocked.stack` and
-/// `finalize.stack`. This test proves the dry-run shell-audit blocked path
-/// records both markers in `events.log`.
+/// `--dry-run` fires no lifecycle event and traverses no dynamic proxy route
+/// (`2026-07-13-proxy-with/spec.md`: "Existing dry-run behavior remains
+/// side-effect-free: dry run does not fire lifecycle events and therefore does
+/// not traverse a dynamic proxy route").
 ///
-/// `rm` is rejected by `check_builtin_blacklist` before the interactive
-/// approval handler is consulted, so the outcome is deterministic across
-/// hosts regardless of TTY availability.
+/// The staged document is a router: every event carries an `append_line` side
+/// effect, `start.stack` carries a blacklisted `rm` that a live composition
+/// preflight would reject (routing `blocked`→`finalize`), and `initialize`
+/// proxies to a second document whose own `initialize` would also append. So
+/// each of the three ways lifecycle could leak into a rehearsal — a plain
+/// event stack, the preflight-blocked pair, and a proxied target's stack — is
+/// armed against the same `events.log`.
+///
+/// The run must exit clean having written no marker at all, and the pane must
+/// name the router rather than the hand-off target.
+///
+/// Completion is polled on process exit, not on a marker: the whole point is
+/// that no marker is ever written.
 #[test]
 #[serial(level2_lifecycle)]
-fn level2_lifecycle_blocked_preflight_dry_run_shell_audit_fires_blocked_and_finalize_stacks() {
+fn level2_lifecycle_dry_run_fires_no_lifecycle_events_and_no_proxy_traversal() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
     let start = "start:\n  stack:\n    - action: {shell: \"rm -rf /tmp/nonexistent\"}\n";
+    let init = "initialize:\n  stack:\n    \
+        - action: {append_line: [\"events.log\", \"initialize\"]}\n    \
+        - action: {proxy: \"handoff-target.md\"}\n";
     let doc = format!(
-        "---\ntitle: lifecycle preflight blocked (dry-run shell audit)\n\
-         {init}{start}{success}{blocked}{failure}{finalize}---\nBody\n",
-        init = marker("initialize"),
+        "---\ntitle: lifecycle dry-run side effects\n\
+         {init}{start}{success}{blocked}{failure}{finalize}---\nROUTER-BODY\n",
+        init = init,
         start = start,
         success = marker("success"),
         blocked = marker("blocked"),
@@ -428,23 +453,48 @@ fn level2_lifecycle_blocked_preflight_dry_run_shell_audit_fires_blocked_and_fina
         finalize = marker("finalize"),
     );
     let staged = stage(&doc, 0);
-    let pane = run_compose_in_tmux_with_args(&staged, "finalize", "--dry-run");
+
+    // The hand-off target lands its own marker, so a traversal would show up in
+    // `events.log` even if the router's own stacks somehow stayed silent.
+    fs::write(
+        staged.workspace.path().join("handoff-target.md"),
+        format!(
+            "---\ntitle: handoff target\n{init}---\nTARGET-BODY\n",
+            init = marker("target-initialize"),
+        ),
+    )
+    .unwrap();
+
+    let pane = run_compose_in_tmux_with_args(&staged, None, "--dry-run");
+
+    // Anti-vacuity: an early abort would also leave `events.log` unwritten, so
+    // first prove the dry run actually rendered the router's composed body.
+    assert!(
+        pane.contains("ROUTER-BODY"),
+        "the dry run must have rendered the router body (otherwise the \
+         no-side-effect assertions below are vacuous); pane:\n{pane}"
+    );
 
     let lines = event_lines(&staged);
-    assert_eq!(
-        lines,
-        vec!["initialize", "blocked", "finalize"],
-        "composition-preflight dry-run blocked path must fire exactly \
-         initialize→blocked→finalize; events.log was {lines:?}; pane:\n{pane}"
+    assert!(
+        lines.is_empty(),
+        "a dry run must fire no lifecycle event, so no stack side effect may \
+         reach the workspace; events.log was {lines:?}; pane:\n{pane}"
     );
     assert!(
-        !lines.iter().any(|l| l == "start"),
-        "start must NOT fire when the dry-run shell audit blocks the run; \
-         got {lines:?}"
+        !staged.events_log.exists(),
+        "a dry run must not even create the side-effect file; pane:\n{pane}"
     );
+    // `events.log` staying empty already rules out traversal — the target's
+    // `initialize` stack would have appended `target-initialize`. The pane check
+    // is the user-visible half: dry run renders the document it was given.
+    // (The target's *path* legitimately appears in the rendered frontmatter,
+    // since it is the router's own `proxy:` argument; only its *body* would
+    // mean the target was composed.)
     assert!(
-        !lines.iter().any(|l| l == "provider-ran"),
-        "the provider must never run on the dry-run blocked path; got {lines:?}"
+        !pane.contains("TARGET-BODY"),
+        "a dry run must report the document it was given, never compose the \
+         `initialize` proxy target; pane:\n{pane}"
     );
 }
 

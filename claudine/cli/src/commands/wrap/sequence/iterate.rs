@@ -13,8 +13,9 @@
 //! and the interrupt story do not branch on task kind.
 
 use std::collections::HashSet;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use biscuit_terminal::components::horizontal_rule::{
     HorizontalRule, RuleAlignment, RuleStyle, RuleWeight,
@@ -25,8 +26,9 @@ use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use claudine::composition::{
     self, CompositionError, CompositionExecutionRequest, CompositionMode, PreflightGraph,
-    ResolvedCompositionSource, RuntimeState, SequencePlan, SequenceRunSummary, SequenceStepResult,
-    SequenceTaskResult,
+    ProxyHandoff, ResolvedCompositionSource, RunLedger, RuntimeState, SequencePlan,
+    SequenceRunSummary, SequenceStepResult, SequenceTaskResult, SharedRunLedger, SurfacedHandoff,
+    commit_proxy,
 };
 use claudine::diagnostics::DiagnosticSnapshot;
 use claudine::system_prompt::SystemPromptArgs;
@@ -34,8 +36,12 @@ use color_eyre::eyre::Result;
 use serde_json::Value;
 use tracing::{debug, info_span};
 
-use crate::commands::compose::SharedComposeArgs;
+use crate::commands::compose::{CompositionKind, SharedComposeArgs};
+use crate::commands::compose::prep::{
+    ActiveDocumentOutcome, prepare_and_run_active_document, resolve_composition_source,
+};
 use crate::commands::wrap::composition::{CompositionPrepContext, execute_composition_request_inner};
+use crate::commands::wrap::overlay::merge_frontmatter_overlay;
 use crate::commands::schema_interactive::{collect_missing_values, resolve_interactive_options};
 use crate::log;
 
@@ -331,9 +337,50 @@ fn run_one_step(
     }
 
     let compose_perf = composed.prepared.compose_perf.clone();
-    let request =
-        build_body_request(run, &live, composed.prepared, target, env_overrides, runtime_state);
-    match execute_composition_request_inner(request, run.verbose, None, run.perf_enabled) {
+    let step_ledger: SharedRunLedger = Arc::new(Mutex::new(RunLedger::new(
+        live.resolved_path.clone(),
+        Arc::clone(&run.compose.approval_cache),
+    )));
+    let request = build_body_request(
+        run,
+        &live,
+        composed.prepared,
+        target,
+        env_overrides,
+        runtime_state,
+        Arc::clone(&step_ledger),
+    );
+    let execution = execute_composition_request_inner(request, run.verbose, None, run.perf_enabled)
+        .and_then(|mut outcome| {
+            if let Some(surfaced) = outcome.initialize_handoff.take() {
+                let kind = if run.compose.inline_mode {
+                    CompositionKind::Inline
+                } else {
+                    CompositionKind::Direct
+                };
+                let system_prompt_args = SystemPromptArgs {
+                    append_file: run.shared.append_system_prompt.clone(),
+                    replace_file: run.shared.replace_system_prompt.clone(),
+                };
+                let launch_area_fallback =
+                    Some(run.prep_context.launch_workspace.launch_cwd.clone());
+                outcome.exit_code = run_step_proxy_loop(
+                    surfaced,
+                    &step_ledger,
+                    run.prep_context.source_repo_root.as_deref(),
+                    run.shared,
+                    kind,
+                    &system_prompt_args,
+                    run.user_set_overrides.clone(),
+                    &launch_area_fallback,
+                    &run.compose.approval_cache,
+                    run.compose.file_resolution_context,
+                    run.verbose,
+                )?;
+            }
+            Ok(outcome)
+        });
+    match execution {
         Ok(outcome) if super::run_was_interrupted(outcome.exit_code, run.interrupted) => {
             StepOutcome::Interrupted {
                 agent_perf: outcome.agent_perf,
@@ -442,6 +489,7 @@ fn build_body_request(
     resolved_target: Option<claudine::composition::ResolvedExecutionTarget>,
     env_overrides: std::collections::BTreeMap<String, String>,
     runtime_state: &std::sync::Arc<RuntimeState>,
+    handoff_ledger: SharedRunLedger,
 ) -> CompositionExecutionRequest {
     let shared = run.shared;
     let resolved = shared.resolve_session_interactivity(prepared.selection_hints.interactive);
@@ -496,6 +544,9 @@ fn build_body_request(
         suppress_output_commit: false,
         // A bodyless sequence step renders under the step header, not a task bar.
         task_frame_writer: None,
+        proxy_overlay: indexmap::IndexMap::new(),
+        handoff_ledger: Some(handoff_ledger),
+        adopted_handoff: None,
     }
 }
 
@@ -579,4 +630,79 @@ fn emit_step_status(
         StatusState::Error
     };
     log::message(&Status::from_prose(prose).state(state).render(&log::terminal()));
+}
+
+/// Drive a sequence step's contained handoff chain to completion.
+///
+/// The target is prepared through the canonical compose pipeline while the
+/// ledger remains scoped to the current sequence step.
+#[allow(clippy::too_many_arguments)]
+fn run_step_proxy_loop(
+    initial: SurfacedHandoff,
+    ledger: &SharedRunLedger,
+    step_repo_root: Option<&Path>,
+    shared: &SharedComposeArgs,
+    kind: CompositionKind,
+    system_prompt_args: &SystemPromptArgs,
+    user_set_overrides: Option<serde_json::Value>,
+    launch_area_fallback: &Option<PathBuf>,
+    shared_approval_cache: &composition::SharedApprovalCache,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
+    verbose: u8,
+) -> Result<i32> {
+    let mut surfaced = initial;
+    let mut commit_repo_root = step_repo_root.map(Path::to_path_buf);
+    loop {
+        let handoff: ProxyHandoff = match surfaced {
+            SurfacedHandoff::Request(request) => {
+                commit_proxy(&mut ledger.lock().unwrap(), request, commit_repo_root.as_deref())
+                    .map_err(color_eyre::eyre::Report::from)?
+            }
+            SurfacedHandoff::Committed(handoff) => *handoff,
+        };
+        let target_ref = handoff.resolved_target().to_string_lossy().into_owned();
+        let mut target_source = resolve_composition_source(
+            &target_ref,
+            kind,
+            shared,
+            file_resolution_context,
+        )?;
+        merge_frontmatter_overlay(
+            target_source.markdown.frontmatter_mut().as_map_mut(),
+            handoff.overlay(),
+        );
+        let overlay = handoff.overlay().clone();
+        let target_file = handoff.authored_target().to_string();
+        let mut inline_state = None;
+        let adopted_handoff = Some(Box::new(handoff));
+
+        let (outcome, next_repo_root) = prepare_and_run_active_document(
+            shared,
+            kind,
+            target_source,
+            &target_file,
+            &overlay,
+            adopted_handoff,
+            false,
+            &mut inline_state,
+            system_prompt_args,
+            user_set_overrides.clone(),
+            launch_area_fallback,
+            shared_approval_cache,
+            ledger,
+            verbose,
+            None,
+            Vec::new(),
+            std::time::Instant::now(),
+            file_resolution_context.clone(),
+        )?;
+
+        match outcome {
+            ActiveDocumentOutcome::Done(code) => return Ok(code),
+            ActiveDocumentOutcome::Handoff(next) => {
+                surfaced = next;
+                commit_repo_root = next_repo_root;
+            }
+        }
+    }
 }

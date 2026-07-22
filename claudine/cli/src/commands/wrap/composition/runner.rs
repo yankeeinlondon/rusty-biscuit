@@ -15,7 +15,9 @@ use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::prelude::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use claudine::composition::lifecycle::{DefaultLifecycleEmitter, LifecycleRunGuard};
-use claudine::composition::{CompositionExecutionRequest, ResolvedExecutionTarget};
+use claudine::composition::{
+    CompositionExecutionRequest, DocumentTransition, ResolvedExecutionTarget,
+};
 use claudine::events::GlobalSettings;
 use claudine::harness::ShellApprovalOptions;
 use claudine::messaging::RuntimeMessagingSettings;
@@ -33,7 +35,6 @@ use super::preflight::{
 use super::target::composition_dispatch_context;
 use super::SingleCompositionOutcome;
 use crate::commands::wrap::env::EnvPlan;
-use crate::commands::wrap::policy::StructuredCodexOutput;
 use crate::commands::wrap::profile::WrapperProfile;
 use crate::commands::wrap::{
     HarnessPromptMode, HarnessPromptState, materialized_harness_prompt_from_prepared,
@@ -72,11 +73,10 @@ pub(super) struct CompositionRunCtx<'a> {
     pub profile: &'static dyn WrapperProfile,
     pub effective_non_interactive: bool,
     pub args_before_prompt: &'a Vec<String>,
+    /// R8 — the invocation-fixed half of the re-entrant launch-plan builder.
+    pub launch_plan_inputs: &'a crate::commands::wrap::launch_plan::LaunchPlanInputs,
     pub child_cwd: &'a Path,
     pub use_structured: bool,
-    pub structured_codex_output: &'a Option<StructuredCodexOutput>,
-    pub stdout_noise: &'static [&'static str],
-    pub stderr_noise: &'static [&'static str],
     pub show_checks: bool,
     pub stream_verbosity: Verbosity,
     pub detail_requested: bool,
@@ -86,7 +86,11 @@ pub(super) struct CompositionRunCtx<'a> {
 }
 
 /// Execute a single composition iteration: harness-plan parse, pre-flight
-/// shell approval, dry-run seam, env/prompt output, and the harness loop.
+/// shell approval, env/prompt output, and the harness loop.
+///
+/// Live runs only — `--dry-run` returns at the seam in
+/// [`super::pipeline::execute_composition_request_inner_with_guard`], before the
+/// lifecycle runtime this body depends on is constructed.
 ///
 /// This is the promoted form of the former inline `run_body` closure. `guard` and
 /// `perf_collector` are passed separately because they are mutable and vary per
@@ -97,7 +101,7 @@ pub(super) fn run_composition_body(
     guard: &mut LifecycleRunGuard<'_>,
     perf_collector: &mut Option<CommandPerfCollector>,
     skip_preflight: bool,
-    proxy_source: Option<&Path>,
+    initial_transition: DocumentTransition,
 ) -> Result<SingleCompositionOutcome> {
     let request = ctx.request;
     let target = ctx.target;
@@ -120,17 +124,40 @@ pub(super) fn run_composition_body(
     let profile = ctx.profile;
     let effective_non_interactive = ctx.effective_non_interactive;
     let args_before_prompt = ctx.args_before_prompt;
+    let launch_plan_inputs = ctx.launch_plan_inputs;
     let child_cwd = ctx.child_cwd;
     let use_structured = ctx.use_structured;
-    let structured_codex_output = ctx.structured_codex_output;
-    let stdout_noise = ctx.stdout_noise;
-    let stderr_noise = ctx.stderr_noise;
     let show_checks = ctx.show_checks;
     let stream_verbosity = ctx.stream_verbosity;
     let detail_requested = ctx.detail_requested;
     let env_plan = ctx.env_plan;
     let effective_sp = ctx.effective_sp;
     let verbose = ctx.verbose;
+
+    // Whether this request's document is handing the run off before its first
+    // provider attempt. The transition itself is consumed by the harness
+    // loop's coordinator; what the body needs to know is only that
+    // `request.prepared` describes a document that will never reach the agent.
+    let hands_off = initial_transition.hands_off_source();
+
+    // Whether `request.prepared` is an already-committed proxy target the harness
+    // loop will re-stage (narrow gate → `initialize` → stabilized reread → audit)
+    // via its bootstrap. When adopting, the target's `initialize` has NOT fired
+    // here (the setup pipeline skipped `route_initialize`), so this body must not
+    // pre-parse the harness plan or run the pre-flight audit against the
+    // bootstrap read — the staged boot does both after the target's `initialize`,
+    // so an initialize-time mutation and the typed HarnessError facets are
+    // observed. It also delivers the target's prompt itself (seed `None`).
+    let adopting = request.adopted_handoff.is_some();
+
+    // Whether this document's canonical preparation withheld its schema verdict
+    // because the document declares an `initialize` of its own (R4). The setup
+    // pipeline routes that event below; the harness loop then owes the stabilized
+    // reread that sees any initialize-time mutation and reaches the verdict. An
+    // adopted target is excluded — its full staged bootstrap already covers both,
+    // and a document that hands off never reaches a verdict at all.
+    let stabilize_after_initialize =
+        request.prepared.schema_verdict_deferred && !adopting && !hands_off;
 
     // Composed frontmatter / source-derived base dir, reused by every
     // composition-preflight failure path so the blocked+finalize stacks
@@ -144,48 +171,69 @@ pub(super) fn run_composition_body(
         .resolved_path
         .parent()
         .or(effective_repo_root);
-    // Validate that the harness plan can be parsed before proceeding.
-    let plan = claudine::harness::parse_harness_plan(
-        &request.prepared.effective_frontmatter,
-        &request.prepared.resolved_path,
-    )
-    .map_err(|e| {
-        // Route through the stack-aware runner so `blocked.stack` and
-        // `finalize.stack` fire (spec.md:436/650/652), not just the
-        // legacy top-level surface.
-        let preflight_outcome = emit_preflight_blocked_and_finalize(
-            guard,
-            lifecycle_effect_engine,
-            emitter,
-            lifecycle_settings,
-            lifecycle_messaging,
-            term,
-            &request.prepared.resolved_path,
-            effective_repo_root,
-            base_dir,
-            Some(launch_workspace.launch_cwd.as_path()),
-            Some(lifecycle_context),
-            frontmatter,
-            document_start,
-            claudine::composition::LifecycleErrorInfo::from_error_or_action("harness_plan", &e),
-        );
-        match preflight_outcome {
-            PreflightBlockedOutcome::EvaluationError(ce) => ce.into(),
-            PreflightBlockedOutcome::Control(control) => {
-                match preflight_blocked_control_error(control, &request.prepared.resolved_path) {
-                    Some(ce) => ce.into(),
-                    None => color_eyre::Report::from(e),
+    // Validate that the harness plan can be parsed before proceeding. Skipped
+    // for an adopted target: its `initialize` has not run yet, so parsing the
+    // plan here would reject the target's (possibly initialize-mutated)
+    // frontmatter before the target could initialize, and would attribute the
+    // failure to a facet-less `harness_plan` action rather than the typed
+    // HarnessError the staged boot's own plan parse surfaces.
+    let plan = if adopting {
+        None
+    } else {
+        Some(
+            claudine::harness::parse_harness_plan(
+                &request.prepared.effective_frontmatter,
+                &request.prepared.resolved_path,
+            )
+            .map_err(|e| {
+                // Route through the stack-aware runner so `blocked.stack` and
+                // `finalize.stack` fire (spec.md:436/650/652), not just the
+                // legacy top-level surface.
+                let preflight_outcome = emit_preflight_blocked_and_finalize(
+                    guard,
+                    lifecycle_effect_engine,
+                    emitter,
+                    lifecycle_settings,
+                    lifecycle_messaging,
+                    term,
+                    &request.prepared.resolved_path,
+                    effective_repo_root,
+                    base_dir,
+                    Some(launch_workspace.launch_cwd.as_path()),
+                    Some(lifecycle_context),
+                    frontmatter,
+                    document_start,
+                    claudine::composition::LifecycleErrorInfo::from_error_or_action(
+                        "harness_plan",
+                        &e,
+                    ),
+                );
+                match preflight_outcome {
+                    PreflightBlockedOutcome::EvaluationError(ce) => ce.into(),
+                    PreflightBlockedOutcome::Control(control) => {
+                        match preflight_blocked_control_error(
+                            control,
+                            &request.prepared.resolved_path,
+                        ) {
+                            Some(ce) => ce.into(),
+                            None => color_eyre::Report::from(e),
+                        }
+                    }
                 }
-            }
-        }
-    })?;
+            })?,
+        )
+    };
 
     // The parsed harness plan is used only for shell-command audit and
     // timeout configuration; there are no longer pre/post validation
     // checks that need an effective-plan transform.
 
     // ── Pre-flight shell approval for harness commands ───────────
-    if !skip_preflight {
+    // Skipped for an adopted target: the staged boot runs the narrow
+    // initialize-shell gate and then the full post-stabilization audit itself,
+    // so auditing the bootstrap read here (before the target's `initialize` and
+    // stabilized reread) would audit a document the run will not execute.
+    if !skip_preflight && !adopting {
         let _harness_preflight = claudine::composition::resolve_shell_approvals(
             None, // template commands already approved during compose
             None,
@@ -232,12 +280,10 @@ pub(super) fn run_composition_body(
         })?;
 
         // Emit the preflight-complete indicator for direct compose and
-        // inline-compose runs. This must sit *before* the dry-run seam below:
-        // dry-run returns early, so a completion message placed after it would
-        // never render for dry-run — leaving the "Starting pre-flight checks"
-        // spinner without its matching "complete" line. Sequence runs handle
-        // their own preflight messaging in the orchestrator
-        // (`wrap::sequence::execute_sequence`) and must not re-emit per step.
+        // inline-compose runs, matching the "Starting pre-flight checks"
+        // spinner. Sequence runs handle their own preflight messaging in the
+        // orchestrator (`wrap::sequence::execute_sequence`) and must not
+        // re-emit per step.
         if !request.sequence && !silent && !quiet {
             let compose_label = if is_inline {
                 "inline composition"
@@ -252,46 +298,10 @@ pub(super) fn run_composition_body(
         }
     }
 
-    // --dry-run seam: the full composition pipeline (compose, real shell
-    // expansion, shell approval, harness pre-checks) has now run. Stop here —
-    // before any provider launches — and emit the composed artifacts:
-    //   - the composed body → stdout (the data product; pipeable/redirectable)
-    //   - the finalized frontmatter (highlighted YAML) → stderr
-    //   - a metadata table → stderr (after the frontmatter)
-    // `--quiet` / `--silent` do not suppress this render: the dry-run output
-    // *is* the command's purpose.
-    if request.dry_run {
-        // Dry-run never launches the provider or mutates the source.
-        // Pre-check validation has been removed; only timeout parsing
-        // and shell-command audit run during composition preflight.
-        let render = super::dry_run::DryRunRender::from_request(request);
-
-        crate::log::data(&render.body);
-        crate::log::message(&super::dry_run::render_hr(term));
-        crate::log::message(&super::dry_run::render_frontmatter_heading(term));
-        crate::log::message("");
-        crate::log::message(&super::dry_run::render_frontmatter(&render.frontmatter, term));
-        crate::log::message(&super::dry_run::render_metadata_table(&render, term));
-
-        if let Some(collector) = perf_collector.as_mut() {
-            collector.set_dry_run();
-        }
-        let outcome = SingleCompositionOutcome {
-            exit_code: 0,
-            provider,
-            agent_perf: None,
-            // Dry-run never produces a per-iteration summary.
-            iteration_signals: None,
-            terminal_signal: None,
-            final_output: None,
-        };
-        // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
-        // The perf report is always emitted to stderr when requested.
-        if let Some(collector) = perf_collector.take() {
-            crate::perf::emit_report(&collector.into_report());
-        }
-        return Ok(outcome);
-    }
+    // No dry-run seam here. `--dry-run` returns from
+    // `pipeline::execute_composition_request_inner_with_guard` before the
+    // lifecycle runtime is even constructed, so this body — and every lifecycle
+    // event it can reach — is live-run-only.
 
     // Plan is validated; the harness loop re-parses from the materialized
     // frontmatter, so the live path no longer needs this copy.
@@ -381,10 +391,11 @@ pub(super) fn run_composition_body(
         }
 
         // Skip the pre-loop agent-prompt preview when an `initialize` proxy
-        // redirected the run: `request.prepared.prompt` is the proxying
-        // *source* document's body, which never reaches the agent. The harness
-        // loop emits the settled *target* document's prompt after the hand-off.
-        if effective_non_interactive && proxy_source.is_none() {
+        // handed the run off (`request.prepared.prompt` is the proxying *source*
+        // body, which never reaches the agent) or when adopting a proxy target
+        // (its prompt is delivered by the staged boot after its own reread). The
+        // harness loop emits the settled *target* document's prompt in both cases.
+        if effective_non_interactive && !hands_off && !adopting {
             crate::output::log_compose_prompt(
                 &request.prepared.prompt,
                 detail_requested,
@@ -401,6 +412,9 @@ pub(super) fn run_composition_body(
 
     // -- Execution --------------------------------------------------------
 
+    // Handed to the harness loop inside the launch-rebuild intent below: each
+    // attempt's rebuilt bundle either keeps it verbatim (unchanged document) or
+    // recomputes its provider/model selection entries from the refreshed facets.
     let dispatch_context = composition_dispatch_context(request, target);
 
     let harness_mode = if is_inline {
@@ -420,46 +434,40 @@ pub(super) fn run_composition_body(
     // cell may already hold prior loop iterations' or sequence steps' outputs.
     let outputs_before = runtime_state.output_count();
 
-    // When an `initialize` Proxy redirected to a different document, the
-    // harness loop re-materializes (re-composes frontmatter + body) from
-    // `source_path` each attempt, so swapping the path here runs the
-    // target document — its body, frontmatter, harness pre-checks, and
-    // its `start`/`success`/`failure`/`finalize` lifecycle. Seed
-    // `initial_materialized = None` so the loop composes the target rather
-    // than reusing the proxying document's prepared prompt.
-    let (effective_source, effective_ref, seed_materialized) = match proxy_source {
-        Some(target_path) => (
-            target_path.to_path_buf(),
-            target_path.display().to_string(),
-            None,
-        ),
-        None => (
-            request.prepared.resolved_path.clone(),
-            request.file_ref.clone(),
-            Some(materialized_harness_prompt_from_prepared(
+    // The prompt state always starts at the document this request prepared —
+    // the *router*, when `initialize` handed off. Repointing it is the
+    // coordinator's job and its alone; the harness loop commits
+    // `initial_transition` before its first attempt. Seed
+    // `initial_materialized = None` on a hand-off so the loop composes the
+    // adopted target rather than reusing the proxying document's prepared
+    // prompt.
+    let seed_materialized = (!hands_off && !adopting)
+        .then(|| {
+            materialized_harness_prompt_from_prepared(
                 &request.prepared,
                 std::sync::Arc::clone(&runtime_state),
-            )),
-        ),
-    };
+            )
+        });
 
     let mut prompt_state = HarnessPromptState {
         mode: harness_mode,
-        source_path: effective_source,
-        original_ref: effective_ref,
+        source_path: request.prepared.resolved_path.clone(),
+        original_ref: request.file_ref.clone(),
         base_prompt: None,
-        overlay: indexmap::IndexMap::new(),
+        // The immediate proxy overlay for a proxied target (empty for a directly
+        // invoked document). Re-applied on every re-materialization by
+        // `materialize_harness_prompt`, so a retry/resume of a proxied target
+        // keeps the pre-schema handoff input rather than losing it once the first
+        // prepared composition is spent (AC26). The first attempt uses the seed
+        // built from `request.prepared` (overlay already baked in during canonical
+        // preparation), so the overlay is applied exactly once per attempt.
+        overlay: request.proxy_overlay.clone(),
         prompt_tail: Vec::new(),
-        next_prompt_override: None,
-        next_resume_session_id: None,
-        // Carried so a `retry`/`resume`/`proxy` re-materialization re-applies
-        // the caller's `--set` params, launch-area file-ref anchor, and
-        // pre-approved shell commands (a proxy target with a `$schema` needs
-        // the same inputs the original document was prepared with).
-        rematerialize: request.prepared.rematerialize.clone(),
         runtime_state: std::sync::Arc::clone(&runtime_state),
         suppress_output_commit: request.suppress_output_commit,
         last_final_output: None,
+        input_layers: request.prepared.input_layers.clone(),
+        entry: request.prepared.entry,
     };
 
     let mut harness_base_args = args_before_prompt.clone();
@@ -467,35 +475,53 @@ pub(super) fn run_composition_body(
         profile.prepare_captured_output(&mut harness_base_args);
     }
 
-    let (exit_code, harness_perf, harness_signals) = run_harness_loop(
+    // The harness loop surfaces a terminal-recovery / start-stack proxy the
+    // provider harness already committed against the shared invocation ledger
+    // (`SurfacedHandoff::Committed`). It is propagated into the outcome below so
+    // the command coordinator re-prepares that target through the full canonical
+    // launch pipeline (R6/R7) rather than the harness adopting it in place.
+    let (exit_code, harness_perf, harness_signals, surfaced_handoff) = run_harness_loop(
         provider,
         profile,
-        binary_path.as_path(),
         child_cwd,
         effective_non_interactive,
         request.timeout.clone(),
         request.step_timeout.clone(),
         request.stall_timeout.clone(),
-        &harness_base_args,
+        request.model.clone(),
+        // R8 — the immutable half of every per-attempt launch rebuild. The
+        // caller's own decisions (explicit provider, `--yolo`, whether MCP is in
+        // play) stay authoritative at every retry and resume; the document half
+        // is what a canonical refresh is allowed to move.
+        crate::commands::wrap::harness_orch::LaunchRebuildIntent {
+            explicit_provider: request.explicit_provider,
+            fallback_provider: provider,
+            fallback_binary: binary_path.as_path().to_path_buf(),
+            installed_snapshot: request.installed_snapshot.clone(),
+            default_non_interactive: effective_non_interactive,
+            cli_yolo: request.yolo,
+            is_inline,
+            mcp_enabled: request.mcp || !request.mcp_use.is_empty(),
+            fallback_provider_reason: target.provider_reason,
+            dispatch_context,
+            launch_plan_inputs: launch_plan_inputs.clone(),
+        },
         &env_plan.env,
         &mut prompt_state,
         effective_repo_root,
         shell_options.clone(),
-        use_structured,
-        structured_codex_output.as_ref(),
-        stdout_noise,
-        stderr_noise,
-        profile.suppress_structured_stderr_on_success(),
         show_checks,
         stream_verbosity,
         detail_requested,
         silent,
         &env_context,
-        &dispatch_context,
         seed_materialized,
         term,
         guard,
-        proxy_source,
+        initial_transition,
+        request.handoff_ledger.clone(),
+        request.adopted_handoff.clone(),
+        stabilize_after_initialize,
         true,
         request.task_frame_writer.clone(),
     )?;
@@ -523,6 +549,12 @@ pub(super) fn run_composition_body(
                 .then(|| runtime_state.last_output_text())
                 .flatten()
         }),
+        // A run that reached the harness carries a handoff only when a terminal
+        // recovery / start-stack proxy fired mid-run: the harness committed it
+        // against the shared invocation ledger and surfaces it here for the
+        // coordinator to re-prepare. `initialize`-route proxies are surfaced
+        // earlier (see `provider_run_handoff`) and never reach this path.
+        initialize_handoff: surfaced_handoff,
     };
     // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
     // The perf report is always emitted to stderr when requested.

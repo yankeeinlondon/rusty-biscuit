@@ -83,31 +83,51 @@ fn read_cli_source(relative: &str) -> String {
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()))
 }
 
-/// Every proxy route must funnel through the shared, existence-checking
-/// `resolve_proxy_target` (D5/D6) and wrap its typed `HarnessError` in
-/// `CompositionError::InvalidFileReference` — never resolve the reference
-/// directly or flatten the failure into an `eyre!` string. The three routes
-/// are the two harness-loop dispatch paths and the setup-phase pipeline.
+/// Provider-attempt routes may only construct typed handoff requests; the
+/// coordinator commit is the sole resolution and typed-failure boundary.
+///
+/// This is stronger than requiring every route to call the shared resolver:
+/// that older shape still allowed several callers to resolve and mutate active
+/// document identity independently. The coordinator now owns the one atomic
+/// resolve/check/commit operation, while the command pipeline may only invoke
+/// that operation and route its concrete failure.
 #[test]
 fn every_proxy_route_uses_the_shared_resolver_and_typed_error() {
-    let routes = [
+    let attempt_routes = [
         "src/commands/wrap/harness_orch/loop_control/proxy.rs",
         "src/commands/wrap/harness_orch/loop_control/control_dispatch.rs",
-        "src/commands/wrap/composition/pipeline.rs",
     ];
-    for route in routes {
+    for route in attempt_routes {
         let src = read_cli_source(route);
         assert!(
-            src.contains("resolve_proxy_target"),
-            "{route} no longer resolves proxy targets through the shared \
-             `resolve_proxy_target` (D5)"
+            src.contains("EvaluatedProxyRequest::new"),
+            "{route} no longer produces the typed request consumed by the coordinator"
         );
         assert!(
-            src.contains("InvalidFileReference"),
-            "{route} no longer wraps the proxy resolution failure in the typed \
-             `CompositionError::InvalidFileReference` (integrated-design §10)"
+            !src.contains("resolve_proxy_target"),
+            "{route} bypasses coordinator ownership by resolving a handoff in the attempt harness"
         );
     }
+
+    let commit = read_source("src/composition/coordinator/commit.rs");
+    assert!(
+        commit.contains("resolve_proxy_target(&target, &source_path, repo_root)"),
+        "the coordinator commit no longer owns the shared existence-checking resolver"
+    );
+    assert!(
+        commit.contains("ProxyCommitError::Resolution"),
+        "the coordinator commit no longer preserves resolution failures as a typed source"
+    );
+
+    let pipeline = read_cli_source("src/commands/wrap/composition/pipeline.rs");
+    assert!(
+        pipeline.contains("commit_proxy("),
+        "the composition coordinator no longer enters the atomic handoff commit"
+    );
+    assert!(
+        !pipeline.contains("resolve_proxy_target"),
+        "the composition pipeline resolves outside the coordinator commit"
+    );
 }
 
 /// The terminal-control dispatch route once called `resolve_harness_path`

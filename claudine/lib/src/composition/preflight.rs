@@ -15,6 +15,7 @@ use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, EffectiveSta
 use crate::composition::error::{CompositionError, ShellApprovalFailure};
 use crate::composition::lifecycle::{
     LATE_BINDING_ROOTS, LifecycleConfig, LifecycleSignal, collect_lifecycle_shell_commands,
+    collect_lifecycle_shell_commands_for,
 };
 use crate::composition::lifecycle_actions::LifecycleActionKind;
 use crate::harness::shell::{ShellApprovalOptions, tokenize_words_strict};
@@ -152,6 +153,49 @@ fn approve_commands(
     all_commands: Vec<(String, std::path::PathBuf, usize)>,
     approval_options: &ShellApprovalOptions,
 ) -> Result<PreFlightResult, CompositionError> {
+    approve_discovered_commands(all_commands, approval_options)
+}
+
+/// Audit only the shell commands reachable from `signals`.
+///
+/// The narrow bootstrap gate uses this with `[LifecycleSignal::Initialize]`: a
+/// freshly adopted document runs its `initialize` *before* the full audit can
+/// run, because `initialize` may mutate the very document the full audit would
+/// have to read. "Initialize before full pre-flight" must never mean "execute
+/// unapproved shell", so the commands that event could select are approved
+/// first, on their own.
+///
+/// Approvals land in `approval_options.approval_cache`, keyed on the normalized
+/// command string, so the post-stabilization audit over
+/// [`LifecycleSignal::ALL`] reuses them instead of prompting a second time.
+///
+/// `lifecycle` must be the C3-resolved config from canonical preparation — the
+/// approved bytes are the executed bytes only when the `{{ }}` spans have
+/// already been stamped.
+///
+/// ## Errors
+///
+/// The same typed failures as [`resolve_shell_approvals`]: a denial, a
+/// blacklisted command, or a missing approval handler.
+pub fn resolve_lifecycle_shell_approvals(
+    lifecycle: &LifecycleConfig,
+    lifecycle_source_path: &std::path::Path,
+    signals: &[LifecycleSignal],
+    approval_options: &ShellApprovalOptions,
+) -> Result<PreFlightResult, CompositionError> {
+    let commands = collect_lifecycle_shell_commands_for(lifecycle, signals)
+        .into_iter()
+        .map(|(command, _property)| (command, lifecycle_source_path.to_path_buf(), 0))
+        .collect();
+    approve_discovered_commands(commands, approval_options)
+}
+
+/// Deduplicate `all_commands` and run each survivor through shell policy.
+fn approve_discovered_commands(
+    all_commands: Vec<(String, std::path::PathBuf, usize)>,
+    approval_options: &ShellApprovalOptions,
+) -> Result<PreFlightResult, CompositionError> {
+    // -- Deduplicate -----------------------------------------------------------
     let unique: Vec<(String, std::path::PathBuf, usize)> = {
         let mut seen = HashSet::new();
         all_commands

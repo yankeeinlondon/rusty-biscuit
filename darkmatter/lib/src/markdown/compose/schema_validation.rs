@@ -119,15 +119,33 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
     // eager-`file` rewrite pass after validation accepts the instance.
     // `effective_for` returns an owned schema (no borrow of `markdown`), so it
     // can outlive the frontmatter mutations below.
-    let effective = schemas.effective_for(markdown).map_err(|err| {
-        MarkdownError::SchemaValidationFailed {
-            path: path.clone(),
-            problems: Vec::new(),
-            summary: format!("schema could not be prepared: {err}"),
-            description: description.clone(),
-            source: Some(Box::new(err)),
+    let effective = match schemas.effective_for(markdown) {
+        Ok(effective) => effective,
+        // A schema that cannot even be prepared is still not this pass's verdict
+        // to report when the caller deferred it; coercion simply has nothing to
+        // work from.
+        Err(_) if options.defer_schema_verdict => return Ok(()),
+        Err(err) => {
+            return Err(MarkdownError::SchemaValidationFailed {
+                path: path.clone(),
+                problems: Vec::new(),
+                summary: format!("schema could not be prepared: {err}"),
+                description: description.clone(),
+                source: Some(Box::new(err)),
+            });
         }
-    })?;
+    };
+
+    let caller_file_overrides = effective
+        .as_ref()
+        .map(|effective| resolve_eager_caller_file_overrides(effective, options))
+        .unwrap_or_default();
+    if !caller_file_overrides.is_empty() {
+        let fm_map = markdown.frontmatter_mut().as_map_mut();
+        for (key, value) in &caller_file_overrides {
+            fm_map.insert(key.clone(), value.clone());
+        }
+    }
 
     if let Some(effective) = effective.as_ref() {
         // Coerce schema-recognized scalars to their declared types and write the
@@ -151,6 +169,13 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
                 fm_map.insert(key, value);
             }
         }
+    }
+
+    // Coercion above is unconditional; the verdict is not. A pass that does not
+    // own the verdict stops here, before a validator is even built: a schema
+    // that cannot be *prepared* is likewise not this pass's failure to report.
+    if options.defer_schema_verdict {
+        return Ok(());
     }
 
     let report = schemas.validate(markdown).map_err(|err| {
@@ -237,12 +262,120 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
                 if composition_pending.contains(&key) {
                     continue;
                 }
+                let value = caller_file_overrides.get(&key).cloned().unwrap_or(value);
                 fm_map.insert(key, value);
             }
         }
     }
 
     Ok(())
+}
+
+/// Resolve eager-file values supplied through `set_overrides` against the
+/// caller's launch-area context before document schema validation.
+///
+/// A value authored in the document resolves from the document. A value passed
+/// by a caller is a different provenance class: it resolves from the caller's
+/// captured base and remains absolute in the effective frontmatter so later
+/// consumers do not reinterpret it as document-authored. The schema tells us
+/// which override strings are file references; ordinary string overrides are
+/// never probed.
+fn resolve_eager_caller_file_overrides(
+    effective: &crate::markdown::schemas::EffectiveSchema,
+    options: &ComposeOptions,
+) -> serde_json::Map<String, serde_json::Value> {
+    let Some(fallback) = options.file_ref_fallback_dir.as_ref() else {
+        return serde_json::Map::new();
+    };
+    let Some(overrides) = options.set_overrides.as_ref().and_then(serde_json::Value::as_object)
+    else {
+        return serde_json::Map::new();
+    };
+    let context = options
+        .file_resolution_context
+        .as_ref()
+        .map(|context| context.for_base(fallback))
+        .unwrap_or_else(|| biscuit_file::FileResolutionContext::new(fallback));
+    let mut resolved = serde_json::Map::new();
+    for (key, value) in overrides {
+        let mut fragments = Vec::new();
+        collect_property_schema_fragments(&effective.json_schema, key, &mut fragments);
+        if let Some(value) = fragments
+            .into_iter()
+            .find_map(|fragment| resolve_eager_caller_value(value, fragment, &context))
+        {
+            resolved.insert(key.clone(), value);
+        }
+    }
+    resolved
+}
+
+fn collect_property_schema_fragments<'a>(
+    schema: &'a serde_json::Value,
+    key: &str,
+    fragments: &mut Vec<&'a serde_json::Value>,
+) {
+    if let Some(fragment) = schema
+        .get("properties")
+        .and_then(serde_json::Value::as_object)
+        .and_then(|properties| properties.get(key))
+    {
+        fragments.push(fragment);
+    }
+    for combinator in ["allOf", "anyOf", "oneOf"] {
+        if let Some(arms) = schema.get(combinator).and_then(serde_json::Value::as_array) {
+            for arm in arms {
+                collect_property_schema_fragments(arm, key, fragments);
+            }
+        }
+    }
+}
+
+fn resolve_eager_caller_value(
+    value: &serde_json::Value,
+    schema: &serde_json::Value,
+    context: &biscuit_file::FileResolutionContext,
+) -> Option<serde_json::Value> {
+    if schema.get("format").and_then(serde_json::Value::as_str)
+        == Some(crate::markdown::schemas::format::DARKMATTER_FILE_FORMAT)
+    {
+        let raw = value.as_str()?;
+        let reference = biscuit_file::FileReference::new(raw).ok()?;
+        let resolved = reference.resolve_in_context(context).ok()??;
+        return Some(serde_json::Value::String(
+            resolved.to_string_lossy().into_owned(),
+        ));
+    }
+    if let Some(items) = schema.get("items")
+        && let Some(values) = value.as_array()
+    {
+        let mut changed = false;
+        let values = values
+            .iter()
+            .map(|value| {
+                resolve_eager_caller_value(value, items, context).map_or_else(
+                    || value.clone(),
+                    |resolved| {
+                        changed = true;
+                        resolved
+                    },
+                )
+            })
+            .collect();
+        if changed {
+            return Some(serde_json::Value::Array(values));
+        }
+    }
+    for combinator in ["allOf", "anyOf", "oneOf"] {
+        if let Some(arms) = schema.get(combinator).and_then(serde_json::Value::as_array) {
+            for arm in arms {
+                if let Some(resolved) = resolve_eager_caller_value(value, arm, context) {
+                    return Some(resolved);
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Returns `true` when `value` is still composition-pending — it holds a
@@ -416,6 +549,30 @@ mod tests {
         assert_eq!(
             md.frontmatter().as_map().get("title"),
             Some(&serde_json::json!("Hello"))
+        );
+    }
+
+    // ── Deferred verdict ──────────────────────────────────────────────
+
+    #[test]
+    fn deferred_verdict_reports_no_problem() {
+        let mut md = md_with_schema("$schema:\n  title: 'string(required)'\nother: stuff\n");
+        let options = ComposeOptions::new().with_deferred_schema_verdict(true);
+        assert!(
+            run(&mut md, &options).is_ok(),
+            "a pass that does not own the verdict reports no violation"
+        );
+    }
+
+    #[test]
+    fn deferred_verdict_still_coerces() {
+        let mut md = md_with_schema("$schema:\n  enabled: boolean\nenabled: \"true\"\n");
+        let options = ComposeOptions::new().with_deferred_schema_verdict(true);
+        assert!(run(&mut md, &options).is_ok());
+        assert_eq!(
+            md.frontmatter().as_map().get("enabled"),
+            Some(&serde_json::json!(true)),
+            "coercion is unconditional; only the verdict is withheld"
         );
     }
 
@@ -1314,6 +1471,86 @@ mod tests {
             md.frontmatter().as_map().get("spec"),
             Some(&serde_json::json!("./spec.md")),
             "lazy `file` value must be left verbatim",
+        );
+    }
+
+    #[test]
+    fn eager_file_set_override_resolves_from_the_callers_launch_area() {
+        let dir = tempfile::tempdir().unwrap();
+        let document_dir = dir.path().join("document");
+        let launch_dir = dir.path().join("launch");
+        std::fs::create_dir_all(&document_dir).unwrap();
+        std::fs::create_dir_all(&launch_dir).unwrap();
+        let resolved = launch_dir.join("spec.md");
+        std::fs::write(&resolved, "# Spec\n").unwrap();
+        let doc_path = document_dir.join("prompt.md");
+        let md = md_with_schema_and_source(
+            "$schema:\n  spec: 'file(eager; required)'\nspec: authored.md\n",
+            &doc_path,
+        );
+        let options = ComposeOptions::new()
+            .with_source_file(&doc_path)
+            .with_file_ref_fallback_dir(&launch_dir)
+            .with_set_overrides(serde_json::json!({ "spec": "spec.md" }));
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        assert_eq!(
+            composed.frontmatter().as_map().get("spec"),
+            Some(&serde_json::json!(resolved.to_string_lossy())),
+        );
+    }
+
+    #[test]
+    fn eager_file_array_set_override_resolves_each_launch_area_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let document_dir = dir.path().join("document");
+        let launch_dir = dir.path().join("launch");
+        std::fs::create_dir_all(&document_dir).unwrap();
+        std::fs::create_dir_all(&launch_dir).unwrap();
+        let first = launch_dir.join("first.md");
+        let second = launch_dir.join("second.md");
+        std::fs::write(&first, "# First\n").unwrap();
+        std::fs::write(&second, "# Second\n").unwrap();
+        let doc_path = document_dir.join("prompt.md");
+        let md = md_with_schema_and_source(
+            "$schema:\n  specs: 'file(eager)[]'\nspecs: []\n",
+            &doc_path,
+        );
+        let options = ComposeOptions::new()
+            .with_source_file(&doc_path)
+            .with_file_ref_fallback_dir(&launch_dir)
+            .with_set_overrides(serde_json::json!({ "specs": ["first.md", "second.md"] }));
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        assert_eq!(
+            composed.frontmatter().as_map().get("specs"),
+            Some(&serde_json::json!([
+                first.to_string_lossy(),
+                second.to_string_lossy(),
+            ])),
+        );
+    }
+
+    #[test]
+    fn ordinary_string_set_override_is_not_treated_as_a_file_reference() {
+        let dir = tempfile::tempdir().unwrap();
+        let launch_dir = dir.path().join("launch");
+        std::fs::create_dir_all(&launch_dir).unwrap();
+        std::fs::write(launch_dir.join("spec.md"), "# Spec\n").unwrap();
+        let doc_path = dir.path().join("prompt.md");
+        let md = md_with_schema_and_source(
+            "$schema:\n  label: 'string(required)'\nlabel: authored\n",
+            &doc_path,
+        );
+        let options = ComposeOptions::new()
+            .with_source_file(&doc_path)
+            .with_file_ref_fallback_dir(&launch_dir)
+            .with_set_overrides(serde_json::json!({ "label": "spec.md" }));
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        assert_eq!(
+            composed.frontmatter().as_map().get("label"),
+            Some(&serde_json::json!("spec.md")),
         );
     }
 

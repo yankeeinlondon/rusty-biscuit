@@ -17,7 +17,7 @@ fn dispatch_defer_aborts_not_implemented() {
     };
     let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
     let mut state = prompt_state(&fx.source_path);
-    let mut budgets = ControlBudgets::default();
+    let mut active = claudine::composition::ActiveDocumentState::initial();
     let outcome = outcome_with(StackControl::Defer {
         delay: "5m".to_string(),
         reason: Some("later".to_string()),
@@ -25,15 +25,14 @@ fn dispatch_defer_aborts_not_implemented() {
     let action = dispatch_terminal_control(
         &outcome,
         1,
-        &mut budgets,
+        active.iteration_mut(),
         None,
         resume_capable_profile(),
         Provider::Goose,
         &mut state,
         &fx.materialized,
-        Some(fx._dir.path()),
         &mut guard,
-        &mut ProxyTracking::default(),
+        &ledger(&fx.source_path),
         &fx.term,
         false,
     );
@@ -66,19 +65,18 @@ fn dispatch_stop_falls_through() {
     };
     let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
     let mut state = prompt_state(&fx.source_path);
-    let mut budgets = ControlBudgets::default();
+    let mut active = claudine::composition::ActiveDocumentState::initial();
     let action = dispatch_terminal_control(
         &outcome_with(StackControl::Stop),
         1,
-        &mut budgets,
+        active.iteration_mut(),
         None,
         resume_capable_profile(),
         Provider::Goose,
         &mut state,
         &fx.materialized,
-        Some(fx._dir.path()),
         &mut guard,
-        &mut ProxyTracking::default(),
+        &ledger(&fx.source_path),
         &fx.term,
         false,
     );
@@ -100,21 +98,20 @@ fn dispatch_error_aborts_without_changing_stop_semantics() {
     };
     let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
     let mut state = prompt_state(&fx.source_path);
-    let mut budgets = ControlBudgets::default();
+    let mut active = claudine::composition::ActiveDocumentState::initial();
     let action = dispatch_terminal_control(
         &outcome_with(StackControl::Error {
             reason: Some("durable findings remain".to_string()),
         }),
         1,
-        &mut budgets,
+        active.iteration_mut(),
         None,
         resume_capable_profile(),
         Provider::Goose,
         &mut state,
         &fx.materialized,
-        Some(fx._dir.path()),
         &mut guard,
-        &mut ProxyTracking::default(),
+        &ledger(&fx.source_path),
         &fx.term,
         false,
     );
@@ -141,19 +138,18 @@ fn dispatch_no_control_falls_through() {
     };
     let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
     let mut state = prompt_state(&fx.source_path);
-    let mut budgets = ControlBudgets::default();
+    let mut active = claudine::composition::ActiveDocumentState::initial();
     let action = dispatch_terminal_control(
         &LifecycleEventOutcome::default(),
         1,
-        &mut budgets,
+        active.iteration_mut(),
         None,
         resume_capable_profile(),
         Provider::Goose,
         &mut state,
         &fx.materialized,
-        Some(fx._dir.path()),
         &mut guard,
-        &mut ProxyTracking::default(),
+        &ledger(&fx.source_path),
         &fx.term,
         false,
     );

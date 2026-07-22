@@ -152,9 +152,10 @@ pub(super) fn compose_step(
         .set_overrides
         .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
 
-    let compose_options = build_template_preflight_options(
+    let (compose_options, prepared_context) = build_template_preflight_options(
         env_overrides,
         &step_source.resolved_path,
+        &step_source.markdown,
         &step_overrides,
         ctx.launch_area,
         Some(ctx.file_resolution_context),
@@ -187,9 +188,9 @@ pub(super) fn compose_step(
         perf_enabled: ctx.shared.perf,
         source_repo_root: ctx.source_repo_root.map(Path::to_path_buf),
         shell_working_directory: Some(ctx.child_cwd.to_path_buf()),
-        // Sequence prep has no launch-area snapshot threaded here; fall back to
-        // capture-at-prepare (the lib default).
-        prepared_context: None,
+        // The shell audit and canonical preparation must expand against the
+        // same captured snapshot even if the process CWD changes between them.
+        prepared_context: Some(prepared_context),
         file_ref_fallback_dir: ctx.launch_area.map(Path::to_path_buf),
         file_resolution_context: Some(ctx.file_resolution_context.clone()),
         // `{{state}}`/`{{previous}}`/`{{next}}` render their `name` in string
@@ -199,6 +200,7 @@ pub(super) fn compose_step(
             .map(|s| (*s).to_string())
             .collect(),
         allow_empty_body,
+        defer_schema_verdict: false,
     };
 
     // Inline steps prepare via `prepare_inline_with_schema` so the composed
@@ -235,15 +237,24 @@ pub(super) fn compose_step(
 pub(super) fn build_template_preflight_options(
     env_overrides: &BTreeMap<String, String>,
     source_path: &Path,
+    markdown: &darkmatter::markdown::Markdown,
     set_overrides: &Value,
     launch_area: Option<&Path>,
     file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
-) -> darkmatter::markdown::compose::ComposeOptions {
-    let mut ctx = darkmatter::markdown::compose::ComposeContext::capture();
+) -> (
+    darkmatter::markdown::compose::ComposeOptions,
+    darkmatter::markdown::compose::ComposeContext,
+) {
+    let anchor = launch_area
+        .or_else(|| source_path.parent())
+        .unwrap_or_else(|| Path::new("."));
+    let mut ctx = darkmatter::markdown::compose::ComposeContext::capture_for_document(
+        anchor, markdown,
+    );
     for (key, value) in env_overrides {
         ctx.env_mut().insert(key.clone(), value.clone());
     }
-    let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(ctx)
+    let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(ctx.clone())
         .with_source_file(source_path)
         // Defer the lifecycle event keys (DM1), matching the main prepare pass.
         // The preflight compose exists only to discover template `::shell`
@@ -268,7 +279,7 @@ pub(super) fn build_template_preflight_options(
             .map(|s| (*s).to_string())
             .collect(),
     );
-    opts
+    (opts, ctx)
 }
 
 #[cfg(test)]

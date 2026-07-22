@@ -16,6 +16,28 @@ changed to one of the specification's evidence statuses before closeout. Only
 | Proxy-with | `e348486c810969abe87a6b7209979034f5454b07:claudine/features/2026-07-13-proxy-with/spec.md` |
 | Proxy acceptance map | `e348486c810969abe87a6b7209979034f5454b07:claudine/features/2026-07-13-proxy-with/notes/acceptance-map.md` |
 
+## Phase 3 merged invariant evidence
+
+The Phase 3 candidate is a resolved worktree rather than a commit because the
+execution request prohibits staging and committing. These rows record merged
+behavior without claiming an immutable candidate SHA or native evidence on an
+unrun operating system.
+
+| ID | Contract | Test or audit | Tier | Platform | Status | Candidate | Evidence |
+|---|---|---|---|---|---|---|---|
+| I1 | Typed diagnostic identity survives every route and two serialization cycles | diagnostic route matrix; `snapshot_round_trips_every_facet_detail_message_and_cause` | L1/L2 | macOS | passed | worktree candidate | `phase3-test-map.md` |
+| I2 | One `FileReference` grammar with repository-first bare and strict explicit-relative resolution | reference matrix and boundary source guard | L1/L2 audit | macOS + host-independent paths | passed | worktree candidate | `phase3-test-map.md`; `phase3-audit.md` |
+| I3 | One captured request/file context is threaded and derived | CWD mutation and cross-repository equivalence tests | L1/L2 | macOS | passed | worktree candidate | `phase3-test-map.md` |
+| I4 | One stage-aware preparation service serves every entry reason | `stage_matrix_covers_every_entry_reason`; `direct_and_proxy_entry_prepare_equivalent_documents` | L1 | macOS | passed | worktree candidate | `phase3-test-map.md` |
+| I5 | Coordinator is the sole atomic handoff owner | production-route source guard; adoption and handoff-failure matrices | L1/L2 | macOS | passed | worktree candidate | `phase3-test-map.md`; `phase3-audit.md` |
+| I6 | Proxy stays contained in its current Sequence Plus step | `level2_lifecycle_proxy_inside_sequence_step_is_contained`; `level2_lifecycle_sequence_step_proxy_to_looping_target_owns_the_loop` | L2 | macOS | passed | worktree candidate | targeted Phase 3 run |
+| I7 | One rebuilt launch bundle supplies compatibility and spawn | launch-facet, retry, resume, and budget suites | L1/L2 | macOS | passed | worktree candidate | `phase3-test-map.md` |
+| I8 | Proxy overlay is typed, shallow, atomic, transient, and immutable | `proxy_with_evaluation` and `overlay_layering` suites; retry/resume/loop L2 cases | L1/L2 | macOS | passed | worktree candidate | `phase3-test-map.md` |
+| I9 | Initialize may coerce before the authoritative stabilized schema verdict | deferred verdict/coercion tests and initialize-before-verdict route matrix | L1/L2 | macOS | passed | worktree candidate | `phase3-test-map.md` |
+| I10 | Terminal and task output is emitted exactly once with equivalent information | characterization routes, diagnostic matrix, and task-stream capture suites | L1/L2 | macOS | passed | worktree candidate | `phase3-test-map.md` |
+| I11 | Trunk schemas, prompts, research, guards, and ignored temp boundary survive | merged-tree source/guard audit | audit | all source | passed | worktree candidate | `phase3-audit.md` |
+| I12 | Platform adapters and gates remain target-correct | Windows `Connected`/dependency source audit; retained Linux/Windows CI jobs | audit | all source | passed | worktree candidate | `phase3-audit.md` (no native Linux/Windows runtime claim) |
+
 ## Error propagation
 
 | ID | Contract | Named merged-tree test or audit | Tier | Platform | Owner | Status | Candidate | Evidence |

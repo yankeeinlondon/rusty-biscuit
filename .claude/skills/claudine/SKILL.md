@@ -1,8 +1,8 @@
 ---
 name: claudine
 description: Use when working in the claudine/ package area or with the Claudine library/CLI — normalizing agentic-CLI lifecycle events and hooks, wrapping providers (Claude Code, Codex, Gemini, Goose, Kimi, OpenCode, Qwen, Kilo, Pi, Antigravity), composing Markdown prompts (compose/inline-compose/sequence), managing the MCP catalog, linking skills/commands/agents across providers, or researching agentic CLI platform behavior.
-last_updated: 2026-07-17
-hash: 65dc854540ca152c-1083e38adfa76a8f
+last_updated: 2026-07-22
+hash: 65dc854540ca152c-6dc3e5320f666a03
 ---
 
 ## Overview
@@ -124,6 +124,9 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 | Whole-value frontmatter | A value that is *exactly one* `{{ … }}` / `$(…)` span is executable state — it must resolve and must never leak as raw syntax | [Composition § Whole-value](composition.md#whole-value-frontmatter-expansion-is-executable-state) |
 | Sequences | Two phases: static preflight over the whole task graph (dynamic sources snapshot once, shell approved byte-for-byte, no exceptions), then just-in-time composition at each step's turn against the live file. One executable per task; `outputs` is the sole accumulator; groups run serial or parallel | [Sequences](../../../claudine/docs/topics/flow-control/sequences.md) · [architecture.md § Sequences](architecture.md#sequences) |
 | Lifecycle stacks | Seven flow-control verbs (`stop`/`skip`/`error`/`proxy`/`retry`/`resume`/`defer`; `defer` unimplemented), two action forms, early/late binding via Darkmatter DM1/DM2 (strict, fail-closed), leak & err-placement guards, `no_error`, the `stdout` channel | [Lifecycle](lifecycle.md) |
+| Document handoffs | `proxy` swaps the active document; one coordinator owns identity, one canonical service prepares every entry reason, so a proxied target behaves like the same document invoked directly. Key/value `proxy.with:` adds a transient, source-evaluated, typed frontmatter overlay for the immediate target | [Lifecycle § Proxy Handoffs](lifecycle.md#proxy-handoffs) · [Composition § Handoffs](composition.md#document-handoffs-and-the-equivalence-contract) |
+| Retry/resume re-entry | Both replace only the provider-attempt slice: canonical fresh read, overlay + provenance kept, budgets decrement, no second `initialize`. The whole launch bundle is recomputed at that fresh read, not snapshotted at adoption, and that bundle *is* the launch — a retry spawns under the refreshed plan. `resume` also compares a session-compatibility key and refuses (`LifecycleResumeIncompatible`) when a facet moved — every document-reachable facet refuses end-to-end; workspace CWD and system-prompt content are immutable invocation inputs | [Lifecycle § Retry and resume](lifecycle.md#retry-and-resume-re-entry) · [Composition § Retry and resume](composition.md#retry-and-resume-re-entry) |
+| Dry run | `--dry-run` stops at a seam right after provider/model resolution — **no lifecycle events, no MCP/argv/CWD setup, no proxy traversal, no `inline-compose` mutation**. `::shell` spans in the document graph are composition, not lifecycle, and still run for real | [Composition § Dry Run](composition.md#dry-run) |
 | Protect | `protect::observe` classifies bash- and write-shaped tools; best-effort defense-in-depth, not a security boundary | [Protect Service](protect-service.md) |
 
 ## MCP Support

@@ -4,6 +4,16 @@ use serde_json::Value;
 use std::fs;
 use std::path::Path;
 
+/// Layer `update` onto `overlay` with shallow top-level semantics.
+///
+/// Every value — scalar, array, **and object** — replaces the key outright: no
+/// deep merge. `null` removes the key instead of storing a null, so a router can
+/// take a property away from its target rather than only overwrite it.
+///
+/// The shallowness is deliberate. A deep merge would make the result of
+/// `with: { loop: {...} }` depend on what the target happened to author under
+/// `loop:`, so the same router would mean different things against different
+/// targets.
 pub(crate) fn merge_frontmatter_overlay(
     overlay: &mut IndexMap<String, Value>,
     update: &IndexMap<String, Value>,
@@ -54,9 +64,17 @@ pub(crate) fn materialize_passthrough_harness_seed(
         frontmatter,
         prompt,
         env_overrides: Vec::new(),
+        selection_hints: claudine::composition::EffectiveSelectionHints::default(),
         inline_closure_plan: None,
         file_resolution_context: None,
         live_frontmatter,
         runtime_state,
+        lifecycle: None,
+        // A direct-wrapper passthrough records `mcp_body_tags: Vec::new()` as its
+        // whole invocation facet set (`wrapper_stages::passthrough_launch_intent`)
+        // — its MCP set comes from `--mcp-use`, not from a document body. Lexing
+        // the provider memory file it wraps would fabricate a moved facet and
+        // send this path into a replay it recorded no inputs for.
+        mcp_body_tags: Vec::new(),
     })
 }

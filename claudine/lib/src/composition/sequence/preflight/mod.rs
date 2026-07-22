@@ -140,7 +140,9 @@ pub fn build_preflight_graph(
     plan: &SequencePlan,
     source: &ResolvedCompositionSource,
 ) -> Result<PreflightGraph, CompositionError> {
-    build_preflight_graph_with_context(plan, source, ComposeContext::capture())
+    let anchor = source.resolved_path.parent().unwrap_or_else(|| Path::new("."));
+    let context = ComposeContext::capture_for_document(anchor, &source.markdown);
+    build_preflight_graph_with_context(plan, source, context)
 }
 
 /// [`build_preflight_graph`] against a caller-supplied `ctx.*`/`env.*` snapshot.

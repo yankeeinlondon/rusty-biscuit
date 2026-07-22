@@ -27,7 +27,8 @@ use super::error::{ActionExprError, CompositionError};
 use self::actions::{
     all_lifecycle_verbs, CommunicationAction, CommunicationChannel, ExpressionFunctionAction,
     expression_function_signature, is_known_lifecycle_verb, LifecycleAction, LifecycleActionKind,
-    LifecycleControlAction, LifecycleStackItem, RetryBackoff, rewrite_to_positional, ShellAction,
+    LifecycleControlAction, LifecycleStackItem, ProxyWith, ProxyWithError,
+    RetryBackoff, rewrite_to_positional, ShellAction,
     SideEffectAction, side_effect_signature,
 };
 use crate::events::{GlobalSettings, TtsSettings};
@@ -52,7 +53,8 @@ pub use parse::{
     scan_removed_validation_keys,
 };
 pub use validate::{
-    collect_lifecycle_shell_commands, validate_no_err_in_no_error_events,
+    collect_lifecycle_shell_commands, collect_lifecycle_shell_commands_for,
+    validate_no_err_in_no_error_events,
     validate_no_interpolation_leaks, validate_no_undefined_lifecycle_variables,
 };
 pub(crate) use validate::first_undefined_stack_variable;
@@ -493,6 +495,15 @@ pub struct LifecycleRunGuard<'a> {
     // the *original* document, so it omits groups only the proxied target
     // references — it must be dropped for the target's events.
     proxied: bool,
+    // The target document's rebuilt early-binding context, installed by the
+    // R6 target launch rebuild once a proxied target's launch state is
+    // recomputed from its own frontmatter (provider/model identity). Owned by
+    // the guard so it can outlive the transient loop borrows that build it, and
+    // preferred over both `ctx.context` (the source's snapshot) and the
+    // demand-driven fallback so a proxied target's lifecycle `ctx.*`/`env.*`
+    // (e.g. `env.MODEL`) resolves to the target's own resolved identity, exactly
+    // as it does when the target is invoked directly.
+    proxy_prepared_context: Option<darkmatter::markdown::compose::ComposeContext>,
 }
 
 impl<'a> LifecycleRunGuard<'a> {
@@ -513,6 +524,7 @@ impl<'a> LifecycleRunGuard<'a> {
             finalize_emitted: false,
             terminal_signal: None,
             proxied: false,
+            proxy_prepared_context: None,
         }
     }
 
@@ -712,21 +724,51 @@ impl<'a> LifecycleRunGuard<'a> {
         self.finalize_emitted = false;
         self.terminal_signal = None;
         self.proxied = true;
+        // A previous hand-off's rebuilt context belongs to the document being
+        // replaced. Drop it so the newly adopted target's events fall back to
+        // the demand-driven capture until its own launch rebuild installs a
+        // fresh one.
+        self.proxy_prepared_context = None;
+    }
+
+    /// Install the proxied target's rebuilt early-binding context.
+    ///
+    /// The R6 target launch rebuild recomputes a proxied target's launch
+    /// identity (provider/model → `env.AGENT`/`env.MODEL`) from the target's own
+    /// frontmatter, captures a `ComposeContext` carrying that identity, and hands
+    /// it here. From this point [`Self::effective_prepared_context`] returns it,
+    /// so the target's lifecycle `ctx.*`/`env.*` resolve to the same values a
+    /// direct invocation of the target would produce, rather than the source's
+    /// snapshot or an identity-less demand capture.
+    pub fn set_proxy_prepared_context(
+        &mut self,
+        context: darkmatter::markdown::compose::ComposeContext,
+    ) {
+        self.proxy_prepared_context = Some(context);
     }
 
     /// The early-binding `ctx.*`/`env.*` snapshot lifecycle events should use,
     /// or `None` to force a demand-driven per-expression re-capture.
     ///
     /// Returns the composition-start snapshot for a normally-run document.
-    /// After a `proxy` hand-off it returns `None`: that snapshot was captured
-    /// demand-driven for the *original* document and omits any `ctx.*` group
-    /// only the proxied target references (e.g. `ctx.area` in the target's
-    /// `success`/`failure` stack), so reusing it renders those references
-    /// empty. Dropping it makes the executor re-capture at the launch area,
-    /// exactly as the target's own body composition already does.
+    /// After a `proxy` hand-off, once the R6 launch rebuild has installed the
+    /// target's context via [`Self::set_proxy_prepared_context`], that rebuilt
+    /// context wins — it carries the target's own resolved provider/model
+    /// identity, so `env.MODEL`/`ctx.model` in the target's stacks match a direct
+    /// invocation. Before the rebuild installs it (or if none is installed) a
+    /// proxied guard returns `None`: the *original* document's snapshot omits any
+    /// `ctx.*` group only the target references, so it is dropped and the
+    /// executor re-captures at the launch area, exactly as the target's own body
+    /// composition already does.
     pub fn effective_prepared_context(
         &self,
-    ) -> Option<&'a darkmatter::markdown::compose::ComposeContext> {
+    ) -> Option<&darkmatter::markdown::compose::ComposeContext> {
+        // A rebuilt target context wins: it carries the proxied target's own
+        // resolved provider/model identity (R6), so it is preferred over both
+        // the source's snapshot and the demand-driven fallback.
+        if let Some(context) = self.proxy_prepared_context.as_ref() {
+            return Some(context);
+        }
         if self.proxied {
             None
         } else {

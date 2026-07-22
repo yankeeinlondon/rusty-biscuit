@@ -793,9 +793,9 @@ fn target_initialize_error_with_failure_raise_surfaces_failure_evaluation_error(
         &fx.materialized,
         &fx.source_path,
         Some(fx._dir.path()),
+        std::slice::from_ref(&fx.source_path),
         &fx.term,
         &eng,
-        None,
         std::time::Instant::now(),
     );
 
@@ -855,9 +855,9 @@ fn target_initialize_routes_to_failure_with_raise_surfaces_failure_evaluation_er
         &fx.materialized,
         &fx.source_path,
         Some(fx._dir.path()),
+        std::slice::from_ref(&fx.source_path),
         &fx.term,
         &eng,
-        None,
         std::time::Instant::now(),
     );
 

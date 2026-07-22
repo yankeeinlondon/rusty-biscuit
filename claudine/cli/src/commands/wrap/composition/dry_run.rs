@@ -8,8 +8,9 @@
 //! phases) own the stdout/stderr split.
 //!
 //! These helpers are the foundation for the compose, inline-compose, and
-//! sequence dry-run paths; the executor wires them in at the post-preflight
-//! dry-run seam.
+//! sequence dry-run paths. The executor wires them in at the dry-run seam in
+//! `pipeline::execute_composition_request_inner_with_guard`, which sits ahead
+//! of lifecycle dispatch so a rehearsal fires no lifecycle event.
 
 use std::path::{Path, PathBuf};
 

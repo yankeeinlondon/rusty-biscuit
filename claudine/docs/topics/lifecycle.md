@@ -186,7 +186,7 @@ Lifecycle flow control actions terminate the current event's stack and influence
 | `stop` | every event | End this event's stack cleanly; composition continues with the current outcome |
 | `skip` | `initialize` only | Whole-document opt-out: no provider invocation, no `finalize`, no `loop` |
 | `error: "reason"` | every event | Mark this event as failed; at `success`/`finalize` it converts success to failure |
-| `proxy: "@other.md"` | every event | Hand off to another prompt document, entering the target at its own `initialize` |
+| `proxy: "@other.md"` | every event | Hand off to another prompt document, entering the target at its own `initialize`. Key/value form accepts an optional `with:` overlay — see [Proxy Handoffs](#proxy-handoffs) |
 | `retry: 3` | every event | Retry the current prompt N additional times (re-runs pre-flight pre-launch, re-invokes the agent post-launch) |
 | `resume: "message"` | every event | Resume the agent session with a follow-up message. Needs a live session — pre-launch it surfaces a `ResumeWithoutSession` error |
 | `defer: "5m"` | every event | Defer this prompt to **run again later** — a fresh scheduled run after the delay (not an in-place pause), via the rendezvous deferred-execution scheduler. **Not implemented yet:** `defer` parses and dispatches but currently surfaces a typed `LifecycleDeferNotImplemented` error until the rendezvous backend is ready. |
@@ -205,7 +205,135 @@ the target becomes the new source for that reference.
 
 **Flow control is universal.** Flow control reacts to **state** — an error, a missing file, an `env` value, frontmatter — and an error is just one kind of state. So `error`/`stop`/`retry`/`resume`/`defer`/`proxy` are valid in **every** event. The headline example: a `success` stack can `resume: "you finished but never wrote abc.md — create it as instructed"` when the agent completed cleanly but an expected artifact is missing. The only placement rule is `skip` (`initialize`-only). Apparent event-specific behavior is **runtime capability**, not placement: `resume` needs a live session (pre-launch → `ResumeWithoutSession`) and `retry`'s re-entry point is derived from whether the provider had launched. This is enforced once, at parse time (`LifecycleControlAction::is_valid_for` → `LifecycleActionPlacement`); at runtime every event's stack dispatches its control through the same event-agnostic path (`decide_control` + `dispatch_terminal_control`). The iteration `loop:` (while/until) is a separate mechanism and is never coupled to handler dispatch.
 
-The provider run-loop events — `start`, `success`, `failure`, `finalize` — dispatch `retry`/`resume`/`proxy` fully (this is where `success` + `resume` lives). The events that sit *outside* that loop — `initialize`, a compose pre-flight `blocked`, and the `loop` gate — handle `error`/`stop` (and `proxy`/`skip` at `initialize`) directly, but `retry`/`proxy` from those events have no re-entry loop to act on yet, so they surface a clear typed error (`LifecycleSetupPhaseRecoveryUnsupported`) rather than a silent no-op. Put recovery on a post-launch event, or use `initialize` `proxy` for pre-launch routing. `defer` (deferred re-execution) is **not implemented in any event yet** — it always surfaces `LifecycleDeferNotImplemented` until its rendezvous backend lands.
+The provider run-loop events — `start`, `success`, `failure`, `finalize` — dispatch `retry`/`resume`/`proxy` fully (this is where `success` + `resume` lives). `proxy` from `initialize` is equally complete: the active-document coordinator sits above both the document loop and the provider harness, so an `initialize` handoff is a real transition rather than a reduced pre-launch path, and the target it hands to is prepared exactly as a directly-invoked document would be (see [Proxy Handoffs](#proxy-handoffs)). What remains unsupported is narrower than it once was: `retry` from `initialize`, and `retry`/`resume`/`proxy` from a compose pre-flight `blocked` or from the `loop` gate, have no re-entry loop to act on and surface a typed `LifecycleSetupPhaseRecoveryUnsupported` rather than a silent no-op. `resume` from `initialize` surfaces `ResumeWithoutSession` — there is no session yet to continue. Put those recoveries on a post-launch event. `defer` (deferred re-execution) is **not implemented in any event yet** — it always surfaces `LifecycleDeferNotImplemented` until its rendezvous backend lands.
+
+#### Retry and resume re-entry
+
+`retry` and `resume` replace only the **provider-attempt slice** of the active document; they do not change document identity. Both refresh the document canonically — a fresh read from disk with full validation — and both keep the document's `with:` overlay, its proxy provenance, and their own decrementing budgets (a `retry` cannot reset its budget by replacing the attempt). `initialize` does **not** re-fire: it is once per active document, not once per attempt.
+
+Launch identity is recomputed at that fresh-read boundary, against the document about to run, so a `model:` changed between attempts actually reaches the child environment rather than being pinned to an adoption-time snapshot.
+
+`resume` additionally checks a **session-compatibility key**. It retains the live provider session only when the key still matches across the refresh; when a facet moved, the resume refuses with `CompositionError::LifecycleResumeIncompatible { facets }`, names the changed facets, and recommends `retry` for a fresh session. Note the ordering: `start` fires before the comparison, so a refusal is a post-`start`, pre-spawn failure and owes the ordinary lifecycle tail — `failure` then exactly one `finalize`, both seeing the refusal as `err.*`. `success` does not fire, and the provider is never spawned a second time. Full facet list, reachability, and coverage: [composition.md — Retry and resume re-entry](composition.md#retry-and-resume-re-entry).
+
+#### Lifecycle events and `--dry-run`
+
+`--dry-run` fires **no lifecycle events at all**. The dry-run seam returns before the lifecycle runtime is constructed, so a stack carrying `append_line`, `set_frontmatter`, or `shell` cannot touch the workspace during a rehearsal, and no dynamic `proxy` route can be traversed. Do not author lifecycle stacks expecting a dry run to exercise them; turning dry run into lifecycle simulation is an explicit non-goal. See [composition.md — Dry Run](composition.md#dry-run).
+
+### Proxy Handoffs
+
+`proxy` hands the run to another prompt document. The target enters at its own `initialize` and becomes the **active document**: it owns the remaining lifecycle, the closure, and the output. A clean handoff synthesizes no source-side terminal, `finalize`, or `loop` event — a `proxy` from `success`/`failure` skips that attempt's ordinary `finalize`, and a `proxy` from `finalize` does not re-enter it.
+
+The target is bootstrapped and prepared by the **same canonical preparation service** that prepares a directly-invoked document, so `claudine compose target.md` and a `proxy` to `target.md` see the same stages: the same `initialize`, the same schema validation, the same shell discovery and approval, and the same typed diagnostics. See [composition.md — Document Handoffs and the Equivalence Contract](composition.md#document-handoffs-and-the-equivalence-contract) for what the target recalculates for itself.
+
+Positional form stays compact and is unchanged:
+
+```yaml
+- proxy: "@prompts/next.md"
+```
+
+#### The `with:` overlay
+
+Key/value form accepts an optional `with:` mapping — a **transient overlay** of top-level frontmatter properties for the immediate target:
+
+```yaml
+success:
+  stack:
+    - action:
+        action: proxy
+        target: "@prompts/next.md"
+        with:
+            attempt: "{{ iteration }}"
+            ready: "{{ true }}"
+            label: "phase-{{ iteration }}"
+            files: "{{ changed_files }}"
+            metadata:
+                source: router
+                area: "{{ ctx.area }}"
+```
+
+`with:` is accepted **only** on key/value proxy. `with: {}` parses and means exactly what omitting it means. A non-mapping `with:` (`LifecycleProxyWithNotMapping`), a dynamic key (`LifecycleProxyWithDynamicKey`), a whole-mapping interpolation such as `with: "{{ payload }}"` (`LifecycleProxyWithWholeMapping`, a named v1 out-of-scope), and `with:` on any other action (`LifecycleProxyOnlyParameter`) are all typed, source-aware frontmatter errors. Positional `proxy:` with a sibling `with:` remains the existing `LifecycleStackAmbiguous` diagnostic, whose actionable rewrite points at key/value form.
+
+#### Typed values
+
+Keys are static YAML strings and are never interpolated — they name target frontmatter properties. Values follow the same rule as every other lifecycle action parameter, recursed through nested arrays and objects:
+
+- a mixed string (`"phase-{{ iteration }}"`) resolves to a string;
+- a string whose trimmed content is **exactly one** `{{ … }}` span keeps the expression's resolved type — `"{{ true }}"` installs boolean `true`, not the string `"true"`;
+- authored YAML numbers, booleans, arrays, objects, and nulls keep their authored types; and
+- strings nested inside arrays and objects follow the same rule.
+
+Arrays and objects here are **data**, not positional action arguments — this is the one place in the lifecycle surface where a nested mapping is a legal action value.
+
+#### Source-time evaluation
+
+The whole mapping resolves **once, at the source**, when the event fires — through the same Darkmatter DM2 subtree composition the rest of the lifecycle surface uses, in strict mode, against the source document's live frontmatter plus the globals in scope for that event (`err`, `timing`, `current`). A `set_frontmatter` run earlier in the same stack is visible to `with:`.
+
+What lands on the target is therefore resolved data, not a template. A raw `{{ … }}` span can never survive into the overlay and be re-evaluated at target time — that would make the binding ambiguous, so it is rejected instead.
+
+Evaluation is **atomic**: the target and the complete mapping resolve before any state changes. On failure — an unknown root, a malformed expression, an unknown function, an out-of-scope global — no partial overlay is installed, the target is never touched, the source stays active for diagnostic attribution, and the run follows the normal failure routing for the event that requested the handoff. `no_error` is accepted (it is a universal key/value field) but does **not** suppress this: proxy has no side-effect dispatch phase, and an overlay failure is an expression-layer error. The diagnostic (`LifecycleProxyWithEvaluationFailed`) names the lifecycle event, the proxy action, the target, and the deepest representable path inside `with` — never a resolved value, which may hold a secret.
+
+#### Precedence and lifetime
+
+The overlay merges into **every** read of the target's authored frontmatter — the bootstrap read before target `initialize` and the fresh read after initialize-time mutations — before composition and schema validation. Precedence, lowest to highest:
+
+1. target-authored frontmatter;
+2. the immediate proxy's `with:` mapping;
+3. caller-supplied compose overrides (`key=value` / `--set`).
+
+**The original caller stays authoritative.** A router cannot silently overwrite an explicit caller value with `with:`.
+
+The merge is shallow at the top level: a scalar or array replaces the target's value, an object **replaces** the target's object at that key rather than deep-merging into it, and `null` removes the target-authored property before composition. A caller override can restore a key the overlay removed.
+
+The overlay is scoped to the **immediate** target:
+
+- it survives that target's retry, resume, and loop-iteration refreshes;
+- it is visible to every lifecycle event and to body composition for that target;
+- it is **never written to disk** — neither document's bytes or `hash:` change; and
+- it is discarded when that target proxies onward.
+
+Forwarding down a chain is explicit. A downstream `proxy` receives only its own `with:` plus the immutable caller overrides — omitting `with:` on the second hop installs an *empty* overlay rather than inheriting the first hop's:
+
+```yaml
+- action: proxy
+  target: "@prompts/final.md"
+  with:
+      spec: "{{ spec }}"      # forwarded because it is named here
+```
+
+Cycle detection and the hop limit are keyed on resolved document paths; an overlay does not create a distinct document identity.
+
+#### `with:` versus `set_frontmatter`
+
+Both put a value in front of a document. They are not interchangeable:
+
+| | `proxy.with` | `set_frontmatter` / `merge_frontmatter` |
+|---|---|---|
+| Persistence | In-memory for one target activation | Writes the file on disk |
+| Scope | The immediate proxy target only | Whatever file the action names |
+| Lifetime | Discarded at the next hop | Permanent until something rewrites it |
+| Visible to | That target's composition, lifecycle, schema, and body | Any later reader of that file |
+
+Reach for `with:` to parameterize the document you are handing to. Reach for `set_frontmatter` when the value must outlive the run.
+
+#### Trust model: prefer schema-declared data properties
+
+For ordinary parameter passing, declare the properties in the target's `$schema` and pass them as data. The schema is what makes the contract visible, validated, and completable:
+
+```yaml
+# prompts/next.md
+$schema:
+  attempt: 'number(required)'
+  label: string
+```
+
+`with:` may nevertheless set **any** top-level key, including control-plane keys — `agent`, `model`, `loop`, `$schema`, `timeout`, MCP, or a lifecycle event block. This is an **advanced, trusted-prompt capability**, and it is deliberate rather than an authority escalation: a source prompt that can `proxy` at all could already select those behaviors itself or run the equivalent lifecycle actions. It is still executable configuration, not inert data — so treat a `with:` that writes control-plane keys the way you would treat handing someone your config file.
+
+The safety properties that hold regardless:
+
+- the target **reparses and revalidates** every structural value the overlay installs — a malformed control-plane overlay fails as the target's own parse error, pre-launch;
+- an invalid overlay fails the target's schema **before any provider launches**;
+- a shell command installed by an overlay is discovered and approved by the *target's* pre-flight, subject to normal target-side policy — approved bytes equal executed bytes; and
+- status output may report that a handoff carries an overlay, and tracing may record property names and counts, but neither prints overlay values.
 
 ### Shell Actions
 
@@ -557,7 +685,7 @@ failure:
 
 `err.category == 'timeout'` matches both kinds; to distinguish them, match `err.code == 'timeout.wall_clock'` or `err.code == 'timeout.step_silence'`.
 
-`resume` is valid only in `failure` and defaults to a single attempt (`max_attempts: 1`). Its string argument binds to the required `message:` parameter.
+`failure` is the natural home for this recovery, but it is not the only legal one: `resume` is valid in **every** event, and needs only a live provider session (pre-launch it surfaces `ResumeWithoutSession`). A `success` stack can resume the agent just as well when the run finished cleanly but left something undone. `resume` defaults to a single attempt (`max_attempts: 1`), and its string argument binds to the required `message:` parameter.
 
 ## Sound Effects
 

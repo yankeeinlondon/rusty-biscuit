@@ -517,8 +517,7 @@ fn finalize_evaluation_error_aborts_without_reentry() {
     assert!(guard.record_event_emission(LifecycleSignal::Failure));
     let eng = engine(fx._dir.path());
     let mut state = prompt_state(&fx.source_path);
-    let mut budgets = ControlBudgets::default();
-    let mut proxy = ProxyTracking::default();
+    let mut active = claudine::composition::ActiveDocumentState::initial();
 
     let action = run_finalize_with_recovery(
         &mut guard,
@@ -529,12 +528,12 @@ fn finalize_evaluation_error_aborts_without_reentry() {
         None,
         std::time::Instant::now(),
         1,
-        &mut budgets,
+        active.iteration_mut(),
         Some("sess-1"),
         resume_capable_profile(),
         Provider::Claude,
         &mut state,
-        &mut proxy,
+        &ledger(&fx.source_path),
         false,
     );
 
@@ -969,3 +968,196 @@ fn blocked_stack_error_routes_to_failure_keeps_blocked_comm_before_failure() {
 }
 
 // -- dispatch_terminal_control runtime-wiring tests --------------------
+
+// -- handoff-failure routing ------------------------------------------------
+//
+// Phase 12 of `features/2026-07-13-proxy-with`, task 4. A refused hand-off
+// leaves the *source* active — `adopt` rejects before it touches document
+// identity — so the source still owes its closure. Every `adopt` call site used
+// to bare-`?` the failure, which had a visible consequence on the terminal
+// routes: `failure` had already fired, so the guard's `Drop` net stayed silent
+// (it only fires when `start_emitted && !terminal_emitted`) and the run exited
+// **without its owed `finalize`**. A `finalize.stack` that releases a lock or
+// posts a status simply never ran, on the path where it mattered most.
+//
+// Event-awareness is not branched on here — it falls out of the guard's
+// emission ledger, which is why these tests drive the real guard rather than a
+// stub of it.
+
+/// The regression. `failure` has fired; a hand-off then fails. The owed
+/// `finalize` must still run, and must see the hand-off's `err`.
+#[test]
+fn a_handoff_failure_after_the_terminal_event_still_runs_the_owed_finalize() {
+    let fx = fixture(serde_json::json!({
+        "finalize": {
+            "stack": [
+                {"when": "err", "action": {"append_line": ["events.log", "finalize-saw-err"]}},
+                {"action": {"append_line": ["events.log", "finalize-ran"]}}
+            ]
+        }
+    }));
+    let emitter = RecordingEmitter::default();
+    let ctx = LifecycleRuntimeContext {
+        settings: &fx.settings,
+        messaging: &fx.messaging,
+        term: &fx.term,
+        source_path: &fx.source_path,
+        repo_root: Some(fx._dir.path()),
+        launch_area: None,
+        context: None,
+    };
+    let mut guard = LifecycleRunGuard::new(&fx.config, &ctx, &emitter);
+    let eng = engine(fx._dir.path());
+
+    // The source ran and failed: `start` and the terminal `failure` are spent.
+    assert!(guard.record_event_emission(LifecycleSignal::Start));
+    guard.mark_provider_launched();
+    assert!(guard.record_event_emission(LifecycleSignal::Failure));
+
+    let report = route_handoff_failure(
+        &mut guard,
+        &fx.materialized,
+        &fx.source_path,
+        Some(fx._dir.path()),
+        &fx.term,
+        &eng,
+        unresolvable_commit_error(&fx.source_path),
+        std::time::Instant::now(),
+    );
+
+    assert!(
+        guard.finalize_emitted(),
+        "the owed `finalize` must fire: the source is still active after a refused \
+         hand-off, and the terminal event having already fired is exactly why the \
+         Drop net cannot cover this"
+    );
+    let lines = std::fs::read_to_string(&fx.log_path).unwrap();
+    assert_eq!(
+        lines.lines().collect::<Vec<_>>(),
+        vec!["finalize-saw-err", "finalize-ran"],
+        "`finalize` runs once and observes the hand-off failure as `err`"
+    );
+    assert_eq!(
+        emitter
+            .events()
+            .into_iter()
+            .filter(|event| matches!(event, Emitted::Stderr(LifecycleSignal::Failure, _)))
+            .count(),
+        0,
+        "the terminal slot was already taken, so no second `failure` is emitted — \
+         no-duplicate-emission comes from the ledger, not from a branch"
+    );
+    assert!(
+        report
+            .downcast_ref::<claudine::composition::ProxyCommitError>()
+            .is_some(),
+        "the hand-off's typed error propagates, not a stringified stand-in"
+    );
+}
+
+/// Before any terminal event the same failure is a pre-launch `blocked`, and
+/// both `blocked` and `finalize` fire. Same helper, opposite ledger state — the
+/// routing reads the guard rather than being told.
+#[test]
+fn a_handoff_failure_before_the_terminal_event_routes_blocked_then_finalize() {
+    let fx = fixture(serde_json::json!({
+        "blocked": {
+            "stack": [{"when": "err", "action": {"append_line": ["events.log", "blocked-ran"]}}]
+        },
+        "finalize": {
+            "stack": [{"action": {"append_line": ["events.log", "finalize-ran"]}}]
+        }
+    }));
+    let emitter = RecordingEmitter::default();
+    let ctx = LifecycleRuntimeContext {
+        settings: &fx.settings,
+        messaging: &fx.messaging,
+        term: &fx.term,
+        source_path: &fx.source_path,
+        repo_root: Some(fx._dir.path()),
+        launch_area: None,
+        context: None,
+    };
+    let mut guard = LifecycleRunGuard::new(&fx.config, &ctx, &emitter);
+    let eng = engine(fx._dir.path());
+
+    // A `start`-stack proxy: started, never launched a provider.
+    assert!(guard.record_event_emission(LifecycleSignal::Start));
+
+    let _ = route_handoff_failure(
+        &mut guard,
+        &fx.materialized,
+        &fx.source_path,
+        Some(fx._dir.path()),
+        &fx.term,
+        &eng,
+        unresolvable_commit_error(&fx.source_path),
+        std::time::Instant::now(),
+    );
+
+    let lines = std::fs::read_to_string(&fx.log_path).unwrap();
+    assert_eq!(
+        lines.lines().collect::<Vec<_>>(),
+        vec!["blocked-ran", "finalize-ran"],
+        "no provider launched, so the failure is `blocked` — and `finalize` follows"
+    );
+    assert_eq!(
+        guard.terminal_signal(),
+        Some(LifecycleSignal::Blocked),
+        "the terminal slot records `blocked`, matching every other pre-launch failure"
+    );
+}
+
+/// Once `finalize` has fired the failure surfaces directly: no lifecycle event
+/// fires at all. This is the third arm of the plan's event-aware rule, and the
+/// one that makes "a failure inside `finalize` never re-enters `finalize`"
+/// true for hand-offs too.
+#[test]
+fn a_handoff_failure_after_finalize_surfaces_without_re_emitting() {
+    let fx = fixture(serde_json::json!({
+        "finalize": {
+            "stack": [{"action": {"append_line": ["events.log", "finalize-ran"]}}]
+        }
+    }));
+    let emitter = RecordingEmitter::default();
+    let ctx = LifecycleRuntimeContext {
+        settings: &fx.settings,
+        messaging: &fx.messaging,
+        term: &fx.term,
+        source_path: &fx.source_path,
+        repo_root: Some(fx._dir.path()),
+        launch_area: None,
+        context: None,
+    };
+    let mut guard = LifecycleRunGuard::new(&fx.config, &ctx, &emitter);
+    let eng = engine(fx._dir.path());
+
+    assert!(guard.record_event_emission(LifecycleSignal::Start));
+    assert!(guard.record_event_emission(LifecycleSignal::Failure));
+    assert!(guard.record_event_emission(LifecycleSignal::Finalize));
+
+    let report = route_handoff_failure(
+        &mut guard,
+        &fx.materialized,
+        &fx.source_path,
+        Some(fx._dir.path()),
+        &fx.term,
+        &eng,
+        unresolvable_commit_error(&fx.source_path),
+        std::time::Instant::now(),
+    );
+
+    assert!(
+        std::fs::read_to_string(&fx.log_path).is_err_and(|e| e.kind()
+            == std::io::ErrorKind::NotFound),
+        "the run's closure is already spent: nothing may fire, so the stack never \
+         writes its line"
+    );
+    assert!(
+        report
+            .downcast_ref::<claudine::composition::ProxyCommitError>()
+            .is_some(),
+        "the failure still surfaces — silently swallowing it would be the other \
+         half of the bug"
+    );
+}

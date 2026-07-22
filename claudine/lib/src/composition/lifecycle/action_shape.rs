@@ -97,6 +97,9 @@ pub(super) fn validate_positional_arity_and_build(
             check_exact_positional_arity(verb, &args, 1, source_file, property_name)?;
             A::Proxy {
                 target: args.into_iter().next().expect("arity checked"),
+                // Positional form stays compact and carries no overlay; an
+                // author who needs `with:` opts into key/value form.
+                with: ProxyWith::default(),
             }
         }
         "retry" => {
@@ -378,6 +381,7 @@ pub(super) fn build_action_from_params(
     verb: &str,
     params: Vec<(String, Expr)>,
     no_error: bool,
+    proxy_with: Option<ProxyWith>,
     source_file: &Path,
 ) -> Result<LifecycleAction, CompositionError> {
     let property = signal.property_name();
@@ -388,7 +392,7 @@ pub(super) fn build_action_from_params(
 
     // Lifecycle control actions.
     if let Some(control) =
-        parse_lifecycle_control_long(verb, &mut params_map, signal, source_file)?
+        parse_lifecycle_control_long(verb, &mut params_map, proxy_with, signal, source_file)?
     {
         reject_extra_params(control.verb(), &params_map, property, source_file)?;
         return Ok(LifecycleAction {
@@ -500,6 +504,7 @@ pub(super) fn build_action_from_params(
 fn parse_lifecycle_control_long(
     verb: &str,
     params: &mut std::collections::HashMap<String, Expr>,
+    proxy_with: Option<ProxyWith>,
     signal: LifecycleSignal,
     source_file: &Path,
 ) -> Result<Option<LifecycleControlAction>, CompositionError> {
@@ -522,6 +527,9 @@ fn parse_lifecycle_control_long(
             target: params.remove("target").ok_or_else(|| {
                 invalid_args("`proxy` requires a `target` parameter".to_string())
             })?,
+            // An omitted `with:` and an authored `with: {}` are the same empty
+            // overlay.
+            with: proxy_with.unwrap_or_default(),
         },
         "retry" => {
             let max_attempts = params.remove("max_attempts");

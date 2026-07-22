@@ -20,7 +20,8 @@ pub(crate) use package_context::{
     resolve_launch_workspace_context, select_package_area_for_cwd, select_package_for_cwd,
 };
 pub(crate) use sanitize::{
-    is_sensitive_key, redact_sensitive_args, sanitize_process_env, validate_include_names,
+    admits_sensitive_key, ambient_sensitive_env, is_sensitive_key, redact_sensitive_args,
+    sanitize_process_env, validate_include_names,
 };
 
 /// Shared startup detection results for the direct wrap path.
@@ -197,6 +198,28 @@ pub(crate) struct EnvPlan {
     pub(crate) perf_substages: Vec<crate::perf::SubstageTiming>,
 }
 
+/// The child-visible interactivity markers one session mode implies.
+///
+/// `INTERACTIVE` is the `"true"`/`"false"` value wrapped providers and
+/// downstream processes read. `CLAUDINE_INTERACTIVE` is a deliberately distinct
+/// `1`/`0` gate in the `CLAUDINE_` correlation namespace that the hook
+/// subprocess (`claudine handle`) reads: the idle (Trigger 2) producer gates on
+/// it, because a non-interactive turn-complete is the agent auto-proceeding
+/// rather than waiting on a human.
+///
+/// Both are a pure function of the mode, and this is the only place that
+/// function lives. The invocation stamps them into its base child environment
+/// from the *opening* mode; a per-attempt rebuild whose refreshed document moved
+/// `interactive:` restates them from here rather than deriving its own pair,
+/// which is what stops a retry shipping refreshed argv alongside a stale
+/// `INTERACTIVE`.
+pub(crate) fn interactivity_env(interactive: bool) -> [(&'static str, &'static str); 2] {
+    [
+        ("INTERACTIVE", if interactive { "true" } else { "false" }),
+        ("CLAUDINE_INTERACTIVE", if interactive { "1" } else { "0" }),
+    ]
+}
+
 #[allow(clippy::too_many_arguments)]
 #[allow(dead_code)] // kept for tests and legacy callers; production paths use `build_child_env_with_launch`
 pub(crate) fn build_child_env(
@@ -289,16 +312,9 @@ pub(crate) fn build_child_env_with_launch(
             "false".to_string()
         },
     );
-    set_added_env(
-        &mut env,
-        &mut added,
-        "INTERACTIVE",
-        if interactive {
-            "true".to_string()
-        } else {
-            "false".to_string()
-        },
-    );
+    for (key, value) in interactivity_env(interactive) {
+        set_added_env(&mut env, &mut added, key, value.to_string());
+    }
     set_added_env(&mut env, &mut added, "AGENT_PARAMS", encoded_agent_params);
     set_added_env(
         &mut env,
@@ -315,18 +331,6 @@ pub(crate) fn build_child_env_with_launch(
         &mut added,
         "CLAUDINE_PID",
         std::process::id().to_string(),
-    );
-    // Advertise interactiveness to the hook subprocess (`claudine
-    // handle`) under the `CLAUDINE_` correlation namespace. The idle
-    // (Trigger 2) producer gates on this: a non-interactive turn-complete
-    // is the agent auto-proceeding, not waiting on a human, so it must not
-    // be flagged. Kept distinct from the child-facing `INTERACTIVE`
-    // ("true"/"false") above — this is a `1`/`0` gate the hook reads.
-    set_added_env(
-        &mut env,
-        &mut added,
-        "CLAUDINE_INTERACTIVE",
-        if interactive { "1" } else { "0" }.to_string(),
     );
 
     for (key, value) in env_overrides {

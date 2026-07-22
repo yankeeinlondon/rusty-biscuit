@@ -22,6 +22,7 @@ pub(crate) mod catalog_drift;
 pub(crate) mod flags;
 pub(crate) mod harness_orch;
 pub(crate) mod inline;
+pub(crate) mod launch_plan;
 pub(crate) mod overlay;
 pub(crate) mod policy;
 pub(crate) mod prompt_source;

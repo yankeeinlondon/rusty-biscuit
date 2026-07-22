@@ -4,7 +4,8 @@
 //! - `claudine inline-compose <file>` — inline composition (replaces body)
 //!
 //! Both commands are thin request builders that delegate to
-//! [`execute_composition_request`] for wrapper-grade execution.
+//! [`crate::commands::wrap::composition::execute_composition_request_inner`]
+//! for wrapper-grade execution.
 
 // `CompositionError` carries variants with several `PathBuf` and other
 // owned fields (e.g. `LoopIterationFailed`, `LoopRateLimited`) so the
@@ -33,7 +34,7 @@ use crate::provider_values::provider_value_parser;
 // that owns no part of the compose run.
 pub(crate) mod interrupt;
 mod loop_run;
-mod prep;
+pub(crate) mod prep;
 mod setters;
 
 pub(crate) use setters::{json_type_name, merge_set_overrides, parse_composition_positionals};
@@ -377,23 +378,42 @@ impl CompositionKind {
         }
     }
 
-    /// Schema-aware prepare function for this command.
-    pub(crate) fn prepare_with_schema(
+    /// Prepare through the canonical document service at an explicit schema
+    /// stage.
+    ///
+    /// The only schema-aware prepare on either execution path. A document whose
+    /// own `initialize` may add or repair a schema property must not be judged
+    /// before that event runs (R4), and the canonical service records the
+    /// deferral on the prepared composition so the harness knows a stabilized
+    /// reread is still owed.
+    ///
+    /// ## Errors
+    ///
+    /// Propagates the composer's typed [`CompositionError`]. A deferred stage
+    /// surfaces every non-schema preparation failure and no schema verdict.
+    pub(crate) fn prepare_staged(
         self,
         source: &ResolvedCompositionSource,
         options: PrepareOptions,
+        entry: claudine::composition::DocumentEntryReason,
+        schema: claudine::composition::SchemaStage,
     ) -> Result<PreparedComposition, CompositionError> {
-        match self {
-            Self::Direct => claudine::composition::prepare_direct_with_schema(source, options),
-            Self::Inline => claudine::composition::prepare_inline_with_schema(source, options),
-        }
+        claudine::composition::prepare_document(claudine::composition::DocumentPreparation {
+            entry,
+            mode: self.mode(),
+            source,
+            prompt_source: claudine::composition::PromptSource::ComposedBody,
+            schema,
+            options,
+        })
     }
 
     /// Schema-agnostic prepare function for this command.
     ///
-    /// Used on loop iterations after the first, where the seed pass has
-    /// already validated the frontmatter against `$schema` and we only need
-    /// to re-compose with the current override state.
+    /// Used on loop iterations after the first, where the verdict has already
+    /// been reached — by iteration 1 itself, or by the harness's stabilized
+    /// reread when iteration 1 deferred — and we only need to re-compose with
+    /// the current override state.
     pub(crate) fn prepare_without_schema(
         self,
         source: &ResolvedCompositionSource,

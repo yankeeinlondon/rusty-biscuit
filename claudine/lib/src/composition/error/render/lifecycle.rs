@@ -344,6 +344,261 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                     "Pass object data through a whole-value `{{ ... }}` interpolation.",
                 )
         }
+        CompositionError::LifecycleProxyWithNotMapping {
+            source_path,
+            property,
+            path,
+            actual,
+        } => {
+            let file_link = render_file_link(source_path);
+            let body = format!(
+                "Lifecycle action <cyan>`proxy`</cyan> field <cyan>`{property}.{path}`</cyan> in \
+                 {file_link} is a {actual}; <cyan>`with`</cyan> must be a mapping of target \
+                 frontmatter properties."
+            );
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("CompositionError", "`with` must be a mapping"))
+                .body(body)
+                .hint(
+                    "Author `with:` as a mapping of static keys, or omit it. `with: {}` is \
+                     equivalent to omitting it.",
+                )
+        }
+        CompositionError::LifecycleProxyWithWholeMapping {
+            source_path,
+            property,
+            path,
+            raw,
+        } => {
+            let file_link = render_file_link(source_path);
+            let body = format!(
+                "Lifecycle action <cyan>`proxy`</cyan> field <cyan>`{property}.{path}`</cyan> in \
+                 {file_link} was supplied as the whole-mapping interpolation <cyan>`{}`</cyan>.\
+                 \n\nSupplying the entire mapping from one expression is not supported in this \
+                 version and is a named follow-up. Author the keys explicitly; each value may \
+                 still be a whole-value interpolation carrying an object or array.",
+                escape_prose_path(raw)
+            );
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "CompositionError",
+                    "whole-mapping `with` is not supported",
+                ))
+                .body(body)
+                .hint(
+                    "Write `with:` with explicit keys, e.g. `with: { spec: \"{{ spec }}\" }`.",
+                )
+        }
+        CompositionError::LifecycleProxyWithDynamicKey {
+            source_path,
+            property,
+            path,
+            key,
+        } => {
+            let file_link = render_file_link(source_path);
+            let body = format!(
+                "Lifecycle action <cyan>`proxy`</cyan> field <cyan>`{property}.{path}`</cyan> in \
+                 {file_link} has the dynamic key <cyan>`{}`</cyan>.\n\n\
+                 <cyan>`with`</cyan> keys name top-level frontmatter properties of the target \
+                 and are never interpolated. Only values resolve.",
+                escape_prose_path(key)
+            );
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "CompositionError",
+                    "`with` keys must be static",
+                ))
+                .body(body)
+                .hint("Use a literal key and move the expression into its value.")
+        }
+        CompositionError::LifecycleProxyWithEvaluationFailed {
+            source_path,
+            property,
+            path,
+            target,
+            message,
+        } => {
+            let file_link = render_file_link(source_path);
+            let body = format!(
+                "Lifecycle action <cyan>`proxy`</cyan> to <cyan>`{}`</cyan> in {file_link} could \
+                 not resolve <cyan>`{property}.{path}`</cyan>.\n\n{message}\n\n\
+                 The whole <cyan>`with`</cyan> mapping resolves at the source before the handoff, \
+                 so nothing was passed to the target and the source is still active.",
+                escape_prose_path(target)
+            );
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "CompositionError",
+                    "`with` value could not be resolved",
+                ))
+                .body(body)
+                .hint(
+                    "`with:` values resolve against the source document — its live frontmatter, \
+                     `ctx.*`/`env.*`, and the globals valid for this event.",
+                )
+        }
+        CompositionError::LifecycleProxyOnlyParameter {
+            source_path,
+            property,
+            verb,
+            param,
+        } => {
+            let file_link = render_file_link(source_path);
+            let body = format!(
+                "Lifecycle action <cyan>`{verb}`</cyan> in <cyan>`{property}`</cyan> in \
+                 {file_link} received a <cyan>`{param}`</cyan> parameter, which only \
+                 <cyan>`proxy`</cyan> accepts."
+            );
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "CompositionError",
+                    "parameter is proxy-only",
+                ))
+                .body(body)
+                .hint(
+                    "Remove the parameter, or use `{ action: proxy, target: ..., with: { ... } }`.",
+                )
+        }
+        CompositionError::LifecycleTransitionUnownedAtStage {
+            source_path,
+            property,
+            verb,
+            stage,
+            reason,
+        } => {
+            let file_link = render_file_link(source_path);
+            let body = format!(
+                "Lifecycle action <cyan>`{verb}`</cyan> in <cyan>`{property}`</cyan> in \
+                 {file_link} ran at <cyan>`{stage}`</cyan>, which cannot act on \
+                 it.\n\n{reason}"
+            );
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "CompositionError",
+                    "transition has no owner at this stage",
+                ))
+                .body(body)
+                .hint(
+                    "`retry`, `resume`, and `defer` act on a provider attempt, so they \
+                     need one to have run. Use `proxy`, `skip`, or `error` for a \
+                     decision made before the provider launches.",
+                )
+        }
+        CompositionError::LifecycleProxyWithoutOwningCoordinator {
+            source_path,
+            property,
+            target,
+            command,
+        } => {
+            let file_link = render_file_link(source_path);
+            let body = format!(
+                "A lifecycle <cyan>`proxy`</cyan> in <cyan>`{property}`</cyan> in \
+                 {file_link} hands off to <cyan>`{}`</cyan>, but <cyan>`{command}`</cyan> \
+                 runs a provider memory file with a prompt supplied on the command \
+                 line — it prepares no active document, so it owns no coordinator that \
+                 can bring the target up.\n\nRunning the target from here would launch \
+                 it with this invocation's own profile, argv, and MCP servers instead \
+                 of the ones the target's own frontmatter selects, so the hand-off is \
+                 refused rather than run against the wrong launch configuration.",
+                escape_prose_path(target)
+            );
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "CompositionError",
+                    "proxy has no owning coordinator",
+                ))
+                .body(body)
+                .hint(
+                    "Run the target through a composition command, which does own a \
+                     coordinator: `claudine compose <target>` (or `inline-compose` / a \
+                     `sequence` step). To keep using the provider wrapper, remove the \
+                     `proxy` from the memory file's lifecycle.",
+                )
+        }
+        CompositionError::LifecycleProxyCycle {
+            source_path,
+            target,
+            chain,
+            limit,
+        } => {
+            let file_link = render_file_link(source_path);
+            let rendered_chain = chain
+                .iter()
+                .map(|hop| format!("<cyan>`{}`</cyan>", escape_prose_path(hop)))
+                .collect::<Vec<_>>()
+                .join(" → ");
+            let body = format!(
+                "A lifecycle <cyan>`proxy`</cyan> in {file_link} hands off to \
+                 <cyan>`{}`</cyan>, which would re-enter a document already on the \
+                 active chain or exceed the hop limit of {limit}.\n\nActive chain: \
+                 {rendered_chain}",
+                escape_prose_path(target)
+            );
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "CompositionError",
+                    "proxy chain forms a cycle",
+                ))
+                .body(body)
+                .hint(
+                    "A document already on the chain cannot be handed off to again — an \
+                     overlay does not make it a distinct target. Give the chain a terminal \
+                     document, or guard the `proxy` with a `when:` condition that stops it.",
+                )
+        }
+        CompositionError::LifecycleResumeIncompatible {
+            source_path,
+            facets,
+        } => {
+            let file_link = render_file_link(source_path);
+            let rendered_facets = facets
+                .iter()
+                .map(|facet| format!("<cyan>`{facet}`</cyan>"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let body = format!(
+                "A lifecycle <cyan>`resume`</cyan> in {file_link} kept a live provider \
+                 session, but a canonical refresh changed launch propert{plural} the \
+                 provider fixed when the session opened: {rendered_facets}.\n\nResuming \
+                 would mix the live session with a different launch plan.",
+                plural = if facets.len() == 1 { "y" } else { "ies" },
+            );
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "CompositionError",
+                    "resume incompatible after refresh",
+                ))
+                .body(body)
+                .hint(
+                    "A session cannot be resumed under launch settings it was not opened \
+                     with. Use `retry` to start a fresh session with the new plan, or keep \
+                     the changed propert(ies) stable across the resume.",
+                )
+        }
+        CompositionError::LifecycleProxyTargetBootstrapFailed {
+            target_path,
+            source_path,
+            property,
+            reason,
+        } => {
+            let source_link = render_file_link(source_path);
+            let target_link = render_file_link(target_path);
+            let body = format!(
+                "The lifecycle <cyan>`proxy`</cyan> at <cyan>`{property}`</cyan> in \
+                 {source_link} handed off to {target_link}, which could not be \
+                 prepared.\n\n{reason}"
+            );
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "CompositionError",
+                    "proxy target could not be prepared",
+                ))
+                .body(body)
+                .hint(
+                    "The hand-off was committed but the target never started — no part of \
+                     it ran. Check that the target composes on its own before proxying to it.",
+                )
+        }
         CompositionError::LifecycleWrongArity {
             source_path,
             property,

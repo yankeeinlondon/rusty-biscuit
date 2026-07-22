@@ -81,6 +81,16 @@ edges exist to serve.
   `claudine-cli` shells out to the `claudine-gen` binary for
   `claudine providers generate`.
 
+## Content Hashing
+
+- `claudine-cli` depends on `biscuit-hash` (`xx_hash` feature only) for the
+  resume session-compatibility key's content digests (system-prompt content and
+  MCP config env). This is the repository's non-crypto hashing authority and the
+  same hasher the `claudine` library uses for MCP catalog IDs
+  (`biscuit_hash::xx_hash`), so digests are comparable across the two crates. It
+  replaced an ad-hoc `std::collections::hash_map::DefaultHasher`, whose output is
+  not a stable, cross-crate authority.
+
 ## Multi-Target Render Components
 
 - `claudine` (library) depends on `renderable` (`../../renderable`) directly, in

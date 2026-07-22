@@ -130,11 +130,42 @@ fn materialized(frontmatter: serde_json::Value) -> MaterializedHarnessPrompt {
         frontmatter,
         prompt: String::new(),
         env_overrides: Vec::new(),
+        selection_hints: claudine::composition::EffectiveSelectionHints::default(),
         inline_closure_plan: None,
         file_resolution_context: None,
         live_frontmatter,
         runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
+        lifecycle: None,
+        mcp_body_tags: Vec::new(),
     }
+}
+
+/// A real [`ProxyCommitError::Resolution`] for a target that does not exist.
+///
+/// Built by driving `commit_proxy` rather than by constructing the variant, so
+/// the authoring-context wrapper and its resolver cause are the ones production
+/// exposes through rendering and `err.*`.
+fn unresolvable_commit_error(source_path: &Path) -> claudine::composition::ProxyCommitError {
+    let mut ledger = claudine::composition::RunLedger::new(
+        source_path.to_path_buf(),
+        claudine::composition::SharedApprovalCache::default(),
+    );
+    let request = claudine::composition::EvaluatedProxyRequest::new(
+        source_path
+            .parent()
+            .expect("the fixture source lives in a directory")
+            .join("no-such-target.md")
+            .display()
+            .to_string(),
+        indexmap::IndexMap::new(),
+        claudine::composition::ProxyProvenance::new(
+            source_path.to_path_buf(),
+            claudine::composition::ActionLocation::new(LifecycleSignal::Failure, 0, 0),
+            vec![source_path.to_path_buf()],
+        ),
+    );
+    claudine::composition::commit_proxy(&mut ledger, request, source_path.parent())
+        .expect_err("a target that does not exist cannot be committed")
 }
 
 /// Number of lines a stack's `append_line` side effect wrote — i.e. the
@@ -200,12 +231,11 @@ fn prompt_state(source: &Path) -> HarnessPromptState {
         base_prompt: None,
         overlay: indexmap::IndexMap::new(),
         prompt_tail: Vec::new(),
-        next_prompt_override: None,
-        next_resume_session_id: None,
-        rematerialize: Default::default(),
         runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
         suppress_output_commit: false,
         last_final_output: None,
+        input_layers: Default::default(),
+        entry: claudine::composition::DocumentEntryReason::Direct,
     }
 }
 
@@ -222,6 +252,19 @@ fn outcome_with(control: StackControl) -> LifecycleEventOutcome {
     }
 }
 
+/// A run ledger seeded at `origin`, for dispatches that read the chain.
+///
+/// A default approval cache is correct here: these tests exercise transition
+/// decisions, and no dispatch path reads the cache.
+fn ledger(origin: &Path) -> claudine::composition::RunLedger {
+    claudine::composition::RunLedger::new(origin.to_path_buf(), Default::default())
+}
+
+/// A coordinator whose run originates at `origin`.
+fn coordinator(origin: &Path) -> ActiveDocumentCoordinator {
+    ActiveDocumentCoordinator::new(origin.to_path_buf(), Default::default())
+}
+
 fn dispatch_guard<'a>(
     config: &'a LifecycleConfig,
     ctx: &'a LifecycleRuntimeContext<'a>,
@@ -231,9 +274,16 @@ fn dispatch_guard<'a>(
 }
 
 
+mod active_state_wiring;
+mod budget_scoping;
+mod coordinator_adoption;
 mod lifecycle_ordering;
+mod overlay_layering;
 mod proxy;
+mod recovery_identity;
 mod requeue;
 mod retry_resume;
+mod shell_approval;
 mod terminal_evaluation;
 mod terminal_routing;
+mod unowned_handoff;

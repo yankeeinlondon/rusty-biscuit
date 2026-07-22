@@ -1,37 +1,18 @@
-//! proxy harness-loop tests.
+//! What a provider attempt may and may not do with a `proxy` control.
+//!
+//! The dispatch's whole job here is to *ask*. Everything about committing the
+//! hand-off — resolving the target, deciding the hop, changing the active
+//! document — is asserted in [`super::coordinator_adoption`], because that is
+//! where it now lives.
 
 use super::*;
 
-fn assert_proxy_detail(
-    report: &color_eyre::eyre::Report,
-    expected_event: &str,
-    expected_property: &str,
-) {
-    let err = claudine::composition::LifecycleErrorInfo::from_error_or_action(
-        "proxy",
-        report.as_ref(),
-    )
-    .to_value();
-    assert_eq!(
-        err["code"],
-        serde_json::json!("composition.invalid_file_reference")
-    );
-    assert_eq!(
-        err["detail"]["event"],
-        serde_json::json!(expected_event),
-        "the structured event must not be inferred from the property: {}",
-        err["detail"]
-    );
-    assert_eq!(
-        err["detail"]["property"],
-        serde_json::json!(expected_property),
-        "the structured property must identify the authored proxy value: {}",
-        err["detail"]
-    );
-}
-
+/// The regression this phase closes: the dispatch used to resolve the target,
+/// push the chain, mutate `source_path`/`original_ref`, and reset the guard,
+/// all from inside a provider attempt. It must now return a request and touch
+/// nothing.
 #[test]
-fn dispatch_proxy_swaps_source_and_resets_guard_for_fresh_run() {
+fn dispatch_proxy_requests_a_handoff_without_touching_active_document() {
     let fx = fixture(serde_json::json!({}));
     let target = fx._dir.path().join("target.md");
     std::fs::write(&target, "---\n---\nbody\n").unwrap();
@@ -49,77 +30,78 @@ fn dispatch_proxy_swaps_source_and_resets_guard_for_fresh_run() {
     guard.mark_provider_launched();
     assert!(guard.record_event_emission(LifecycleSignal::Failure));
     let mut state = prompt_state(&fx.source_path);
-    let mut budgets = ControlBudgets::default();
-    // Use an absolute target so resolution is unambiguous.
+    let mut active = claudine::composition::ActiveDocumentState::initial();
+    let mut overlay = indexmap::IndexMap::new();
+    overlay.insert("phase".to_string(), serde_json::json!(2));
     let outcome = outcome_with(StackControl::Proxy {
         target: target.display().to_string(),
+        overlay,
+        location: claudine::composition::ActionLocation::new(LifecycleSignal::Failure, 0, 1),
     });
     let action = dispatch_terminal_control(
         &outcome,
         3,
-        &mut budgets,
+        active.iteration_mut(),
         None,
         resume_capable_profile(),
         Provider::Goose,
         &mut state,
         &fx.materialized,
-        Some(fx._dir.path()),
         &mut guard,
-        &mut ProxyTracking::default(),
+        &ledger(&fx.source_path),
         &fx.term,
         false,
     );
-    // Proxy re-enters at attempt 1 for a fresh run.
-    assert!(matches!(
-        action,
-        TerminalControlAction::Continue { next_attempt: 1 }
-    ));
-    assert_eq!(state.source_path, target);
-    // The guard was fully reset (initialize will fire again).
-    assert!(!guard.initialize_emitted());
-    assert_eq!(guard.terminal_signal(), None);
-}
 
-#[test]
-fn target_initialize_proxy_failure_projects_event_and_property_separately() {
-    let fx = fixture(serde_json::json!({
-        "initialize": {
-            "stack": [{"action": {"proxy": "missing-target.md"}}]
-        }
-    }));
-    let emitter = RecordingEmitter::default();
-    let ctx = LifecycleRuntimeContext {
-        settings: &fx.settings,
-        messaging: &fx.messaging,
-        term: &fx.term,
-        source_path: &fx.source_path,
-        repo_root: Some(fx._dir.path()),
-        launch_area: None,
-        context: None,
+    let TerminalControlAction::Proxy(request) = action else {
+        panic!("a proxy control must produce a request, got {action:?}");
     };
-    let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
-    let effect_engine = engine(fx._dir.path());
-
-    let action = run_target_initialize(
-        &mut guard,
-        &fx.materialized,
-        &fx.source_path,
-        Some(fx._dir.path()),
-        &fx.term,
-        &effect_engine,
-        None,
-        std::time::Instant::now(),
+    assert_eq!(request.target(), target.display().to_string());
+    assert_eq!(
+        request.overlay().get("phase"),
+        Some(&serde_json::json!(2)),
+        "the evaluated overlay rides on the request"
+    );
+    assert_eq!(
+        request.provenance().source_path(),
+        fx.source_path,
+        "provenance attributes the hop to the document that authored it"
+    );
+    assert_eq!(
+        request.provenance().location().to_string(),
+        "failure.stack[0].action[1]",
+        "provenance names the exact property that requested the hop"
+    );
+    assert_eq!(
+        request.provenance().chain(),
+        std::slice::from_ref(&fx.source_path),
+        "provenance carries the ledger's chain, not a fabricated one"
     );
 
-    let TargetInitializeAction::Abort(report) = action else {
-        panic!("expected the missing initialize proxy target to abort, got {action:?}");
-    };
-    assert_proxy_detail(&report, "initialize", "initialize.stack[*].proxy");
+    // The attempt harness may not commit identity. Nothing moved.
+    assert_eq!(
+        state.source_path, fx.source_path,
+        "the dispatch must not swap the active document"
+    );
+    assert_eq!(
+        state.entry,
+        claudine::composition::DocumentEntryReason::Direct
+    );
+    assert!(
+        guard.initialize_emitted() || guard.terminal_signal().is_some(),
+        "the dispatch must not reset the guard for an uncommitted hand-off"
+    );
 }
 
+/// A `proxy` to a nonexistent document is not the dispatch's problem to
+/// detect: it has no filesystem authority. The request is well-formed and the
+/// coordinator rejects it — see
+/// [`super::coordinator_adoption::adopt_rejects_a_missing_target_without_activating_it`].
 #[test]
-fn terminal_proxy_failure_projects_event_and_property_separately() {
+fn dispatch_proxy_to_missing_target_still_only_requests() {
     let fx = fixture(serde_json::json!({}));
+    let missing = fx._dir.path().join("missing.md");
+    assert!(!missing.exists(), "the fixture target must not exist");
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
         settings: &fx.settings,
@@ -134,29 +116,33 @@ fn terminal_proxy_failure_projects_event_and_property_separately() {
     guard.mark_provider_launched();
     assert!(guard.record_event_emission(LifecycleSignal::Failure));
     let mut state = prompt_state(&fx.source_path);
-    let mut budgets = ControlBudgets::default();
+    let mut active = claudine::composition::ActiveDocumentState::initial();
     let outcome = outcome_with(StackControl::Proxy {
-        target: "missing-target.md".to_string(),
+        target: missing.display().to_string(),
+        overlay: indexmap::IndexMap::new(),
+        location: claudine::composition::ActionLocation::new(LifecycleSignal::Failure, 0, 0),
     });
-
     let action = dispatch_terminal_control(
         &outcome,
-        1,
-        &mut budgets,
+        3,
+        active.iteration_mut(),
         None,
         resume_capable_profile(),
-        Provider::Claude,
+        Provider::Goose,
         &mut state,
         &fx.materialized,
-        Some(fx._dir.path()),
         &mut guard,
-        &mut ProxyTracking::default(),
+        &ledger(&fx.source_path),
         &fx.term,
         false,
     );
 
-    let TerminalControlAction::Abort(report) = action else {
-        panic!("expected the missing terminal proxy target to abort, got {action:?}");
-    };
-    assert_proxy_detail(&report, "failure", "failure.stack[*].proxy");
+    assert!(
+        matches!(action, TerminalControlAction::Proxy(_)),
+        "resolution is the coordinator's call, not the dispatch's; got {action:?}"
+    );
+    assert_eq!(
+        state.source_path, fx.source_path,
+        "the source document stays active until a hop is committed"
+    );
 }

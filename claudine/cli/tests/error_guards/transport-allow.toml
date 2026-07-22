@@ -61,6 +61,14 @@
 
 [[allow]]
 shape = "error_text_field"
+file = "lib/src/composition/lifecycle/actions.rs"
+symbol = "type_with_value"
+tag = "retained"
+reason = """
+`action_value_to_expr` has a deliberately string-valued parse contract: its `Err(String)` is already unstructured at the source and no typed error exists at this boundary to retain. `type_with_value` carries that parser-owned explanation into the public action-validation error while preserving the action kind and source value separately."""
+
+[[allow]]
+shape = "error_text_field"
 file = "lib/src/harness/audit.rs"
 symbol = "audit_shell_commands"
 tag = "retained"

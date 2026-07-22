@@ -312,3 +312,57 @@ fn seeded_loop_doc_namespace_condition_retains_readonly_control_value() {
     }
 }
 
+
+/// R4 reaches the loop route through the seed compose.
+///
+/// The seed pass runs *before* the engine emits `initialize`, so it is one of
+/// the reads that must withhold the verdict when the caller selected the
+/// deferred stage. While the CLI hard-coded `defer_schema_verdict: false` for
+/// the loop route, a document whose own `initialize` supplies a required
+/// property was rejected here — before the event that would have supplied it —
+/// even though the identical document without `loop:` ran to completion.
+#[test]
+fn loop_seed_read_honors_the_deferred_schema_verdict() {
+    let source = make_source(&[
+        ("$schema", json!({"count": "number(required)"})),
+        ("phase", json!(1)),
+        (
+            "initialize",
+            json!({"stack": [{"action": {"set_frontmatter": ["loop.md", "count", 7]}}]}),
+        ),
+        (
+            "loop",
+            json!({"until": "phase > 2", "action": "increment(phase)"}),
+        ),
+    ]);
+    let config = resolve_loop_config(&source).unwrap().unwrap();
+
+    let judged = build_loop_seed_with_lifecycle(
+        &source,
+        &config,
+        PrepareOptions::default(),
+        CompositionMode::ChainedDocument,
+    );
+    assert!(
+        judged.is_err(),
+        "the undeferred seed read owns the verdict, so an unauthored required \
+         property must fail here — otherwise this row cannot tell the two \
+         stages apart"
+    );
+
+    let deferred = build_loop_seed_with_lifecycle(
+        &source,
+        &config,
+        PrepareOptions {
+            defer_schema_verdict: true,
+            ..PrepareOptions::default()
+        },
+        CompositionMode::ChainedDocument,
+    );
+    assert!(
+        deferred.is_ok(),
+        "a deferred seed read must not judge the document: `initialize` has not \
+         run yet and is what supplies `count`; got {:?}",
+        deferred.err()
+    );
+}

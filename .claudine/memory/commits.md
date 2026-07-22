@@ -55,8 +55,31 @@ do not belong here.
   compose cleanly with a retry loop inside a single shell invocation, while a
   prewritten file lets the loop reuse the same body verbatim. A bare
   `git commit -- <paths> <<EOF` can open the configured editor and block.
+  checked temp file for long bodies. A bare `git commit -- <paths> <<EOF` can
+  open the configured editor and block.
+- `--` between `-F -` and the pathspec list is mandatory, even with `--only`.
+  Without it, git parses the first path as a subcommand (e.g. `git commit
+  --only -F - claudine/lib/...` tries to invoke `git-claudine`) and may also
+  re-enter the working directory as a relative path, triggering a permission
+  denied error. Always: `git commit --only -F - -- path1 path2 … <<'MSG' …`.
 - Do not place messages containing backticks, dollar signs, or other shell
   metacharacters in a double-quoted `-m` argument.
+
+## Credential and Signing Blockers
+
+- The system prompt warns against running `gpg` / `ssh-add` / credential
+  helpers directly. The same hang hazard applies when parent config already
+  enables signing — `commit.gpgsign=true` (set globally or per-repo) makes
+  every `git commit` silently invoke `gpg-agent` and block on `/dev/tty`
+  for the passphrase, even though the sub-agent did not opt in. Pre-flight
+  with `git config --get commit.gpgsign` and `git config --show-origin
+  --get commit.gpgsign`; if truthy, override per invocation:
+  `git -c commit.gpgsign=false commit --only -F - -- <paths>`. Do not
+  `git config --unset` or otherwise rewrite repo config from a sub-agent.
+- Always export `GIT_TERMINAL_PROMPT=0` before any git invocation in a
+  non-interactive session, even when no prompt is expected. Cheap insurance
+  against credential helpers opening `/dev/tty` for HTTP proxies, push
+  remotes, etc.
 
 ## Mixed-State Paths
 

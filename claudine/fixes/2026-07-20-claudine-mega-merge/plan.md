@@ -1,7 +1,7 @@
 ---
 total_phases: 6
 created: 2026-07-21
-phase: 2
+phase: 3
 agent: "opencode/zai-coding-plan/glm-5.2"
 yolo: "false"
 reviewed: true
@@ -92,16 +92,45 @@ skills_files_updated_during_phase_2:
   - .claude/skills/claudine/cli-reference.md
   - .claude/skills/claudine/error-architecture.md
   - .claude/skills/claudine/timeline.md
+source_files_during_phase_3:
+  - .config/nextest.toml
+  - .github/workflows/claudine-tests.yml
+  - claudine/cli/Cargo.toml
+  - claudine/cli/src/**/*.rs
+  - claudine/cli/tests/**/*.rs
+  - claudine/docs/providers/dispatch-inventory.json
+  - claudine/gen/tests/drift.rs
+  - claudine/lib/src/**/*.rs
+  - claudine/lib/tests/boundary_lint.rs
+  - darkmatter/lib/src/markdown/compose/context/options.rs
+  - darkmatter/lib/src/markdown/compose/schema_validation.rs
+docs_updated_during_phase_3:
+  - .claudine/memory/commits.md
+  - CLAUDE.md
+  - claudine/docs/dependencies.md
+  - claudine/docs/topics/composition.md
+  - claudine/docs/topics/lifecycle.md
+  - claudine/features/2026-07-13-proxy-with/plan.md
+  - claudine/features/2026-07-13-proxy-with/spec.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/acceptance-ledger.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/conflict-checklist.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact-review.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/plan.md
+docs_created_during_phase_3:
+  - claudine/features/2026-07-13-proxy-with/notes/**/*.md
+  - claudine/features/2026-07-13-proxy-with/review-*.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/proxy-merge-detect.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/phase3-audit.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/phase3-gates.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/phase3-test-map.md
+skills_files_updated_during_phase_3:
+  - .claude/skills/claudine/SKILL.md
+  - .claude/skills/claudine/architecture.md
 packages:
-  - biscuit-file
-  - biscuit-file-cli
-  - biscuit-test-harness
   - claudine
   - claudine-cli
-  - claudine-contract
   - claudine-gen
   - darkmatter
-  - rendezvous-daemon
 ---
 
 # Claudine Mega-Merge Execution Plan
@@ -242,52 +271,52 @@ Spec mapping: spec Phase 2. Goal: one preparation service, one transition path, 
 
 ### Tasks
 
-- [ ] Re-read impact reports for proxy-side symbols (coordinator, lifecycle executor, loop engine, launch plan, overlay, sequence runner). For a symbol that exists only on `proxy-with`, use the report generated from that exact feature tip; for a shared symbol, review both feature-tip reports. Clear every HIGH/CRITICAL item in `impact-review.md` before editing.
-- [ ] Start the merge with ancestry preserved and without committing: `git merge --no-ff --no-commit e348486c`.
+- [x] Re-read impact reports for proxy-side symbols (coordinator, lifecycle executor, loop engine, launch plan, overlay, sequence runner). For a symbol that exists only on `proxy-with`, use the report generated from that exact feature tip; for a shared symbol, review both feature-tip reports. Clear every HIGH/CRITICAL item in `impact-review.md` before editing.
+- [ ] Start the merge with ancestry preserved and without committing: `git merge --no-ff --no-commit e348486c`. (Blocked by the explicit no-stage/no-commit instruction: candidate tree `4403f57bea49fc3b8e31e1767359d717295325fa` was materialized and resolved without changing the index; see `phase3-audit.md`.)
 
 ### Conflict clusters (resolve in this order)
 
-- [ ] **Cluster 1 — Shared types, diagnostic shapes, transition errors.** Files: `composition/error/{mod,render/mod,tests}`, shared `types`. Owner per responsibility map: Claudine library lifecycle protocol + diagnostic registry. Resolve as state-machine behavior, not line-by-line text.
-- [ ] **Cluster 2 — Darkmatter options and schema-stage contract.** Files: `darkmatter/lib/src/markdown/compose/context/options.rs` plus auto-merged schema validation, transclusion, reference graph, expression, schema-resolution surfaces (I9). Preserve deferred schema verdict (initialize may coerce; authoritative verdict after stabilized reread).
-- [ ] **Cluster 3 — Canonical preparation and request/file-resolution context.** Files: `compose/prep.rs`, `wrap/composition/{mod,pipeline,runner}.rs`, `wrapper_stages.rs`, `composition/{mod,preflight,prepare,types}.rs` (I3, I4). One preparation service carrying `FileResolutionContext`. No reduced proxy composer or sequence-only materializer outside it.
-- [ ] **Cluster 4 — Coordinator, lifecycle protocol, loop engine, transition ownership.** Files: `composition/lifecycle/{context,executor}`, `composition/looping/engine`, new `composition::coordinator`, preparation-stage, diagnostic registry, restored-diagnostic modules (I5). Coordinator is the sole owner allowed to resolve, prepare, validate, and commit a handoff. Failed handoffs must not partially activate, lose the triggering event, synthesize source completion, or emit closure twice.
-- [ ] **Cluster 5 — CLI preparation, launch bundle, harness orchestration, retry/resume.** Files: `wrap/harness_orch/{loop_control,loop_control/control_dispatch,loop_control/proxy,prompt,types}.rs`, `overlay.rs`, launch adapters, environment sanitation, attempt classification, wrapper entry points, system-prompt lifetime, session reporting, new launch-plan modules (I7). The complete launch bundle is the sole source of both the compatibility key and spawn inputs. Retry/resume retain and refresh only documented facets and budgets.
-- [ ] **Cluster 6 — Sequence Plus containment and task/group integration.** Files: `wrap/sequence/{iterate,mod,phase1c}.rs`, requeue/proxy tests, Sequence Plus task/group and task-stream modules (I6). A proxy selected inside a sequence step transfers active-document ownership without restarting, duplicating, or advancing the containing step. Sequence retains step/task/output ownership; adopted target owns document context, loop, lifecycle, launch, closure.
-- [ ] **Cluster 7 — Terminal rendering, task framing, error emission.** Files: renderers, task-stream framing, any ad-hoc emission boundaries (I10). Exactly-once terminal behavior. `NO_COLOR`, non-TTY, Unicode fallback, OSC 8, concurrent attribution, idle flush, and close behavior remain informationally equivalent.
-- [ ] **Cluster 8 — Tests, generated inventories, skills, docs, CI, repository guards.** Files: `dispatch-inventory.json`, `gen/tests/drift.rs`, `docs/topics/composition.md`, `.claude/skills/claudine/{SKILL,architecture}.md`, `.claudine/memory/commits.md`, `CLAUDE.md`, nextest profiles, `claudine-tests.yml`, guard scripts, shared `just` support. (Detailed reconciliation of generated/docs happens in Phase 4; here the goal is "no markers, no broken build, no stale guard.")
+- [x] **Cluster 1 — Shared types, diagnostic shapes, transition errors.** Files: `composition/error/{mod,render/mod,tests}`, shared `types`. Owner per responsibility map: Claudine library lifecycle protocol + diagnostic registry. Resolve as state-machine behavior, not line-by-line text.
+- [x] **Cluster 2 — Darkmatter options and schema-stage contract.** Files: `darkmatter/lib/src/markdown/compose/context/options.rs` plus auto-merged schema validation, transclusion, reference graph, expression, schema-resolution surfaces (I9). Preserve deferred schema verdict (initialize may coerce; authoritative verdict after stabilized reread).
+- [x] **Cluster 3 — Canonical preparation and request/file-resolution context.** Files: `compose/prep.rs`, `wrap/composition/{mod,pipeline,runner}.rs`, `wrapper_stages.rs`, `composition/{mod,preflight,prepare,types}.rs` (I3, I4). One preparation service carrying `FileResolutionContext`. No reduced proxy composer or sequence-only materializer outside it.
+- [x] **Cluster 4 — Coordinator, lifecycle protocol, loop engine, transition ownership.** Files: `composition/lifecycle/{context,executor}`, `composition/looping/engine`, new `composition::coordinator`, preparation-stage, diagnostic registry, restored-diagnostic modules (I5). Coordinator is the sole owner allowed to resolve, prepare, validate, and commit a handoff. Failed handoffs must not partially activate, lose the triggering event, synthesize source completion, or emit closure twice.
+- [x] **Cluster 5 — CLI preparation, launch bundle, harness orchestration, retry/resume.** Files: `wrap/harness_orch/{loop_control,loop_control/control_dispatch,loop_control/proxy,prompt,types}.rs`, `overlay.rs`, launch adapters, environment sanitation, attempt classification, wrapper entry points, system-prompt lifetime, session reporting, new launch-plan modules (I7). The complete launch bundle is the sole source of both the compatibility key and spawn inputs. Retry/resume retain and refresh only documented facets and budgets.
+- [x] **Cluster 6 — Sequence Plus containment and task/group integration.** Files: `wrap/sequence/{iterate,mod,phase1c}.rs`, requeue/proxy tests, Sequence Plus task/group and task-stream modules (I6). A proxy selected inside a sequence step transfers active-document ownership without restarting, duplicating, or advancing the containing step. Sequence retains step/task/output ownership; adopted target owns document context, loop, lifecycle, launch, closure.
+- [x] **Cluster 7 — Terminal rendering, task framing, error emission.** Files: renderers, task-stream framing, any ad-hoc emission boundaries (I10). Exactly-once terminal behavior. `NO_COLOR`, non-TTY, Unicode fallback, OSC 8, concurrent attribution, idle flush, and close behavior remain informationally equivalent.
+- [x] **Cluster 8 — Tests, generated inventories, skills, docs, CI, repository guards.** Files: `dispatch-inventory.json`, `gen/tests/drift.rs`, `docs/topics/composition.md`, `.claude/skills/claudine/{SKILL,architecture}.md`, `.claudine/memory/commits.md`, `CLAUDE.md`, nextest profiles, `claudine-tests.yml`, guard scripts, shared `just` support. (Detailed reconciliation of generated/docs happens in Phase 4; here the goal is "no markers, no broken build, no stale guard.")
 
 ### Per-conflict protocol (applies to every file in every cluster)
 
 For each conflict:
 
-- [ ] Inspect merge base and both branch versions.
-- [ ] Identify the final responsibility owner from the spec's Architectural Responsibility Map.
-- [ ] Inspect callers, callees, and affected execution flows via `gitnexus context()` / `impact()`.
-- [ ] Identify existing acceptance tests from both branches that bind this surface.
-- [ ] Resolve the smallest coherent behavior unit — never broad `--ours` / `--theirs` (R15).
-- [ ] Run focused tests for that unit before moving to the next cluster.
-- [ ] Record rationale, owner, and evidence pointer in `conflict-checklist.md`.
+- [x] Inspect merge base and both branch versions.
+- [x] Identify the final responsibility owner from the spec's Architectural Responsibility Map.
+- [x] Inspect callers, callees, and affected execution flows via `gitnexus context()` / `impact()`.
+- [x] Identify existing acceptance tests from both branches that bind this surface.
+- [x] Resolve the smallest coherent behavior unit — never broad `--ours` / `--theirs` (R15).
+- [x] Run focused tests for that unit before moving to the next cluster.
+- [x] Record rationale, owner, and evidence pointer in `conflict-checklist.md`.
 
 ### One-sided / auto-merged review (do not skip)
 
-- [ ] Review `composition/target.rs`, launch adapters, environment sanitation, attempt classification, wrapper entry points, system-prompt lifetime, session reporting.
-- [ ] Review Darkmatter schema validation, transclusion, reference graph, expression, schema-resolution paths.
-- [ ] Review new `composition::coordinator`, preparation-stage, diagnostic registry, restored-diagnostic, Sequence Plus task/group, task-stream, launch-plan modules for duplicate responsibilities and stale adapters.
-- [ ] Review completion adapters and all remaining private `@/` or relative-path rewrite candidates — eliminate any second grammar (I2).
-- [ ] Review test harness backends, nextest config, CI filters, fail-closed tier behavior.
-- [ ] Review the Rendezvous Windows `Connected` adapter and dependency gating (I12, R12).
+- [x] Review `composition/target.rs`, launch adapters, environment sanitation, attempt classification, wrapper entry points, system-prompt lifetime, session reporting.
+- [x] Review Darkmatter schema validation, transclusion, reference graph, expression, schema-resolution paths.
+- [x] Review new `composition::coordinator`, preparation-stage, diagnostic registry, restored-diagnostic, Sequence Plus task/group, task-stream, launch-plan modules for duplicate responsibilities and stale adapters.
+- [x] Review completion adapters and all remaining private `@/` or relative-path rewrite candidates — eliminate any second grammar (I2).
+- [x] Review test harness backends, nextest config, CI filters, fail-closed tier behavior.
+- [x] Review the Rendezvous Windows `Connected` adapter and dependency gating (I12, R12).
 
 ### Invariant and responsibility audit
 
-- [ ] Verify the Architectural Responsibility Map has exactly one owner per row in the merged tree.
-- [ ] Verify invariants I1–I12 against merged source. For each, cite the appropriate merged-code test, source audit, generated guard, or platform evidence row in `acceptance-ledger.md`; do not invent a unit-test citation for documentation, ancestry, or native-platform obligations.
+- [x] Verify the Architectural Responsibility Map has exactly one owner per row in the merged tree.
+- [x] Verify invariants I1–I12 against merged source. For each, cite the appropriate merged-code test, source audit, generated guard, or platform evidence row in `acceptance-ledger.md`; do not invent a unit-test citation for documentation, ancestry, or native-platform obligations.
 
 ### Commit gates
 
-- [ ] Run `git diff --check` and the anchored worktree/index marker scans from Phase 2. Both scans are empty after classified fixture exclusions.
-- [ ] Inspect staged changes: `git diff --cached --stat`. No surprises.
-- [ ] Run focused tests across all eight clusters, then Claudine L1 + lint.
-- [ ] Run GitNexus `detect_changes({scope: "compare", base_ref: "main"})`. Save the report to `impact/proxy-merge-detect.md`; review unexpected symbols, execution flows, deleted guards, and duplicate paths.
+- [x] Run `git diff --check` and the anchored worktree/index marker scans from Phase 2. Both scans are empty after classified fixture exclusions.
+- [x] Inspect staged changes: `git diff --cached --stat`. No surprises.
+- [x] Run focused tests across all eight clusters, then Claudine L1 + lint.
+- [x] Run GitNexus `detect_changes({scope: "compare", base_ref: "main"})`. Save the report to `impact/proxy-merge-detect.md`; review unexpected symbols, execution flows, deleted guards, and duplicate paths.
 - [ ] Create the proxy-with merge commit with ancestry preserved. Capture its SHA, update `sha-ledger.md`, run change detection and staged-diff/marker review for that ledger-only change, then create a documentation-only checkpoint commit so Phase 4 starts clean.
 
 ### Validation Checkpoint (Phase 3 exit)

@@ -356,6 +356,9 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
             suppress_output_commit: true,
             // Carries this task's bar to the thread draining the child's stdout.
             task_frame_writer: request.frame_writer.clone(),
+            proxy_overlay: indexmap::IndexMap::new(),
+            handoff_ledger: None,
+            adopted_handoff: None,
         };
 
         let outcome = execute_composition_request_inner(

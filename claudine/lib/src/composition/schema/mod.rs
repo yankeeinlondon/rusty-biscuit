@@ -44,7 +44,7 @@ use super::error::{
     CompositionError, DroppedOptional, DroppedOptionalSource, DroppedOptionalStage,
     InteractiveShape, MissingProperty, TextFormat,
 };
-use super::prepare::{PrepareOptions, prepare_direct, prepare_inline};
+use super::prepare::{PrepareOptions, PromptSource, prepare_direct_with_prompt, prepare_inline};
 use super::types::{PreparedComposition, ResolvedCompositionSource};
 
 pub mod classify;
@@ -126,7 +126,30 @@ pub fn prepare_direct_with_schema(
     source: &ResolvedCompositionSource,
     options: PrepareOptions,
 ) -> Result<PreparedComposition, CompositionError> {
-    prepare_with_schema(source, options, PrepareMode::Direct)
+    prepare_with_schema(
+        source,
+        options,
+        PrepareMode::Direct(PromptSource::ComposedBody),
+    )
+}
+
+/// [`prepare_direct_with_schema`] for a caller-supplied prompt.
+///
+/// The direct-wrapper passthrough case composes the document only for its
+/// effective frontmatter, so it needs the schema layer's categorization
+/// without the composed body becoming the prompt. Splitting this out is what
+/// lets the harness route reach the same typed schema errors as the `compose`
+/// and `sequence` routes; see [`prepare_document`][super::prepare_document].
+///
+/// ## Errors
+///
+/// See [`prepare_direct_with_schema`].
+pub fn prepare_direct_with_schema_and_prompt(
+    source: &ResolvedCompositionSource,
+    options: PrepareOptions,
+    prompt_source: PromptSource,
+) -> Result<PreparedComposition, CompositionError> {
+    prepare_with_schema(source, options, PrepareMode::Direct(prompt_source))
 }
 
 /// Wrap [`prepare_inline`] with schema-aware error categorization and
@@ -143,9 +166,9 @@ pub fn prepare_inline_with_schema(
     prepare_with_schema(source, options, PrepareMode::Inline)
 }
 
-#[derive(Clone, Copy)]
-enum PrepareMode {
-    Direct,
+#[derive(Clone)]
+pub(super) enum PrepareMode {
+    Direct(PromptSource),
     Inline,
 }
 
@@ -156,24 +179,26 @@ fn prepare_with_schema(
 ) -> Result<PreparedComposition, CompositionError> {
     let mut dropped: Vec<DroppedOptional> = Vec::new();
     let file_ref_fallback_dir = options.file_ref_fallback_dir.clone();
-    let prepared = match run_prepare(source, options.clone(), mode) {
+    let prepared = match run_prepare(source, options.clone(), &mode) {
         Ok(prepared) => prepared,
-        Err(err) => handle_compose_error(source, options, mode, err, &mut dropped)?,
+        Err(err) => handle_compose_error(source, options, &mode, err, &mut dropped)?,
     };
     // Re-validate the post-shell-expanded effective frontmatter and apply
     // the same typed error / drop-and-retry rules so values that became
     // invalid (or now satisfy the schema) after `$(...)` expansion are
     // judged on their final form.
-    post_shell_validate(source, prepared, dropped, mode, file_ref_fallback_dir.as_deref())
+    post_shell_validate(source, prepared, dropped, &mode, file_ref_fallback_dir.as_deref())
 }
 
 fn run_prepare(
     source: &ResolvedCompositionSource,
     options: PrepareOptions,
-    mode: PrepareMode,
+    mode: &PrepareMode,
 ) -> Result<PreparedComposition, CompositionError> {
     match mode {
-        PrepareMode::Direct => prepare_direct(source, options),
+        PrepareMode::Direct(prompt_source) => {
+            prepare_direct_with_prompt(source, options, prompt_source.clone())
+        }
         PrepareMode::Inline => prepare_inline(source, options),
     }
 }
@@ -193,7 +218,7 @@ fn post_shell_validate(
     source: &ResolvedCompositionSource,
     mut prepared: PreparedComposition,
     mut dropped: Vec<DroppedOptional>,
-    _mode: PrepareMode,
+    _mode: &PrepareMode,
     file_ref_fallback_dir: Option<&std::path::Path>,
 ) -> Result<PreparedComposition, CompositionError> {
     // No `$schema` → no validation work to do.

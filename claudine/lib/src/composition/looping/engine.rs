@@ -5,10 +5,10 @@ use std::path::{Path, PathBuf};
 use serde_json::{Map, Value};
 use tracing::info;
 
+use super::super::coordinator::{EvaluatedProxyRequest, ProxyProvenance, SurfacedHandoff};
 use super::super::error::CompositionError;
 use super::super::lifecycle::{LifecycleConfig, LifecycleEmitter, LifecycleRunGuard, LifecycleRuntimeContext, LifecycleSignal};
 use super::super::lifecycle_context::LifecycleErrorInfo;
-use super::super::lifecycle_control::{MAX_PROXY_HOPS, proxy_handoff_allowed, resolve_proxy_target};
 use super::super::lifecycle_executor::{ShellRunner, StackControl, StackExecutionContext};
 use super::super::lifecycle::runtime::{
     LifecycleCatchExecution, LifecycleCatchProtocol, LifecycleCatchResult, LifecycleCatchState,
@@ -416,65 +416,37 @@ where
             StackControl::Error { reason } => {
                 unreachable!("the catch protocol consumes initialize error control: {reason:?}");
             }
-            StackControl::Proxy { target } => {
-                let resolution = match file_resolution_context.as_ref() {
-                    Some(context) => super::super::resolve_proxy_target_in_context(
-                        &target,
-                        prompt_path,
-                        context,
-                    ),
-                    None => resolve_proxy_target(
-                        &target,
-                        prompt_path,
-                        lifecycle_ctx.repo_root,
-                    ),
-                };
-                let resolved = match resolution {
-                    Ok(path) => path,
-                    Err(err) => {
-                        // Resolution failure (missing file, unresolvable
-                        // `@repo/…` reference) is reported as an initialize
-                        // failure so the user sees the underlying cause. The
-                        // typed `HarnessError`'s Diagnostic facets are threaded
-                        // through so `err.code` / `err.detail.*` reach a
-                        // `failure`/`finalize` stack.
-                        let reason =
-                            format!("proxy target `{target}` could not be resolved: {err}");
-                        return Ok(route_init_failure_typed(
-                            &mut guard,
-                            &init_ctx,
-                            prompt_path,
-                            &init_outcome,
-                            LifecycleErrorInfo::from_harness_error(&err),
-                            reason,
-                        ));
-                    }
-                };
-                if !proxy_handoff_allowed(&[prompt_path.to_path_buf()], &resolved) {
-                    return Ok(LoopExecutionResult::failure(
-                        initial_frontmatter,
-                        0,
-                        String::new(),
-                        0,
-                        CompositionError::LifecycleProxyCycle {
-                            source_path: prompt_path.to_path_buf(),
-                            target: target.clone(),
-                            chain: vec![prompt_path.display().to_string()],
-                            limit: MAX_PROXY_HOPS,
-                        },
-                    ));
-                }
+            StackControl::Proxy {
+                target,
+                overlay,
+                location,
+            } => {
+                // Neither resolution nor the cycle/hop decision happens here.
+                // The engine has no run ledger, so it can only see this one
+                // document — which is why this call site used to pass a
+                // single-element chain and miss multi-hop history entirely.
+                // The coordinator commits the request against the
+                // invocation-wide chain instead.
+                //
                 // No Failure/Finalize/loop-gate events fire on a clean
                 // hand-off: the document is being replaced, not failed. The
-                // caller re-enters with the target, whose own `initialize`
-                // decides what happens next.
+                // target's own `initialize` decides what happens next.
+                let request = EvaluatedProxyRequest::new(
+                    target,
+                    overlay,
+                    ProxyProvenance::new(
+                        prompt_path.to_path_buf(),
+                        location,
+                        vec![prompt_path.to_path_buf()],
+                    ),
+                );
                 return Ok(LoopExecutionResult::success(
                     initial_frontmatter,
                     0,
                     String::new(),
                     0,
                 )
-                .with_init_proxy_target(resolved));
+                .with_handoff(SurfacedHandoff::Request(request)));
             }
             StackControl::Resume { .. } => {
                 // Pre-launch: no provider session to resume.
@@ -581,6 +553,23 @@ where
                 continue;
             }
         };
+
+        // A proxy surfaced by the iteration's own lifecycle ends the source
+        // document *now*: the target is not an extra iteration of this loop
+        // (R7), so no loop gate runs and no further iteration begins. Checked
+        // before fail-fast handling on purpose — a proxy selected by a
+        // `failure` stack is a clean handoff, not a failed iteration.
+        if let Some(handoff) = output.handoff {
+            iteration_count += 1;
+            let exit_code = output.exit_code;
+            return Ok(LoopExecutionResult::success(
+                frontmatter,
+                iteration_count,
+                output.output,
+                exit_code,
+            )
+            .with_handoff(handoff));
+        }
 
         last_output = output.output;
         last_exit_code = output.exit_code;
@@ -729,55 +718,6 @@ where
         last_output,
         last_exit_code,
     ))
-}
-
-/// Route an `initialize` failure built from an already-typed error snapshot,
-/// preserving the source error's `Diagnostic` facets on the `err` global.
-///
-/// Used where the initialize-phase failure carries a typed cause (e.g. a
-/// `Proxy` target that fails to resolve via [`crate::harness::HarnessError`]):
-/// threading [`LifecycleErrorInfo::from_harness_error`] through here keeps
-/// `err.code` / `err.detail.*` projecting for a `failure`/`finalize` stack
-/// instead of flattening to a bare message. `fallback_reason` populates the
-/// terminal [`CompositionError::LifecycleInitializeFailed`] when neither catch
-/// event raised.
-fn route_init_failure_typed(
-    guard: &mut LifecycleRunGuard<'_>,
-    init_ctx: &StackExecutionContext<'_>,
-    prompt_path: &Path,
-    init_outcome: &super::super::lifecycle_executor::LifecycleEventOutcome,
-    action_error: LifecycleErrorInfo,
-    fallback_reason: String,
-) -> LoopExecutionResult {
-    let mut routed_outcome = init_outcome.clone();
-    routed_outcome.action_error = Some(action_error.clone());
-    let result = execute_loop_catch_protocol(
-        guard,
-        init_ctx,
-        LifecycleSignal::Initialize,
-        Some(&action_error),
-        routed_outcome,
-    );
-    let error = if let (Some(signal), Some(info)) = (
-        result.evaluation_error_signal,
-        result.evaluation_error.as_ref(),
-    ) {
-        CompositionError::lifecycle_evaluation(
-            signal.property_name(),
-            prompt_path,
-            info,
-        )
-    } else {
-        CompositionError::LifecycleInitializeFailed {
-            source_path: prompt_path.to_path_buf(),
-            reason: fallback_reason,
-        }
-    };
-    // The returned result reports the initialize-time frontmatter. We clone it
-    // from `init_ctx` (which borrows the caller's `initial_frontmatter`) rather
-    // than take ownership: the caller still holds `init_ctx` across this call,
-    // so moving the frontmatter in would conflict with that live borrow.
-    LoopExecutionResult::failure(init_ctx.frontmatter.clone(), 0, String::new(), 0, error)
 }
 
 fn execute_loop_catch_protocol(
