@@ -304,8 +304,7 @@ All proposals verified against `.claude/skills/claudine/lifecycle.md`, the
 Darkmatter expression/side-effect docs, and the implementation
 (`composition/lifecycle/control.rs`, `runtime.rs`,
 `wrap/harness_orch/loop_control/*`). Anything not currently expressible is in
-the [feature wishlist](#claudine--darkmatter-feature-wishlist) instead of
-being proposed with imaginary functions.
+the [feature wishlist](#claudine--darkmatter-feature-wishlist) instead of being proposed with imaginary functions.
 
 ### Key semantics the proposals rest on
 
