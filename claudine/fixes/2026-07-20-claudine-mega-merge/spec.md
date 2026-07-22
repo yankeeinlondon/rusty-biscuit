@@ -1,9 +1,11 @@
 ---
 created: 2026-07-21
-status: ready for review
-reviewed: false
+status: reviewed
+reviewed: true
+reviewed_by: codex/default
+reviewed_on: 2026-07-21
 area: claudine
-integration_seed: d2d0a8fc4467230ed78e2a1d3146b7c336cc17fd
+integration_seed: 2fb3692a3e87806ef719c665559e6139b87ca930
 feature_tips:
     error-prop-and-file-resolution: 43c23c6535cf6e52a35dbb06ea6f4ccce0c88e97
     proxy-with: e348486c810969abe87a6b7209979034f5454b07
@@ -18,7 +20,7 @@ rulings:
 
 ## Status
 
-Ready for review. This specification defines how to integrate the `claudine`,
+Reviewed. This specification defines how to integrate the `claudine`,
 `error-prop-and-file-resolution`, and `proxy-with` histories without reducing
 the work to a textual conflict exercise.
 
@@ -46,10 +48,14 @@ The conflict report analyzed these tips:
 | `proxy-with` | `e348486c810969abe87a6b7209979034f5454b07` |
 
 The current `claudine` integration seed is
-`d2d0a8fc4467230ed78e2a1d3146b7c336cc17fd`. Its only changes after the
-reviewed trunk tip are the committed mega-merge research documents and a
-GitNexus count refresh. The feature tips and merge bases still match the
-report:
+`2fb3692a3e87806ef719c665559e6139b87ca930`. Since the originally analyzed
+seed (`d2d0a8fc4467230ed78e2a1d3146b7c336cc17fd`), the branch has added the
+mega-merge specification and execution plan, a repository-memory record, and
+a GitNexus count refresh; it has not added implementation from either feature
+branch. Non-mutating previews were refreshed during review on 2026-07-21 and
+still report three trunk/foundation conflicts, one trunk/proxy conflict, and
+36 conflicts between the two feature tips. The feature tips and merge bases
+still match the report:
 
 - `claudine` ↔ `error-prop-and-file-resolution`:
   `8fc8711434b01327479297af9b40a67685409d00`
@@ -61,11 +67,20 @@ because the four-input conflict report predates it. If any branch moves again,
 the new SHA becomes a reviewed input only after the conflict inventory and
 baseline evidence are refreshed.
 
-At authoring time, the integration worktree also contains modified
-`.claudine/memory/commits.md` and `CLAUDE.md`, an untracked
-`.claude/settings.local.json`, and this new specification. They are user-owned
-inputs and MUST be preserved or committed intentionally before Phase 0 declares
-the worktree clean.
+The worktree may contain concurrent user-owned changes; at review start this
+included the untracked `.claude/settings.local.json`, and further edits may
+arrive before execution. Phase 0 MUST rerun `git status`, classify every
+modified or untracked path, and preserve or intentionally exclude each one
+before declaring the worktree clean. Earlier research notes that named
+modified `.claudine/memory/commits.md` and `CLAUDE.md` describe an older
+worktree state; those particular changes are part of the reviewed seed.
+
+The reviewed seed contains two literal merge-marker lines in `CLAUDE.md`
+(`<<<<<<< HEAD` and `||||||| 4a7e2f8c6`; `AGENTS.md` exposes the same content
+through its symlink). This is a known input defect, not a conflict introduced
+by either planned merge. Phase 0 MUST record it in the baseline marker scan,
+and the first merge's `CLAUDE.md` resolution MUST remove it. Phase 1 cannot
+exit with any marker remaining.
 
 ## Goal
 
@@ -144,6 +159,17 @@ All production document references MUST be parsed and planned through
 Resolution failures MUST preserve ordered candidates, probes, reference kind,
 and source provenance as typed detail.
 
+> **Reader note — intentional shared-contract change:** Repository-first bare
+> resolution is a deliberate breaking change from Biscuit File's former
+> base/CWD-first default, not a Claudine-local correction. Before the switch,
+> the integration MUST inventory every workspace caller and every committed
+> Claudine/Darkmatter document where both candidates exist. Source-local intent
+> MUST be rewritten to explicit `./` or `../`; callers that genuinely require
+> the old order MUST select an explicit Biscuit File transition policy and
+> document why. The implementation, Biscuit File topic/skill documentation,
+> Darkmatter documentation, completions, and fixtures MUST change together. A
+> private Claudine compatibility resolver is prohibited.
+
 ### I3 — No ambient recapture in nested execution
 
 CWD, repository, package area, HOME, environment, and configured roots MUST be
@@ -152,12 +178,31 @@ context from its own source provenance. It MUST NOT reread ambient process
 state or use diagnostic-only `launch_area` metadata as a second execution
 anchor.
 
+For a file-backed child, its source directory is the authoring base and its
+repository is the nearest trusted worktree root that contains that source. A
+target in another repository therefore changes the authoring-resolution
+context for its own nested references, but it does not move the provider
+process: launch CWD/child CWD remain invocation-fixed. Repository containment
+MUST be component-aware after lexical absolutization; it MUST NOT be described
+as a canonicalization-based sandbox or security boundary.
+
 ### I4 — One preparation service
 
 Direct execution, handoff adoption, retry, resume, and loop refresh MUST use
 one canonical preparation service with explicit entry reasons and schema
 stages. No reduced proxy composer or sequence-only materializer may claim
 equivalent behavior outside this service.
+
+The service MUST enforce this entry policy; no row may silently fall through
+to another row's behavior:
+
+| Entry reason | Source/input basis | `initialize` | Schema and full shell audit | Loop ownership |
+|---|---|---:|---:|---|
+| Direct document | Fresh read plus caller overrides | Once | Run after identity stabilizes | Establish |
+| Proxy target | Fresh read plus immutable handoff overlay plus caller overrides | Once | Run after identity stabilizes | Establish |
+| Retry | Fresh read of the same document plus retained inputs | No | Rerun | Refresh current definition |
+| Resume | Fresh read of the same document plus retained inputs | No | Rerun before compatibility decision/spawn | Refresh current definition |
+| Next document-loop iteration | Prepared source snapshot plus in-memory loop state | No | Reuse the validated structural plan and exact stamped commands | Retain |
 
 ### I5 — Atomic coordinator-owned handoff
 
@@ -166,6 +211,11 @@ the only owner allowed to resolve, prepare, validate, and commit it. Every
 producer MUST receive a consumed or explicitly rejected result. Failed
 handoffs MUST NOT partially activate a target, lose the triggering lifecycle
 event, synthesize source completion, or emit closure twice.
+
+Dry-run MUST stop before lifecycle execution, dynamic proxy traversal,
+environment/MCP setup, or any filesystem, network, messaging, or provider side
+effect. It may report statically resolved selection/launch intent, but it MUST
+NOT manufacture a handoff merely to exercise the coordinator.
 
 ### I6 — Sequence containment
 
@@ -177,12 +227,35 @@ adopted target owns its document context, loop, lifecycle, launch, and closure.
 
 ### I7 — One coherent launch rebuild
 
-After a handoff, target-dependent provider, profile/binary, model,
-interactivity, permission mode, structured output, MCP, credentials, argv,
-environment, child CWD, system-prompt delivery, dispatch, closure, and loop
-facets MUST be rebuilt as one plan. The session compatibility key MUST be
-computed from the plan that is actually spawned. Retry and resume MUST retain
-and refresh only their documented facets and budgets.
+After a handoff or fresh-read retry/resume boundary, all mutable launch facets
+MUST be rebuilt as one plan. The split is normative:
+
+| Scope | Facets |
+|---|---|
+| Invocation-fixed | Command/output policy, launch CWD and provider child CWD, explicit repository intent, caller overrides, composed system-prompt content, command-wide timing, proxy chain/hop state, and exact-command approval cache |
+| Rebuilt from the active document and attempt | Provider, profile/binary and resume protocol, model, interactivity, permission/tool mode, structured output, MCP set/injection, provider credential policy, provider-authored argv/environment, stream/parser/dispatch adapters, system-prompt delivery shape, loop plan, and closure owner |
+
+> **Reader note — authoring context is not process location:** The earlier
+> blanket rebuild wording incorrectly grouped child CWD and system-prompt
+> content with document-mutable facets. Claudine exposes no document surface
+> that can renegotiate either value. Keeping them invocation-fixed prevents a
+> cross-repository proxy from unexpectedly moving the provider process or
+> rereading mutable prompt content, while rebuilding provider-shaped delivery
+> still preserves direct/proxy equivalence.
+
+The target's authoring repository from I3 informs composition and nested file
+resolution; it MUST NOT be mistaken for the invocation-fixed provider child
+CWD. Credential policy MUST be re-applied from the captured unsanitized
+ambient snapshot plus explicit inclusion intent without exposing secret
+values.
+
+The session compatibility key MUST be computed from the exact plan that is
+spawned and include every non-renegotiable launch facet, including
+invocation-fixed facets and provider-specific identity fields. Retry starts a
+fresh session. Resume may retain a live session only when this complete key is
+identical; otherwise it MUST fail before spawn with a typed diagnostic naming
+the changed facets and recommending retry. Retry and resume MUST retain and
+decrement their documented budgets rather than resetting them during refresh.
 
 ### I8 — `proxy.with` semantics
 
@@ -204,8 +277,20 @@ and refresh only their documented facets and budgets.
 
 Darkmatter's deferred schema-verdict support MUST survive. Target bootstrap may
 coerce values before `initialize`; the authoritative schema verdict occurs
-after the stabilized reread. Direct, initialize-proxy, recovery-proxy, retry,
-resume, and looping paths MUST apply the same selected stage policy.
+after the stabilized reread. A fresh direct or proxy identity MUST resolve and
+layer inputs, construct only the early-bound context needed by `initialize`,
+apply a narrow approval/policy gate to executable initialize actions, run
+`initialize` once, atomically consume any resulting control transition, then
+reread the stabilized identity and perform the authoritative schema verdict,
+full shell audit, loop recognition, and launch planning. Malformed input before
+the lifecycle surface exists returns its typed bootstrap diagnostic and cannot
+fire target catch events.
+
+Retry and resume use a fresh read and rerun the authoritative verdict/audit
+without rerunning `initialize`. Later document-loop iterations use the prepared
+snapshot and validated structural plan from I4; they do not reread the source,
+rerun schema validation, or introduce unapproved command bytes. Tests MUST lock
+each row rather than asserting only that all routes select some schema stage.
 
 ### I10 — Exactly-once terminal behavior
 
@@ -237,8 +322,8 @@ runtime evidence.
 | R1 | Two preparation designs are combined line by line, leaving route-dependent state. | Critical | Adopt one stage-aware preparation service carrying `FileResolutionContext`. | Direct/proxy/retry/resume/loop equivalence tests and responsibility audit. |
 | R2 | Proxy handoff failures flatten diagnostics or route closure through the wrong source/target. | Critical | Resolve lifecycle/transition conflicts as a state machine; retain snapshots through erased boundaries. | Combined handoff-failure matrix proving diagnostic identity, event retention, and exactly-once closure. |
 | R3 | Sequence Plus and proxy both own step advancement or active-document closure. | Critical | Keep sequence invocation state outside the coordinator-owned active document. | Proxy-in-step, proxy-in-group, looped-target, teardown, and output-order seam tests. |
-| R4 | Compatibility key and spawned launch are assembled from different state. | Critical | Make the complete launch bundle the sole source of both key and spawn inputs. | Per-facet launch tests plus provider/model/MCP/credential retry-resume cases. |
-| R5 | Nested documents recapture ambient CWD/HOME/repository state. | High | Thread and derive the explicit request snapshot at every adapter. | Source/repository re-anchoring and single-capture tests on direct, proxy, sequence, and Darkmatter routes. |
+| R4 | Compatibility key and spawned launch are assembled from different state, or target authoring context incorrectly moves invocation-fixed launch state. | Critical | Make the complete launch bundle the sole source of both key and spawn inputs; enforce the I7 facet split. | Per-facet launch tests plus provider/model/MCP/credential retry-resume and cross-repository child-CWD cases. |
+| R5 | Nested documents recapture ambient CWD/HOME/repository state or inherit the wrong source repository. | High | Thread and derive the explicit request snapshot at every adapter; keep authoring context distinct from child CWD. | Source/repository re-anchoring, cross-repository, and single-capture tests on direct, proxy, sequence, and Darkmatter routes. |
 | R6 | Overlay typing, precedence, null removal, or schema timing changes during conflict resolution. | High | Preserve immutable pre-schema overlay and deferred verdict ordering. | Typed recursive values, all precedence combinations, null deletion, immediate refresh, downstream-hop isolation, and schema-order tests. |
 | R7 | Auto-merged files hide semantic incompatibility. | High | Review all files changed by both branches plus listed one-sided responsibility modules. | Base/ours/theirs/caller/test review recorded in conflict checklist. |
 | R8 | Error/status output is duplicated or reordered under concurrent tasks. | High | Preserve one effective selector and `TerminalRenderable`/task-stream ownership. | Plain/color/OSC 8 and parallel task failure captures at L2. |
@@ -249,6 +334,7 @@ runtime evidence.
 | R13 | Dirty or untracked integration inputs are overwritten or omitted. | High | Preserve changes before merge; start from a clean integration worktree; never destructively reset. | Clean `git status --short --branch` and recoverable copy/commit of this directory. |
 | R14 | Branch refs move after analysis. | High | Freeze exact SHAs and repeat merge-tree preview if any ref changes. | Recorded SHA ledger and refreshed conflict manifest. |
 | R15 | Broad `ours`/`theirs` selection deletes a valid architecture. | Critical | Resolve by responsibility and invariant, never by branch preference alone. | Per-conflict rationale and post-resolution responsibility audit. |
+| R16 | Pre-existing marker text in the integration seed is mistaken for a newly introduced merge conflict or survives because scans begin too late. | High | Baseline marker scans before merging; explicitly remove the known `CLAUDE.md` markers in the first resolution. | Before/after marker records and a zero-marker Phase 1 exit scan over tracked text and staged blobs. |
 
 ## Conflict Review Scope
 
@@ -263,7 +349,7 @@ grouped below.
 | Sequence integration | `wrap/sequence/{iterate,mod,phase1c}.rs` and requeue/proxy tests | Sequence invocation ownership surrounding active-document execution. |
 | Library composition/lifecycle | `composition/error`, lifecycle `context`/`executor`, looping `engine`, `composition/{mod,preflight,prepare,types}.rs` | Provider-neutral combined contract. |
 | Darkmatter | `markdown/compose/context/options.rs` | Explicit resolution context, name coercion, and deferred schema verdict in one option model. |
-| Generated/docs | dispatch inventory, `claudine-gen` drift fixture, composition topic | Regenerate or rewrite from settled merged source. |
+| Generated/docs | dispatch inventory, `claudine-gen` drift fixture, composition topic, and this fix's `plan.md` | Regenerate or rewrite from settled merged source; the specification remains normative over the execution plan. |
 
 The following automatically merged or one-sided areas MUST also be reviewed:
 
@@ -294,21 +380,30 @@ The following automatically merged or one-sided areas MUST also be reviewed:
    merge commits.
 4. Refresh non-mutating merge previews against the frozen SHAs and export the
    exact conflict list into a checklist.
-5. Record independent baseline results at both feature tips. Red, timed-out,
+5. Scan tracked text for merge markers before either merge and save the result
+   as the baseline. Record the two known `CLAUDE.md` marker lines as seed debt;
+   any other hit MUST be classified and resolved or explicitly identified as
+   intentional fixture content before integration proceeds.
+6. Reconcile `plan.md` with this reviewed specification. In particular, its
+   SHA ledger, seam-case count, marker baseline, pre-commit change-detection
+   gates, and completion rule MUST match this document; `accepted-debt` does
+   not satisfy completion.
+7. Record independent baseline results at both feature tips. Red, timed-out,
    skipped, and backend-blocked results remain labeled as such.
-6. Build the acceptance ledger before editing. Import every criterion from the
+8. Build the acceptance ledger before editing. Import every criterion from the
    four feature specs, the Sequence Plus validation matrix, and the proxy-with
    acceptance map. Each row needs a merged-code test, tier, platform, owner,
    status, and evidence location.
-7. Confirm the GitNexus index is current. Before editing a conflicted symbol,
+9. Confirm the GitNexus index is current. Before editing a conflicted symbol,
    run upstream impact analysis and record direct callers, affected processes,
    and risk. Stop and warn before editing a HIGH or CRITICAL symbol until the
    resolution is reviewed.
-8. Enable `git rerere` if repeated attempts are expected. Reused resolutions
+10. Enable `git rerere` if repeated attempts are expected. Reused resolutions
    still require review against this specification.
 
 Phase 0 exits only when the inputs are recoverable, refs are frozen, baselines
-are recorded, and the acceptance ledger exists.
+and the pre-existing marker debt are recorded, the execution plan agrees with
+this specification, and the acceptance ledger exists.
 
 ### Phase 1 — Integrate the foundation branch
 
@@ -334,9 +429,11 @@ Before recording the first merge commit:
 - prove Darkmatter composition, schema, reference, and transclusion paths;
 - prove Sequence Plus retained behavior, JIT state, tasks/groups, deterministic
   merges, and process ownership at their applicable tiers;
-- run supporting-package and Claudine L1/lint gates; and
+- run supporting-package and Claudine L1/lint gates;
 - inspect staged changes and scan both worktree and staged blobs for conflict
-  markers.
+  markers, proving the known `CLAUDE.md` markers were removed; and
+- run GitNexus change detection against `main`, record affected symbols and
+  execution flows, and resolve unexpected scope before committing.
 
 Phase 1 exits with a known-good foundation merge commit. Failures originating
 here MUST be resolved before proxy-with is introduced so later regressions
@@ -344,7 +441,7 @@ remain attributable.
 
 ### Phase 2 — Integrate proxy-with by dependency order
 
-Merge `proxy-with` with `--no-commit`. Resolve conflicts in this order:
+Merge `proxy-with` with `--no-ff --no-commit`. Resolve conflicts in this order:
 
 1. shared types, diagnostic shapes, and transition errors;
 2. Darkmatter options and the schema-stage contract;
@@ -373,7 +470,9 @@ For each conflict:
 
 Phase 2 exits only when there is one preparation service, one transition path,
 one resolution grammar, one diagnostic selector, one launch bundle, and no
-conflict markers in either unstaged or staged content.
+conflict markers in either unstaged or staged content. Before recording the
+second merge commit, run GitNexus change detection against `main`, record the
+result, and resolve unexpected scope.
 
 ### Phase 3 — Regenerate and reconcile derived material
 
@@ -389,7 +488,9 @@ After runtime behavior is settled:
 5. preserve trunk lifecycle schemas and local-runner research;
 6. correct the stale proxy-with acceptance-map description of the Linux L2
    workflow; and
-7. verify that comments describe the merged behavior, deleting or correcting
+7. reconcile `plan.md` and its checklists with the final seam suite and
+   completion rule; and
+8. verify that comments describe the merged behavior, deleting or correcting
    drift while treating the code as authoritative unless an acceptance
    invariant proves the code wrong.
 
@@ -439,9 +540,9 @@ visible in the ledger.
 
 ### Phase 5 — Final audit and closeout
 
-1. Run GitNexus change detection against `main` and review unexpected affected
-   symbols, execution flows, deleted guards, or duplicate paths before each
-   merge commit.
+1. Run final GitNexus change detection against `main` and review unexpected
+   affected symbols, execution flows, deleted guards, or duplicate paths. The
+   two pre-commit reports required by Phases 1 and 2 remain separate evidence.
 2. Review the final diff for unintended production, test, generated, and
    documentation changes.
 3. Verify generators and drift/source-scan guards from a clean merged checkout.
@@ -450,7 +551,9 @@ visible in the ledger.
    each ledger row.
 6. Update all four feature records with the final merged SHA and fresh results.
 7. Move feature/fix records to `_completed` only after all required evidence is
-   green or the owner explicitly accepts a precisely documented residual debt.
+   green and the completion definition below is satisfied. Accepted debt may
+   permit a merge commit, but its record remains active and links to a scoped
+   follow-up until the required evidence passes.
 
 ## Acceptance Assurance
 
@@ -491,6 +594,12 @@ The merged suite MUST prove at least these interactions:
 10. A failure from a proxied target inside a parallel group remains attributed
     to the correct task, preserves stdout/stderr ordering, settles all children,
     merges state deterministically, and tears down process descendants.
+11. A target in a different repository derives nested references from its own
+    source/repository while the provider still launches in the invocation-fixed
+    child CWD and the two contexts remain distinct in diagnostics.
+12. Dry-run reports selection intent without firing lifecycle events, traversing
+    a dynamic proxy, preparing MCP/environment side effects, or mutating either
+    document; no overlay value appears in its output.
 
 ### Evidence classification
 
@@ -532,7 +641,10 @@ Two evidence gaps are known before integration:
   keyboard-interruption evidence.
 
 These gaps do not forbid starting the merge. They do forbid declaring the
-merged result fully accepted until discharged or explicitly accepted as debt.
+merged result complete until discharged. Explicitly accepted debt may permit a
+code-integration commit under the evidence-classification rule above, but it
+does not convert the missing evidence into acceptance or permit moving this
+fix to `_completed`.
 
 ## Stop Conditions and Recovery
 
