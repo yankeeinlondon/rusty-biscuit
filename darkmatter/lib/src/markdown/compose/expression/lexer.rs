@@ -347,6 +347,12 @@ pub enum Token {
     /// Right bracket `]`.
     RBracket,
 
+    /// Left brace `{`.
+    LBrace,
+
+    /// Right brace `}`.
+    RBrace,
+
     /// Arithmetic plus `+`.
     Plus,
 
@@ -421,6 +427,8 @@ impl fmt::Display for Token {
             Token::Dot => write!(f, "."),
             Token::LBracket => write!(f, "["),
             Token::RBracket => write!(f, "]"),
+            Token::LBrace => write!(f, "{{"),
+            Token::RBrace => write!(f, "}}"),
             Token::Plus => write!(f, "+"),
             Token::Minus => write!(f, "-"),
             Token::Star => write!(f, "*"),
@@ -631,6 +639,14 @@ impl<'a> Lexer<'a> {
             ']' => {
                 self.advance();
                 Ok(Token::RBracket)
+            }
+            '{' => {
+                self.advance();
+                Ok(Token::LBrace)
+            }
+            '}' => {
+                self.advance();
+                Ok(Token::RBrace)
             }
             '+' => {
                 self.advance();

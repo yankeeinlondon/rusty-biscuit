@@ -35,6 +35,7 @@ pub const CI_BENCH_IDS: &[&str] = &[
     // Migration-critical git_ops IDs (spec §5.5).
     "git_ops/revwalk_recent_gated/nograph",
     "git_ops/worktree_fanout/4",
+    "workloads_service_listing/500",
 ];
 
 /// Build a Criterion-compatible regex that matches every ID in

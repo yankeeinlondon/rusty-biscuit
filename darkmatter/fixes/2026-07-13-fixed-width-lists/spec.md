@@ -1,5 +1,9 @@
 ---
 status: ready for planning and implementation
+reviewed: true
+reviewed_by: codex/default
+reviewed_on: 2026-07-18
+review_iterations: 6
 created: 2026-07-13
 area: darkmatter
 packages:
@@ -103,10 +107,10 @@ source items that are already wrapped. The test therefore misses the unwrap-befo
 
 GitNexus impact analysis classifies the eventual implementation as broad:
 
-- `strip_incidental_newlines`: **CRITICAL**, 33 direct and 176 transitive dependents when tests are
-  included; and
-- `reflow_to_width`: **HIGH**, 5 direct and 25 transitive dependents across cleanup, compose, CLI,
-  and DMLS formatting.
+- `strip_incidental_newlines`: **CRITICAL**, 34 direct and 178 total dependents at depth three when
+  tests are included; and
+- `reflow_to_width`: **CRITICAL**, 5 direct and 25 total dependents at depth three across cleanup,
+  compose, CLI, and DMLS formatting, including two CLI execution-flow families.
 
 The implementation MUST consequently preserve all non-list behavior and prove parity at every
 public surface rather than treating this as a CLI-only patch.
@@ -125,8 +129,10 @@ public surface rather than treating this as a CLI-only patch.
    paragraphs, blockquotes, fenced and indented code, tables, HTML blocks, and Darkmatter
    directives.
 6. Keep `--ignore-incidental-newlines` neutral with respect to list soft breaks.
-7. Keep the library, compose, CLI, and DMLS formatting paths byte-equivalent for the same cleanup
-   settings.
+7. Keep equivalent full-cleanup sequences byte-equivalent across direct library use, compose, the
+   CLI, and DMLS formatting. Preserve the narrower, established transform-only contract of
+   `cleanup_to_fixed_width` and `Markdown::cleanup_with_fixed_width`, which is strip then reflow and
+   does not independently select a list-spacing or indentation policy.
 8. Preserve the existing public API, CLI flags, list-spacing modes, marker rules, Unicode join
    policy, and fixed-width overflow policy.
 
@@ -137,6 +143,8 @@ This fix does not:
 - change `--fixed-width` or `--ignore-incidental-newlines` flag names, ranges, defaults, or their
   mutual exclusion;
 - change `--indent`, `ListSpacingMode`, ordered-list renumbering, or unordered-marker restoration;
+- broaden `cleanup_to_fixed_width` or `Markdown::cleanup_with_fixed_width` into the full cleanup
+  serializer/list-normalization pipeline;
 - introduce a separate list formatter or a new public Markdown AST;
 - split words, URLs, inline-code spans, or spaceless-script runs that already overflow the target
   width;
@@ -180,7 +188,9 @@ on context it can contain:
 - a task-list checkbox; and
 - the separator after the final marker.
 
-For `>   10. [ ] Body`, the full prefix is every byte before `Body`, not merely `10. `.
+For `>   10. [ ] Body`, the full prefix is every byte before `Body`, not merely `10. `. CommonMark
+ordered-list markers contain one to nine digits; wider numeric runs are not list markers and remain
+ordinary prose.
 
 ### Hanging continuation prefix
 
@@ -214,7 +224,7 @@ indentation used only to make source wrapping attractive MUST NOT survive as lit
 This applies equally to:
 
 - `-`, `*`, and `+` unordered items;
-- `.` and `)` ordered markers of any digit width;
+- `.` and `)` ordered markers with any CommonMark-valid digit width (one to nine digits);
 - checked and unchecked GFM task items;
 - lazy and explicitly indented continuation lines;
 - nested items at every configured indentation width; and
@@ -338,6 +348,11 @@ strip phase and fixed-width reflow:
 If fixed-width processing wraps either side, every emitted physical line still carries the prefix
 required to remain inside the original list/blockquote containers.
 
+The hard-break suffix is inseparable from the preceding content. If the complete prefix, one
+otherwise atomic body token, and the required two-space or backslash suffix cannot fit together,
+that physical line MAY overflow. This is the same unavoidable-overflow class as an atomic token or
+prefix that cannot fit; the hard break MUST NOT be deleted merely to satisfy the width.
+
 ### Protected child blocks
 
 List containment does not turn non-prose blocks into reflowable prose. The following remain
@@ -349,7 +364,8 @@ verbatim apart from pre-existing cleanup normalization:
 - thematic breaks and headings;
 - link-reference definitions where the parser treats them structurally;
 - Darkmatter `::` directive lines; and
-- `::shell-block` bodies and other explicitly protected directive bodies.
+- `::shell-block` bodies and any future directive body explicitly classified as opaque by the
+  shared Darkmatter structural-protection model.
 
 The distinction between a four-space list continuation and indented code MUST come from parsed
 block context. A raw `line.starts_with("    ")` check is not sufficient.
@@ -373,6 +389,11 @@ cleanup, to identify:
 Darkmatter-specific structural protection remains an overlay because pulldown-cmark does not know
 the semantics of `::` directives. The existing fence/HTML/shell-block protections may be retained,
 but indentation heuristics MUST NOT override parsed evidence that a line is list prose.
+
+The shared structural-protection classification is authoritative for Darkmatter directives. In
+v1, `::shell-block` is the only opaque directive-body family in this cleanup path. Disclosure
+bodies and conditional `::block` bodies contain Markdown and remain eligible for ordinary
+paragraph cleanup; their opener, separator, and closer lines remain structural and protected.
 
 The implementation MAY keep the existing line scanner for non-list prose to minimize regression
 risk. Ambiguous list continuation and code classification MUST be resolved from parser structure,
@@ -444,6 +465,27 @@ entry points continue to be authoritative:
 - `ComposeOptions::{with_incidental_newline_mode, with_fixed_width}`; and
 - DMLS `formatting.fixed_width`.
 
+There are two intentionally different orchestration levels:
+
+1. `cleanup_to_fixed_width` and `Markdown::cleanup_with_fixed_width` retain their established
+   transform-only contract: collapse incidental newlines, then call `reflow_to_width`. They do not
+   choose a list-spacing mode, force a nesting indentation, align tables, or perform the complete
+   cleanup serialization pipeline.
+2. `md clean`, compose Cleanup, and DMLS formatting first run their selected full cleanup variant
+   and then call `reflow_to_width`. Their parity oracle is the equivalent direct library sequence
+   using the same cleanup variant, indentation, incidental-newline mode, and width.
+
+`reflow_to_width` remains the backend for already-cleaned content. It MAY defensively coalesce list
+paragraph soft breaks needed to keep a logical item intact, but callers that require whole-document
+unwrap-before-rewrap behavior MUST use `cleanup_to_fixed_width` or run the selected cleanup variant
+before calling it.
+
+> **Reader's note.** An earlier draft required every public entry point to be byte-equivalent. That
+> would silently broaden the two transform-only helpers into full Markdown cleanup and change
+> unrelated table, spacing, marker, and indentation behavior. The reviewed contract instead
+> requires byte parity only between equivalent pipelines while keeping the existing helper
+> semantics explicit.
+
 Private types may be added under `markdown/cleanup/reflow.rs` or a focused child module. Do not add
 a generic pass trait or a public list-layout abstraction for this single engine.
 
@@ -452,7 +494,9 @@ a generic pass trait or a public list-layout abstraction for this single engine.
 The target is Unicode display columns, including every container-prefix column. The existing
 atomic-token rule remains: a token wider than the available body width is emitted intact and may
 overflow. A complete prefix that already meets or exceeds the requested width cannot be made to
-fit; the following body token is likewise emitted intact rather than split.
+fit; the following body token is likewise emitted intact rather than split. A required hard-break
+suffix participates in the same indivisible line atom, so prefix + one token + suffix MAY overflow
+when no valid narrower representation exists.
 
 Only synthesized prefix whitespace is new. Word tokenization, inline-code protection,
 spaceless-script joining, and long-token behavior remain outside this fix unless a fail-first list
@@ -528,7 +572,8 @@ Add exact-output tests for:
 4. nested lists honor 2-, 4-, and 8-space configured nesting widths;
 5. blockquoted ordered, unordered, and task lists retain composite prefixes;
 6. first and subsequent paragraphs wrap independently;
-7. hard breaks remain and both sides retain valid container prefixes;
+7. hard breaks remain and both sides retain valid container prefixes, including a fixture where
+   the indivisible hard-break suffix causes the documented overflow;
 8. a long token is not split even when the prefix leaves less available width;
 9. wide Unicode content is measured with `UnicodeWidthStr` including the prefix;
 10. protected child blocks remain byte-equivalent; and
@@ -544,10 +589,16 @@ structural fingerprint after ignoring soft-break events and source offsets. It M
 
 - list and item count/order;
 - ordered versus unordered list kind;
+- ordered-list starting ordinal;
 - nesting depth;
 - paragraph boundaries;
-- blockquote boundaries; and
+- blockquote boundaries;
+- checked/unchecked task state; and
 - code/table/HTML child-block boundaries.
+
+The structural fingerprint cannot recover every source spelling from pulldown-cmark. Exact-output
+assertions MUST separately pin ordered delimiter (`.` versus `)`), unordered marker, task-box
+spelling, and canonical indentation.
 
 Use this helper on the nested-list, second-paragraph, blockquoted-list, and protected-code fixtures.
 Exact output remains required; the fingerprint supplements rather than replaces string assertions.
@@ -578,6 +629,21 @@ The output MUST match the corresponding direct library cleanup sequence.
 Extend formatting parity with a pre-wrapped list fixture. DMLS output for `fixed_width = N` MUST be
 byte-identical to the `Markdown::cleanup` plus `reflow_to_width` sequence used by `md clean`.
 
+### Performance regression
+
+The semantic model MUST reuse the event stream already collected by full cleanup. Default cleanup
+MUST NOT add an unconditional second Markdown parse. Fixed-width mode may perform the existing
+post-cleanup parse needed to derive logical reflow blocks, but this fix MUST NOT add another parse
+on top of that sequence.
+
+Extend the focused cleanup benchmark when necessary and compare representative top-level prose,
+flat lists, deeply nested lists, and blockquoted task lists against the pre-fix baseline. The
+review must report parse count and timing evidence. On the same host and Criterion profile, default
+cleanup MUST remain within 10% of its pre-fix median, fixed-width cleanup MUST remain within 15% on
+the list-heavy fixtures, and the original fixed-width budget of less than 2x full cleanup on the
+same input remains in force. A larger regression requires profiling and explicit approval rather
+than being accepted solely because correctness tests pass.
+
 ## Documentation and Drift Maintenance
 
 Implementation is incomplete until the following are updated:
@@ -602,6 +668,7 @@ the authority when unrelated stale comments are found.
 From the `darkmatter/` package area:
 
 ```bash
+just build
 just test
 just test-l2
 just lint
@@ -628,18 +695,22 @@ The fix is complete when all of the following are true:
    aligns with the first line's body in Unicode display columns.
 7. Ordered-marker digit growth, task boxes, configured nesting widths, and composed blockquote/list
    prefixes are handled per item without hard-coded prefix widths.
-8. Except for the established atomic-token/prefix overflow case, every reflowed physical line's
-   total display width is at most the requested width.
+8. Except for the established indivisible atomic-token, prefix, and hard-break-suffix overflow
+   cases, every reflowed physical line's total display width is at most the requested width.
 9. Blank-line paragraph boundaries, sibling-item boundaries, nested-list boundaries, hard breaks,
    and protected child blocks remain structurally intact.
 10. Structural fingerprint tests show no change to list/item nesting or protected block ownership.
 11. Default, compact, and loose list-spacing modes retain their existing behavior.
-12. The direct library, compose, CLI stdout, CLI `--save`, and DMLS formatting paths agree for the
-    same settings.
+12. Equivalent full-cleanup sequences agree across direct library use, compose, CLI stdout, CLI
+    `--save`, and DMLS formatting. The transform-only fixed-width helpers retain the narrower
+    contract defined by Decision 4.
 13. Cleanup is idempotent in default, preserve, and fixed-width modes.
 14. No public API, CLI schema, dependency, or platform-specific behavior changes.
-15. Area L1, L2, and lint recipes pass, and GitNexus change detection reports only the expected
-    cleanup-related surfaces.
+15. The default cleanup path reuses its existing parse, and fixed-width mode adds no parse beyond
+    the established cleanup-plus-reflow sequence; focused benchmark evidence shows no unexplained
+    regression.
+16. Area build, L1, L2, and lint recipes pass, and GitNexus change detection reports only the
+    expected cleanup-related surfaces.
 
 ## Out of Scope Follow-ups
 

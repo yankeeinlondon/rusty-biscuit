@@ -1,0 +1,79 @@
+Linux behavioral evidence (run 2) -- Findings 22, 17, 1 -- ALL PASS
+====================================================================
+
+Environment
+-----------
+  Container : docker (Docker Desktop linux/arm64 VM), image rust:latest, --memory=7g
+  Kernel    : Linux 6.12.76-linuxkit aarch64      <-- REAL Linux kernel, not a cross-compile
+  Distro    : Debian GNU/Linux 13 (trixie)
+  rustc     : 1.97.1 (8bab26f4f 2026-07-14)  [container stable; host stable is 1.96.0 --
+              rust-toolchain.toml pins `channel = "stable"`, so each platform resolving its
+              own stable IS the pinned policy]
+  Mem free  : 6 GB of 7 GB
+  Build     : CARGO_BUILD_JOBS=2, targeted per-binary `cargo test` (run 1's whole-package
+              nextest build OOM-killed the linker: `ld terminated with signal 9`)
+
+F22 -- directory-hash membership -- PASS  [GAP CLOSED]
+------------------------------------------------------
+  Library unit:
+    $ cargo test -p darkmatter --lib includes_vendored_but_skips_hidden_directories
+    test markdown::fs::tests::includes_vendored_but_skips_hidden_directories ... ok
+    test result: ok. 1 passed; 0 failed
+
+  End-to-end CLI (the aggregate + diagnostics + exit-status freeze the plan requires):
+    $ cargo test -p darkmatter-cli --test hash_directory
+    test test_hash_directory_vendored_membership_matches_plain_dir ... ok
+    test test_hash_directory_skips_hidden_dirs ... ok
+    test test_hash_directory_deterministic ... ok
+    test test_hash_directory_honors_ignore_properties ... ok
+    test test_hash_directory_ignores_managed_keys ... ok
+    test test_hash_directory_strict ... ok
+    test test_hash_directory_malformed_frontmatter_exits_one ... ok
+    test result: ok. 15 passed; 0 failed
+
+  This is the real Linux behavioral run the verification matrix demands for F22's
+  OS-divergent directory traversal / path handling. Linux agrees with macOS: Markdown
+  under node_modules/target/vendor is in the aggregate; only dot-prefixed dirs are pruned.
+
+F17 -- shell wait primitive -- PASS  [GAP CLOSED]
+-------------------------------------------------
+    $ cargo test -p darkmatter --lib -- <the six F17 tests>
+    test ...::fast_command_completion_is_not_delayed_by_a_poll_interval ... ok
+    test ...::saturated_merged_stream_capture_does_not_deadlock ... ok
+    test ...::saturated_dual_stream_capture_does_not_deadlock_in_pipeline_executor ... ok
+    test ...::saturated_dual_stream_capture_does_not_deadlock ... ok
+    test ...::pipeline_executor_timeout_selects_timeout_error ... ok
+    test ...::timed_out_child_process_is_killed_and_reaped ... ok
+    test result: ok. 6 passed; 0 failed
+
+  The most valuable Linux result in this feature. `shared_child`'s wait primitive is
+  `waitid`-based on Unix and `WaitForSingleObject`-based on Windows, so Linux exercises a
+  genuinely different code path from macOS. All three saturation tests (256 KiB/stream in
+  8 KiB chunks, past the 64 KiB pipe buffer) complete without deadlock, the timeout arm
+  kills+reaps synchronously (`pgrep -P` proves no surviving child), and the
+  granularity guard passes -- confirming no 10 ms poll loop was reintroduced.
+
+F1 -- sniff timezone seam -- PASS
+---------------------------------
+    $ cargo test -p sniff --lib -- bare_detect_timezone_probes_ntp \
+                                   detect_timezone_with_options_respects_probe_flag
+    test os::time::tests::detect_timezone_with_options_respects_probe_flag ... ok
+    test os::time::tests::bare_detect_timezone_probes_ntp ... ok
+    test result: ok. 2 passed; 0 failed
+
+  Run via --lib because sniff's integration.rs does not compile on Linux (pre-existing,
+  unrelated -- see linux-behavioral-run.txt). F1 is classified OS-identical anyway (the
+  probe_ntp boolean routing carries no cfg), so this is confirmation, not an obligation.
+
+Cross-platform status after this run
+------------------------------------
+  Finding | Linux behavioral        | Windows compile        | Windows behavioral
+  --------|-------------------------|------------------------|--------------------
+    F2/21 | PASS (PTY, run 1)       | PASS (+ clean skip arm)| n/a (Unix-only, gated)
+    F17   | PASS (6/6)              | PASS                   | OPEN
+    F22   | PASS (15/15 CLI + unit) | PASS                   | OPEN
+    F1    | PASS (2/2)              | PASS                   | n/a (OS-identical)
+
+  Windows behavioral runs for F17 and F22 remain the only cross-platform gap; no Windows
+  host or emulator is reachable from this session, and a cross-compile is not a
+  behavioral run. Carried to the owner in results.md "Open at closeout".

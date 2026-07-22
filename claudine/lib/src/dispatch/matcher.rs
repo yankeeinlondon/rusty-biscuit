@@ -113,10 +113,21 @@ pub fn compile_many(bindings: &[(AgenticEvent, &str)]) -> Vec<(AgenticEvent, Opt
 /// comparisons, fallbacks, helper functions, literals). A bare variable
 /// reference such as `Bash` deliberately does not qualify so that simple
 /// regex-style matchers continue to compile as regexes.
+///
+/// Container literals recurse rather than qualifying outright, for the same
+/// reason: `[Bb]` is a regex character class that also parses as an array
+/// literal of bare variables, so it must keep falling through to the regex
+/// branch. `[tool_name == 'Bash']` does qualify, because an element uses a
+/// condition-grade feature. Object keys are authored text, never expressions,
+/// so only the values are inspected.
 fn expression_uses_known_features(expr: &Expr) -> bool {
     match expr {
         Expr::Variable(_) => false,
         Expr::Paren(inner) => expression_uses_known_features(inner),
+        Expr::ArrayLiteral(elements) => elements.iter().any(expression_uses_known_features),
+        Expr::ObjectLiteral(entries) => {
+            entries.iter().any(|(_, value)| expression_uses_known_features(value))
+        }
         Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => true,
         Expr::UnaryNot(_)
         | Expr::UnaryMinus(_)
@@ -321,6 +332,36 @@ mod tests {
     fn notification_with_no_type_returns_false() {
         let meta = notification_meta(None);
         assert!(!matches_with_pattern(Some("info"), &meta));
+    }
+
+    #[test]
+    fn regex_character_class_still_compiles_as_a_regex() {
+        // `[Bb]ash` and `[abc]` are regex character classes that also parse
+        // as array literals of bare variables. Container literals recurse
+        // instead of qualifying outright, so these keep their legacy regex
+        // semantics; an unconditional `true` arm would hijack them into
+        // expression matchers.
+        assert!(matches!(
+            RuntimeMatcher::compile("[abc]"),
+            Some(RuntimeMatcher::Regex(_))
+        ));
+        let meta = tool_meta(AgenticEvent::BeforeTool, Some("bash"));
+        assert!(matches_with_pattern(Some("[Bb]ash"), &meta));
+    }
+
+    #[test]
+    fn array_literal_with_condition_grade_element_compiles_as_expression() {
+        // An element that uses a condition-grade feature makes the whole
+        // container literal condition-grade; a no-op `false` arm would send
+        // this to the regex branch instead.
+        assert!(matches!(
+            RuntimeMatcher::compile("[tool_name == 'Bash']"),
+            Some(RuntimeMatcher::Expression { .. })
+        ));
+        assert!(matches!(
+            RuntimeMatcher::compile("{ hit: tool_name == 'Bash' }"),
+            Some(RuntimeMatcher::Expression { .. })
+        ));
     }
 
     #[test]

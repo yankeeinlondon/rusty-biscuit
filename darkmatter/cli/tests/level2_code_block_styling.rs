@@ -2,9 +2,11 @@ mod common;
 
 use common::level2::{
     CODE_DOC, is_sentinel_line, max_bg_luma_on_line, max_fg_luma_on_line, min_fg_luma_on_line,
-    raw_line_is_blank, rendered_region, rtrim, run_md, run_md_after_shell_prefix, run_md_env,
+    raw_line_is_blank, rendered_region, rtrim, run_md, run_md_env, run_md_in_tmux,
 };
+use biscuit_test_harness::tmux::TmuxHarness;
 use serial_test::serial;
+use test_toolkit::{Level, require_level};
 
 #[test]
 #[serial(level2_terminal)]
@@ -69,14 +71,15 @@ fn level2_code_block_max_fill_constrains_body_width() {
 #[serial(level2_terminal)]
 fn level2_align_code_block_center_indents_more_than_left() {
     let body = "```rust\nfn main() {}\n```\n";
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
     // Left-aligned baseline.
-    let Some((left_frame, _)) = run_md(
+    let left_frame = run_md_in_tmux(
         body,
+        None,
         "--align-code-blocks left --fill-code-blocks max=20 --max-width 60",
-    ) else {
-        return;
-    };
+        &[],
+    );
     let left_header = left_frame
         .plain
         .lines()
@@ -86,12 +89,12 @@ fn level2_align_code_block_center_indents_more_than_left() {
 
     // Center-aligned: same fill, same page width, so the only difference is
     // the alignment surplus added as additional left padding.
-    let Some((center_frame, _)) = run_md(
+    let center_frame = run_md_in_tmux(
         body,
+        None,
         "--align-code-blocks center --fill-code-blocks max=20 --max-width 60",
-    ) else {
-        return;
-    };
+        &[],
+    );
     let center_header = center_frame
         .plain
         .lines()
@@ -116,13 +119,13 @@ fn level2_align_code_block_center_indents_more_than_left() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_code_block_inverts_to_light_in_dark_terminal() {
-    let Some((frame, _)) = run_md_env(
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    let frame = run_md_in_tmux(
         CODE_DOC,
+        None,
         "--code-theme github --max-width 60",
         &[("COLORFGBG", "15;0")], // bg index 0 => dark terminal
-    ) else {
-        return;
-    };
+    );
 
     let code_luma = max_bg_luma_on_line(&frame.raw, "rust").unwrap_or_else(|| {
         panic!(
@@ -141,19 +144,19 @@ fn level2_code_block_inverts_to_light_in_dark_terminal() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_default_code_block_inverts_background_and_foreground() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
     let mut captured = None;
     let mut bg: Option<f32> = None;
     let mut min_fg: Option<f32> = None;
     let mut max_fg: Option<f32> = None;
 
     for _ in 0..3 {
-        let Some((frame, _)) = run_md_env(
+        let frame = run_md_in_tmux(
             CODE_DOC,
+            None,
             "--max-width 60",
             &[("COLORFGBG", "15;0")], // bg index 0 => dark terminal
-        ) else {
-            return;
-        };
+        );
 
         bg = max_bg_luma_on_line(&frame.raw, "FooBar");
         min_fg = min_fg_luma_on_line(&frame.raw, "FooBar");
@@ -207,16 +210,16 @@ fn level2_default_code_block_inverts_background_and_foreground() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_code_block_clears_inherited_dim_before_theme_colors() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
     let mut captured = None;
     let mut bg = None;
     for _ in 0..3 {
-        let Some((frame, _)) = run_md_after_shell_prefix(
+        let frame = run_md_in_tmux(
             CODE_DOC,
-            "printf '\\033[2m'; COLORFGBG='15;0'",
+            Some("printf '\\033[2m'"),
             "--max-width 60",
-        ) else {
-            return;
-        };
+            &[("COLORFGBG", "15;0")],
+        );
         bg = max_bg_luma_on_line(&frame.raw, "FooBar");
         captured = Some(frame);
         if bg.is_some() {
@@ -240,11 +243,9 @@ fn level2_code_block_clears_inherited_dim_before_theme_colors() {
     );
 }
 
-// #0 mirror — "light terminal -> dark code panel" is not asserted here. This
-// WezTerm harness cannot stage a light terminal: it answers the OSC-11
-// background query (dark), which the single-source color-mode resolver treats
-// as authoritative, so `COLORFGBG` can no longer force a light page. The
-// inversion in this direction is covered where a light surface is real:
+// #0 mirror — "light terminal -> dark code panel" is not repeated here. The
+// inversion in that direction is covered where the light surface is the test's
+// primary subject:
 //   - level2_schema_about_light_terminal_uses_dark_code_theme (L2, tmux: OSC-11
 //     unanswered, so COLORFGBG=0;15 is honored)
 //   - i7_code_block_inverts_theme_against_light_terminal (L1, sets the terminal

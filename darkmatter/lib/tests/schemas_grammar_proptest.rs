@@ -29,6 +29,8 @@ fn type_strategy() -> impl Strategy<Value = SimplifiedType> {
         Just(SimplifiedType::Email),
         Just(SimplifiedType::Literal),
         Just(SimplifiedType::Expression),
+        Just(SimplifiedType::TypeDefinition),
+        Just(SimplifiedType::Schema),
         Just(SimplifiedType::Any),
     ]
 }
@@ -122,6 +124,18 @@ fn item_constraints_for(ty: SimplifiedType) -> impl Strategy<Value = Vec<Constra
         SimplifiedType::Literal => literal_value()
             .prop_map(|value| vec![Constraint::LiteralValue(value)])
             .boxed(),
+        SimplifiedType::TypeDefinition => prop_oneof![
+            Just(vec![]),
+            Just(vec![Constraint::Generated]),
+            Just(vec![Constraint::Default(serde_json::json!("string"))]),
+        ]
+        .boxed(),
+        SimplifiedType::Schema => prop_oneof![
+            Just(vec![]),
+            Just(vec![Constraint::Generated]),
+            Just(vec![Constraint::Default(serde_json::json!("./schema.yaml"))]),
+        ]
+        .boxed(),
         // Other types (including `expression`) only accept universal
         // constraints — handled via the outer `universal` strategy below.
         _ => Just(vec![]).boxed(),

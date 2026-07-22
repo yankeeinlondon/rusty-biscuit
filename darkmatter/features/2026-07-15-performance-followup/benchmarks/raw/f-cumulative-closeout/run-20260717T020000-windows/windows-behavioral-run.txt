@@ -1,0 +1,113 @@
+Windows behavioral evidence -- closes review-2 "Required Windows behavioral evidence is absent"
+===============================================================================================
+
+Environment
+-----------
+  Host      : Parallels Desktop 26.4.0 VM "Winny" on this macOS arm64 host
+  Guest OS  : Microsoft Windows 11 Home, Version 10.0.26200.8737   <-- a REAL Windows kernel
+  System    : ARM64-based PC (PROCESSOR_ARCHITECTURE=ARM64)
+  Exec path : `prlctl exec Winny cmd.exe /c ...` via Parallels Guest Tools (state=installed)
+  Binaries  : cross-compiled on the macOS host for x86_64-pc-windows-gnu (mingw-w64),
+              executed on the Windows guest under Windows' built-in x64 emulation (Prism)
+  rustc     : 1.96.0 (host stable; the guest has no Rust toolchain)
+
+  *** SCOPE OF THIS EVIDENCE -- read before citing ***
+
+  This IS a real Windows host executing real Win32/NT syscalls. It is NOT Wine, and it is
+  NOT a cross-compile-only result. `shared_child`'s wait lowers to the genuine Windows
+  `WaitForSingleObject` family here, and F22's traversal runs the genuine
+  `FindFirstFileW`/`FindNextFileW` behind `std::fs::read_dir`.
+
+  Two honest qualifications:
+
+    1. This is ARM64 Windows running an x86_64 binary under Prism emulation. The emulation
+       is at the *instruction* level; the Win32/NT layer is the real OS, so process-wait,
+       pipe, kill/reap and directory-traversal semantics are Windows' own. This is not an
+       API reimplementation -- which is precisely what a Wine run would have been, and why
+       Wine was rejected as evidence for these two findings.
+    2. Not driven through `just test` / `cargo nextest` on the guest: the guest has no Rust
+       toolchain. The test binaries were built on the host and invoked directly, so this is
+       libtest's own runner -- same binaries, same assertions, same filters.
+
+  Transfer artifact worth knowing (NOT a defect, NOT Windows behavior): `cargo_bin_cmd!("md")`
+  bakes the compile-time host path of `md.exe` into the CLI test binary. Cross-compiled on
+  macOS that path is `/Users/ken/.../debug/md.exe`. Windows resolves a leading `/` against
+  the current drive, so staging a copy at `C:\Users\ken\...\debug\md.exe` satisfies it.
+  Without that staging all 15 F22 CLI tests fail with ERROR_PATH_NOT_FOUND (code 3) at spawn.
+  A native Windows `cargo test` would not need the staging step.
+
+Result summary
+--------------
+  F17 executor suite        14/14 PASS   [Windows behavioral gap CLOSED]
+  F22 CLI hash_directory    15/15 PASS   [Windows behavioral gap CLOSED]
+  F22 lib unit               1/1  PASS
+  ------------------------------------
+  TOTAL                     30/30 PASS   (reproduced across three independent runs)
+
+  The F17 suite lists exactly 14 tests on Windows: the 12 Unix-utility fixture tests in the
+  same module are now `#[cfg(unix)]`-gated, so the binary runs green as a whole -- which is
+  what review-2 required. Load-bearing arms proven here:
+
+    - timed_out_child_process_is_killed_and_reaped
+        -> the Windows kill+reap actually lands; the heartbeat file stops growing.
+    - saturated_dual_stream_capture_does_not_deadlock (+ pipeline + merged variants)
+        -> 256 KiB/stream past the pipe buffer does not wedge on Windows.
+    - wait_hands_the_full_budget_to_one_blocking_span (+ pipeline variant)
+        -> the no-poll guarantee holds on the WaitForSingleObject mapping.
+    - test_hash_directory_vendored_membership_matches_plain_dir
+        -> Windows agrees with macOS and Linux on directory-hash membership. This retires
+           the "Windows separator/path semantics remain the genuine unknown for F22" risk
+           that results.md carried to the owner.
+
+Verbatim harness output
+-----------------------
+--- F17 executor suite: darkmatter-e92c572b06eb6d9b.exe markdown::compose::shell_expansion::executor:: --test-threads=4
+
+running 14 tests
+test markdown::compose::shell_expansion::executor::tests::child_process_entrypoint ... ok
+test markdown::compose::shell_expansion::executor::tests::bare_filename_source_falls_through_to_cwd ... ok
+test markdown::compose::shell_expansion::executor::tests::command_not_found_for_nonexistent_executable ... ok
+test markdown::compose::shell_expansion::executor::tests::join_output_thread_reports_panic ... ok
+test markdown::compose::shell_expansion::executor::tests::execution_failed_includes_output_streams ... ok
+test markdown::compose::shell_expansion::executor::tests::pipeline_wait_hands_the_full_budget_to_one_blocking_span ... ok
+test markdown::compose::shell_expansion::executor::tests::saturated_dual_stream_capture_does_not_deadlock ... ok
+test markdown::compose::shell_expansion::executor::tests::pipeline_executor_timeout_selects_timeout_error ... ok
+test markdown::compose::shell_expansion::executor::tests::stderr_is_captured_and_combined ... ok
+test markdown::compose::shell_expansion::executor::tests::saturated_merged_stream_capture_does_not_deadlock ... ok
+test markdown::compose::shell_expansion::executor::tests::working_directory_resolution_priority ... ok
+test markdown::compose::shell_expansion::executor::tests::saturated_dual_stream_capture_does_not_deadlock_in_pipeline_executor ... ok
+test markdown::compose::shell_expansion::executor::tests::wait_hands_the_full_budget_to_one_blocking_span ... ok
+test markdown::compose::shell_expansion::executor::tests::timed_out_child_process_is_killed_and_reaped ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 5205 filtered out; finished in 1.14s
+
+
+--- F22 CLI suite: hash_directory-7474dd4efd42f2af.exe --test-threads=4
+
+running 15 tests
+test test_hash_directory_default ... ok
+test test_hash_directory_body_only ... ok
+test test_hash_directory_deterministic ... ok
+test test_hash_directory_differs_from_single_file ... ok
+test test_hash_directory_frontmatter_only ... ok
+test test_hash_directory_ignores_non_markdown ... ok
+test test_hash_directory_honors_ignore_properties ... ok
+test test_hash_directory_ignores_managed_keys ... ok
+test test_hash_directory_includes_vendored_dirs ... ok
+test test_hash_directory_rejects_save ... ok
+test test_hash_directory_rejects_structured_kind ... ok
+test test_hash_directory_malformed_frontmatter_exits_one ... ok
+test test_hash_directory_skips_hidden_dirs ... ok
+test test_hash_directory_strict ... ok
+test test_hash_directory_vendored_membership_matches_plain_dir ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.35s
+
+
+--- F22 lib unit: darkmatter-e92c572b06eb6d9b.exe markdown::fs:: --test-threads=2
+
+running 1 test
+test markdown::fs::tests::includes_vendored_but_skips_hidden_directories ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5218 filtered out; finished in 0.01s
+

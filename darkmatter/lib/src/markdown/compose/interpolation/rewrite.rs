@@ -101,6 +101,21 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
     fail_fast: bool,
     warning_stage: &'static str,
 ) -> Result<InterpolationRewrite, MarkdownError> {
+    // Fast path (F14): a `{{ … }}` expression and a `{{{ … }}}` literal both
+    // require the `{{` sequence. When the input contains none, no expression or
+    // literal can be present, so the whole scan pipeline — the MarkdownAware
+    // pulldown-cmark code-region parse in `ExpressionFinder::new`, every rescan
+    // pass, and `convert_literals` — is provably a no-op. Skip it and return the
+    // input verbatim. Byte-identical: the scan would find zero locations and
+    // `convert_literals` zero literals either way.
+    if !input.contains("{{") {
+        return Ok(InterpolationRewrite {
+            output: input.to_string(),
+            replacements: 0,
+            warnings: Vec::new(),
+        });
+    }
+
     let mut output = input.to_string();
     let mut total_count = 0;
     let mut all_warnings = Vec::new();
@@ -194,7 +209,15 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
         }
     }
 
-    let output = convert_literals(&output, scan_mode);
+    // `convert_literals` runs a full expression scan (a pulldown-cmark parse in
+    // MarkdownAware mode) plus a copy. A `{{{ … }}}` literal is impossible
+    // without the `{{{` sequence, so skip that work entirely when it's absent
+    // (F14) — byte-identical: the scan would find no literals either way.
+    let output = if output.contains("{{{") {
+        convert_literals(&output, scan_mode)
+    } else {
+        output
+    };
 
     Ok(InterpolationRewrite {
         output,
@@ -429,6 +452,36 @@ mod tests {
         assert_eq!(result.output, "no expressions here");
         assert_eq!(result.replacements, 0);
         assert!(result.warnings.is_empty());
+    }
+
+    /// F14 fast-path: input with single braces but no `{{` skips the scan
+    /// pipeline entirely and returns verbatim (byte-identical to the scanning
+    /// path, which would find zero expressions and zero literals).
+    #[test]
+    fn single_brace_input_takes_fast_path_verbatim() {
+        let state = make_state(json!({"name": "Alice"}));
+        let evaluator = Evaluator::new(&state);
+        // Contains `{` and `}` but never `{{` — the JSON-ish body must survive
+        // untouched under both scan modes.
+        let input = "config { key: value } and a lone } brace";
+        for mode in [ScanMode::Plain, ScanMode::MarkdownAware] {
+            let result = interpolate_text(input, &evaluator, mode, false, "test").unwrap();
+            assert_eq!(result.output, input);
+            assert_eq!(result.replacements, 0);
+            assert!(result.warnings.is_empty());
+        }
+    }
+
+    /// F14 fast-path must NOT swallow `{{{ … }}}` literals: `{{{` contains `{{`,
+    /// so the guard falls through to the normal literal-conversion path.
+    #[test]
+    fn triple_brace_literal_still_converted_despite_fast_path() {
+        let state = make_state(json!({}));
+        let evaluator = Evaluator::new(&state);
+        let result = interpolate_text("{{{ x }}}", &evaluator, ScanMode::Plain, false, "test")
+            .unwrap();
+        assert_eq!(result.output, "{{ x }}");
+        assert_eq!(result.replacements, 0);
     }
 
     #[test]

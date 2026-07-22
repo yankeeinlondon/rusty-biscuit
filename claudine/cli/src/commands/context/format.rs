@@ -25,7 +25,10 @@ fn context_value_type_markup(ty: &ContextValueType) -> String {
         SimplifiedType::Number | SimplifiedType::NumberLike => "green",
         SimplifiedType::Boolean | SimplifiedType::Boolish => "orange",
         SimplifiedType::Date | SimplifiedType::DateTime | SimplifiedType::Time => "violet",
-        SimplifiedType::Object | SimplifiedType::Any => "cyan",
+        SimplifiedType::Object
+        | SimplifiedType::Any
+        | SimplifiedType::TypeDefinition
+        | SimplifiedType::Schema => "cyan",
         SimplifiedType::String
         | SimplifiedType::Enum
         | SimplifiedType::File
@@ -102,5 +105,27 @@ pub(super) fn format_effect_example(
     match example {
         Some(ex) => inline_code_text(&format!("→ {}", ex.result), term),
         None => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn semantic_schema_types_render_as_structural_types() {
+        let definition = ContextValueType {
+            base: SimplifiedType::TypeDefinition,
+            is_array: false,
+            integer: false,
+        };
+        let schema = ContextValueType {
+            base: SimplifiedType::Schema,
+            is_array: true,
+            integer: false,
+        };
+
+        assert_eq!(context_value_type_markup(&definition), "<cyan>type-definition</cyan>");
+        assert_eq!(context_value_type_markup(&schema), "<cyan>schema[]</cyan>");
     }
 }

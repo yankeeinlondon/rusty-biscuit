@@ -1,0 +1,61 @@
+Phase 1 pre-change baseline
+Captured: 2026-07-18
+Invocation: darkmatter::parse_yaml_schema followed by darkmatter::to_json_schema
+SimplifiedSchema input:
+title: string(required)
+metadata:
+  published: boolean
+  tags: string[]
+
+Output:
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "metadata": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "published": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "tags": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              ]
+            }
+          },
+          "type": "object"
+        }
+      ]
+    },
+    "title": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "title"
+  ],
+  "type": "object"
+}
+
+

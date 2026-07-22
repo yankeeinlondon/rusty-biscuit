@@ -246,11 +246,18 @@ impl RunLocalCache {
     /// When `persistent_ctx` is provided, the persistent cache uses a
     /// full multi-dimensional key (source + body + state + context + options)
     /// instead of just the path-based key.
+    ///
+    /// `persistent_eligible` gates the persistent store: when `false`, run-local
+    /// single-flight reuse still applies but no persistent read or write is
+    /// attempted. Callers pass `false` when correct reuse would require
+    /// process-local instance identity that a persistent key cannot express
+    /// (e.g. an attached shell approval handler).
     pub fn get_or_compute_compose<F>(
         &self,
         key: &str,
         persistent_ctx: Option<&PersistentContext>,
         freshness_mode: CacheFreshnessMode,
+        persistent_eligible: bool,
         compute: F,
     ) -> MarkdownResult<Arc<ComposeResult>>
     where
@@ -311,9 +318,15 @@ impl RunLocalCache {
         // We own the InFlight slot — try persistent cache before computing
         self.record_miss();
 
-        // Check persistent store
+        // Check persistent store (skipped entirely when the key is not
+        // persistent-eligible — run-local single-flight reuse still applied).
+        let persistent_lookup = if persistent_eligible {
+            self.try_persistent_read_compose(key, persistent_ctx, freshness_mode)
+        } else {
+            None
+        };
         let stale_fallback =
-            match self.try_persistent_read_compose(key, persistent_ctx, freshness_mode) {
+            match persistent_lookup {
                 Some(PersistentLookup::Fresh(result)) => {
                     let arc_result = Arc::new(result);
                     {
@@ -336,8 +349,11 @@ impl RunLocalCache {
         // Compute fresh result
         match compute() {
             Ok(result) => {
-                // Write to persistent store (best-effort)
-                self.try_persistent_write_compose(key, persistent_ctx, &result);
+                // Write to persistent store (best-effort; skipped when the key
+                // is not persistent-eligible).
+                if persistent_eligible {
+                    self.try_persistent_write_compose(key, persistent_ctx, &result);
+                }
 
                 let arc_result = Arc::new(result);
                 {
@@ -1161,7 +1177,7 @@ mod tests {
 
         for _ in 0..3 {
             let result = cache
-                .get_or_compute_compose("key1", None, CacheFreshnessMode::Strict, || {
+                .get_or_compute_compose("key1", None, CacheFreshnessMode::Strict, true, || {
                     call_count += 1;
                     Ok(ComposeResult {
                         content: format!("result-{}", call_count),
@@ -1185,7 +1201,7 @@ mod tests {
         let call_count = std::sync::atomic::AtomicUsize::new(0);
 
         let result1 = cache
-            .get_or_compute_compose("key1", None, CacheFreshnessMode::Strict, || {
+            .get_or_compute_compose("key1", None, CacheFreshnessMode::Strict, true, || {
                 call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 Ok(ComposeResult {
                     content: "hello".to_string(),
@@ -1196,7 +1212,7 @@ mod tests {
             .unwrap();
 
         let result2 = cache
-            .get_or_compute_compose("key1", None, CacheFreshnessMode::Strict, || {
+            .get_or_compute_compose("key1", None, CacheFreshnessMode::Strict, true, || {
                 call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 Ok(ComposeResult {
                     content: "should not compute".to_string(),
@@ -1240,6 +1256,7 @@ mod tests {
                             "contested-key",
                             None,
                             CacheFreshnessMode::Strict,
+                            true,
                             || {
                                 compute_count.fetch_add(1, Ordering::SeqCst);
                                 std::thread::sleep(Duration::from_millis(50));
@@ -1306,7 +1323,7 @@ mod tests {
 
         // Populate cache
         cache
-            .get_or_compute_compose("key1", None, CacheFreshnessMode::Strict, || {
+            .get_or_compute_compose("key1", None, CacheFreshnessMode::Strict, true, || {
                 Ok(ComposeResult {
                     content: "original".to_string(),
                     report: ComposeReport::new(),
@@ -1329,7 +1346,7 @@ mod tests {
         };
 
         let result = refresh_cache
-            .get_or_compute_compose("key1", None, CacheFreshnessMode::Strict, || {
+            .get_or_compute_compose("key1", None, CacheFreshnessMode::Strict, true, || {
                 Ok(ComposeResult {
                     content: "refreshed".to_string(),
                     report: ComposeReport::new(),
@@ -1452,7 +1469,7 @@ mod tests {
 
         // Same key string, different namespaces
         cache
-            .get_or_compute_compose("shared-key", None, CacheFreshnessMode::Strict, || {
+            .get_or_compute_compose("shared-key", None, CacheFreshnessMode::Strict, true, || {
                 Ok(ComposeResult {
                     content: "compose-content".to_string(),
                     report: ComposeReport::new(),
@@ -1506,6 +1523,7 @@ mod tests {
                 "child",
                 Some(&child_ctx),
                 CacheFreshnessMode::Strict,
+                true,
                 || {
                     Ok(ComposeResult {
                         content: "# Child\n\nVersion 1\n".to_string(),
@@ -1523,6 +1541,7 @@ mod tests {
                 "parent",
                 Some(&parent_ctx),
                 CacheFreshnessMode::Strict,
+                true,
                 || {
                     Ok(ComposeResult {
                         content: "# Parent\n\n# Child\n\nVersion 1\n".to_string(),
@@ -1627,6 +1646,7 @@ mod tests {
                 "compose-op",
                 Some(&persistent_ctx),
                 CacheFreshnessMode::Strict,
+                true,
                 || {
                     Ok(ComposeResult {
                         content: "# Title\n\nBody\n".to_string(),
@@ -1647,6 +1667,7 @@ mod tests {
                 "compose-op",
                 Some(&persistent_ctx),
                 CacheFreshnessMode::Strict,
+                true,
                 || {
                     compute_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     Ok(ComposeResult {
@@ -1660,6 +1681,100 @@ mod tests {
 
         assert_eq!(compute_count.load(std::sync::atomic::Ordering::SeqCst), 0);
         assert_eq!(result.content, "# Title\n\nBody\n");
+    }
+
+    #[test]
+    fn persistent_ineligible_key_never_reads_or_writes_persistent_store() {
+        let (dir, cache) = persistent_cache();
+        let workspace = tempdir().unwrap();
+        let source_path = workspace.path().join("doc.md");
+        fs::write(&source_path, "# Title\n\nBody\n").unwrap();
+        cache.load_markdown(&source_path).unwrap();
+
+        let canonical_source = compose_cache_key(&source_path);
+        let persistent_ctx = PersistentContext {
+            source_id: source_id_hash(&canonical_source),
+            state_hash: 0,
+            context_hash: 0,
+            options_hash: 0,
+        };
+
+        // Ineligible: run-local single-flight still works, but nothing is
+        // written to the persistent store.
+        cache
+            .get_or_compute_compose(
+                "ineligible-key",
+                Some(&persistent_ctx),
+                CacheFreshnessMode::Strict,
+                false,
+                || {
+                    Ok(ComposeResult {
+                        content: "# Title\n\nBody\n".to_string(),
+                        report: ComposeReport::new(),
+                        dependencies: vec![],
+                    })
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            cache.stats().persistent_writes,
+            0,
+            "ineligible key must not write persistent cache"
+        );
+
+        // A fresh cache over the same store cannot read that (never-written)
+        // entry back, so it recomputes rather than serving a persistent hit.
+        let second = RunLocalCache::new(CacheAccessMode::ReadWrite)
+            .with_persistent(dir.path().join("cache"));
+        second.load_markdown(&source_path).unwrap();
+        let recomputed = std::sync::atomic::AtomicUsize::new(0);
+        second
+            .get_or_compute_compose(
+                "ineligible-key",
+                Some(&persistent_ctx),
+                CacheFreshnessMode::Strict,
+                false,
+                || {
+                    recomputed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Ok(ComposeResult {
+                        content: "# Title\n\nBody\n".to_string(),
+                        report: ComposeReport::new(),
+                        dependencies: vec![],
+                    })
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            recomputed.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "no persistent entry exists to serve, so the closure runs"
+        );
+        assert_eq!(second.stats().persistent_hits, 0);
+
+        // Contrast: the same key when eligible writes through to the store.
+        let eligible = RunLocalCache::new(CacheAccessMode::ReadWrite)
+            .with_persistent(dir.path().join("cache"));
+        eligible.load_markdown(&source_path).unwrap();
+        eligible
+            .get_or_compute_compose(
+                "eligible-key",
+                Some(&persistent_ctx),
+                CacheFreshnessMode::Strict,
+                true,
+                || {
+                    Ok(ComposeResult {
+                        content: "# Title\n\nBody\n".to_string(),
+                        report: ComposeReport::new(),
+                        dependencies: vec![],
+                    })
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            eligible.stats().persistent_writes,
+            1,
+            "eligible key writes persistent cache"
+        );
     }
 
     #[test]
@@ -1752,6 +1867,7 @@ mod tests {
                 "child",
                 Some(&child_ctx),
                 CacheFreshnessMode::Strict,
+                true,
                 || {
                     Ok(ComposeResult {
                         content: "# Child\n\nVersion 1\n".to_string(),
@@ -1769,6 +1885,7 @@ mod tests {
                 "parent",
                 Some(&parent_ctx),
                 CacheFreshnessMode::Strict,
+                true,
                 || {
                     Ok(ComposeResult {
                         content: "# Parent\n\n# Child\n\nVersion 1\n".to_string(),
@@ -1790,6 +1907,7 @@ mod tests {
                 "parent",
                 Some(&parent_ctx),
                 CacheFreshnessMode::Fallback,
+                true,
                 || Err(std::io::Error::other("boom").into()),
             )
             .unwrap();
@@ -1830,6 +1948,7 @@ mod tests {
                 "child",
                 Some(&child_ctx),
                 CacheFreshnessMode::Strict,
+                true,
                 || {
                     Ok(ComposeResult {
                         content: "# Child\n\nVersion 1\n".to_string(),
@@ -1847,6 +1966,7 @@ mod tests {
                 "parent",
                 Some(&parent_ctx),
                 CacheFreshnessMode::Strict,
+                true,
                 || {
                     Ok(ComposeResult {
                         content: "# Parent\n\n# Child\n\nVersion 1\n".to_string(),
@@ -1869,6 +1989,7 @@ mod tests {
                 "parent",
                 Some(&parent_ctx),
                 CacheFreshnessMode::Optimistic,
+                true,
                 || {
                     compute_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     Ok(ComposeResult {

@@ -1,7 +1,7 @@
 ---
 $schema:
-    spec: file(required;eager) -> the specification file providing the basis for this review's findings
-    design: file -> the design file (_optional_) that compliments the spec
+    spec: file(required;eager;match(**/*spec*.md)) -> the specification file providing the basis for this review's findings
+    design: file(match(**/*design*.md)) -> the design file (_optional_) that compliments the spec
     iteration: number -> the review's iteration number
     review: file -> the review file which will be created based on this prompt's execution
 description: "Reviews a _feature specification_ to make sure that the specification has been fully implemented. This prompt is also aware of the likelihood of more than one review being necessary and therefore names the reviews `review-{iteration}.md` in the same folder where the feature was specified.\n\nThe caller can pass in the **iteration** number but it should be detected automatically."
@@ -9,8 +9,8 @@ description: "Reviews a _feature specification_ to make sure that the specificat
 dir: "{{dirname(spec)}}"
 design: "{{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}"
 iteration: "{{ file_exists(spec) ? (frontmatter(spec, 'review_iterations') || 0) + 1  : 1   }}"
-review: {{ dirname(spec) + '/review-' + iteration + '.md' }}
-previous: {{ iteration < 2 ? null : 'decrement_file_index(review)' }}
+review: "{{ dirname(spec) + '/review-' + iteration + '.md' }}"
+previous: {{ iteration < 2 ? null : decrement_file_index(review) }}
 feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 start:
     message: "👓 starting {{feature_or_fix}} review #{{iteration}} of `{{parent_dir(spec)}}` (_in the **{{ctx.area}}** package area_)"
@@ -115,13 +115,13 @@ test is at the wrong level under "Findings" with severity at least "high".
     - set the `implemented` property to `false`
     - set the `description` property to "A **{{feature_or_fix}}** review of `{{ parent_dir(spec) }}/{{ basename(spec) }}`"
     - set the `{{feature_or_fix}}` property to "{{ parent_dir(review) }}/{{ basename(review) }}"
-    ::block when="iteration < 2"
+    ::block when="iteration > 1"
     - set the `previous` property to "{{parent_dir(previous)}}/{{basename(previous)}}"
     ::end-block
-::block when="iteration <  2"
+::block when="iteration >  1"
 - Now set the frontmatter properties of the _previous review_ located at @{{previous}}:
-- set the `next` property on the _previous review_ to "{{parent_dir(review)}}/{{basename(review)}}"
-- set the `implemented` property to `true`
+    - set the `next` property on the _previous review_ to "{{parent_dir(review)}}/{{basename(review)}}"
+    - set the `implemented` property to `true`
 ::end-block
 - Set the spec file's ({{spec}}) `review_iterations` Frontmatter property to '{{iteration}}'
 - Summarize to the caller what was found and be sure to mention whether the review deemed the {{feature_or_fix}} to be **production ready** or not.

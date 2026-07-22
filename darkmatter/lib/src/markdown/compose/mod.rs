@@ -125,6 +125,7 @@ pub use shell_expansion::ShellTimeoutBehavior;
 pub use context::effective_state::{EffectiveState, EffectiveStateBuilder};
 pub(crate) use context::effective_state::ResolvingLookup;
 pub use context::options::{ComposeOptions, ComposeSource};
+pub(crate) use context::options::ReferenceGraphOptionsIdentity;
 pub use context::report::{ComposeReport, ComposeWarning, SourceRange};
 pub use context::runtime::ComposeContext;
 pub use perf::{

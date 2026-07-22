@@ -179,14 +179,9 @@ tokio.workspace = true
 **Common commands:**
 
 ```bash
-# Build all workspace crates
-cargo build --workspace
-
-# Test all crates
-cargo test --workspace
-
-# Build specific crate
+# Build and test a selected crate
 cargo build -p my-core
+cargo test -p my-core
 
 # Run example from specific crate
 cargo run -p my-cli --example demo
@@ -366,5 +361,8 @@ Aggregator POM ("reactor") driving multiple modules.
 1. Create workspace root `Cargo.toml`
 2. Move packages to `crates/` subdirectories
 3. Update path dependencies
-4. Run `cargo build --workspace` to verify
+4. Verify the migration with builds, tests, and lint scoped to the packages and
+   downstream consumers affected by the new workspace boundaries. Use an
+   aggregate repository verification recipe only when the explicit migration
+   contract requires it.
 5. Commit shared `Cargo.lock`

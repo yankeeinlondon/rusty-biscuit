@@ -3,9 +3,57 @@ repo: "rusty-biscuit"
 scope: "darkmatter library + md CLI (with cross-package findings in sniff and biscuit-terminal where darkmatter's hot paths land there)"
 created: "2026-07-12"
 method: "4 parallel code-review passes (compose, rendering, schemas, CLI/IO) + empirical verification with hyperfine, RUST_LOG tracing, and `md compose --perf` against a release build of the current branch"
+reviewed: true
+reviewed_by: codex/default
+reviewed_on: 2026-07-15
+review_iterations: 3
 ---
 
 # Performance Review: Darkmatter Library and CLI
+
+> **Superseded in part (2026-07-16).** All 35 findings below were audited
+> against `51c1f16e10ffe825b56987573ba4eabc659c768e`. Where this review's
+> status and the audit disagree, **the audit wins** — two changes made here were
+> forbidden behavior changes and have since been reverted (Finding 1's
+> `sniff::detect_timezone()` boundary, Finding 22's directory-hash membership),
+> and several findings' evidence was rejected as measured at the wrong level.
+> The body and checkboxes below are preserved unedited as the historical
+> `codex/default` record; they are **not** the current disposition.
+>
+> - Final dispositions + evidence:
+>   [`2026-07-15-performance-followup/results.md`](../../features/2026-07-15-performance-followup/results.md)
+> - Audit table + retained work:
+>   [`2026-07-15-performance-followup/spec.md`](../../features/2026-07-15-performance-followup/spec.md)
+> - **Finding 18** correctness (graph opacity + document/options/mode identity)
+>   is owned exclusively by
+>   [`2026-07-15-reference-graph/`](../../features/_completed/2026-07-15-reference-graph/plan.md)
+>   (archived to `_completed/` on 2026-07-16; path corrected 2026-07-17);
+>   no such work landed under this review.
+
+> **Verification-scope correction (2026-07-15):** This review introduced
+> `cargo check --workspace` as a cross-package closeout gate in commit
+> `64e4b8cb8`. That advice is superseded. Identify affected packages and
+> downstream consumers first, then run build, test, and lint for those package
+> areas. Historical result entries remain evidence of commands already run,
+> not instructions to repeat them.
+
+> **Reader's note (2026-07-14 review):** The original draft identified the
+> right hot paths, but several suggested optimizations silently changed public
+> or side-effect semantics. The reviewed design keeps `sniff::detect_timezone()`
+> as the full, NTP-reporting API while Darkmatter explicitly requests local-only
+> timezone data; caches expensive terminal facts rather than a whole ambient
+> `Terminal`; validates a schema from one resolved/coerced instance; preserves
+> source-ordered body-shell execution; and retains collision-resistant validator
+> cache identity through `biscuit-hash`. It also adds the missing delivery,
+> reproducibility, compatibility, and cross-platform contracts below.
+
+> **Finding 29 follow-up (2026-07-15):** The public
+> `EffectiveSchema::json_schema` ownership change from `Value` to `Arc<Value>`
+> is now an explicit compatibility exception. This repository has no
+> established external users, and the same-source Criterion comparison showed
+> material improvements in every ownership-sensitive case. A second measured
+> refinement removes all deep clones from built-in baseline configuration and
+> baseline-only resolution. See [`results-2.md`](./results-2.md).
 
 ## Executive Summary
 
@@ -35,6 +83,119 @@ problems are concentrated in four places:
 - **High: 5**
 - **Medium: 12**
 - **Low: 15**
+
+## Scope and Delivery Contract
+
+This document is a measured optimization backlog, not authorization to land all
+33 findings as one undifferentiated refactor. Each numbered finding is an
+independent change and must pass its own before/after checkpoint. Findings that
+do not show a repeatable improvement outside measurement noise should not land.
+
+### Finding disposition and approval
+
+A finding is not complete merely because a safe subset landed or because the
+remaining work is broad, risky, uncommon, or better suited to a dedicated
+change. Those considerations can determine sequencing, but they do not remove
+the residual work from this specification. A partially implemented finding
+remains open and must not be represented by a completed checkbox without an
+explicit list of its still-open sub-items.
+
+A finding, or a separately identified sub-item, can be closed without an
+implementation only when one of these dispositions is recorded:
+
+- A requirement-matched benchmark shows no repeatable improvement outside the
+  harness noise, with the evidence retained alongside the finding.
+- The proposed optimization conflicts with a compatibility or correctness
+  invariant. Reject the unsafe approach explicitly and keep the underlying
+  performance problem open when a compatible alternative remains possible.
+- The repository owner explicitly approves removing or deferring the work from
+  this review. A deferral must link to an active or unscheduled follow-up spec;
+  moving residual work there is a scope decision, not evidence of completion.
+
+Implementation complexity, public or internal blast radius, regression risk,
+or an assertion that a path is rare are not sufficient closeout evidence by
+themselves. An aggregate phase checkpoint also cannot mark unimplemented
+sub-items complete.
+
+The current plan's residual work therefore remains part of this active review:
+the deep cross-pass portions of Findings 7 and 16; Findings 11, 12, 13, and 32;
+the unimplemented portions of Findings 14, 23, 25, 33, and 35; and Finding 17's
+10 ms process-polling issue. Finding 17's proposed parallel execution of body
+shell directives is explicitly rejected because it violates invariant 5; that
+decision does not close the independent polling sub-item.
+
+### In scope
+
+- The `darkmatter` library and `md` CLI hot paths named in the findings.
+- The narrow `sniff` and `biscuit-terminal` changes required by Darkmatter's
+  measured paths.
+- Benchmarks, regression tests, and documentation needed to keep the gains and
+  behavior stable.
+
+### Non-goals
+
+- Changing compose output, validation results, rendering output, CLI JSON
+  shapes, or public Rust signatures merely to make an optimization easier.
+- Making arbitrary shell directives concurrent.
+- Turning `Terminal` into a process-global snapshot of the current working
+  directory, environment, stream attachment, or terminal configuration.
+- Changing directory-hash membership without an explicit compatibility ruling
+  (Open Question 4).
+- Replacing bounded run-local caches with unbounded process-global caches.
+
+### Compatibility and correctness invariants
+
+1. Except for Finding 1's intentional removal of Darkmatter's unused NTP
+   probe, public behavior is byte-for-byte and error-for-error compatible.
+   Snapshot/golden tests must cover composed Markdown, terminal output, JSON,
+   diagnostics, and exit status where the changed path can affect them.
+2. Public Rust APIs remain source-compatible except for Finding 29's explicitly
+   approved `EffectiveSchema::json_schema: Value` → `Arc<Value>` ownership
+   change. That exception is supported by the measurements in
+   [`results-2.md`](./results-2.md) and by the absence of established external
+   users. Other internal borrowed, shared, or `Cow` paths retain their existing
+   owned public facades; in particular,
+   `darkmatter_base_json_schema() -> Value` remains source-compatible and
+   independently mutable.
+3. Cache identity must include every input that can affect the cached result.
+   Schema validators include schema bytes, document `base_dir`, and
+   `file_ref_fallback_dir`; file-backed caches also retain their existing
+   dependency/content invalidation contract. Cache hits may never change a
+   validation answer.
+4. Caches must be bounded and safe under concurrent library use. A performance
+   fix must report its capacity/eviction policy and cannot introduce an
+   environment- or current-directory-dependent global singleton.
+5. Body shell directives retain source-order execution and failure semantics.
+   Stable output order alone is not sufficient: commands may observe or mutate
+   shared filesystem, environment, and process-external state.
+6. All implementations must compile on macOS, Linux, and Windows. OS-specific
+   probes require target-gated tests; Unix PTY/OSC tests must not make Windows
+   test targets compile Unix-only imports.
+
+### Evidence and completion criteria
+
+A finding is complete only when all of the following hold:
+
+- A release-build baseline and post-change result use the same fixture bytes,
+  command, environment, TTY mode, warm-up, and sample policy. Record median (or
+  mean), dispersion, and sample count; do not compare numbers from different
+  hosts as a pass/fail gate.
+- CLI fixtures are committed or generated by a checked-in deterministic command
+  with recorded byte sizes and content hashes. The uncommitted ad-hoc fixtures
+  used for the original measurements are evidence for the finding, but are not
+  a reproducible regression harness.
+- Microbenchmarks prove the local mechanism and an end-to-end command proves
+  that the gain survives process startup and surrounding work. TTY findings
+  include a real PTY/L2 measurement; piped hyperfine runs cannot validate OSC
+  latency.
+- Results are compared against a predeclared threshold: no statistically
+  credible regression on unaffected benchmark groups, and a repeatable win
+  larger than the harness noise on the target group. Absolute millisecond goals
+  in this document are directional because host and terminal latency vary.
+- `just build`, `just test`, `just test-l2`, and `just lint` pass in each
+  affected package area. Cross-package changes include downstream consumers
+  identified by impact analysis. Read-only formatting checks are permitted;
+  this work must not run write-mode `cargo fmt`.
 
 ### Measured baseline (release build, macOS, stdout piped)
 
@@ -95,10 +256,17 @@ is computed and thrown away.
 
 **Fix.** Call `sniff::os::detect_timezone_with_options(false)` in
 `populate_datetime` (the timezone-abbreviation derivation is the only thing
-darkmatter needs, and it never uses NTP status). Separately consider making
-sniff's bare `detect_timezone()` default to `probe_ntp: false` — a network
-probe is a surprising default for a "detect timezone" call. Expected result:
-compose drops from ~127 ms to ~70 ms immediately.
+Darkmatter needs, and it never uses NTP status). Keep sniff's bare
+`detect_timezone()` behavior unchanged: its documented contract is the full
+time-information convenience API, including NTP status, while
+`detect_timezone_with_options(false)` and `OsRequest::summary()` are the
+established local-only surfaces. Changing the convenience default would be a
+cross-package semantic break unrelated to removing Darkmatter's unused work;
+if desired, that belongs in a separate sniff specification with a caller audit.
+Also correct the stale "zero-cost"/"purely local" capture comment in the same
+change. Expected directional result: compose drops from ~127 ms toward ~70 ms
+on the original host, with no `sntp`, `timedatectl`, or `w32tm` child spawned by
+Darkmatter on macOS, Linux, or Windows.
 
 ---
 
@@ -132,9 +300,17 @@ library callers (claudine) rendering many documents per process pay it per
 document.
 
 **Fix.** Add a `TEXT_COLOR_CACHE: OnceLock` mirroring `BG_COLOR_CACHE`
-(ideally batch OSC 10+11 in one raw-mode session). In darkmatter, cache one
-detected `Terminal` per process in a `LazyLock<Terminal>` and clone it in
-`terminal_options_from_terminal_options` / `ambient_terminal_width`.
+(ideally batch OSC 10+11 in one raw-mode session). Cache only the default-query
+path; the explicit `*_with_timeout` APIs remain uncached. Do **not** cache a
+whole detected `Terminal` in the Darkmatter library: it includes
+current-directory, environment, stream-attachment, color-mode, and config-file
+facts whose lifetime is construction-scoped. `Terminal::width()` and
+`height()` are intentionally dynamic. For width-only call sites such as
+`ambient_terminal_width`, call the dynamic dimensions detector directly. For
+full rendering, add/use a caller-supplied-terminal path so long-running hosts
+can reuse a snapshot intentionally, while the zero-config convenience path
+retains fresh construction semantics. The exact lifetime of default OSC/color
+probe caching is resolved in Open Question 1.
 
 ### 3. One CLI invocation constructs `Terminal::default()` up to four times
 
@@ -151,8 +327,13 @@ twice; Ghostty spawns `ghostty +show-config`), and connection/CI detection.
 `md toc --json` also constructs a `Terminal` it never uses
 (`commands/mod.rs:158-171` — built before the `json` branch).
 
-**Fix.** Detect once per process — a CLI-level `LazyLock<Terminal>` — and
-pass it down. Move `Terminal::new()` inside the non-JSON branch of `toc`.
+**Fix.** Detect once per **CLI invocation**, after argument parsing, and pass a
+borrowed terminal context to every human-rendered branch that runs in that
+invocation. Do not use a process-global `LazyLock<Terminal>`: tests and library
+hosts may change the current directory, environment, or attached streams
+within one process. Construct lazily so pure Markdown/HTML/JSON paths do not
+detect a terminal at all. Move `Terminal::new()` inside the non-JSON branch of
+`toc`.
 
 ### 4. `Markdown::toc()` line numbers are O(n²)
 
@@ -175,8 +356,13 @@ the total is O(E × N). Measured: 81 KB → 203 ms, 326 KB → 2.24 s (4× size,
 and the reference graph's heading indexes.
 
 **Fix.** Precompute a sorted line-start offset table once and binary-search
-per event — or track the line incrementally since offsets are mostly
-increasing. Compute it only in the arms that need it.
+only in event arms that consume a line number, or track the line incrementally
+because pulldown-cmark offsets are emitted in source order. Preserve the shared
+span contract: 1-indexed lines, byte offsets, `\r\n` counting as one line break,
+and offsets clamped to the source. Prefer the incremental O(n) design when it
+stays simple; the table design is O(n log n) and is acceptable if it is clearer.
+Do not replace these calls with repeated `span::line_of_offset`, which is also a
+prefix scan and therefore retains the quadratic behavior.
 
 ### 5. Schema stage resolves the effective schema twice and coerces twice per compose
 
@@ -267,9 +453,17 @@ the existing `with_trigger_registry` API. Fix the doc claim either way.
 per compose — the already-cached `BASE_JSON_SCHEMA` (`mod.rs:161-167`) is never
 consulted on this path. `effective_for` then clones the baseline JSON into
 `base_layers` per call — twice per `run()` (finding 5). Measured: the baseline
-schema accounts for ~47 ms of wall on a trivial compose. Fix: feed
-`with_baseline_json_schema(darkmatter_base_json_schema())` when the baseline
-is the darkmatter base; hold layers as `Arc<Value>`.
+schema accounts for ~47 ms of wall on a trivial compose. Fix: add a dedicated
+built-in-baseline builder that shares the cached JSON Schema as `Arc<Value>`;
+retain the owned accessor for callers that require an independent value.
+
+**Follow-up (2026-07-15).** Complete and measured. The default compose path now
+uses `DarkmatterSchemas::with_darkmatter_baseline_json_schema()`, which shares
+the process-cached `Arc<Value>` and validates it by reference. DMLS also keeps
+the built-in baseline shared until a matching extension requires an owned merge.
+Built-in configuration improved from 391.12 µs to 26.42 ns and configuration
+plus baseline-only resolution improved from 450.91 µs to 56.47 µs. The owned
+accessor remains unchanged. See [`results-2.md`](./results-2.md).
 
 ### 10. Full ctx-values map deep-cloned on every frontmatter `ctx.*` lookup
 
@@ -480,6 +674,25 @@ Baseline JSON, trigger payloads, and document JSON are cloned per call — 2×
 per `run()`, 4× with trigger re-assembly. Falls out of findings 5/8/9;
 otherwise `Arc<Value>` layers.
 
+**Status (2026-07-15): implemented, measured, and approved with an explicit
+compatibility exception.** `EffectiveSchema::json_schema` is retained as
+`Arc<Value>`. Against the prior owned `Value`, the Darkmatter baseline-only
+case improved 69.4%, baseline-plus-document improved 28.6%, and cloning an
+assembled Darkmatter effective schema improved 99.7% (125.53 µs → 340.21 ns).
+The 512-property synthetic cases improved 56.2%, 16.9%, and 91.5%,
+respectively, while the document-only control showed no significant change.
+
+The follow-up implementation stores the built-in JSON Schema once as
+`Arc<Value>`, adds a borrowed accessor and a dedicated shared-baseline builder,
+validates baseline shape without a probe merge, and makes `merge_baseline`
+borrow the baseline property map. The common built-in configuration and
+baseline-only paths now perform zero deep clones. Merged results clone each
+baseline property at most once because `merge_baseline` must produce an owned
+`Value` before it is wrapped in `Arc`. The existing
+`darkmatter_base_json_schema() -> Value` facade continues to return an
+independent deep clone. Full measurements and verification are recorded in
+[`results-2.md`](./results-2.md).
+
 ### 30. `doc.*` namespace lookups rebuild the entire effective state as a `Value::Object`
 
 **Location:** `context/effective_state.rs:182-184`; `frontmatter_interpolation.rs:88-91`
@@ -593,6 +806,10 @@ good.
   interpolation + `$schema` + one transclusion, and one for `as_terminal` on a
   code-heavy 100 KB doc — the two paths this review found regressions in are
   exactly the ones with no bench coverage today.
+- Keep `effective_schema_ownership` as the Finding 29 regression harness. Save
+  a named Criterion baseline before changing ownership, configuration, or merge
+  behavior; its baseline-only, merged, accessor, initialization, and control
+  cases distinguish Arc sharing from unrelated parse/validation work.
 - Keep `md compose --perf` in the loop: it attributed the NTP stall precisely
   and is the right harness for validating fixes 1/5/6/7.
 - Re-run the `toc` scaling test (81 KB / 326 KB / 1.3 MB) after fix 4; the

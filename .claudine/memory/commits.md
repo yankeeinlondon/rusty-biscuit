@@ -28,6 +28,9 @@ do not belong here.
   result means the working tree differs from the staged snapshot.
 - Do not commit unresolved conflict markers. If staged content contains them,
   leave that group staged and report it.
+- Scan staged blobs for all diff3 conflict-marker forms, including the base
+  marker `|||||||`; partial resolutions can leave it behind after deleting the
+  `=======` separator and `>>>>>>>` terminator.
 - Use `git log` for commit-history examples. `sniff git commits` is not valid.
 
 ## Path-Limited Commits
@@ -45,6 +48,13 @@ do not belong here.
   open the configured editor and block.
 - Do not place messages containing backticks, dollar signs, or other shell
   metacharacters in a double-quoted `-m` argument.
+- **`--only` + `-F -` argument order.** In a path-restricted commit that reads
+  the message from stdin, place `-F -` BEFORE `--only`, not after:
+  `git commit -F - --only -- <paths>` works; `git commit --only -F - -- <paths>`
+  makes `--only` absorb `-F` as a pathspec and git returns
+  `error: pathspec '-F' did not match any file(s) known to git`. The heredoc
+  payload is then never read. Pair this with the single-quoted `<<'COMMIT_MSG'`
+  delimiter above.
 
 ## Mixed-State Paths
 
@@ -70,20 +80,101 @@ do not belong here.
 
 - Follow recent repository history and the prompt's Conventional Commit format.
   Subjects use lowercase after the colon and stay under 72 characters.
-- Use `planning` for physical moves into `_completed` or out of `_unscheduled`.
-  An in-place planning-document edit is normally `docs`, not `planning`.
+- Use `planning` for physical moves into `_completed` or out of `_unscheduled`,
+  AND for review-cycle doc commits inside a fix/review directory: a cycle-N→N+1
+  in-place edit (`log.md` verification entry, `review-N.md` flipping
+  `implemented: true` and pointing at `next`, the new `review-(N+1).md`,
+  `spec.md` bumping `review_iterations`) ships as
+  `planning(<area>): close <fix> cycle N, open cycle N+1`. `main` is the
+  authority — this is the established convention for the `redundant-walk`
+  and `invalid-frontmatter` fix cycles (see `4c903c586`, `152ea6b84`,
+  `690b2ecc3`); follow the most recent sibling commits, not a generic
+  "in-place edits are docs" rule.
+- When drafting a cycle-close commit body, the diff's literal wording matters.
+  Paraphrasing too aggressively risks inventing commitments the staged content
+  did not make (e.g. "smoke test failed" vs. "smoke attempt was interrupted by
+  host load before any benchmark case ran" are materially different). Quote or
+  paraphrase only what the diff actually says; if a section is too thin to
+  characterize, summarize the size and the file/line range rather than
+  speculating on its content.
+- `planning` commits may have zero source diff. The fix-review pattern uses
+  verification iterations to re-audit a prior cycle's implementation rather than
+  redo it, so a cycle-N log/spec/review update can ship with no Rust changes.
+  Treat such commits as valid cycle iterations, not no-ops.
 - Describe the semantic change, not Git's similarity score or mechanics.
 
 ## Concurrency
 
+- GitNexus `detect_changes` against a shared staged worktree reports aggregate
+  symbols, processes, and risk for sibling groups as well as the group under review.
+  A HIGH/CRITICAL result for a docs-only group may therefore describe unrelated
+  staged runtime work; review the assigned diff and path-limited commit shape before
+  treating the aggregate rating as group-local risk.
 - Parallel groups must have disjoint paths. If one group introduces a module,
   dependency, or symbol consumed by another group, commit the producer first.
-
+- Adding new variants to a non-`non_exhaustive` enum couples the producer and
+  every consumer whose match must update. Producer-first leaves consumers with
+  non-exhaustive matches; consumer-first references variants that do not yet
+  exist. Combine producer and all matching consumers into a single semantic
+  group, even if the commit crosses package boundaries; drop the scope in the
+  message (`perf:` instead of `perf(sniff):`) to acknowledge the cross-area
+  span. The producer-first rule above assumes the additions are
+  backward-compatible (e.g., new items behind `#[non_exhaustive]`, trait
+  methods, struct fields with defaults).
+- Extra staged paths are normal in concurrent batches. Treat them as sibling
+  work and scope with `git commit --only -- <assigned-paths>`. `--only` leaves
+  every other staged entry untouched in the index, so do NOT reach for
+  `git restore --staged` (or any other index mutator) to "clean up" siblings
+  before committing. Doing so corrupts sibling work and forces the orchestrator
+  to re-stage from the working tree.
+- The staged set can shrink between inspection and commit when a sibling commit
+  lands. `--only -- <paths>` handles this; verify the resulting commit shape.
+- Git accepts intermediate commits that reference files introduced by sibling
+  commits. That may make individual commits non-compiling; this is expected for
+  parallel structural refactors when the full final history is coherent.
 - Git lock failures are transient contention. Retry the identical commit up to
-
+  five times with a short backoff.
+- In a linked worktree, `.git` is a file and the index lock is under the
+  worktree-specific gitdir, while branch-reference locks are under the shared
+  gitdir. Resolve both with `git rev-parse --git-dir` and `git rev-parse
+  --git-common-dir`; do not infer lock locations from `.git/index.lock` or
+  remove locks manually.
+- Under heavy parallel contention (five or more sub-agents committing
+  concurrently against the same worktree), the per-agent retry budget is
+  sometimes insufficient: `index.lock` can persist longer than five
+  attempts. Expect some groups to fail in the first round and re-dispatch
+  them in a second round once the bulk of contention has cleared. Before
+  re-dispatching, re-verify each failed group's assigned paths are still
+  staged (`git status --short`). Never `rm` the lock file — that races
+  against sibling agents and can corrupt an in-flight index write.
+- Never disable repository signing or override signing configuration (including
+  `gpg.program`) to avoid or preempt signing failures. Let the repository and
+  host defaults apply. If signing hangs or fails, stop and report it.
+- In a non-interactive session, gpg-agent pinentry is the most likely commit
+  failure mode. Before committing, sanity-check `git config --get commit.gpgsign`
+  (or repo-local `commit.gpgsign` truth) and `pgrep gpg-agent`; if the agent is
+  alive but the signing-subkey passphrase is not cached, `git commit` will
+  block waiting for a TTY. Verify the agent has the key cached (or commit is
+  deliberately unsigned) before dispatching, and report any signing hang
+  immediately rather than letting the agent time out.
+- Never bypass repository hooks with `--no-verify`, `-c core.hooksPath=...`, or
+  equivalent overrides. An instruction not to run validations means do not
+  launch them explicitly; configured commit hooks still run normally. If a hook
+  blocks the commit, report the failure rather than suppressing it.
+- Never amend or create follow-up fixup commits after a successful commit in a
+  concurrent batch. Report the issue so the orchestrator can decide whether to
+  accept, revert, or coordinate a rewrite.
 - Run commands from the inherited worktree root. Do not change to a guessed
   repository path, and do not push commits.
 - In zsh wrappers, avoid special variable names such as `status` and `path`.
+- `git commit --only -F - -- <pathspec...>` is safe under concurrent index
+  churn: when another sub-agent's commit lands between this agent's read and
+  its commit, the `--only -- <paths>` form commits only the named paths
+  regardless of intermediate index changes, so the agent never accidentally
+  sweeps in files that left its assigned set during the gap. Confirmed in a
+  three-group batch where the planning-archive group landed last while the
+  docs-only and rustdoc-only groups had already moved their files out of the
+  index.
 
 ## Orchestration
 
@@ -100,6 +191,25 @@ do not belong here.
 - A truncated body is not corruption. Per the Concurrency rule, do not amend
   mid-batch — accept the loss, note it in the orchestrator's summary, and let
   the developer decide whether to rewrite the message after the batch settles.
+- Before dispatching subagents, cross-check that the union of every group's
+  pathspec list equals the exact staged file set (sort both and diff). If a
+  staged path is not in any group, the orchestrator has missed it and must
+  recover before dispatch, not after the batch lands. Catching it after the
+  fact still works (`git status --short` exposes leftovers), but it produces
+  an unplanned catch-up commit mid-summary that complicates the report and
+  shifts the convention from "every commit was planned" to "we patched one
+  in late". Observed in this repo with `area.rs` slipping past an 8-group
+  split — small file, big directory list, easy to skip during fast path
+  partitioning.
+- **Active-file iteration race.** A staged file that the caller is actively
+  editing will drift between `git add`, `git status`, and `git commit`. A
+  dispatch loop (stage → sub-agent → see `MM` → re-stage → re-dispatch) can
+  never catch a stable snapshot while edits arrive faster than the agent
+  overhead. Detect by `stat -f '%Sm' <path>` (mtime in the last few seconds)
+  or by repeated `MM` reports across two dispatches. When the file is being
+  actively iterated and the working tree is a clean superset of staged
+  intent, stage it once and commit directly as the orchestrator in a single
+  shell — do not keep re-dispatching. Reserve sub-agents for stable snapshots.
 
 ## Verification
 
@@ -109,18 +219,14 @@ do not belong here.
   `git log -1` after concurrent commits; HEAD may already have advanced.
 - If a wrapper hides commit stdout, recover immediately with `git reflog -1`
   and verify that hash. Prefer unwrapped `git commit` so stdout is visible.
-- After all groups finish, inspect `git status --short` for staged paths left
-  behind and report or commit them as appropriate.
-- For whitespace-only groups, sanity-check with
-  `git diff --staged --stat --ignore-all-space --ignore-blank-lines` or
-  `--numstat --ignore-all-space --ignore-blank-lines`. Zero output means no
-  non-whitespace changes remain.
-- A successful `git commit` exit status is authoritative for that invocation.
-- Capture the new commit hash from `git commit` stdout and verify that hash with
-  `git show --stat <hash>` or `git show --name-status <hash>`. Do not rely on
-  `git log -1` after concurrent commits; HEAD may already have advanced.
-- If a wrapper hides commit stdout, recover immediately with `git reflog -1`
-  and verify that hash. Prefer unwrapped `git commit` so stdout is visible.
+- When `commit.gpgsign` is true, follow `git show --stat <hash>` with
+  `git verify-commit <hash>`. The commit exit status covers the index update
+  but not the signature, so a misconfigured `gpg.program` or an expired
+  signing subkey can ship an unsigned commit silently. `verify-commit`
+  confirms the signature is `G` (good) rather than `B` (bad) or absent,
+  which protects downstream tooling that depends on `git log --pretty=%G?`
+  showing a good signature (e.g. `darkmatter/features/*` review-cycle
+  tooling).
 - Agent or task completion alone does not prove that its commit landed. After
   all groups finish, inspect `git status --short` and recent history for staged
   paths or missing commits. Treat empty or ambiguous agent reports as unknown.

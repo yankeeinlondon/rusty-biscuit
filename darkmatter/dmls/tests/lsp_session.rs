@@ -2470,6 +2470,190 @@ fn function_call_hover_known_and_unknown() {
     fixture.shutdown();
 }
 
+#[test]
+fn git_catalog_descriptors_reach_lsp_completion_and_hover() {
+    let git_context: Vec<_> = expressions::context_descriptors()
+        .iter()
+        .filter(|descriptor| {
+            (descriptor.category == "Repository" && descriptor.subsection == "Git")
+                || (descriptor.category == "File Changes"
+                    && descriptor.subsection == "Conflicts")
+        })
+        .collect();
+    assert_eq!(git_context.len(), 3, "the shipped Git context descriptor set changed");
+    assert_eq!(
+        git_context
+            .iter()
+            .filter(|descriptor| {
+                !descriptor.required
+                    && !descriptor.display_type.is_array
+                    && descriptor.display_type.to_string() == "string"
+            })
+            .count(),
+        2,
+        "Git context must expose two nullable scalar strings"
+    );
+    assert_eq!(
+        git_context
+            .iter()
+            .filter(|descriptor| {
+                descriptor.required
+                    && descriptor.display_type.is_array
+                    && descriptor.display_type.to_string() == "string[]"
+            })
+            .count(),
+        1,
+        "Git context must expose one required string array"
+    );
+
+    let git_functions: Vec<_> = expressions::function_descriptors()
+        .iter()
+        .filter(|descriptor| descriptor.category == "Git")
+        .collect();
+    assert_eq!(
+        git_functions
+            .iter()
+            .map(|descriptor| descriptor.signature)
+            .collect::<Vec<_>>(),
+        [
+            "predict_conflicts(branch)",
+            "branch_exists_on_remote()",
+            "branch_exists_on_remote(branch)",
+            "branch_exists_on_remote(branch, remote)",
+            "remote_vendor([remote])",
+        ],
+        "the shipped Git function signature set changed"
+    );
+
+    let mut text = String::from("# Git catalog parity\n\n");
+    let mut context_positions = Vec::new();
+    for descriptor in &git_context {
+        let hover_line = text.lines().count() as u32;
+        text.push_str(&format!("Hover: {{{{ ctx.{} }}}}\n", descriptor.name));
+        let completion_line = text.lines().count() as u32;
+        let completion_source = format!("Complete: {{{{ ctx.{}", descriptor.name);
+        let completion_character = completion_source.len() as u32;
+        text.push_str(&completion_source);
+        text.push('\n');
+        context_positions.push((*descriptor, hover_line, completion_line, completion_character));
+    }
+    let mut function_positions = Vec::new();
+    for function in &git_functions {
+        let function_name = function.signature.split('(').next().expect("function name");
+        let hover_line = if expressions::function_descriptor(function_name) == Some(*function) {
+            let line = text.lines().count() as u32;
+            text.push_str(&format!(
+                "Function: {{{{ {function_name}(\"feature/example\") }}}}\n"
+            ));
+            Some(line)
+        } else {
+            None
+        };
+        let completion_line = text.lines().count() as u32;
+        let completion_source = format!("Complete: {{{{ {function_name}");
+        let completion_character = completion_source.len() as u32;
+        text.push_str(&completion_source);
+        text.push('\n');
+        function_positions.push((*function, hover_line, completion_line, completion_character));
+    }
+
+    let workspace = tempfile::tempdir().unwrap();
+    let path = workspace.path().join("doc.md");
+    std::fs::write(&path, &text).unwrap();
+    let uri = url::Url::from_file_path(&path).unwrap();
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    open(&fixture, uri.as_str(), &text);
+
+    for (descriptor, hover_line, completion_line, completion_character) in context_positions {
+        let label = format!("ctx.{}", descriptor.name);
+        let completion = fixture
+            .request(
+                "textDocument/completion",
+                json!({
+                    "textDocument": { "uri": uri.as_str() },
+                    "position": { "line": completion_line, "character": completion_character }
+                }),
+            )
+            .result
+            .expect("context completion");
+        let item = completion
+            .as_array()
+            .expect("completion array")
+            .iter()
+            .find(|item| item["textEdit"]["newText"] == json!(label))
+            .unwrap_or_else(|| panic!("completion missing catalog descriptor `{label}`"));
+        assert_eq!(item["detail"], json!(descriptor.display_type.to_string()));
+        assert_eq!(item["documentation"]["kind"], json!("markdown"));
+        assert_eq!(item["documentation"]["value"], json!(descriptor.description));
+
+        let hover = fixture
+            .request(
+                "textDocument/hover",
+                json!({
+                    "textDocument": { "uri": uri.as_str() },
+                    "position": { "line": hover_line, "character": 12 }
+                }),
+            )
+            .result
+            .expect("context hover");
+        let hover_text = hover["contents"]["value"].as_str().unwrap_or_default();
+        assert!(
+            hover_text.contains(&expressions::format_ctx_hover_block(descriptor)),
+            "context hover must use the shipped descriptor: {hover_text}"
+        );
+    }
+
+    for (function, hover_line, completion_line, completion_character) in function_positions {
+        let function_name = function.signature.split('(').next().expect("function name");
+        let completion = fixture
+            .request(
+                "textDocument/completion",
+                json!({
+                    "textDocument": { "uri": uri.as_str() },
+                    "position": {
+                        "line": completion_line,
+                        "character": completion_character
+                    }
+                }),
+            )
+            .result
+            .expect("function completion");
+        let item = completion
+            .as_array()
+            .expect("completion array")
+            .iter()
+            .find(|item| {
+                item["label"] == json!(function.signature)
+                    && item["textEdit"]["newText"] == json!(function_name)
+            })
+            .unwrap_or_else(|| {
+                panic!("completion missing Git signature `{}`", function.signature)
+            });
+        assert_eq!(item["detail"], json!(function.typed_signature()));
+        assert_eq!(item["documentation"]["value"], json!(function.description));
+
+        let Some(hover_line) = hover_line else { continue };
+        let hover = fixture
+            .request(
+                "textDocument/hover",
+                json!({
+                    "textDocument": { "uri": uri.as_str() },
+                    "position": { "line": hover_line, "character": 15 }
+                }),
+            )
+            .result
+            .expect("function hover");
+        let hover_text = hover["contents"]["value"].as_str().unwrap_or_default();
+        assert!(
+            hover_text.contains(&expressions::format_function_block(function)),
+            "function hover must use the shipped descriptor: {hover_text}"
+        );
+    }
+
+    fixture.shutdown();
+}
+
 const PROSE_PERIOD_DOC: &str = "# Doc\n\nplain prose ctx.\n";
 
 #[test]
@@ -3108,6 +3292,2098 @@ fn semantic_tokens_wiki_enable_suppresses_only_f4() {
         vec![tok(0, 0, 7, TT_MACRO, TM_INTERPOLATION)],
         "the F1 interpolation must survive the wiki gate: {suppressed:?}"
     );
+
+    fixture.shutdown();
+}
+
+#[test]
+fn meta_schema_phase1_schema_hover_uses_nominal_type() {
+    let workspace = tempfile::tempdir().unwrap();
+    let text = "---\n$schema:\n  title: string\ntitle: Hello\n---\nBody\n";
+    let path = workspace.path().join("doc.md");
+    std::fs::write(&path, text).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), text);
+
+    let markup = hover_markup(&mut fixture, uri.as_str(), 1, 2);
+    println!("{markup}");
+    assert!(markup.contains("Type: **schema**"), "schema hover: {markup}");
+    assert!(!markup.contains("Type: **any**"), "schema hover: {markup}");
+    assert!(
+        markup.contains("Declares an inline SimplifiedSchema mapping"),
+        "schema control hover includes the base description: {markup}"
+    );
+
+    fixture.shutdown();
+}
+
+#[test]
+fn meta_schema_phase7_inline_hover_completion_and_diagnostics() {
+    let workspace = tempfile::tempdir().unwrap();
+    let valid = concat!(
+        "---\n",
+        "$schema:\n",
+        "  definition: type-definition\n",
+        "  quoted_definition: type-definition\n",
+        "definition:\n",
+        "  - string(required)\n",
+        "  - nested: number\n",
+        "quoted_definition: 'number(required)'\n",
+        "---\n\nbody\n",
+    );
+    let valid_path = workspace.path().join("valid.md");
+    std::fs::write(&valid_path, valid).unwrap();
+
+    let partial = "---\n$schema:\n  title: str\n---\n\nbody\n";
+    let partial_path = workspace.path().join("partial.md");
+    std::fs::write(&partial_path, partial).unwrap();
+
+    let invalid = concat!(
+        "---\n",
+        "$schema:\n",
+        "  definition: type-definition\n",
+        "definition: string(nope)\n",
+        "---\n\nbody\n",
+    );
+    let invalid_path = workspace.path().join("invalid.md");
+    std::fs::write(&invalid_path, invalid).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    let valid_uri = url::Url::from_file_path(valid_path).unwrap();
+    open(&fixture, valid_uri.as_str(), valid);
+    let hover = hover_markup(&mut fixture, valid_uri.as_str(), 4, 3);
+    assert!(hover.contains("Type: **type-definition**"), "{hover}");
+    assert!(hover.contains("Declares: **string | object**"), "{hover}");
+    assert!(hover.contains("Required"), "{hover}");
+    let quoted_hover = hover_markup(&mut fixture, valid_uri.as_str(), 7, 3);
+    assert!(quoted_hover.contains("Declares: **number**"), "{quoted_hover}");
+    assert!(quoted_hover.contains("Required"), "{quoted_hover}");
+
+    let partial_uri = url::Url::from_file_path(partial_path).unwrap();
+    open(&fixture, partial_uri.as_str(), partial);
+    let completion = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": partial_uri.as_str() },
+                "position": { "line": 2, "character": 12 }
+            }),
+        )
+        .result
+        .expect("inline schema completion");
+    assert!(
+        completion
+            .as_array()
+            .expect("completion array")
+            .iter()
+            .any(|item| item["label"] == json!("string")),
+        "inline schema completion is descriptor-driven: {completion:?}"
+    );
+
+    let invalid_uri = url::Url::from_file_path(invalid_path).unwrap();
+    open(&fixture, invalid_uri.as_str(), invalid);
+    let diagnostics = fixture.wait_for_diagnostics(invalid_uri.as_str());
+    let specialized: Vec<&Value> = diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic["code"] == json!("dm.schema.invalid_type_definition")
+        })
+        .collect();
+    assert_eq!(specialized.len(), 1, "{diagnostics:?}");
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic["code"] != json!("dm.schema.constraint")),
+        "the generic keyword failure is replaced: {diagnostics:?}"
+    );
+    assert_eq!(specialized[0]["range"]["start"], json!({ "line": 3, "character": 12 }));
+    assert_eq!(specialized[0]["range"]["end"], json!({ "line": 3, "character": 24 }));
+
+    fixture.shutdown();
+}
+
+/// Hover activates over every region a semantic owner activates, not only the
+/// owner's own key.
+///
+/// Completion routes through the longest semantic owner prefix, so a nested
+/// entry inside any property declared `schema` or `type-definition` is one
+/// complete type definition. Hover previously required the hovered entry to be
+/// the owner itself and to be declared `type-definition`, so both nested forms
+/// below offered completion but no hover.
+#[test]
+fn meta_schema_hover_covers_entries_nested_under_semantic_owners() {
+    let workspace = tempfile::tempdir().unwrap();
+
+    // (file, text, hover line, hover character, expected `Declares:` value)
+    let cases = [
+        (
+            "schema-owner.md",
+            concat!(
+                "---\n",
+                "$schema:\n",
+                "  config: schema\n",
+                "config:\n",
+                "  title: string(required)\n",
+                "---\n\nbody\n",
+            ),
+            4u32,
+            3u32,
+            "string",
+        ),
+        (
+            "type-definition-owner.md",
+            concat!(
+                "---\n",
+                "$schema:\n",
+                "  definition: type-definition\n",
+                "definition:\n",
+                "  nested: number(required)\n",
+                "---\n\nbody\n",
+            ),
+            4u32,
+            3u32,
+            "number",
+        ),
+    ];
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    for (name, text, line, character, declares) in cases {
+        let path = workspace.path().join(name);
+        std::fs::write(&path, text).unwrap();
+        let uri = url::Url::from_file_path(path).unwrap();
+        open(&fixture, uri.as_str(), text);
+        let hover = hover_markup(&mut fixture, uri.as_str(), line, character);
+        assert!(hover.contains("Type: **type-definition**"), "{name}: {hover}");
+        assert!(hover.contains(&format!("Declares: **{declares}**")), "{name}: {hover}");
+        assert!(hover.contains("Required"), "{name}: {hover}");
+    }
+    fixture.shutdown();
+}
+
+/// Every pattern-key form is a complete definition with hover, in both inline
+/// and standalone schemas.
+///
+/// The shared schema model keeps pattern keys on `SchemaShape::pattern_keys`,
+/// separate from the literal `properties` map, and the source projector spans
+/// both. The region walk that feeds hover previously read only `properties`,
+/// so `<string>` and friends parsed and had spans but never became hoverable.
+#[test]
+fn meta_schema_hover_covers_pattern_keys_inline_and_standalone() {
+    let workspace = tempfile::tempdir().unwrap();
+
+    const BODY: &str = concat!(
+        "  \"<string>\": string(required)\n",
+        "  \"<starting::x-509>\": number\n",
+        "  \"<ending::.md>\": boolean\n",
+        "  \"<pattern::[0-9_]$>\": string\n",
+    );
+    // Each pattern-key line, paired with the type it declares. Line numbers are
+    // resolved per document below because the two envelopes differ in prelude.
+    let expected = ["string", "number", "boolean", "string"];
+
+    let inline = format!("---\n$schema:\n{BODY}---\n\nbody\n");
+    // (file, text, line of the first pattern key)
+    let standalone = [
+        ("pure.yaml", format!("$schema:\n{BODY}"), 1u32),
+        ("tagged.yaml", format!("kind: schema\ntypes:\n{BODY}"), 2),
+    ];
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    let inline_path = workspace.path().join("inline.md");
+    std::fs::write(&inline_path, &inline).unwrap();
+    let inline_uri = url::Url::from_file_path(inline_path).unwrap();
+    open(&fixture, inline_uri.as_str(), &inline);
+    for (index, declares) in expected.iter().enumerate() {
+        let line = 2 + index as u32;
+        // Character 4 sits inside the quoted `<…>` key on every line.
+        let hover = hover_markup(&mut fixture, inline_uri.as_str(), line, 4);
+        assert!(hover.contains("Type: **type-definition**"), "inline line {line}: {hover}");
+        assert!(
+            hover.contains(&format!("Declares: **{declares}**")),
+            "inline line {line}: {hover}"
+        );
+    }
+
+    for (name, text, first_line) in standalone {
+        let path = workspace.path().join(name);
+        std::fs::write(&path, &text).unwrap();
+        let uri = url::Url::from_file_path(path).unwrap();
+        open(&fixture, uri.as_str(), &text);
+        for (index, declares) in expected.iter().enumerate() {
+            let line = first_line + index as u32;
+            let hover = hover_markup(&mut fixture, uri.as_str(), line, 4);
+            assert!(
+                hover.contains("Type: **type-definition**"),
+                "{name} line {line}: {hover}"
+            );
+            assert!(
+                hover.contains(&format!("Declares: **{declares}**")),
+                "{name} line {line}: {hover}"
+            );
+        }
+    }
+
+    fixture.shutdown();
+}
+
+/// Making standalone schema regions authoritative must not disturb the
+/// Markdown substrate's own autolink hover.
+///
+/// This is the exact token the arbitration hands to the schema layer inside a
+/// standalone envelope. In ordinary prose no envelope is activated, so it is
+/// nothing but an autolink and must still hover as one.
+#[test]
+fn markdown_autolink_hover_survives_standalone_schema_arbitration() {
+    let workspace = tempfile::tempdir().unwrap();
+    let text = "# Doc\n\n<starting::x-509>\n";
+    let path = workspace.path().join("doc.md");
+    std::fs::write(&path, text).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), text);
+    let autolink = hover_markup(&mut fixture, uri.as_str(), 2, 5);
+    assert!(autolink.contains("Unresolved link"), "autolink hover: {autolink}");
+    fixture.shutdown();
+}
+
+#[test]
+fn meta_schema_phase7_standalone_pure_and_tagged_completion() {
+    let workspace = tempfile::tempdir().unwrap();
+    let cases = [
+        ("pure.yaml", "$schema:\n  title: str\n", 1u32, 12u32, "string"),
+        (
+            "pure-union.yaml",
+            "$schema:\n  - ./sch\n",
+            1u32,
+            9u32,
+            "./schema.yaml",
+        ),
+        (
+            "tagged.yaml",
+            "kind: schema\ntypes:\n  title: str\n",
+            2u32,
+            12u32,
+            "string",
+        ),
+    ];
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    for (name, text, line, character, expected) in cases {
+        let path = workspace.path().join(name);
+        std::fs::write(&path, text).unwrap();
+        let uri = url::Url::from_file_path(path).unwrap();
+        open(&fixture, uri.as_str(), text);
+        let completion = fixture
+            .request(
+                "textDocument/completion",
+                json!({
+                    "textDocument": { "uri": uri.as_str() },
+                    "position": { "line": line, "character": character }
+                }),
+            )
+            .result
+            .expect("standalone completion");
+        assert!(
+            completion
+                .as_array()
+                .expect("completion array")
+                .iter()
+                .any(|item| item["label"] == json!(expected)),
+            "{name} must activate by content: {completion:?}"
+        );
+    }
+    fixture.shutdown();
+}
+
+/// A pure standalone document whose whole payload is a scalar file reference
+/// still receives schema-declaration completion.
+///
+/// The value being authored sits on the top-level `$schema` line itself, which
+/// no mapping encloses, so activation cannot be recovered from the ancestor
+/// chain the way every nested standalone form is. Before the fix the provider
+/// bailed out before any file-reference candidate was offered.
+#[test]
+fn meta_schema_standalone_scalar_reference_completion() {
+    // (name, text, character, expected label)
+    let cases = [
+        ("empty.yaml", "$schema: \n", 9u32),
+        ("partial.yaml", "$schema: ./sch\n", 14),
+        ("complete.yaml", "$schema: ./schema.yaml\n", 22),
+    ];
+
+    let workspace = tempfile::tempdir().unwrap();
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    for (name, body, character) in cases {
+        for crlf in [false, true] {
+            let text = if crlf { body.replace('\n', "\r\n") } else { body.to_string() };
+            let file = if crlf { format!("crlf-{name}") } else { name.to_string() };
+            let path = workspace.path().join(&file);
+            std::fs::write(&path, &text).unwrap();
+            let uri = url::Url::from_file_path(path).unwrap();
+            open(&fixture, uri.as_str(), &text);
+            let completion = fixture
+                .request(
+                    "textDocument/completion",
+                    json!({
+                        "textDocument": { "uri": uri.as_str() },
+                        "position": { "line": 0, "character": character }
+                    }),
+                )
+                .result
+                .expect("standalone scalar reference completion");
+            let items = completion.as_array().expect("completion array");
+            let offered = items
+                .iter()
+                .find(|item| item["label"] == json!("./schema.yaml"))
+                .unwrap_or_else(|| panic!("{file}: no reference candidate: {completion:?}"));
+            // The replaced range is the authored reference token, so an
+            // accepted candidate overwrites what was typed rather than
+            // appending to it.
+            let range = &offered["textEdit"]["range"];
+            assert_eq!(range["end"], json!({ "line": 0, "character": character }), "{file}");
+            assert_eq!(range["start"]["line"], json!(0), "{file}");
+            assert_eq!(range["start"]["character"], json!(9), "{file}");
+        }
+    }
+    fixture.shutdown();
+}
+
+/// The scalar-reference form keeps its completion while the buffer is
+/// momentarily unparseable, on the same last-good state every other standalone
+/// form relies on.
+#[test]
+fn meta_schema_standalone_scalar_reference_completion_survives_malformed_edit() {
+    let workspace = tempfile::tempdir().unwrap();
+    let valid = "$schema: ./schema.yaml\n";
+    let malformed = "$schema: ./schema.yaml\n\tbad\n";
+    let path = workspace.path().join("scalar-reference.yaml");
+    std::fs::write(&path, valid).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), valid);
+    assert!(fixture.wait_for_diagnostics(uri.as_str()).is_empty());
+
+    fixture.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": uri.as_str(), "version": 2 },
+            "contentChanges": [ { "text": malformed } ]
+        }),
+    );
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == json!("dm.schema.document_malformed")),
+        "the current malformed buffer owns diagnostics: {diagnostics:?}"
+    );
+
+    let completion = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 0, "character": 14 }
+            }),
+        )
+        .result
+        .expect("last-good scalar reference completion");
+    assert!(
+        completion
+            .as_array()
+            .expect("completion array")
+            .iter()
+            .any(|item| item["label"] == json!("./schema.yaml")),
+        "last-good standalone state keeps scalar-reference completion alive: {completion:?}"
+    );
+
+    fixture.shutdown();
+}
+
+#[test]
+fn meta_schema_phase7_standalone_last_good_keeps_completion_and_current_diagnostic() {
+    let workspace = tempfile::tempdir().unwrap();
+    let valid = "$schema:\n  title: string\n";
+    let malformed = "$schema:\n  title: str\n";
+    let path = workspace.path().join("schema.yaml");
+    std::fs::write(&path, valid).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), valid);
+    assert!(fixture.wait_for_diagnostics(uri.as_str()).is_empty());
+
+    fixture.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": uri.as_str(), "version": 2 },
+            "contentChanges": [ { "text": malformed } ]
+        }),
+    );
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic["code"] == json!("dm.schema.invalid_type_definition")
+        }),
+        "the current malformed definition owns diagnostics: {diagnostics:?}"
+    );
+
+    let completion = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 1, "character": 12 }
+            }),
+        )
+        .result
+        .expect("last-good completion");
+    assert!(
+        completion
+            .as_array()
+            .expect("completion array")
+            .iter()
+            .any(|item| item["label"] == json!("string")),
+        "last-good schema state keeps completion alive: {completion:?}"
+    );
+    let hover = hover_markup(&mut fixture, uri.as_str(), 1, 3);
+    assert!(hover.contains("Type: **type-definition**"), "{hover}");
+    assert!(hover.contains("Declares: **string**"), "{hover}");
+
+    fixture.shutdown();
+}
+
+#[test]
+fn meta_schema_explicit_mapping_pairs_retain_last_good_assistance() {
+    let workspace = tempfile::tempdir().unwrap();
+    let valid = "? kind\n: schema\n? types\n:\n  title: string\n";
+    let malformed = "? kind\n: schema\n? types\n:\n  title: nope\n";
+    let path = workspace.path().join("explicit-mapping.yaml");
+    std::fs::write(&path, valid).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), valid);
+    assert!(fixture.wait_for_diagnostics(uri.as_str()).is_empty());
+
+    let labels = completion_labels(&mut fixture, uri.as_str(), 4, 13);
+    assert!(
+        labels.iter().any(|label| label == "string"),
+        "valid explicit-key envelope offers semantic completion: {labels:?}"
+    );
+    let hover = hover_markup(&mut fixture, uri.as_str(), 4, 3);
+    assert!(
+        hover.contains("Type: **type-definition**") && hover.contains("Declares: **string**"),
+        "valid explicit-key envelope activates semantic hover: {hover}"
+    );
+
+    fixture.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": uri.as_str(), "version": 2 },
+            "contentChanges": [ { "text": malformed } ]
+        }),
+    );
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == json!("dm.schema.invalid_type_definition")),
+        "the current explicit-key buffer owns diagnostics: {diagnostics:?}"
+    );
+
+    let labels = completion_labels(&mut fixture, uri.as_str(), 4, 10);
+    assert!(
+        labels.iter().any(|label| label == "number"),
+        "the retained explicit-key model keeps completion alive: {labels:?}"
+    );
+    let hover = hover_markup(&mut fixture, uri.as_str(), 4, 3);
+    assert!(
+        hover.contains("Type: **type-definition**") && hover.contains("Declares: **string**"),
+        "the retained explicit-key model keeps hover alive: {hover}"
+    );
+
+    fixture.shutdown();
+}
+
+#[test]
+fn meta_schema_compact_explicit_pair_union_keeps_schema_assistance() {
+    let workspace = tempfile::tempdir().unwrap();
+    let source = concat!(
+        "kind: schema\n",
+        "types:\n",
+        "  choice:\n",
+        "    - ? nested\n",
+        "      : string\n",
+        "    - number\n",
+    );
+    let path = workspace.path().join("compact-explicit-mapping.yaml");
+    std::fs::write(&path, source).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), source);
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic["code"] != json!("dm.schema.document_malformed")),
+        "valid compact explicit mapping pair is not malformed: {diagnostics:?}"
+    );
+
+    let labels = completion_labels(&mut fixture, uri.as_str(), 4, 12);
+    assert!(
+        labels.iter().any(|label| label == "string"),
+        "compact explicit mapping pair retains semantic completion: {labels:?}"
+    );
+    let hover = hover_markup(&mut fixture, uri.as_str(), 3, 9);
+    assert!(
+        hover.contains("Type: **type-definition**")
+            && hover.contains("Declares: **object | number**"),
+        "compact explicit mapping pair retains semantic hover: {hover}"
+    );
+
+    fixture.shutdown();
+}
+
+/// A block tagged document authored `types` first must retain its last-good
+/// model when edited into a buffer whose nested payload holds a valid YAML
+/// plain scalar with a mid-scalar quote (`  title: foo-"bar`).
+///
+/// The block scanner used to run that indented line through cross-line quote
+/// tracking, where a token-blind `-` boundary let the `"` open a quote that
+/// swallowed the following top-level `kind: schema` line — so the activation
+/// claim returned `None`, the overlay was dropped, and diagnostics, completion,
+/// and hover all went dark on exactly the keystroke last-good exists for
+/// (violating AC9). The authoritative parser instead recognizes the tagged
+/// envelope and reports the invalid `title` definition, so DMLS must keep
+/// serving the last-good model.
+#[test]
+fn meta_schema_standalone_types_first_retains_last_good_across_nested_quote_edit() {
+    let workspace = tempfile::tempdir().unwrap();
+    let valid = "types:\n  title: string\nkind: schema\n";
+    let malformed = "types:\n  title: foo-\"bar\nkind: schema\n";
+    let path = workspace.path().join("types-first.yaml");
+    std::fs::write(&path, valid).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), valid);
+    assert!(fixture.wait_for_diagnostics(uri.as_str()).is_empty());
+
+    // The `title` key declares a type-definition in the valid buffer.
+    let hover = hover_markup(&mut fixture, uri.as_str(), 1, 3);
+    assert!(
+        hover.contains("Type: **type-definition**") && hover.contains("Declares: **string**"),
+        "valid tagged envelope activates semantic intelligence: {hover}"
+    );
+
+    fixture.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": uri.as_str(), "version": 2 },
+            "contentChanges": [ { "text": malformed } ]
+        }),
+    );
+
+    // Diagnostics stay available: the current malformed buffer owns them.
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == json!("dm.schema.invalid_type_definition")),
+        "the current malformed definition owns diagnostics: {diagnostics:?}"
+    );
+
+    // Completion stays available from the retained last-good model.
+    let completion = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 1, "character": 9 }
+            }),
+        )
+        .result
+        .expect("last-good completion");
+    assert!(
+        completion
+            .as_array()
+            .expect("completion array")
+            .iter()
+            .any(|item| item["label"] == json!("string")),
+        "last-good tagged state keeps completion alive: {completion:?}"
+    );
+
+    // Hover stays available: still the last-good `string`, not the buffer's
+    // current `foo-"bar`.
+    let hover = hover_markup(&mut fixture, uri.as_str(), 1, 3);
+    assert!(
+        hover.contains("Type: **type-definition**") && hover.contains("Declares: **string**"),
+        "the retained tagged model survives the malformed edit: {hover}"
+    );
+
+    fixture.shutdown();
+}
+
+/// Flow-only indicators inside a top-level block plain scalar must not hide a
+/// later tagged envelope claim. The current malformed buffer owns diagnostics,
+/// while completion and hover continue to use the valid model opened at the
+/// same source positions.
+#[test]
+fn meta_schema_standalone_block_plain_flow_indicator_retains_last_good() {
+    let workspace = tempfile::tempdir().unwrap();
+    let malformed = "description: foo{ \"bar\nkind: schema\ntypes:\n  title: nope\n";
+    let poison_line_len = malformed.lines().next().unwrap().len();
+    let valid = format!(
+        "#{}\nkind: schema\ntypes:\n  title: string\n",
+        " ".repeat(poison_line_len - 1)
+    );
+    let path = workspace.path().join("block-plain-flow-indicator.yaml");
+    std::fs::write(&path, &valid).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), &valid);
+    assert!(fixture.wait_for_diagnostics(uri.as_str()).is_empty());
+
+    let hover = hover_markup(&mut fixture, uri.as_str(), 3, 3);
+    assert!(
+        hover.contains("Type: **type-definition**") && hover.contains("Declares: **string**"),
+        "valid tagged envelope activates semantic intelligence: {hover}"
+    );
+
+    fixture.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": uri.as_str(), "version": 2 },
+            "contentChanges": [ { "text": malformed } ]
+        }),
+    );
+
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == json!("dm.schema.invalid_type_definition")),
+        "the current malformed definition owns diagnostics: {diagnostics:?}"
+    );
+
+    let labels = completion_labels(&mut fixture, uri.as_str(), 3, 9);
+    assert!(
+        labels.iter().any(|label| label == "string"),
+        "the retained tagged model keeps completion alive: {labels:?}"
+    );
+
+    let hover = hover_markup(&mut fixture, uri.as_str(), 3, 3);
+    assert!(
+        hover.contains("Type: **type-definition**") && hover.contains("Declares: **string**"),
+        "the retained tagged model survives the malformed edit: {hover}"
+    );
+
+    fixture.shutdown();
+}
+
+/// A flow-authored tagged envelope with `types` before `kind` must retain the
+/// same last-good assistance as its block-style equivalent when a nested
+/// definition becomes the valid YAML plain scalar `foo- "bar`. The hyphen is
+/// mid-token even though whitespace follows it, so the quote remains inert.
+#[test]
+fn meta_schema_standalone_flow_types_first_retains_last_good_across_plain_quote_edit() {
+    let workspace = tempfile::tempdir().unwrap();
+    let valid = "{types: {title: string}, kind: schema}\n";
+    let malformed = "{types: {title: foo- \"bar}, kind: schema}\n";
+    let path = workspace.path().join("flow-types-first.yaml");
+    std::fs::write(&path, valid).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), valid);
+    assert!(fixture.wait_for_diagnostics(uri.as_str()).is_empty());
+
+    let hover = hover_markup(&mut fixture, uri.as_str(), 0, 10);
+    assert!(
+        hover.contains("Type: **type-definition**") && hover.contains("Declares: **string**"),
+        "valid flow envelope activates semantic intelligence: {hover}"
+    );
+
+    fixture.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": uri.as_str(), "version": 2 },
+            "contentChanges": [ { "text": malformed } ]
+        }),
+    );
+
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == json!("dm.schema.invalid_type_definition")),
+        "the current malformed definition owns diagnostics: {diagnostics:?}"
+    );
+
+    let labels = completion_labels(&mut fixture, uri.as_str(), 0, 16);
+    assert!(
+        labels.iter().any(|label| label == "string"),
+        "the retained flow model keeps completion alive: {labels:?}"
+    );
+
+    let hover = hover_markup(&mut fixture, uri.as_str(), 0, 10);
+    assert!(
+        hover.contains("Type: **type-definition**") && hover.contains("Declares: **string**"),
+        "the retained flow model survives the malformed edit: {hover}"
+    );
+
+    fixture.shutdown();
+}
+
+/// Flow presentation is not a second dialect: the authoritative standalone
+/// parser accepts a YAML mapping however it is written, so a flow-authored
+/// envelope seeds the same last-good model a block one does. The activation
+/// claim consulted during a malformed edit must agree, or the overlay is
+/// dropped and the retained model dies on exactly the keystroke it exists for.
+///
+/// Completion inside these envelopes has its own coverage in
+/// [`meta_schema_standalone_flow_completion_locates_the_cursor_structurally`];
+/// what this test owns is the retained *model*.
+#[test]
+fn meta_schema_standalone_flow_envelopes_retain_last_good_across_malformed_edit() {
+    // (file, valid, malformed, character inside the `title` key token)
+    let cases = [
+        (
+            "flow-pure.yaml",
+            "{\"$schema\": {\"title\": \"string\"}}\n",
+            "{\"$schema\": {\"title\": \"str\"}}\n",
+            16u32,
+        ),
+        (
+            "flow-tagged.yaml",
+            "{kind: schema, types: {title: string}}\n",
+            "{kind: schema, types: {title: str}}\n",
+            25,
+        ),
+    ];
+
+    let workspace = tempfile::tempdir().unwrap();
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    for (name, valid, malformed, hover_character) in cases {
+        let path = workspace.path().join(name);
+        std::fs::write(&path, valid).unwrap();
+        let uri = url::Url::from_file_path(path).unwrap();
+        open(&fixture, uri.as_str(), valid);
+        assert!(
+            fixture.wait_for_diagnostics(uri.as_str()).is_empty(),
+            "{name}: a valid flow envelope is clean"
+        );
+        let hover = hover_markup(&mut fixture, uri.as_str(), 0, hover_character);
+        assert!(
+            hover.contains("Type: **type-definition**") && hover.contains("Declares: **string**"),
+            "{name}: flow presentation activates semantic intelligence: {hover}"
+        );
+
+        fixture.notify(
+            "textDocument/didChange",
+            json!({
+                "textDocument": { "uri": uri.as_str(), "version": 2 },
+                "contentChanges": [ { "text": malformed } ]
+            }),
+        );
+        let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+        assert!(
+            diagnostics.iter().any(|diagnostic| {
+                diagnostic["code"] == json!("dm.schema.invalid_type_definition")
+            }),
+            "{name}: the current malformed buffer owns diagnostics: {diagnostics:?}"
+        );
+
+        // A dropped overlay answers hover with nothing, so this is the retained
+        // last-good model talking — it still declares `string`, not the `str`
+        // the buffer now says.
+        let hover = hover_markup(&mut fixture, uri.as_str(), 0, hover_character);
+        assert!(
+            hover.contains("Type: **type-definition**") && hover.contains("Declares: **string**"),
+            "{name}: the retained flow model survives a malformed edit: {hover}"
+        );
+    }
+
+    fixture.shutdown();
+}
+
+/// Semantic completion locates a flow cursor structurally, not by indentation.
+///
+/// The standalone parser accepts block and flow mappings equally, so every
+/// document it recognizes owes completion. A one-line flow envelope has no
+/// `key:` line and no indentation ancestry, so the block cursor model answered
+/// nothing for any of the forms below — in the valid state as well as the
+/// malformed one the last-good model exists to serve.
+///
+/// The two sequence forms are the interesting pair: an outer array is a root
+/// union whose arms are mappings (the flow cursor must see through it to the
+/// arm's own key), while a union-valued item is a mapping entry whose *value*
+/// is a sequence (the flow cursor must stop at the entry and leave the arms to
+/// the shared type-expression cursor authority).
+#[test]
+fn meta_schema_standalone_flow_completion_locates_the_cursor_structurally() {
+    // (file, valid, malformed, character just past the authored prefix, label)
+    let cases = [
+        (
+            "pure.yaml",
+            r#"{"$schema": {"title": "string"}}"#,
+            r#"{"$schema": {"title": "str"}}"#,
+            26u32,
+            "string",
+        ),
+        (
+            "tagged.yaml",
+            "{kind: schema, types: {title: string}}",
+            "{kind: schema, types: {title: str}}",
+            33,
+            "string",
+        ),
+        (
+            "nested.yaml",
+            "{$schema: {config: {title: string}}}",
+            "{$schema: {config: {title: str}}}",
+            30,
+            "string",
+        ),
+        (
+            "outer-array.yaml",
+            "{$schema: [{title: string}, {name: number}]}",
+            "{$schema: [{title: string}, {name: num}]}",
+            38,
+            "number",
+        ),
+        (
+            "union-item.yaml",
+            "{$schema: {title: [string, number]}}",
+            "{$schema: {title: [string, num]}}",
+            30,
+            "number",
+        ),
+    ];
+
+    let workspace = tempfile::tempdir().unwrap();
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    for (name, valid, malformed, character, label) in cases {
+        let path = workspace.path().join(name);
+        let valid = format!("{valid}\n");
+        let malformed = format!("{malformed}\n");
+        std::fs::write(&path, &valid).unwrap();
+        let uri = url::Url::from_file_path(path).unwrap();
+        open(&fixture, uri.as_str(), &valid);
+        assert!(
+            fixture.wait_for_diagnostics(uri.as_str()).is_empty(),
+            "{name}: the valid flow envelope must parse cleanly"
+        );
+        let labels = completion_labels(&mut fixture, uri.as_str(), 0, character);
+        assert!(
+            labels.iter().any(|offered| offered == label),
+            "{name}: a valid flow envelope owes completion: {labels:?}"
+        );
+
+        fixture.notify(
+            "textDocument/didChange",
+            json!({
+                "textDocument": { "uri": uri.as_str(), "version": 2 },
+                "contentChanges": [ { "text": malformed } ]
+            }),
+        );
+        // Which code is published depends on the envelope's shape (a root union
+        // fails as a whole declaration, a mapping entry as one definition); what
+        // matters here is that the *current* buffer owns the error while the
+        // retained model keeps answering.
+        let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic["source"] == json!("darkmatter.schema")),
+            "{name}: the current malformed buffer owns diagnostics: {diagnostics:?}"
+        );
+        let labels = completion_labels(&mut fixture, uri.as_str(), 0, character);
+        assert!(
+            labels.iter().any(|offered| offered == label),
+            "{name}: the retained flow model owes completion too: {labels:?}"
+        );
+    }
+
+    fixture.shutdown();
+}
+
+#[test]
+fn meta_schema_phase7_shipped_schema_provider_path() {
+    let workspace = tempfile::tempdir().unwrap();
+    let shipped = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../docs/schemas/darkmatter.yaml");
+    let text = std::fs::read_to_string(&shipped).expect("read shipped Darkmatter schema");
+    let path = workspace.path().join("darkmatter.yaml");
+    std::fs::write(&path, &text).unwrap();
+
+    let schema_line = text
+        .lines()
+        .position(|line| line.trim_start().starts_with("\"$schema\":"))
+        .expect("shipped $schema definition") as u32;
+    let schema_column = text
+        .lines()
+        .nth(schema_line as usize)
+        .and_then(|line| line.find("$schema"))
+        .expect("shipped $schema column") as u32;
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), &text);
+    assert!(fixture.wait_for_diagnostics(uri.as_str()).is_empty());
+
+    let hover = hover_markup(&mut fixture, uri.as_str(), schema_line, schema_column);
+    assert!(hover.contains("Type: **type-definition**"), "{hover}");
+    assert!(hover.contains("Declares: **schema**"), "{hover}");
+
+    fixture.shutdown();
+}
+
+#[test]
+fn meta_schema_phase6_shipped_schema_activation_and_current_error() {
+    let workspace = tempfile::tempdir().unwrap();
+    let shipped = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../docs/schemas/darkmatter.yaml");
+    let text = std::fs::read_to_string(&shipped).expect("read shipped Darkmatter schema");
+    let path = workspace.path().join("darkmatter.yaml");
+    std::fs::write(&path, &text).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), &text);
+    let initial = fixture.wait_for_diagnostics(uri.as_str());
+    assert!(
+        initial.is_empty(),
+        "the real shipped schema must activate and parse cleanly: {initial:?}"
+    );
+
+    let malformed = "$schema:\n\tbad: string\n";
+    fixture.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": uri.as_str(), "version": 2 },
+            "contentChanges": [ { "text": malformed } ]
+        }),
+    );
+    let current = fixture.wait_for_diagnostics(uri.as_str());
+    assert_eq!(
+        current.iter().filter(|diagnostic| {
+            diagnostic["code"] == json!("dm.schema.document_malformed")
+        }).count(),
+        1,
+        "the malformed current buffer must own exactly one schema diagnostic: {current:?}"
+    );
+    assert_eq!(current[0]["range"]["start"], json!({ "line": 0, "character": 0 }));
+
+    fixture.shutdown();
+}
+
+/// Every parser state the shared tolerant parser-state authority distinguishes,
+/// end to end through the protocol.
+///
+/// Each case is a value the schema grammar cannot parse yet, so nothing here can
+/// be answered by re-parsing: the completion must come from the cursor's
+/// structural role. The last three cases additionally prove the projection seam
+/// — multibyte content, CRLF line endings, and quoted scalars all report ranges
+/// in authored document bytes.
+#[test]
+fn meta_schema_completion_reads_parser_state_for_partially_authored_values() {
+    const ACTIVATION: &str = "$schema:\n  definition: type-definition\n";
+
+    // (name, frontmatter body after ACTIVATION, line, character, expected label)
+    let cases = [
+        // The innermost `(` belongs to `pattern(...)`, so a delimiter search
+        // cannot see that the cursor is back in `string`'s constraint list.
+        (
+            "second-constraint.md",
+            "definition: string(pattern(^a); re\n",
+            3u32,
+            34u32,
+            "required",
+        ),
+        // The postfix `[](…)` list carries the array constraint surface, not
+        // the `type-definition` item atom's (default / required / generated).
+        (
+            "array-constraints.md",
+            "definition: type-definition[](mi\n",
+            3,
+            32,
+            "min",
+        ),
+        // An inline object is not a token under a comma/bracket splitter.
+        (
+            "inline-object.md",
+            "definition: '{ child: str'\n",
+            3,
+            25,
+            "string",
+        ),
+        // A union arm authored as a block-sequence item keeps its own state.
+        (
+            "union-arm.md",
+            "definition:\n  - string\n  - string(mi\n",
+            5,
+            13,
+            "min",
+        ),
+        // Double-quoted projection.
+        ("double-quoted.md", "definition: \"string(mi\"\n", 3, 22, "min"),
+        // Multibyte content inside the value being completed.
+        ("utf8.md", "definition: enum(café)[](mi\n", 3, 27, "min"),
+    ];
+
+    let workspace = tempfile::tempdir().unwrap();
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    for (name, body, line, character, expected) in cases {
+        for crlf in [false, true] {
+            let text = format!("---\n{ACTIVATION}{body}---\n\nbody\n");
+            let text = if crlf { text.replace('\n', "\r\n") } else { text };
+            let file = if crlf { format!("crlf-{name}") } else { name.to_string() };
+            let path = workspace.path().join(&file);
+            std::fs::write(&path, &text).unwrap();
+            let uri = url::Url::from_file_path(path).unwrap();
+            open(&fixture, uri.as_str(), &text);
+            let completion = fixture
+                .request(
+                    "textDocument/completion",
+                    json!({
+                        "textDocument": { "uri": uri.as_str() },
+                        "position": { "line": line, "character": character }
+                    }),
+                )
+                .result
+                .expect("completion result");
+            let items = completion.as_array().expect("completion array");
+            let offered = items
+                .iter()
+                .find(|item| item["label"] == json!(expected))
+                .unwrap_or_else(|| panic!("{file}: {expected} not offered: {completion:?}"));
+            // The replaced range is the authored token, located by the parser
+            // rather than by searching the decoded text.
+            let range = &offered["textEdit"]["range"];
+            assert_eq!(range["end"], json!({ "line": line, "character": character }), "{file}");
+            assert_eq!(range["start"]["line"], json!(line), "{file}");
+            assert!(
+                range["start"]["character"].as_u64().unwrap() < u64::from(character),
+                "{file}: a partial token must be replaced, not appended: {range:?}"
+            );
+        }
+    }
+
+    fixture.shutdown();
+}
+
+/// A top-level `value` property typed as a **mixed union** of a semantic
+/// meta-type arm and one ordinary `arm`, in both arm orders
+/// (`semantic_first`), with `value_line` as the authored instance.
+fn mixed_semantic_union_doc(
+    semantic: &str,
+    semantic_first: bool,
+    arm: &str,
+    value_line: &str,
+) -> String {
+    let semantic_arm = format!("    - {semantic}");
+    let other = format!("    - \"{arm}\"");
+    let (first, second) =
+        if semantic_first { (semantic_arm, other) } else { (other, semantic_arm) };
+    format!("---\n$schema:\n  value:\n{first}\n{second}\n{value_line}\n---\n\nbody\n")
+}
+
+fn codes(diagnostics: &[Value]) -> Vec<String> {
+    diagnostics
+        .iter()
+        .filter_map(|diagnostic| diagnostic["code"].as_str().map(str::to_string))
+        .collect()
+}
+
+#[test]
+fn mixed_semantic_union_gates_the_specialized_diagnostic_on_whole_union_failure() {
+    // Activation records the semantic kind when *any* arm carries it, so the
+    // specialized diagnostic must additionally prove the whole union rejected
+    // the value — otherwise a sibling arm that validly accepts it is diagnosed.
+    //
+    // (semantic type, specialized code, sibling arm, value the sibling accepts,
+    //  value no arm accepts)
+    let cases = [
+        (
+            "type-definition",
+            "dm.schema.invalid_type_definition",
+            "string",
+            "value: hello",
+            "value:\n  a: 1",
+        ),
+        (
+            "schema",
+            "dm.schema.invalid_schema_shape",
+            "string",
+            "value: https://example.com/schema.yaml",
+            "value:\n  a: 1",
+        ),
+    ];
+
+    let workspace = tempfile::tempdir().unwrap();
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    let mut counter = 0usize;
+    for (semantic, expected_code, arm, accepted, rejected) in cases {
+        for semantic_first in [true, false] {
+            for (value_line, whole_union_fails) in [(accepted, false), (rejected, true)] {
+                counter += 1;
+                let text = mixed_semantic_union_doc(semantic, semantic_first, arm, value_line);
+                let path = workspace.path().join(format!("union-{counter}.md"));
+                std::fs::write(&path, &text).unwrap();
+                let uri = url::Url::from_file_path(path).unwrap();
+                open(&fixture, uri.as_str(), &text);
+                let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+                let present = codes(&diagnostics).iter().any(|code| code == expected_code);
+                assert_eq!(
+                    present, whole_union_fails,
+                    "{semantic} (semantic_first={semantic_first}, `{value_line}`): \
+                     expected {expected_code} present={whole_union_fails}: {diagnostics:?}"
+                );
+            }
+        }
+    }
+
+    fixture.shutdown();
+}
+
+#[test]
+fn single_arm_semantic_type_keeps_its_specialized_diagnostic() {
+    // The common non-union path is unchanged: one specialized diagnostic, and
+    // the generic custom-keyword problem it replaces stays suppressed.
+    let workspace = tempfile::tempdir().unwrap();
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    let text = "---\n$schema:\n  value: type-definition\nvalue: string(nope)\n---\n\nbody\n";
+    let path = workspace.path().join("single-arm.md");
+    std::fs::write(&path, text).unwrap();
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), text);
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    let codes = codes(&diagnostics);
+    assert_eq!(
+        codes.iter().filter(|code| *code == "dm.schema.invalid_type_definition").count(),
+        1,
+        "exactly one specialized diagnostic: {diagnostics:?}"
+    );
+    assert!(
+        !codes.iter().any(|code| code == "dm.schema.constraint"),
+        "the generic custom-keyword diagnostic stays replaced: {diagnostics:?}"
+    );
+
+    fixture.shutdown();
+}
+
+#[test]
+fn mixed_semantic_union_completion_merges_sibling_arm_candidates() {
+    // `[type-definition, enum(foo, bar)]` activates semantic authoring on one
+    // arm; the enum arm's members must still reach the merged union list.
+    let workspace = tempfile::tempdir().unwrap();
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    for semantic_first in [true, false] {
+        let text = mixed_semantic_union_doc(
+            "type-definition",
+            semantic_first,
+            "enum(foo, bar)",
+            "value: ",
+        );
+        let file = format!("union-completion-{semantic_first}.md");
+        let path = workspace.path().join(&file);
+        std::fs::write(&path, &text).unwrap();
+        let uri = url::Url::from_file_path(path).unwrap();
+        open(&fixture, uri.as_str(), &text);
+        let completion = fixture
+            .request(
+                "textDocument/completion",
+                json!({
+                    "textDocument": { "uri": uri.as_str() },
+                    "position": { "line": 5, "character": 7 }
+                }),
+            )
+            .result
+            .expect("completion result");
+        let labels: Vec<&str> = completion
+            .as_array()
+            .expect("completion array")
+            .iter()
+            .filter_map(|item| item["label"].as_str())
+            .collect();
+        for expected in ["foo", "bar", "string"] {
+            assert!(
+                labels.contains(&expected),
+                "{file}: `{expected}` must be offered by the merged union: {labels:?}"
+            );
+        }
+    }
+
+    fixture.shutdown();
+}
+
+/// The LSP range of `needle`'s first occurrence in an ASCII fixture.
+fn range_of(text: &str, needle: &str) -> Value {
+    let start = text.find(needle).expect("fixture substring");
+    let line = text[..start].matches('\n').count() as u32;
+    let line_start = text[..start].rfind('\n').map_or(0, |index| index + 1);
+    let character = (start - line_start) as u32;
+    json!({
+        "start": { "line": line, "character": character },
+        "end": { "line": line, "character": character + needle.len() as u32 }
+    })
+}
+
+/// The LSP range covering an entire ASCII fixture.
+fn whole_document_range(text: &str) -> Value {
+    let line = text.matches('\n').count() as u32;
+    let line_start = text.rfind('\n').map_or(0, |index| index + 1);
+    json!({
+        "start": { "line": 0, "character": 0 },
+        "end": { "line": line, "character": (text.len() - line_start) as u32 }
+    })
+}
+
+/// A rejected **outer** standalone declaration must carry the declaration-shape
+/// code over the smallest offending value or union arm; only a buffer that is
+/// not parseable YAML keeps the whole-document `document_malformed` contract,
+/// and a rejected **inner** definition keeps its own specialized code.
+///
+/// The ranges are the point of this test: a whole-document range on any of the
+/// first four cases is the defect it exists to catch.
+#[test]
+fn standalone_outer_declaration_errors_are_shape_coded_and_precisely_ranged() {
+    // (file, text, expected code, offending substring — `None` = whole buffer)
+    let cases: [(&str, &str, &str, Option<&str>); 7] = [
+        (
+            "pure-empty-union.yaml",
+            "$schema: []\n",
+            "dm.schema.invalid_schema_shape",
+            Some("[]"),
+        ),
+        (
+            "tagged-empty-union.yaml",
+            "kind: schema\ntypes: []\n",
+            "dm.schema.invalid_schema_shape",
+            Some("[]"),
+        ),
+        (
+            "pure-invalid-arm.yaml",
+            "$schema:\n  - title: string\n  - 42\n",
+            "dm.schema.invalid_schema_shape",
+            Some("42"),
+        ),
+        (
+            "pure-invalid-reference.yaml",
+            "$schema: \"   \"\n",
+            "dm.schema.invalid_schema_shape",
+            Some("\"   \""),
+        ),
+        (
+            // A tab cannot indent YAML, so this never becomes a mapping at all.
+            "malformed.yaml",
+            "$schema:\n\tbad: string\n",
+            "dm.schema.document_malformed",
+            None,
+        ),
+        (
+            "pure-invalid-inner.yaml",
+            "$schema:\n  title: str\n",
+            "dm.schema.invalid_type_definition",
+            Some("str"),
+        ),
+        (
+            "tagged-invalid-inner.yaml",
+            "kind: schema\ntypes:\n  title: str\n",
+            "dm.schema.invalid_type_definition",
+            Some("str"),
+        ),
+    ];
+    let schema_codes = [
+        "dm.schema.invalid_schema_shape",
+        "dm.schema.document_malformed",
+        "dm.schema.invalid_type_definition",
+    ];
+
+    let workspace = tempfile::tempdir().unwrap();
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    for (file, text, expected_code, offending) in cases {
+        let path = workspace.path().join(file);
+        std::fs::write(&path, text).unwrap();
+        let uri = url::Url::from_file_path(path).unwrap();
+        open(&fixture, uri.as_str(), text);
+        let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+
+        let published = codes(&diagnostics);
+        let owned: Vec<&String> = published
+            .iter()
+            .filter(|code| schema_codes.contains(&code.as_str()))
+            .collect();
+        assert_eq!(
+            owned,
+            vec![&expected_code.to_string()],
+            "{file}: exactly one schema-document diagnostic, with the stable code \
+             clients use to tell declaration shape from document YAML failure: \
+             {diagnostics:?}"
+        );
+
+        let expected_range = match offending {
+            Some(needle) => range_of(text, needle),
+            None => whole_document_range(text),
+        };
+        let reported = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic["code"] == json!(expected_code))
+            .expect("the asserted diagnostic");
+        assert_eq!(
+            reported["range"], expected_range,
+            "{file}: the range must cover only the offending value: {reported:?}"
+        );
+    }
+
+    fixture.shutdown();
+}
+
+/// Standalone reference declarations must reach the same declaration parser an
+/// inline `$schema` value does.
+///
+/// A scalar payload is a whole-file reference — a valid, *active* standalone
+/// schema document — while an invalid or remote reference arm is rejected on
+/// the arm's own range. Before declaration-parser parity the library stored
+/// union arms unchecked, so the two invalid-arm cases published nothing at all,
+/// and it rejected every scalar payload, so the valid case published
+/// `document_malformed`.
+#[test]
+fn standalone_reference_declarations_match_the_shared_declaration_parser() {
+    // (file, text, offending substring — `None` = a valid, active document)
+    let cases: [(&str, &str, Option<&str>); 5] = [
+        // None of these targets exist on disk: classification is passive, so a
+        // valid reference must not depend on the file being present.
+        ("valid-scalar-reference.yaml", "$schema: ./other.yaml\n", None),
+        (
+            "whitespace-arm.yaml",
+            "$schema: [\"   \"]\n",
+            Some("\"   \""),
+        ),
+        (
+            "remote-arm.yaml",
+            "$schema: [https://example.com/schema.yaml]\n",
+            Some("https://example.com/schema.yaml"),
+        ),
+        (
+            // The valid first arm must not launder the invalid second one.
+            "mixed-union.yaml",
+            "$schema:\n  - ./valid.yaml\n  - https://example.com/schema.yaml\n",
+            Some("https://example.com/schema.yaml"),
+        ),
+        ("valid-reference-union.yaml", "$schema:\n  - ./a.yaml\n  - ./b.yaml\n", None),
+    ];
+    let schema_codes = [
+        "dm.schema.invalid_schema_shape",
+        "dm.schema.document_malformed",
+        "dm.schema.invalid_type_definition",
+    ];
+
+    let workspace = tempfile::tempdir().unwrap();
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    for (file, text, offending) in cases {
+        let path = workspace.path().join(file);
+        std::fs::write(&path, text).unwrap();
+        let uri = url::Url::from_file_path(path).unwrap();
+        open(&fixture, uri.as_str(), text);
+        let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+
+        let published = codes(&diagnostics);
+        let owned: Vec<&String> = published
+            .iter()
+            .filter(|code| schema_codes.contains(&code.as_str()))
+            .collect();
+
+        let Some(needle) = offending else {
+            assert!(
+                owned.is_empty(),
+                "{file}: a syntactically valid reference declaration is an active \
+                 standalone schema document, not a malformed one: {diagnostics:?}"
+            );
+            continue;
+        };
+
+        assert_eq!(
+            owned,
+            vec![&"dm.schema.invalid_schema_shape".to_string()],
+            "{file}: an unchecked reference arm must not be silently accepted: {diagnostics:?}"
+        );
+        let reported = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic["code"] == json!("dm.schema.invalid_schema_shape"))
+            .expect("the asserted diagnostic");
+        assert_eq!(
+            reported["range"],
+            range_of(text, needle),
+            "{file}: the range must cover only the offending arm: {reported:?}"
+        );
+    }
+
+    fixture.shutdown();
+}
+
+// ── Query-vocabulary documentation links ────────────────────────────────────
+
+/// Installs a copy of the real topic doc at its repository-relative location
+/// under `root`, so a resolved `file://` target lands on the same headings the
+/// shipped doc carries.
+fn install_topic_doc(root: &std::path::Path) -> std::path::PathBuf {
+    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../docs/topics/darkmatter-expressions.md");
+    let destination = root.join("darkmatter/docs/topics/darkmatter-expressions.md");
+    std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
+    std::fs::copy(&source, &destination).expect("the shipped topic doc is readable");
+    destination
+}
+
+/// The first Markdown link destination in `markdown` whose target names the
+/// query-vocabulary anchor, if any.
+fn vocabulary_destination(markdown: &str) -> Option<String> {
+    let mut rest = markdown;
+    while let Some(open) = rest.find("](") {
+        let after = &rest[open + 2..];
+        let close = after.find(')')?;
+        let destination = &after[..close];
+        if destination.contains("provider-query-vocabulary") {
+            return Some(destination.to_string());
+        }
+        rest = &after[close..];
+    }
+    None
+}
+
+/// Asserts `destination` is an absolute `file://` URI whose path exists and
+/// whose fragment names a real heading in the file it points at — i.e. that
+/// following the link actually arrives at the vocabulary.
+fn assert_destination_navigates(destination: &str) {
+    assert!(
+        destination.starts_with("file:///"),
+        "the emitted target must be absolute, got `{destination}`"
+    );
+    let url = url::Url::parse(destination).expect("the emitted target parses as a URL");
+    let path = url
+        .to_file_path()
+        .expect("the emitted target converts back to a filesystem path");
+    assert!(path.is_file(), "the emitted target must exist: {path:?}");
+
+    let fragment = url.fragment().expect("the emitted target keeps its anchor");
+    let content = std::fs::read_to_string(&path).unwrap();
+    let resolved = content
+        .lines()
+        .filter_map(|line| line.strip_prefix("## "))
+        .any(|heading| github_slug(heading) == fragment);
+    assert!(
+        resolved,
+        "`#{fragment}` must resolve to a heading in {path:?}"
+    );
+}
+
+/// A GitHub-style heading slug — the anchor form an editor resolves.
+fn github_slug(heading: &str) -> String {
+    heading
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .filter_map(|c| match c {
+            ' ' => Some('-'),
+            c if c.is_ascii_alphanumeric() || c == '-' => Some(c),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The review-20 contract: the query-vocabulary target a client receives must
+/// be navigable from a document that is **not** a sibling of the topic doc.
+/// The authored `darkmatter-expressions.md#…` spelling is sibling-relative, so
+/// an editor resolves it against the active file; the response boundary must
+/// therefore hand back an absolute `file://` URI instead.
+#[test]
+fn vocabulary_link_resolves_from_a_document_outside_the_topic_directory() {
+    let workspace = tempfile::tempdir().unwrap();
+    install_topic_doc(workspace.path());
+
+    // Deliberately nested, and nowhere near `darkmatter/docs/topics/`.
+    let document = workspace.path().join("notes/deep/nested/page.md");
+    std::fs::create_dir_all(document.parent().unwrap()).unwrap();
+    let text = "# Notes\n\nRecent work: {{ pr_list(5) }}\n";
+    std::fs::write(&document, text).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(&document).unwrap();
+    open(&fixture, uri.as_str(), text);
+
+    // Hover on the `pr_list` function name (D5).
+    let line = 2;
+    let character = text.lines().nth(line as usize).unwrap().find("pr_list").unwrap() as u32 + 1;
+    let hover = hover_markup(&mut fixture, uri.as_str(), line, character);
+    assert!(hover.contains("pr_list"), "{hover}");
+    let hovered = vocabulary_destination(&hover)
+        .unwrap_or_else(|| panic!("hover must carry a vocabulary link: {hover}"));
+    assert_destination_navigates(&hovered);
+
+    // Hover additionally answers the question inline, so the reader never has
+    // to follow the link at all.
+    assert!(hover.contains("**Query keys**"), "{hover}");
+    assert!(hover.contains("`target_branch`"), "{hover}");
+
+    // Completion documentation (D4) is the second promised surface.
+    let completion_text = "# Notes\n\nRecent work: {{ pr_li\n";
+    fixture.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": uri.as_str(), "version": 2 },
+            "contentChanges": [{ "text": completion_text }]
+        }),
+    );
+    let items = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 2, "character": 29 }
+            }),
+        )
+        .result
+        .expect("completions");
+    let items = items.as_array().expect("completion array");
+    let documented: Vec<&Value> = items
+        .iter()
+        .filter(|item| {
+            item["label"]
+                .as_str()
+                .is_some_and(|label| label.starts_with("pr_list("))
+        })
+        .collect();
+    assert!(!documented.is_empty(), "expected `pr_list` completions: {items:?}");
+    for item in documented {
+        let documentation = item["documentation"]["value"]
+            .as_str()
+            .unwrap_or_else(|| panic!("completion documentation: {item:?}"));
+        let target = vocabulary_destination(documentation).unwrap_or_else(|| {
+            panic!("completion documentation must carry a vocabulary link: {documentation}")
+        });
+        assert_destination_navigates(&target);
+    }
+
+    fixture.shutdown();
+}
+
+/// The complement: with no topic doc reachable from the document, no dead
+/// relative target may reach the client on either surface. The vocabulary is
+/// embedded in hover, so dropping the link costs the reader nothing.
+#[test]
+fn an_unshipped_topic_doc_yields_no_dead_link_on_either_surface() {
+    let workspace = tempfile::tempdir().unwrap();
+    let document = workspace.path().join("page.md");
+    let text = "# Notes\n\nRecent work: {{ cicd_list(5) }}\n";
+    std::fs::write(&document, text).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(&document).unwrap();
+    open(&fixture, uri.as_str(), text);
+
+    let character = text.lines().nth(2).unwrap().find("cicd_list").unwrap() as u32 + 1;
+    let hover = hover_markup(&mut fixture, uri.as_str(), 2, character);
+    assert!(hover.contains("cicd_list"), "{hover}");
+    assert!(
+        !hover.contains("darkmatter-expressions.md"),
+        "an unresolvable relative target must not reach the client: {hover}"
+    );
+    assert!(vocabulary_destination(&hover).is_none(), "{hover}");
+    // The reader still gets the vocabulary, which is the point of the link.
+    assert!(hover.contains("**Query keys**"), "{hover}");
+    assert!(hover.contains("`workflow`"), "{hover}");
+    assert!(hover.contains("provider query vocabulary"), "{hover}");
+
+    let completion_text = "# Notes\n\nRecent work: {{ cicd_li\n";
+    fixture.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": uri.as_str(), "version": 2 },
+            "contentChanges": [{ "text": completion_text }]
+        }),
+    );
+    let items = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 2, "character": 31 }
+            }),
+        )
+        .result
+        .expect("completions");
+    for item in items.as_array().expect("completion array") {
+        let documentation = item["documentation"]["value"].as_str().unwrap_or_default();
+        assert!(
+            !documentation.contains("darkmatter-expressions.md"),
+            "an unresolvable relative target must not reach the client: {documentation}"
+        );
+    }
+
+    fixture.shutdown();
+}
+
+/// Requests `textDocument/completion` and returns the item labels.
+fn completion_labels(
+    fixture: &mut ClientFixture,
+    uri: &str,
+    line: u32,
+    character: u32,
+) -> Vec<String> {
+    let result = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character }
+            }),
+        )
+        .result
+        .expect("completion result");
+    result
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item["label"].as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Semantic activation, completion ancestors, and hover must be addressed by the
+/// structural frontmatter AST, not by dotted strings, line indentation, or a raw
+/// `:` search.
+///
+/// Every key here is one a text-derived path cannot spell. `build.target` was
+/// split into a nested `build` → `target` lookup that resolves to nothing, so
+/// its declared `type-definition` never activated. `host: port` was truncated at
+/// its embedded colon. `a/b` and `c~d` are the RFC 6901 escape characters, so
+/// they prove the pointer encoding round-trips (`~1` / `~0`) rather than
+/// colliding with a real path separator.
+#[test]
+fn structural_paths_survive_quoted_and_punctuated_frontmatter_keys() {
+    let workspace = tempfile::tempdir().unwrap();
+    let text = concat!(
+        "---\n",
+        "\"$schema\":\n",
+        "  \"build.target\": type-definition\n",
+        "  \"a/b\": string\n",
+        "  \"c~d\": number\n",
+        "  \"host: port\": string\n",
+        "  outer:\n",
+        "    inner: string\n",
+        "\"build.target\": string(required)\n",
+        "\"a/b\": alpha\n",
+        "\"c~d\": 3\n",
+        "\"host: port\": beta\n",
+        "outer:\n",
+        "  inner: gamma\n",
+        "---\n\nbody\n",
+    );
+    let path = workspace.path().join("punctuated.md");
+    std::fs::write(&path, text).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), text);
+
+    // The `.`-bearing key resolves to its own declaration, so its semantic
+    // meta-type activates.
+    let dotted = hover_markup(&mut fixture, uri.as_str(), 8, 3);
+    assert!(
+        dotted.contains("type-definition"),
+        "`build.target` must resolve as one key, not a nested `build` → `target` \
+         path: {dotted}"
+    );
+
+    // The remaining punctuation classes each resolve to a declared property.
+    for (line, character, key) in [(9, 2, "a/b"), (10, 2, "c~d"), (11, 3, "host: port")] {
+        let hover = hover_markup(&mut fixture, uri.as_str(), line, character);
+        assert!(!hover.is_empty(), "`{key}` must resolve to its declaration: {hover:?}");
+    }
+
+    // Nested mappings still resolve through the structural parent chain.
+    let nested = hover_markup(&mut fixture, uri.as_str(), 13, 3);
+    assert!(!nested.is_empty(), "`outer.inner` must resolve: {nested:?}");
+
+    fixture.shutdown();
+}
+
+/// Completion must take its owner key and ancestor chain from the AST.
+///
+/// A quoted ancestor is the sharpest case: `"$schema"` written with quotes is
+/// the reserved `$schema` path, but a `split(':')` reconstruction keeps the
+/// quotes and matches nothing. The `.`-bearing owner key is the same failure one
+/// level down. Both are exercised with LF and CRLF, since a line-scanning
+/// implementation is where line-ending handling goes wrong.
+#[test]
+fn meta_schema_completion_owner_and_ancestors_come_from_the_ast() {
+    let workspace = tempfile::tempdir().unwrap();
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    // (file stem, source, completion line, completion character, why)
+    let cases: [(&str, &str, u32, u32, &str); 2] = [
+        (
+            "quoted-schema",
+            "---\n\"$schema\":\n  title: str\n---\n\nbody\n",
+            2,
+            12,
+            "a quoted `\"$schema\"` ancestor is still the reserved `$schema` path",
+        ),
+        (
+            "dotted-owner",
+            concat!(
+                "---\n\"$schema\":\n  \"build.target\": type-definition\n",
+                "\"build.target\": str\n---\n\nbody\n",
+            ),
+            3,
+            19,
+            "the owner key is `build.target`, not the text before the first `:`",
+        ),
+    ];
+
+    for (stem, lf_text, line, character, why) in cases {
+        for (ending, suffix) in [("\n", "lf"), ("\r\n", "crlf")] {
+            let text = lf_text.replace('\n', ending);
+            let path = workspace.path().join(format!("{stem}-{suffix}.md"));
+            std::fs::write(&path, &text).unwrap();
+            let uri = url::Url::from_file_path(&path).unwrap();
+            open(&fixture, uri.as_str(), &text);
+
+            let labels = completion_labels(&mut fixture, uri.as_str(), line, character);
+            assert!(
+                labels.iter().any(|label| label == "string"),
+                "{stem} ({suffix}): {why}; got {labels:?}"
+            );
+        }
+    }
+
+    fixture.shutdown();
+}
+
+/// A malformed edit elsewhere in the block must not cost the line being authored
+/// its semantic ownership.
+///
+/// The last-good tree is consulted per entry — its key token is re-read at the
+/// span it recorded — so an unrelated broken value leaves untouched keys
+/// structurally owned instead of surrendering every one of them at once.
+#[test]
+fn malformed_buffer_retains_structural_ownership_of_untouched_keys() {
+    let workspace = tempfile::tempdir().unwrap();
+    let good = concat!(
+        "---\n",
+        "\"$schema\":\n",
+        "  \"build.target\": type-definition\n",
+        "\"build.target\": str\n",
+        "---\n\nbody\n",
+    );
+    let path = workspace.path().join("last-good.md");
+    std::fs::write(&path, good).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), good);
+    assert!(
+        completion_labels(&mut fixture, uri.as_str(), 3, 19).iter().any(|l| l == "string"),
+        "baseline: the valid buffer completes"
+    );
+
+    // Break the YAML on a *later* line, leaving lines 0-3 byte-identical.
+    let head = &good[..good.find("---\n\nbody").unwrap()];
+    let broken = format!("{head}bad: [unclosed\n---\n\nbody\n");
+    fixture.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": uri.as_str(), "version": 2 },
+            "contentChanges": [ { "text": broken } ]
+        }),
+    );
+
+    let labels = completion_labels(&mut fixture, uri.as_str(), 3, 19);
+    assert!(
+        labels.iter().any(|label| label == "string"),
+        "a malformed value on a later line must not cost `build.target` its \
+         declared `type-definition` ownership; got {labels:?}"
+    );
+
+    fixture.shutdown();
+}
+
+/// Completion must address the value being authored by its **complete**
+/// structural key path, not by one decoded ancestor name.
+///
+/// Two whole classes of activation are invisible to a single-segment owner. A
+/// nested semantic property is recorded at `/parameter/type` — the authoring
+/// shape the meta-schema feature itself uses — while a search keyed on the first
+/// ancestor looks for `/parameter` and finds nothing. A top-level key holding
+/// `/` or `~` is recorded RFC 6901-encoded (`/a~1b`, `/c~0d`), so comparing it
+/// against the decoded `a/b` / `c~d` never matches. Each shape is exercised in
+/// its scalar and `[]` sequence form, under LF and CRLF.
+#[test]
+fn meta_schema_completion_matches_complete_structural_pointers() {
+    let workspace = tempfile::tempdir().unwrap();
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    // (file stem, source, line, character, expected label, why)
+    let cases: [(&str, &str, u32, u32, &str, &str); 8] = [
+        (
+            "nested-type-definition",
+            "---\n$schema:\n  parameter:\n    type: type-definition\nparameter:\n  type: str\n---\n\nbody\n",
+            5,
+            11,
+            "string",
+            "a nested `type-definition` is recorded at `/parameter/type`",
+        ),
+        (
+            "nested-schema",
+            "---\n$schema:\n  nested:\n    decl: schema\nnested:\n  decl: ./\n---\n\nbody\n",
+            5,
+            10,
+            "./schema.yaml",
+            "a nested `schema` is recorded at `/nested/decl`",
+        ),
+        (
+            "slash-key",
+            "---\n$schema:\n  \"a/b\": type-definition\n\"a/b\": str\n---\n\nbody\n",
+            3,
+            10,
+            "string",
+            "`a/b` is recorded encoded as `/a~1b`",
+        ),
+        (
+            "tilde-key",
+            "---\n$schema:\n  \"c~d\": type-definition\n\"c~d\": str\n---\n\nbody\n",
+            3,
+            10,
+            "string",
+            "`c~d` is recorded encoded as `/c~0d`",
+        ),
+        (
+            "nested-type-definition-array",
+            "---\n$schema:\n  parameter:\n    type: type-definition[]\nparameter:\n  type:\n    - str\n---\n\nbody\n",
+            6,
+            9,
+            "string",
+            "the `[]` form of a nested `type-definition`",
+        ),
+        (
+            "nested-schema-array",
+            "---\n$schema:\n  nested:\n    decl: schema[]\nnested:\n  decl:\n    - ./\n---\n\nbody\n",
+            6,
+            8,
+            "./schema.yaml",
+            "the `[]` form of a nested `schema`",
+        ),
+        (
+            "slash-key-array",
+            "---\n$schema:\n  \"a/b\": type-definition[]\n\"a/b\":\n  - str\n---\n\nbody\n",
+            4,
+            7,
+            "string",
+            "the `[]` form of an RFC 6901-escaped `/` owner",
+        ),
+        (
+            "tilde-key-array",
+            "---\n$schema:\n  \"c~d\": type-definition[]\n\"c~d\":\n  - str\n---\n\nbody\n",
+            4,
+            7,
+            "string",
+            "the `[]` form of an RFC 6901-escaped `~` owner",
+        ),
+    ];
+
+    // Collected rather than asserted per case: each row is an independent
+    // activation class, and one failure must not hide the other seven.
+    let mut failures = Vec::new();
+    for (stem, lf_text, line, character, expected, why) in cases {
+        for (ending, suffix) in [("\n", "lf"), ("\r\n", "crlf")] {
+            let text = lf_text.replace('\n', ending);
+            let path = workspace.path().join(format!("{stem}-{suffix}.md"));
+            std::fs::write(&path, &text).unwrap();
+            let uri = url::Url::from_file_path(&path).unwrap();
+            open(&fixture, uri.as_str(), &text);
+
+            let labels = completion_labels(&mut fixture, uri.as_str(), line, character);
+            if !labels.iter().any(|label| label == expected) {
+                failures.push(format!(
+                    "{stem} ({suffix}): {why}; expected {expected:?} in {labels:?}"
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+
+    fixture.shutdown();
+}
+
+/// Last-good retention must cover the complete-pointer shapes too.
+///
+/// The nested and escaped owners resolve through the same per-entry
+/// still-placed check as flat keys, so a malformed value on a later line must
+/// leave them structurally owned rather than surrendering their activation.
+#[test]
+fn malformed_buffer_retains_nested_and_escaped_semantic_owners() {
+    let workspace = tempfile::tempdir().unwrap();
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    // (file stem, source, line, character)
+    let cases: [(&str, &str, u32, u32); 3] = [
+        (
+            "retain-nested",
+            "---\n$schema:\n  parameter:\n    type: type-definition\nparameter:\n  type: str\n",
+            5,
+            11,
+        ),
+        (
+            "retain-slash",
+            "---\n$schema:\n  \"a/b\": type-definition\n\"a/b\": str\n",
+            3,
+            10,
+        ),
+        (
+            "retain-tilde",
+            "---\n$schema:\n  \"c~d\": type-definition\n\"c~d\": str\n",
+            3,
+            10,
+        ),
+    ];
+
+    for (stem, head, line, character) in cases {
+        let good = format!("{head}---\n\nbody\n");
+        let path = workspace.path().join(format!("{stem}.md"));
+        std::fs::write(&path, &good).unwrap();
+        let uri = url::Url::from_file_path(&path).unwrap();
+        open(&fixture, uri.as_str(), &good);
+        assert!(
+            completion_labels(&mut fixture, uri.as_str(), line, character)
+                .iter()
+                .any(|label| label == "string"),
+            "{stem}: baseline valid buffer must complete"
+        );
+
+        let broken = format!("{head}bad: [unclosed\n---\n\nbody\n");
+        fixture.notify(
+            "textDocument/didChange",
+            json!({
+                "textDocument": { "uri": uri.as_str(), "version": 2 },
+                "contentChanges": [ { "text": broken } ]
+            }),
+        );
+
+        let labels = completion_labels(&mut fixture, uri.as_str(), line, character);
+        assert!(
+            labels.iter().any(|label| label == "string"),
+            "{stem}: a malformed value on a later line must not cost the owner \
+             its declared semantic activation; got {labels:?}"
+        );
+    }
+
+    fixture.shutdown();
+}
+
+/// A standalone inner property definition whose key contains punctuation must
+/// keep its specific `dm.schema.invalid_type_definition` code and its own range.
+///
+/// A dotted lookup string cannot distinguish the property `build.target` from
+/// the nested path `build` → `target`, so with both authored it resolved to
+/// whichever appeared first — ranging a *valid* sibling definition instead of
+/// the rejected one. The nested/flat pair is deliberate: it is the collision the
+/// dotted spelling is blind to.
+#[test]
+fn standalone_inner_definition_diagnostics_address_punctuated_keys() {
+    // (file, text, offending substring)
+    let cases: [(&str, &str, &str); 3] = [
+        (
+            "pure-dotted.yaml",
+            "$schema:\n  build:\n    target: number\n  \"build.target\": str\n",
+            "str",
+        ),
+        (
+            "pure-slash.yaml",
+            "$schema:\n  a:\n    b: number\n  \"a/b\": str\n",
+            "str",
+        ),
+        (
+            "tagged-colon.yaml",
+            "kind: schema\ntypes:\n  \"host: port\": str\n",
+            "str",
+        ),
+    ];
+
+    let workspace = tempfile::tempdir().unwrap();
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    for (file, text, offending) in cases {
+        let path = workspace.path().join(file);
+        std::fs::write(&path, text).unwrap();
+        let uri = url::Url::from_file_path(path).unwrap();
+        open(&fixture, uri.as_str(), text);
+        let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+
+        assert!(
+            codes(&diagnostics).iter().any(|code| code == "dm.schema.invalid_type_definition"),
+            "{file}: a punctuated key must keep the inner-definition code rather \
+             than falling through to the document-malformed fallback: {diagnostics:?}"
+        );
+        let reported = diagnostics
+            .iter()
+            .find(|d| d["code"] == json!("dm.schema.invalid_type_definition"))
+            .expect("the inner-definition diagnostic");
+        assert_eq!(
+            reported["range"],
+            range_of(text, offending),
+            "{file}: the range must cover only the offending value: {reported:?}"
+        );
+    }
 
     fixture.shutdown();
 }

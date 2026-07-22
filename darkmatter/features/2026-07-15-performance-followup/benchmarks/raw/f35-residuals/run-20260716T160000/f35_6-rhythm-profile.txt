@@ -1,0 +1,76 @@
+Finding 35.6 — `normalize_body_rhythm` per-line ANSI-strip allocation
+=====================================================================
+
+Run id:    run-20260716T160000
+Host:      macOS (Darwin 25.5.0), aarch64. SHARED, HEAVILY LOADED host
+           (load average ~29-30; concurrent Spotlight index + parallel rustc).
+           Baseline and candidate are therefore sampled INTERLEAVED in one
+           process, so the ratio survives the host drift (identical code
+           re-measured across separate runs moved +50% on this host).
+Profile:   release (`cargo nextest run -p darkmatter --lib --release`)
+Harness:   TEMPORARY in-crate module `f35_6_profile` in
+           darkmatter/lib/src/layout/page/tests.rs. Deleted after this capture
+           (Phase 8 / F25 precedent). `normalize_body_rhythm` is private and
+           exposing it for a Criterion bench would be exactly the public API
+           addition the standing contract bars, so it is measured in-crate.
+Warm-up:   3 iterations per case. Samples: 100 (20 for the full render).
+Statistic: median.
+
+Fixtures (manifest identities, Architecture Decision A):
+  toc_medium.md        -> rendered through DarkmatterPage (margin 2, padding 1,
+                          PageBackground::Subtle, Terminal::new_optimistic(100))
+                          = 549 decorated lines, mostly SGR-coloured prose.
+  render_code_heavy.md -> same page path = 329 lines, many `\x1b[48…`
+                          background-filled code-panel rows.
+  toc_medium.md raw    -> 531 escape-free lines (Cow::Borrowed path).
+
+Declared threshold (before capture)
+-----------------------------------
+Target operation: the `normalize_body_rhythm` pass on a decorated body.
+Minimum repeatable win: >= 10% on the decorated-prose target.
+Maximum permitted control regression: 0% on the escape-free body.
+
+Equivalence gate
+----------------
+The harness asserts `normalize_body_rhythm(body) == baseline_normalize(body)`
+for every measured body before timing it, so no number below is reported for a
+run whose output diverged.
+
+Results
+-------
+  case                          lines    baseline    candidate    change
+  decorated prose (SGR)          549     164.8 us      14.8 us    -91.1 %
+  code panel (bg fill)           329     133.7 us       9.0 us    -93.3 %
+  plain (escape-free)            531      28.4 us      19.8 us    -30.3 %
+
+  full decorated DarkmatterPage::render (candidate, median): 582.5 us
+  rhythm pass share of that render (candidate)             :   2.55 %
+
+Interpretation
+--------------
+`strip_escape_codes` takes `Into<String>`, so the pre-change predicate allocated
+TWICE per output line: an owned `String` copy of the line, then the regex's
+replacement output. Driving the same canonical `ANSI_ESCAPE_RE` directly over the
+borrowed `&str` returns a `Cow` that BORROWS when the line carries no escape
+code, and hoisting the `\x1b[48` background-fill test ahead of the strip decides
+every filled row without touching the regex at all (`&&` over two pure operands,
+so the reorder is result-preserving).
+
+Every case improved; there is no regression, including the escape-free body,
+which the candidate now handles with zero allocations (-30.3%).
+
+End-to-end: the pass accounted for ~164.8 us of a decorated `toc_medium` render;
+the same render now spends 14.8 us there. Reconstructing the baseline render as
+582.5 + (164.8 - 14.8) = ~732.5 us, the rhythm pass fell from ~22.5% of a
+decorated render to 2.55%, i.e. the decorated render path itself is ~20% faster.
+This clears the declared 10% floor by a wide margin on the target operation AND
+on the operation that contains it.
+
+Disposition: ACCEPTED (implementation win).
+
+Cross-platform classification: OS-IDENTICAL, confirmed from the actual diff.
+The change is a pure in-memory string/regex predicate: one `Cow`-returning
+`replace_all` and a reordered `&&`. No `cfg`, no filesystem, no terminal I/O, no
+OS-divergent behavior. The regex is the same shared `ANSI_ESCAPE_RE` static that
+`strip_escape_codes` already used on every platform. Windows compile + the macOS
+behavioral run + ordinary Linux CI are sufficient per the Verification Matrix.

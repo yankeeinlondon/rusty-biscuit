@@ -6,6 +6,11 @@ show_system_prompt: false
 operation: commit
 agent: opencode
 model: minimax/MiniMax-M3
+success: 
+    message: "staged files committed in {{ctx.area}}"
+    stack:
+        - action:
+            - shell: gitnexus analyze --force
 ---
 
 # Commit Staged Files

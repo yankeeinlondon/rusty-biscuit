@@ -1,0 +1,326 @@
+{
+  "_README": [
+    "Pinned, offline YAML corpus for the invalid-frontmatter feature.",
+    "",
+    "Sources are recorded per case in `provenance`:",
+    "  - `monorepo`     : verbatim frontmatter lifted from a real .md file in this",
+    "                     repo. `origin` names the file it came from. These are the",
+    "                     highest-value regression cases: if the analyzer ever",
+    "                     mutates one, it has corrupted a document that ships.",
+    "  - `yaml-spec`    : constructed from a YAML 1.2 spec production (flow",
+    "                     collections, anchors/aliases, block scalars, directives,",
+    "                     multi-document streams, reserved indicators). These cover",
+    "                     the same failure classes the upstream YAML Test Suite",
+    "                     exercises, but they are authored here rather than copied,",
+    "                     so no case ID is claimed and no network fetch is needed.",
+    "  - `regression`   : a shape that previously broke, or a boundary the spec",
+    "                     calls out explicitly.",
+    "",
+    "Why JSON and not a directory of .yaml files: this feature is *about* BOMs,",
+    "CRLF, trailing spaces, and missing final newlines. Those bytes cannot survive",
+    "a checkout, an editor save, or a `git config core.autocrlf` round trip in a",
+    "raw file. JSON string escapes pin them exactly and stay diffable. For the",
+    "same reason every BOM below is written as the explicit escape \\uFEFF rather",
+    "than a literal mark, which would be invisible in review.",
+    "",
+    "Two classes:",
+    "  - `preserved` : must come back byte-identical. `expect_codes` (optional) are",
+    "                  diagnostic codes that MUST fire; `expect_no_diagnostics`",
+    "                  (optional) asserts the analyzer found nothing at all.",
+    "  - `repaired`  : must come back exactly equal to `expected`.",
+    "",
+    "Universal invariants asserted over BOTH classes live in yaml_corpus.rs:",
+    "no panic, determinism, idempotency, and untouched-byte reconstruction."
+  ],
+
+  "yaml_test_suite": {
+    "repository": "https://github.com/yaml/yaml-test-suite",
+    "release": "data-2022-01-17",
+    "commit": "6e6c296ae9c9d2d5c4134b4b64d01b29ac19ff6f",
+    "license": "MIT",
+    "notice": "YAML-TEST-SUITE-NOTICE.md",
+    "cases": [
+      {
+        "id": "9FMG",
+        "name": "Multi-level Mapping Indent",
+        "category": "valid",
+        "source_path": "9FMG/in.yaml",
+        "source": "a:\n  b:\n    c: d\n  e:\n    f: g\nh: i\n",
+        "expect_parse": true
+      },
+      {
+        "id": "4H7K",
+        "name": "Flow sequence with invalid extra closing bracket",
+        "category": "expected-failure",
+        "source_path": "4H7K/in.yaml",
+        "source": "---\n[ a, b, c ] ]\n",
+        "expect_parse": false
+      },
+      {
+        "id": "2JQS",
+        "name": "Block Mapping with Missing Keys",
+        "category": "duplicate-key",
+        "source_path": "2JQS/in.yaml",
+        "source": ": a\n: b\n",
+        "expect_codes": ["yaml.parse"]
+      },
+      {
+        "id": "3GZX",
+        "name": "Spec Example 7.1. Alias Nodes",
+        "category": "anchor-alias",
+        "source_path": "3GZX/in.yaml",
+        "source": "First occurrence: &anchor Foo\nSecond occurrence: *anchor\nOverride anchor: &anchor Bar\nReuse anchor: *anchor\n",
+        "expect_parse": true
+      },
+      {
+        "id": "7ZZ5",
+        "name": "Empty flow collections",
+        "category": "flow",
+        "source_path": "7ZZ5/in.yaml",
+        "source": "---\nnested sequences:\n- - - []\n- - - {}\nkey1: []\nkey2: {}\n",
+        "expect_parse": true
+      },
+      {
+        "id": "G4RS",
+        "name": "Spec Example 2.17. Quoted Scalars",
+        "category": "scalar",
+        "source_path": "G4RS/in.yaml",
+        "source": "unicode: \"Sosa did fine.\\u263A\"\ncontrol: \"\\b1998\\t1999\\t2000\\n\"\nhex esc: \"\\x0d\\x0a is \\r\\n\"\n\nsingle: '\"Howdy!\" he cried.'\nquoted: ' # Not a ''comment''.'\ntie-fighter: '|\\-*-/|'\n",
+        "expect_parse": true
+      },
+      {
+        "id": "L383",
+        "name": "Two scalar docs with trailing comments",
+        "category": "multi-document",
+        "source_path": "L383/in.yaml",
+        "source": "--- foo  # comment\n--- foo  # comment\n",
+        "expect_codes": ["yaml.multi-document"]
+      }
+    ]
+  },
+
+  "preserved": [
+    {
+      "name": "monorepo/biscuit-icon-skill",
+      "provenance": "monorepo",
+      "origin": ".claude/skills/biscuit-icon/SKILL.md",
+      "note": "Folded block scalar carrying a URL, backticks, parens, an em dash, and an ellipsis. The `://` and the `>` indicator are the shapes most likely to trip a naive quoting pass.",
+      "expect_no_diagnostics": true,
+      "source": "name: biscuit-icon\ndescription: >\n  Expert knowledge for the biscuit-icon Rust library and `icon` CLI — curated\n  offline domain icons plus on-demand Iconify (https://iconify.design/) lookup,\n  cached in a local SQLite database. Use when working in the `biscuit-icon/`\n  package area, using `biscuit_icon::Icon` or any of the domain enums\n  (`Os`, `Emoji`, `File`, `Brand`, ...), assembling styled `<svg>` from an\n  `IconBody`, calling `Icon::iconify` for network/cache lookup, rendering\n  icons through the `renderable` tree (terminal ladder, browser inline SVG,\n  markdown), or using the `icon` CLI for listing sets/icons and dynamic\n  shell completions.\n"
+    },
+    {
+      "name": "monorepo/proxmox-skill",
+      "provenance": "monorepo",
+      "origin": ".claude/skills/homelab/proxmox.md",
+      "note": "A very long unquoted plain scalar containing commas, periods, and a leading-tilde path. Plain scalars this long are exactly what the ambiguous-scalar lint must not false-positive on.",
+      "expect_no_diagnostics": true,
+      "source": "name: proxmox\ndescription: Manage Proxmox VE clusters via REST API. Use when user asks to list, start, stop, restart VMs or LXC containers, check node status, create snapshots, view tasks, or manage Proxmox infrastructure. Requires API token or credentials configured.\n"
+    },
+    {
+      "name": "monorepo/feature-review-frontmatter",
+      "provenance": "monorepo",
+      "origin": "darkmatter/features/2026-07-14-invalid-frontmatter/review-1.md",
+      "note": "Carries a $schema control key, booleans, an offset-bearing ISO timestamp, slash-bearing paths, and a double-quoted value containing markdown emphasis and backticks. The timestamp and the two date-prefixed paths each raise the ambiguous-scalar lint — a non-deterministic find, so they are reported and never mutated. This case exists to pin that real, shipping frontmatter DOES produce suggestions and still comes through byte-identical.",
+      "expect_codes": ["yaml.ambiguous-scalar"],
+      "source": "$schema: feature-review.yaml\nready: false\nagent: codex/default\ncreated: 2026-07-18T18:10:47-07:00\nspec: 2026-07-14-invalid-frontmatter/spec.md\nimplemented: false\ndescription: \"A **feature** review of `2026-07-14-invalid-frontmatter/spec.md`\"\nfeature: 2026-07-14-invalid-frontmatter/review-1.md\n"
+    },
+    {
+      "name": "monorepo/spec-frontmatter",
+      "provenance": "monorepo",
+      "origin": "darkmatter/features/2026-07-14-invalid-frontmatter/spec.md",
+      "note": "A quoted slash-and-hyphen value alongside a bare integer. The quoting tier must leave an already-correctly-quoted string alone.",
+      "expect_no_diagnostics": true,
+      "source": "clarified: \"claude/claude-opus-4-8\"\nreview_iterations: 1\n"
+    },
+    {
+      "name": "monorepo/skill-hash-pair",
+      "provenance": "monorepo",
+      "origin": ".claude/skills/rust/SKILL.md",
+      "note": "A hyphen-joined hex hash. It parses as a string only because of the letters and the hyphen; the analyzer must not 'help' by requoting it.",
+      "expect_no_diagnostics": true,
+      "source": "name: rust\nhash: 352b2caf7cdd68a6-25eab10b5d5ca11c\n"
+    },
+
+    {
+      "name": "yaml-spec/anchor-and-alias",
+      "provenance": "yaml-spec",
+      "note": "Anchors/aliases are v1 report-only. Detection is allowed; mutation is not.",
+      "source": "base: &defaults\n  timeout: 30\nchild:\n  <<: *defaults\n  retries: 2\n"
+    },
+    {
+      "name": "yaml-spec/multi-document-stream",
+      "provenance": "yaml-spec",
+      "note": "Multi-document handling is explicitly out of scope for v1 (detect only).",
+      "source": "---\nkey: one\n---\nkey: two\n"
+    },
+    {
+      "name": "yaml-spec/duplicate-key",
+      "provenance": "yaml-spec",
+      "note": "Spec lists duplicate keys as detected-and-reported, never mutated.",
+      "expect_codes": ["yaml.duplicate-key"],
+      "source": "title: first\nother: 1\ntitle: second\n"
+    },
+    {
+      "name": "yaml-spec/literal-block-scalar-keeps-interior-space",
+      "provenance": "yaml-spec",
+      "note": "Trailing spaces inside a literal block scalar are CONTENT, not formatting. Stripping them would silently change the string. The final space before \\n on each body line is deliberate.",
+      "source": "script: |\n  echo one  \n  echo two\t\n"
+    },
+    {
+      "name": "yaml-spec/comment-bearing-flow-sequence",
+      "provenance": "yaml-spec",
+      "note": "A comment inside a flow collection blocks the whitespace-normalization tier; the value must survive untouched.",
+      "source": "ports: [80, # http\n  443]\n"
+    },
+    {
+      "name": "yaml-spec/single-quoted-with-escaped-quote",
+      "provenance": "yaml-spec",
+      "note": "'' is the single-quoted escape for a literal apostrophe. A requoting pass that ignored it would corrupt the value.",
+      "source": "message: 'it''s fine'\n"
+    },
+    {
+      "name": "yaml-spec/double-quoted-with-escapes",
+      "provenance": "yaml-spec",
+      "note": "Backslash escapes are only meaningful inside double quotes. Byte preservation matters more than value here.",
+      "source": "path: \"C:\\\\Users\\\\Ken\"\nnewline: \"a\\nb\"\n"
+    },
+    {
+      "name": "yaml-spec/plain-scalar-with-interior-colon",
+      "provenance": "yaml-spec",
+      "note": "A colon NOT followed by a space stays inside the plain scalar; this is a URL, not a nested mapping.",
+      "source": "url: http://example.com:8080/path\n"
+    },
+    {
+      "name": "yaml-spec/explicit-tag",
+      "provenance": "yaml-spec",
+      "note": "A tagged node is decorated; the quoting tier must decline rather than wrap the tag.",
+      "source": "count: !!str 42\n"
+    },
+    {
+      "name": "yaml-spec/directive-and-document-end",
+      "provenance": "yaml-spec",
+      "note": "%YAML directive plus explicit ... terminator. The % indicator is only reserved at scalar start, not here.",
+      "source": "%YAML 1.2\n---\nkey: value\n...\n"
+    },
+    {
+      "name": "regression/empty-value-and-explicit-null",
+      "provenance": "regression",
+      "note": "`empty:` and `~` both resolve to null. Suspicious-empty-value is a non-deterministic lint: report at most, never fill in a value.",
+      "source": "empty:\nnull_tilde: ~\nnull_word: null\n"
+    },
+    {
+      "name": "regression/unterminated-single-quote",
+      "provenance": "regression",
+      "note": "Unparseable and NOT repairable: where the missing quote belongs is a guess. Must be left byte-identical so `md clean` keeps its exit-1 contract.",
+      "source": "title: 'unterminated\n"
+    },
+    {
+      "name": "regression/reserved-indicator-with-trailing-comment",
+      "provenance": "regression",
+      "note": "A trailing comment makes the lexeme extent ambiguous, so the reserved-indicator repair must decline rather than swallow the comment into the string.",
+      "source": "title: @foo # comment\n"
+    },
+    {
+      "name": "regression/tab-indentation-is-unrepairable",
+      "provenance": "regression",
+      "note": "YAML forbids tabs as indentation. Converting them means guessing the intended width, so this stays report-only.",
+      "source": "parent:\n\tchild: value\n"
+    }
+  ],
+
+  "repaired": [
+    {
+      "name": "monorepo/spec-frontmatter-crlf-bom",
+      "provenance": "monorepo",
+      "origin": "darkmatter/features/2026-07-14-invalid-frontmatter/spec.md",
+      "note": "Real frontmatter as a Windows editor would leave it: BOM plus CRLF. This is the cross-platform normalization path.",
+      "source": "﻿clarified: \"claude/claude-opus-4-8\"\r\nreview_iterations: 1\r\n",
+      "expected": "clarified: \"claude/claude-opus-4-8\"\nreview_iterations: 1\n"
+    },
+    {
+      "name": "monorepo/skill-frontmatter-trailing-space",
+      "provenance": "monorepo",
+      "origin": ".claude/skills/homelab/proxmox.md",
+      "note": "Trailing spaces after a plain scalar are parse-irrelevant and safe to strip. The space before each \\n is deliberate.",
+      "source": "name: proxmox  \ndescription: Manage Proxmox VE clusters via REST API.   \n",
+      "expected": "name: proxmox\ndescription: Manage Proxmox VE clusters via REST API.\n"
+    },
+    {
+      "name": "normalization/bom-only",
+      "provenance": "regression",
+      "note": "BOM removal in isolation, single key. The spec lists BOM removal as a deterministic, auto-applied normalization.",
+      "source": "﻿key: value\n",
+      "expected": "key: value\n"
+    },
+    {
+      "name": "normalization/crlf-only",
+      "provenance": "regression",
+      "note": "CRLF normalization in isolation, with no BOM in play.",
+      "source": "key: value\r\n",
+      "expected": "key: value\n"
+    },
+    {
+      "name": "normalization/bom-plus-crlf",
+      "provenance": "regression",
+      "note": "BOM and CRLF together, single key — how a Windows editor actually leaves a file.",
+      "source": "﻿key: value\r\n",
+      "expected": "key: value\n"
+    },
+    {
+      "name": "normalization/bom-plus-lf-two-keys",
+      "provenance": "regression",
+      "note": "Isolates BOM against key count, with line endings held at LF.",
+      "source": "﻿alpha: 1\nbeta: 2\n",
+      "expected": "alpha: 1\nbeta: 2\n"
+    },
+    {
+      "name": "normalization/bom-plus-crlf-two-keys",
+      "provenance": "regression",
+      "note": "BOM + CRLF + more than one key: the shape essentially every real Windows-authored frontmatter block has. Isolates whether a BOM-induced parse failure suppresses the CRLF normalization too.",
+      "source": "﻿alpha: 1\r\nbeta: 2\r\n",
+      "expected": "alpha: 1\nbeta: 2\n"
+    },
+    {
+      "name": "regression/flagship-reserved-indicator",
+      "provenance": "regression",
+      "note": "The spec's flagship no-schema case: an unquoted plain scalar starting with a reserved indicator. Unparseable in, valid out, source text preserved.",
+      "source": "title: @daily-report\n",
+      "expected": "title: \"@daily-report\"\n"
+    },
+    {
+      "name": "regression/reserved-indicator-in-realistic-frontmatter",
+      "provenance": "regression",
+      "note": "The flagship case embedded in a document-shaped block, proving the repair is span-local and leaves its neighbours alone.",
+      "source": "name: nextest\ntitle: @daily-report\nversion: \"1.0\"\n",
+      "expected": "name: nextest\ntitle: \"@daily-report\"\nversion: \"1.0\"\n"
+    },
+    {
+      "name": "yaml-spec/missing-final-newline",
+      "provenance": "yaml-spec",
+      "note": "POSIX text files end with a newline; adding one is parse-equivalent.",
+      "source": "key: value",
+      "expected": "key: value\n"
+    },
+    {
+      "name": "yaml-spec/mixed-line-endings",
+      "provenance": "yaml-spec",
+      "note": "A file edited on two platforms. All three terminator styles must converge on LF.",
+      "source": "a: 1\r\nb: 2\rc: 3\n",
+      "expected": "a: 1\nb: 2\nc: 3\n"
+    },
+    {
+      "name": "yaml-spec/flow-collection-spacing",
+      "provenance": "yaml-spec",
+      "note": "Whitespace inside flow collections is parse-irrelevant; normalization is gated on Value equality.",
+      "source": "ports: [ 80,443 ]\n",
+      "expected": "ports: [80, 443]\n"
+    },
+    {
+      "name": "regression/multibyte-neighbour-survives-repair",
+      "provenance": "regression",
+      "note": "A repair span adjacent to multi-byte UTF-8 must not split a codepoint. If span arithmetic is ever done in chars instead of bytes, this is the case that catches it.",
+      "source": "title: @日本語\nnote: 日本語のテキスト\n",
+      "expected": "title: \"@日本語\"\nnote: 日本語のテキスト\n"
+    }
+  ]
+}

@@ -15,7 +15,9 @@ use std::path::{Path, PathBuf};
 use biscuit_file::toml_crate;
 use serde::{Deserialize, Serialize};
 
-use crate::filesystem::repo::detection::ManifestCache;
+use crate::filesystem::repo::detection::{ManifestStore, probe_exists, probe_is_dir};
+use crate::performance;
+use crate::performance::counters;
 use crate::programs::contract::CategoryEnum;
 use crate::programs::enums::TestRunner;
 use crate::programs::test_runner_spec::{TEST_RUNNER_SPEC, TestRunnerEcosystem};
@@ -97,7 +99,7 @@ impl TestRunnerUsage {
 pub(crate) fn detect_test_runners(
     pkg_dir: &Path,
     repo_root: &Path,
-    cache: &mut ManifestCache,
+    manifests: &ManifestStore,
 ) -> Vec<TestRunnerUsage> {
     let ecosystems = ecosystems_present(pkg_dir);
     if ecosystems.is_empty() {
@@ -108,7 +110,7 @@ pub(crate) fn detect_test_runners(
     // matching is exact: a runner is attributed only when its dependency key
     // appears as an actual dependency declaration, never as an incidental
     // substring of a package name, test script, or comment.
-    let declared = collect_declared_deps(pkg_dir, &ecosystems, cache);
+    let declared = collect_declared_deps(pkg_dir, &ecosystems, manifests);
 
     let mut found: Vec<TestRunnerUsage> = Vec::new();
     let mut seen: HashSet<TestRunner> = HashSet::new();
@@ -136,7 +138,12 @@ pub(crate) fn detect_test_runners(
         };
         'globs: for glob in spec.config_globs {
             for dir in search_dirs {
-                if let Some(located) = locate_config(dir, runner, glob, cache) {
+                let located = if *dir == repo_root && root_scoped_config(runner) {
+                    locate_root_config(dir, runner, glob, manifests)
+                } else {
+                    locate_config(dir, runner, glob, manifests)
+                };
+                if let Some(located) = located {
                     push_unique(
                         &mut found,
                         &mut seen,
@@ -237,7 +244,7 @@ fn prioritize(mut found: Vec<TestRunnerUsage>) -> Vec<TestRunnerUsage> {
 }
 
 /// Detect declared test runners for a single project directory, building a
-/// fresh manifest cache.
+/// fresh manifest store.
 ///
 /// This is the entry point for non-monorepo contexts where no `Package` is
 /// produced by repo detection (e.g. a standalone Cargo crate). For monorepo
@@ -245,8 +252,8 @@ fn prioritize(mut found: Vec<TestRunnerUsage>) -> Vec<TestRunnerUsage> {
 /// during repo detection.
 #[must_use]
 pub fn detect_test_runners_for_dir(dir: &Path) -> Vec<TestRunnerUsage> {
-    let mut cache = ManifestCache::default();
-    detect_test_runners(dir, dir, &mut cache)
+    let manifests = ManifestStore::default();
+    detect_test_runners(dir, dir, &manifests)
 }
 
 /// Returns `true` when `runner`'s config file lives once at the workspace/repo
@@ -279,19 +286,42 @@ fn locate_config(
     pkg_dir: &Path,
     runner: TestRunner,
     glob: &str,
-    cache: &mut ManifestCache,
+    manifests: &ManifestStore,
 ) -> Option<PathBuf> {
     if is_glob_pattern(glob) {
         return locate_glob_file(pkg_dir, glob);
     }
     let path = pkg_dir.join(glob);
-    if !path.exists() {
+    if !probe_exists(&path) {
         return None;
     }
     match required_config_section(runner, glob) {
-        Some(section) => cache
+        Some(section) => manifests
             .raw_text(&path)
-            .is_some_and(|text| ini_has_section(text, section))
+            .is_some_and(|text| ini_has_section(&text, section))
+            .then_some(path),
+        None => Some(path),
+    }
+}
+
+/// Locate a config whose workspace-root path is shared by every package.
+fn locate_root_config(
+    repo_root: &Path,
+    runner: TestRunner,
+    glob: &str,
+    manifests: &ManifestStore,
+) -> Option<PathBuf> {
+    if is_glob_pattern(glob) {
+        return locate_config(repo_root, runner, glob, manifests);
+    }
+    let path = repo_root.join(glob);
+    if !manifests.root_config_exists(&path) {
+        return None;
+    }
+    match required_config_section(runner, glob) {
+        Some(section) => manifests
+            .raw_text(&path)
+            .is_some_and(|text| ini_has_section(&text, section))
             .then_some(path),
         None => Some(path),
     }
@@ -336,7 +366,7 @@ fn locate_glob_file(pkg_dir: &Path, pattern: &str) -> Option<PathBuf> {
         root.push(segment);
         literal_segments += 1;
     }
-    if !root.exists() {
+    if !probe_exists(&root) {
         return None;
     }
 
@@ -359,6 +389,7 @@ fn glob_walk(
     matcher: &globset::GlobMatcher,
     max_descent: usize,
 ) -> Option<PathBuf> {
+    performance::increment_counter(counters::FS_READ_DIRS, 1);
     let entries = std::fs::read_dir(dir).ok()?;
     for entry in entries.flatten() {
         let Ok(file_type) = entry.file_type() else {
@@ -423,37 +454,37 @@ fn push_unique(
 /// Returns the ecosystems that have a manifest present in `pkg_dir`.
 fn ecosystems_present(pkg_dir: &Path) -> HashSet<TestRunnerEcosystem> {
     let mut set = HashSet::new();
-    if pkg_dir.join("Cargo.toml").exists() {
+    if probe_exists(&pkg_dir.join("Cargo.toml")) {
         set.insert(TestRunnerEcosystem::Rust);
     }
-    if pkg_dir.join("go.mod").exists() {
+    if probe_exists(&pkg_dir.join("go.mod")) {
         set.insert(TestRunnerEcosystem::Go);
     }
-    if pkg_dir.join("package.json").exists() {
+    if probe_exists(&pkg_dir.join("package.json")) {
         set.insert(TestRunnerEcosystem::Node);
     }
-    if pkg_dir.join("pyproject.toml").exists()
-        || pkg_dir.join("requirements.txt").exists()
-        || pkg_dir.join("setup.py").exists()
+    if probe_exists(&pkg_dir.join("pyproject.toml"))
+        || probe_exists(&pkg_dir.join("requirements.txt"))
+        || probe_exists(&pkg_dir.join("setup.py"))
     {
         set.insert(TestRunnerEcosystem::Python);
     }
-    if pkg_dir.join("composer.json").exists() {
+    if probe_exists(&pkg_dir.join("composer.json")) {
         set.insert(TestRunnerEcosystem::Php);
     }
-    if pkg_dir.join("Gemfile").exists() || has_gemspec(pkg_dir) {
+    if probe_exists(&pkg_dir.join("Gemfile")) || has_gemspec(pkg_dir) {
         set.insert(TestRunnerEcosystem::Ruby);
     }
-    if pkg_dir.join("pom.xml").exists()
-        || pkg_dir.join("build.gradle").exists()
-        || pkg_dir.join("build.gradle.kts").exists()
+    if probe_exists(&pkg_dir.join("pom.xml"))
+        || probe_exists(&pkg_dir.join("build.gradle"))
+        || probe_exists(&pkg_dir.join("build.gradle.kts"))
     {
         set.insert(TestRunnerEcosystem::Jvm);
     }
     if has_csproj(pkg_dir) {
         set.insert(TestRunnerEcosystem::DotNet);
     }
-    if pkg_dir.join("mix.exs").exists() {
+    if probe_exists(&pkg_dir.join("mix.exs")) {
         set.insert(TestRunnerEcosystem::Elixir);
     }
     set
@@ -491,40 +522,40 @@ fn key_declared(deps: &DeclaredDeps, key: &str) -> bool {
 fn collect_declared_deps(
     pkg_dir: &Path,
     ecosystems: &HashSet<TestRunnerEcosystem>,
-    cache: &mut ManifestCache,
+    manifests: &ManifestStore,
 ) -> DeclaredDeps {
     let mut deps = DeclaredDeps::default();
     if ecosystems.contains(&TestRunnerEcosystem::Node) {
-        collect_node_deps(pkg_dir, cache, &mut deps.names);
+        collect_node_deps(pkg_dir, manifests, &mut deps.names);
     }
     if ecosystems.contains(&TestRunnerEcosystem::Php) {
-        collect_php_deps(pkg_dir, cache, &mut deps.names);
+        collect_php_deps(pkg_dir, manifests, &mut deps.names);
     }
     if ecosystems.contains(&TestRunnerEcosystem::Python) {
-        collect_python_deps(pkg_dir, cache, &mut deps.names);
+        collect_python_deps(pkg_dir, manifests, &mut deps.names);
     }
     if ecosystems.contains(&TestRunnerEcosystem::Go) {
-        collect_go_deps(pkg_dir, cache, &mut deps.names);
+        collect_go_deps(pkg_dir, manifests, &mut deps.names);
     }
     if ecosystems.contains(&TestRunnerEcosystem::Ruby) {
-        collect_ruby_deps(pkg_dir, cache, &mut deps.names);
+        collect_ruby_deps(pkg_dir, manifests, &mut deps.names);
     }
     if ecosystems.contains(&TestRunnerEcosystem::Jvm) {
-        collect_jvm_coordinates(pkg_dir, cache, &mut deps.coordinates);
+        collect_jvm_coordinates(pkg_dir, manifests, &mut deps.coordinates);
     }
     if ecosystems.contains(&TestRunnerEcosystem::DotNet) {
-        collect_dotnet_deps(pkg_dir, cache, &mut deps.names);
+        collect_dotnet_deps(pkg_dir, manifests, &mut deps.names);
     }
     if ecosystems.contains(&TestRunnerEcosystem::Elixir) {
-        collect_elixir_deps(pkg_dir, cache, &mut deps.names);
+        collect_elixir_deps(pkg_dir, manifests, &mut deps.names);
     }
     deps
 }
 
 /// Insert every npm dependency key (across the four standard sections) into
 /// `out`.
-fn collect_node_deps(pkg_dir: &Path, cache: &mut ManifestCache, out: &mut HashSet<String>) {
-    let Some(val) = cache.npm(&pkg_dir.join("package.json")) else {
+fn collect_node_deps(pkg_dir: &Path, manifests: &ManifestStore, out: &mut HashSet<String>) {
+    let Some(val) = manifests.npm(&pkg_dir.join("package.json")) else {
         return;
     };
     for section in [
@@ -540,10 +571,10 @@ fn collect_node_deps(pkg_dir: &Path, cache: &mut ManifestCache, out: &mut HashSe
 }
 
 /// Insert every Composer `require` / `require-dev` package name into `out`.
-fn collect_php_deps(pkg_dir: &Path, cache: &mut ManifestCache, out: &mut HashSet<String>) {
-    let parsed = cache
+fn collect_php_deps(pkg_dir: &Path, manifests: &ManifestStore, out: &mut HashSet<String>) {
+    let parsed = manifests
         .raw_text(&pkg_dir.join("composer.json"))
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok());
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
     let Some(val) = parsed else {
         return;
     };
@@ -557,8 +588,8 @@ fn collect_php_deps(pkg_dir: &Path, cache: &mut ManifestCache, out: &mut HashSet
 /// Insert every declared PyPI distribution name (lowercased) from
 /// `pyproject.toml` (PEP 621, PEP 735, and Poetry layouts) and any top-level
 /// `requirements*.txt` into `out`.
-fn collect_python_deps(pkg_dir: &Path, cache: &mut ManifestCache, out: &mut HashSet<String>) {
-    if let Some(val) = cache.pyproject(&pkg_dir.join("pyproject.toml")) {
+fn collect_python_deps(pkg_dir: &Path, manifests: &ManifestStore, out: &mut HashSet<String>) {
+    if let Some(val) = manifests.pyproject(&pkg_dir.join("pyproject.toml")) {
         // PEP 621 [project].dependencies + [project.optional-dependencies]
         if let Some(project) = val.get("project") {
             if let Some(arr) = project
@@ -611,7 +642,7 @@ fn collect_python_deps(pkg_dir: &Path, cache: &mut ManifestCache, out: &mut Hash
     for path in files_matching(pkg_dir, |name| {
         name.starts_with("requirements") && name.ends_with(".txt")
     }) {
-        if let Some(text) = cache.raw_text(&path) {
+        if let Some(text) = manifests.raw_text(&path) {
             for line in text.lines() {
                 if let Some(name) = python_requirement_name(line) {
                     out.insert(name);
@@ -642,8 +673,8 @@ fn insert_poetry_names(table: &toml_crate::value::Table, out: &mut HashSet<Strin
 }
 
 /// Insert every Go module path declared in a `require` directive into `out`.
-fn collect_go_deps(pkg_dir: &Path, cache: &mut ManifestCache, out: &mut HashSet<String>) {
-    let Some(text) = cache.go_mod(&pkg_dir.join("go.mod")) else {
+fn collect_go_deps(pkg_dir: &Path, manifests: &ManifestStore, out: &mut HashSet<String>) {
+    let Some(text) = manifests.go_mod(&pkg_dir.join("go.mod")) else {
         return;
     };
     let mut in_block = false;
@@ -670,11 +701,11 @@ fn collect_go_deps(pkg_dir: &Path, cache: &mut ManifestCache, out: &mut HashSet<
 
 /// Insert every gem named by a `gem "..."` line (Gemfile) or an
 /// `add_*dependency "..."` call (gemspec) into `out`.
-fn collect_ruby_deps(pkg_dir: &Path, cache: &mut ManifestCache, out: &mut HashSet<String>) {
+fn collect_ruby_deps(pkg_dir: &Path, manifests: &ManifestStore, out: &mut HashSet<String>) {
     let mut paths = vec![pkg_dir.join("Gemfile")];
     paths.extend(files_matching(pkg_dir, |name| name.ends_with(".gemspec")));
     for path in paths {
-        let Some(text) = cache.raw_text(&path) else {
+        let Some(text) = manifests.raw_text(&path) else {
             continue;
         };
         for raw in text.lines() {
@@ -691,8 +722,12 @@ fn collect_ruby_deps(pkg_dir: &Path, cache: &mut ManifestCache, out: &mut HashSe
 }
 
 /// Insert every Maven/Gradle `groupId:artifactId` coordinate into `out`.
-fn collect_jvm_coordinates(pkg_dir: &Path, cache: &mut ManifestCache, out: &mut HashSet<String>) {
-    if let Some(text) = cache.raw_text(&pkg_dir.join("pom.xml")) {
+fn collect_jvm_coordinates(
+    pkg_dir: &Path,
+    manifests: &ManifestStore,
+    out: &mut HashSet<String>,
+) {
+    if let Some(text) = manifests.raw_text(&pkg_dir.join("pom.xml")) {
         for block in text.split("<dependency>").skip(1) {
             let block = &block[..block.find("</dependency>").unwrap_or(block.len())];
             if let (Some(group), Some(artifact)) = (
@@ -704,10 +739,10 @@ fn collect_jvm_coordinates(pkg_dir: &Path, cache: &mut ManifestCache, out: &mut 
         }
     }
     for name in ["build.gradle", "build.gradle.kts"] {
-        let Some(text) = cache.raw_text(&pkg_dir.join(name)) else {
+        let Some(text) = manifests.raw_text(&pkg_dir.join(name)) else {
             continue;
         };
-        for literal in quoted_strings(text) {
+        for literal in quoted_strings(&text) {
             let mut parts = literal.splitn(3, ':');
             if let (Some(group), Some(artifact)) = (parts.next(), parts.next())
                 && is_coordinate_token(group)
@@ -721,9 +756,9 @@ fn collect_jvm_coordinates(pkg_dir: &Path, cache: &mut ManifestCache, out: &mut 
 
 /// Insert every `<PackageReference Include="...">` package id from each
 /// `.csproj` in the package dir into `out`.
-fn collect_dotnet_deps(pkg_dir: &Path, cache: &mut ManifestCache, out: &mut HashSet<String>) {
+fn collect_dotnet_deps(pkg_dir: &Path, manifests: &ManifestStore, out: &mut HashSet<String>) {
     for path in files_matching(pkg_dir, |name| name.ends_with(".csproj")) {
-        let Some(text) = cache.raw_text(&path) else {
+        let Some(text) = manifests.raw_text(&path) else {
             continue;
         };
         for element in text.split("PackageReference").skip(1) {
@@ -739,11 +774,11 @@ fn collect_dotnet_deps(pkg_dir: &Path, cache: &mut ManifestCache, out: &mut Hash
 }
 
 /// Insert every Mix dependency atom (`{:dep, ...}`) into `out`.
-fn collect_elixir_deps(pkg_dir: &Path, cache: &mut ManifestCache, out: &mut HashSet<String>) {
-    let Some(text) = cache.raw_text(&pkg_dir.join("mix.exs")) else {
+fn collect_elixir_deps(pkg_dir: &Path, manifests: &ManifestStore, out: &mut HashSet<String>) {
+    let Some(text) = manifests.raw_text(&pkg_dir.join("mix.exs")) else {
         return;
     };
-    let mut rest = text;
+    let mut rest = text.as_str();
     while let Some(pos) = rest.find("{:") {
         let after = &rest[pos + 2..];
         let end = after
@@ -759,6 +794,7 @@ fn collect_elixir_deps(pkg_dir: &Path, cache: &mut ManifestCache, out: &mut Hash
 /// Return the package-dir entries whose file name satisfies `pred`. The scan is
 /// shallow (no recursion), so it is cheap and bounded.
 fn files_matching(pkg_dir: &Path, pred: impl Fn(&str) -> bool) -> Vec<PathBuf> {
+    performance::increment_counter(counters::FS_READ_DIRS, 1);
     let Ok(entries) = std::fs::read_dir(pkg_dir) else {
         return Vec::new();
     };
@@ -841,6 +877,7 @@ fn is_coordinate_token(token: &str) -> bool {
 
 /// Returns `true` when the package dir contains a `.gemspec` file.
 fn has_gemspec(pkg_dir: &Path) -> bool {
+    performance::increment_counter(counters::FS_READ_DIRS, 1);
     if let Ok(entries) = std::fs::read_dir(pkg_dir) {
         for entry in entries.flatten() {
             if entry
@@ -857,6 +894,7 @@ fn has_gemspec(pkg_dir: &Path) -> bool {
 
 /// Returns `true` when the package dir contains a `.csproj` file.
 fn has_csproj(pkg_dir: &Path) -> bool {
+    performance::increment_counter(counters::FS_READ_DIRS, 1);
     if let Ok(entries) = std::fs::read_dir(pkg_dir) {
         for entry in entries.flatten() {
             if entry
@@ -875,10 +913,11 @@ fn has_csproj(pkg_dir: &Path) -> bool {
 /// (`tests/`, `test/`, `spec/`, or `*_test.*` / `*_spec.*` naming).
 fn has_convention_tests(pkg_dir: &Path) -> bool {
     for dir in ["tests", "test", "spec"] {
-        if pkg_dir.join(dir).is_dir() {
+        if probe_is_dir(&pkg_dir.join(dir)) {
             return true;
         }
     }
+    performance::increment_counter(counters::FS_READ_DIRS, 1);
     if let Ok(entries) = std::fs::read_dir(pkg_dir) {
         for entry in entries.flatten() {
             if let Some(name) = entry.file_name().to_str()
@@ -922,13 +961,13 @@ mod tests {
     }
 
     fn detect(dir: &Path) -> Vec<TestRunnerUsage> {
-        let mut cache = ManifestCache::default();
-        detect_test_runners(dir, dir, &mut cache)
+        let manifests = ManifestStore::default();
+        detect_test_runners(dir, dir, &manifests)
     }
 
     fn detect_in_workspace(pkg_dir: &Path, root: &Path) -> Vec<TestRunnerUsage> {
-        let mut cache = ManifestCache::default();
-        detect_test_runners(pkg_dir, root, &mut cache)
+        let manifests = ManifestStore::default();
+        detect_test_runners(pkg_dir, root, &manifests)
     }
 
     fn runners_of(usage: &[TestRunnerUsage]) -> Vec<TestRunner> {

@@ -25,6 +25,7 @@
 //! type_name        := "string" | "date" | "datetime" | "time" | "number"
 //!                   | "numberlike" | "boolean" | "boolish" | "object"
 //!                   | "file" | "enum" | "url" | "email" | "yaml" | "json"
+//!                   | "literal" | "expression" | "type-definition" | "schema"
 //!                   | "any"
 //! item_constraints := constraint ( ";" constraint )*
 //! arr_constraints  := constraint ( ";" constraint )*
@@ -97,14 +98,14 @@ struct Token {
     span: Range<usize>,
 }
 
-struct Lexer<'a> {
+pub(super) struct Lexer<'a> {
     src: &'a str,
     bytes: &'a [u8],
-    pos: usize,
+    pub(super) pos: usize,
 }
 
 impl<'a> Lexer<'a> {
-    fn new(src: &'a str) -> Self {
+    pub(super) fn new(src: &'a str) -> Self {
         Self {
             src,
             bytes: src.as_bytes(),
@@ -112,11 +113,11 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn peek_byte(&self) -> Option<u8> {
+    pub(super) fn peek_byte(&self) -> Option<u8> {
         self.bytes.get(self.pos).copied()
     }
 
-    fn skip_ws(&mut self) {
+    pub(super) fn skip_ws(&mut self) {
         while let Some(b) = self.peek_byte() {
             if b.is_ascii_whitespace() {
                 self.pos += 1;
@@ -184,7 +185,7 @@ impl<'a> Lexer<'a> {
     ///
     /// `-` is a normal word character except when followed by `>` (the
     /// description arrow), where the `-` terminates the word.
-    fn read_word(&mut self) -> (String, Range<usize>) {
+    pub(super) fn read_word(&mut self) -> (String, Range<usize>) {
         let start = self.pos;
         while let Some(b) = self.peek_byte() {
             if matches!(b, b',' | b';' | b'(' | b')' | b'\'' | b'"') || b.is_ascii_whitespace() {
@@ -201,7 +202,7 @@ impl<'a> Lexer<'a> {
 
     /// Read an identifier (`[a-z][a-z0-9-]*`). Used in the type-name and
     /// constraint-keyword positions.
-    fn read_ident(&mut self) -> (String, Range<usize>) {
+    pub(super) fn read_ident(&mut self) -> (String, Range<usize>) {
         let start = self.pos;
         while let Some(b) = self.peek_byte() {
             if b.is_ascii_alphanumeric() || b == b'-' || b == b'_' {
@@ -838,6 +839,19 @@ impl<'a> Parser<'a> {
             }
         }
 
+        self.validate_semantic_constraints(
+            ty,
+            &item_constraints,
+            false,
+            name_span.clone(),
+        )?;
+        self.validate_semantic_constraints(
+            ty,
+            &array_constraints,
+            true,
+            name_span.clone(),
+        )?;
+
         // Enum requires members.
         if matches!(ty, SimplifiedType::Enum)
             && !item_constraints
@@ -867,6 +881,68 @@ impl<'a> Parser<'a> {
             array_constraints,
             description: None,
         })
+    }
+
+    fn validate_semantic_constraints(
+        &self,
+        ty: SimplifiedType,
+        constraints: &[Constraint],
+        is_array_level: bool,
+        span: Range<usize>,
+    ) -> Result<(), SchemaError> {
+        if !matches!(ty, SimplifiedType::TypeDefinition | SimplifiedType::Schema) {
+            return Ok(());
+        }
+
+        for constraint in constraints {
+            match constraint {
+                Constraint::Required | Constraint::Generated => {}
+                Constraint::Default(value) => {
+                    let Some(default) = value.as_str() else {
+                        return self.err(
+                            format!(
+                                "`default` value is not valid on `{}`; expected a scalar semantic value",
+                                ty.as_keyword()
+                            ),
+                            span.clone(),
+                        );
+                    };
+                    let value = serde_yaml_ng::Value::String(default.to_string());
+                    let result = match ty {
+                        SimplifiedType::TypeDefinition => {
+                            super::parse_property_definition(self.property, &value).map(|_| ())
+                        }
+                        SimplifiedType::Schema => {
+                            super::parse_schema_declaration(&value).map(|_| ())
+                        }
+                        _ => unreachable!("semantic type checked above"),
+                    };
+                    if let Err(error) = result {
+                        return self.err(
+                            format!(
+                                "`default` value is not valid on `{}`: {error}",
+                                ty.as_keyword()
+                            ),
+                            span.clone(),
+                        );
+                    }
+                }
+                Constraint::MinItems(_) | Constraint::MaxItems(_) | Constraint::Unique
+                    if is_array_level => {}
+                other => {
+                    return self.err(
+                        format!(
+                            "constraint `{}` is not valid on `{}`{}",
+                            other.keyword(),
+                            ty.as_keyword(),
+                            if is_array_level { " arrays" } else { "" }
+                        ),
+                        span.clone(),
+                    );
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Pure lookahead: returns `true` when the token stream immediately after

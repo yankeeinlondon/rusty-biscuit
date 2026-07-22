@@ -1,3 +1,307 @@
+---
+total_phases: 8
+source_files_during_phase_1:
+  - biscuit-speaks/cli/src/install_ui.rs
+  - biscuit-speaks/cli/src/main.rs
+  - playa/cli/src/install_ui.rs
+  - playa/cli/src/main.rs
+  - sniff/cli/src/args/mod.rs
+  - sniff/cli/src/args/repo.rs
+  - sniff/cli/src/commands/mod.rs
+  - sniff/cli/src/commands/repo.rs
+  - sniff/cli/src/install_plan_cmd.rs
+  - sniff/cli/src/install_ui.rs
+  - sniff/cli/src/output/filesystem/files.rs
+  - sniff/cli/src/output/filesystem/mod.rs
+  - sniff/cli/src/output/recent_commits.rs
+  - sniff/cli/src/output/repo_json.rs
+  - sniff/cli/src/perf.rs
+  - sniff/cli/tests/cli.rs
+  - sniff/cli/tests/snapshots.rs
+  - sniff/lib/benches/cases/filesystem.rs
+  - sniff/lib/benches/cases/workload_matrix.rs
+  - sniff/lib/benches/perf.rs
+  - sniff/lib/benches/support/bench_ids.rs
+  - sniff/lib/benches/support/builder.rs
+  - sniff/lib/benches/support/fixtures.rs
+  - sniff/lib/benches/support/remote_report_fixture.rs
+  - sniff/lib/examples/work_counts.rs
+  - sniff/lib/src/error.rs
+  - sniff/lib/src/executable_index.rs
+  - sniff/lib/src/filesystem/docs.rs
+  - sniff/lib/src/filesystem/file_types/aggregate.rs
+  - sniff/lib/src/filesystem/file_types/classify.rs
+  - sniff/lib/src/filesystem/file_types/model.rs
+  - sniff/lib/src/filesystem/formatting.rs
+  - sniff/lib/src/filesystem/git/api.rs
+  - sniff/lib/src/filesystem/git/discovery.rs
+  - sniff/lib/src/filesystem/git/mod.rs
+  - sniff/lib/src/filesystem/git/open.rs
+  - sniff/lib/src/filesystem/git/recent_commits.rs
+  - sniff/lib/src/filesystem/git/remote_refresh.rs
+  - sniff/lib/src/filesystem/git/status.rs
+  - sniff/lib/src/filesystem/git/types.rs
+  - sniff/lib/src/filesystem/git/worktree.rs
+  - sniff/lib/src/filesystem/mod.rs
+  - sniff/lib/src/filesystem/repo/aggregate.rs
+  - sniff/lib/src/filesystem/repo/aggregate_view.rs
+  - sniff/lib/src/filesystem/repo/area.rs
+  - sniff/lib/src/filesystem/repo/cargo.rs
+  - sniff/lib/src/filesystem/repo/detection.rs
+  - sniff/lib/src/filesystem/repo/dotnet.rs
+  - sniff/lib/src/filesystem/repo/glob.rs
+  - sniff/lib/src/filesystem/repo/go.rs
+  - sniff/lib/src/filesystem/repo/gradle.rs
+  - sniff/lib/src/filesystem/repo/identity.rs
+  - sniff/lib/src/filesystem/repo/manifest_index.rs
+  - sniff/lib/src/filesystem/repo/maven.rs
+  - sniff/lib/src/filesystem/repo/mod.rs
+  - sniff/lib/src/filesystem/repo/nested.rs
+  - sniff/lib/src/filesystem/repo/npm.rs
+  - sniff/lib/src/filesystem/repo/nx_turbo.rs
+  - sniff/lib/src/filesystem/repo/ownership.rs
+  - sniff/lib/src/filesystem/repo/polyglot.rs
+  - sniff/lib/src/filesystem/repo/python.rs
+  - sniff/lib/src/filesystem/repo/seed.rs
+  - sniff/lib/src/filesystem/repo/test_runner_usage.rs
+  - sniff/lib/src/filesystem/repo/topology.rs
+  - sniff/lib/src/filesystem/repo/types.rs
+  - sniff/lib/src/filesystem/repo/uv.rs
+  - sniff/lib/src/filesystem/system_view.rs
+  - sniff/lib/src/hardware/audio.rs
+  - sniff/lib/src/hardware/storage.rs
+  - sniff/lib/src/lib.rs
+  - sniff/lib/src/network/mod.rs
+  - sniff/lib/src/os/locale.rs
+  - sniff/lib/src/os/time.rs
+  - sniff/lib/src/performance.rs
+  - sniff/lib/src/performance/counters.rs
+  - sniff/lib/src/process.rs
+  - sniff/lib/src/programs/enums/metadata.rs
+  - sniff/lib/src/programs/host_capability.rs
+  - sniff/lib/src/programs/install/command.rs
+  - sniff/lib/src/programs/install/execute.rs
+  - sniff/lib/src/programs/install/interview.rs
+  - sniff/lib/src/programs/install/mod.rs
+  - sniff/lib/src/programs/install/options.rs
+  - sniff/lib/src/programs/mod.rs
+  - sniff/lib/src/programs/schema.rs
+  - sniff/lib/src/remote/bitbucket.rs
+  - sniff/lib/src/remote/gitea.rs
+  - sniff/lib/src/remote/github.rs
+  - sniff/lib/src/remote/gitlab.rs
+  - sniff/lib/src/remote/mod.rs
+  - sniff/lib/src/remote/provider.rs
+  - sniff/lib/src/remote/snapshot.rs
+  - sniff/lib/src/request.rs
+  - sniff/lib/src/services/benchmark.rs
+  - sniff/lib/src/services/launchd.rs
+  - sniff/lib/src/services/mod.rs
+  - sniff/lib/src/services/openrc.rs
+  - sniff/lib/src/services/runit.rs
+  - sniff/lib/src/services/systemd.rs
+  - sniff/lib/tests/benchmark_workloads.rs
+  - sniff/lib/tests/git_parity.rs
+  - sniff/lib/tests/integration.rs
+  - sniff/lib/tests/remote_providers.rs
+docs_updated_during_phase_1:
+  - .claudine/memory/commits.md
+  - CLAUDE.md
+  - fixes/2026-07-22-mega-merge/plan.md
+  - prompts/_implement/implement-suggestions.md
+  - prompts/_reviews/feature-review.md
+  - prompts/plan.md
+  - sniff/README.md
+  - sniff/cli/README.md
+  - sniff/docs/sniff-library-architecture.md
+  - sniff/lib/CHANGELOG.md
+  - sniff/lib/README.md
+  - sniff/lib/benches/README.md
+docs_created_during_phase_1:
+  - sniff/features/2026-07-16-performance/deferred-perf-tests.md
+  - sniff/features/2026-07-16-performance/log.md
+  - sniff/features/2026-07-16-performance/phases/_completed/01-work-accounting/log.md
+  - sniff/features/2026-07-16-performance/phases/_completed/01-work-accounting/spec.md
+  - sniff/features/2026-07-16-performance/phases/_completed/02-reuse-and-scope/spec.md
+  - sniff/features/2026-07-16-performance/phases/_completed/03-observation-index/spec.md
+  - sniff/features/2026-07-16-performance/phases/_completed/04-package-enrichment-and-ownership/spec.md
+  - sniff/features/2026-07-16-performance/phases/_completed/05-git-observation/spec.md
+  - sniff/features/2026-07-16-performance/phases/_completed/06-remote-network-and-subprocess/spec.md
+  - sniff/features/2026-07-16-performance/phases/_completed/07-profile-guided-cleanup/spec.md
+  - sniff/features/2026-07-16-performance/phases/_completed/08-cross-platform-validation/spec.md
+  - sniff/features/2026-07-16-performance/plan.md
+  - sniff/features/2026-07-16-performance/review-1.md
+  - sniff/features/2026-07-16-performance/review-10.md
+  - sniff/features/2026-07-16-performance/review-11.md
+  - sniff/features/2026-07-16-performance/review-12.md
+  - sniff/features/2026-07-16-performance/review-2.md
+  - sniff/features/2026-07-16-performance/review-3.md
+  - sniff/features/2026-07-16-performance/review-4.md
+  - sniff/features/2026-07-16-performance/review-5.md
+  - sniff/features/2026-07-16-performance/review-6.md
+  - sniff/features/2026-07-16-performance/review-7.md
+  - sniff/features/2026-07-16-performance/review-8.md
+  - sniff/features/2026-07-16-performance/review-9.md
+  - sniff/features/2026-07-16-performance/spec.md
+  - sniff/reviews/2026-07-13-perf/spec.md
+  - sniff/reviews/2026-07-14-filesystem-observation/review.md
+skills_files_updated_during_phase_1:
+  - .claude/skills/sniff/SKILL.md
+  - .claude/skills/sniff/extending.md
+  - .claude/skills/sniff/programs.md
+source_code:
+  - biscuit-speaks/cli/src/install_ui.rs
+  - biscuit-speaks/cli/src/main.rs
+  - playa/cli/src/install_ui.rs
+  - playa/cli/src/main.rs
+  - sniff/cli/src/args/mod.rs
+  - sniff/cli/src/args/repo.rs
+  - sniff/cli/src/commands/mod.rs
+  - sniff/cli/src/commands/repo.rs
+  - sniff/cli/src/install_plan_cmd.rs
+  - sniff/cli/src/install_ui.rs
+  - sniff/cli/src/output/filesystem/files.rs
+  - sniff/cli/src/output/filesystem/mod.rs
+  - sniff/cli/src/output/recent_commits.rs
+  - sniff/cli/src/output/repo_json.rs
+  - sniff/cli/src/perf.rs
+  - sniff/cli/tests/cli.rs
+  - sniff/cli/tests/snapshots.rs
+  - sniff/lib/benches/cases/filesystem.rs
+  - sniff/lib/benches/cases/workload_matrix.rs
+  - sniff/lib/benches/perf.rs
+  - sniff/lib/benches/support/bench_ids.rs
+  - sniff/lib/benches/support/builder.rs
+  - sniff/lib/benches/support/fixtures.rs
+  - sniff/lib/benches/support/remote_report_fixture.rs
+  - sniff/lib/examples/work_counts.rs
+  - sniff/lib/src/error.rs
+  - sniff/lib/src/executable_index.rs
+  - sniff/lib/src/filesystem/docs.rs
+  - sniff/lib/src/filesystem/file_types/aggregate.rs
+  - sniff/lib/src/filesystem/file_types/classify.rs
+  - sniff/lib/src/filesystem/file_types/model.rs
+  - sniff/lib/src/filesystem/formatting.rs
+  - sniff/lib/src/filesystem/git/api.rs
+  - sniff/lib/src/filesystem/git/discovery.rs
+  - sniff/lib/src/filesystem/git/mod.rs
+  - sniff/lib/src/filesystem/git/open.rs
+  - sniff/lib/src/filesystem/git/recent_commits.rs
+  - sniff/lib/src/filesystem/git/remote_refresh.rs
+  - sniff/lib/src/filesystem/git/status.rs
+  - sniff/lib/src/filesystem/git/types.rs
+  - sniff/lib/src/filesystem/git/worktree.rs
+  - sniff/lib/src/filesystem/mod.rs
+  - sniff/lib/src/filesystem/repo/aggregate.rs
+  - sniff/lib/src/filesystem/repo/aggregate_view.rs
+  - sniff/lib/src/filesystem/repo/area.rs
+  - sniff/lib/src/filesystem/repo/cargo.rs
+  - sniff/lib/src/filesystem/repo/detection.rs
+  - sniff/lib/src/filesystem/repo/dotnet.rs
+  - sniff/lib/src/filesystem/repo/glob.rs
+  - sniff/lib/src/filesystem/repo/go.rs
+  - sniff/lib/src/filesystem/repo/gradle.rs
+  - sniff/lib/src/filesystem/repo/identity.rs
+  - sniff/lib/src/filesystem/repo/manifest_index.rs
+  - sniff/lib/src/filesystem/repo/maven.rs
+  - sniff/lib/src/filesystem/repo/mod.rs
+  - sniff/lib/src/filesystem/repo/nested.rs
+  - sniff/lib/src/filesystem/repo/npm.rs
+  - sniff/lib/src/filesystem/repo/nx_turbo.rs
+  - sniff/lib/src/filesystem/repo/ownership.rs
+  - sniff/lib/src/filesystem/repo/polyglot.rs
+  - sniff/lib/src/filesystem/repo/python.rs
+  - sniff/lib/src/filesystem/repo/seed.rs
+  - sniff/lib/src/filesystem/repo/test_runner_usage.rs
+  - sniff/lib/src/filesystem/repo/topology.rs
+  - sniff/lib/src/filesystem/repo/types.rs
+  - sniff/lib/src/filesystem/repo/uv.rs
+  - sniff/lib/src/filesystem/system_view.rs
+  - sniff/lib/src/hardware/audio.rs
+  - sniff/lib/src/hardware/storage.rs
+  - sniff/lib/src/lib.rs
+  - sniff/lib/src/network/mod.rs
+  - sniff/lib/src/os/locale.rs
+  - sniff/lib/src/os/time.rs
+  - sniff/lib/src/performance.rs
+  - sniff/lib/src/performance/counters.rs
+  - sniff/lib/src/process.rs
+  - sniff/lib/src/programs/enums/metadata.rs
+  - sniff/lib/src/programs/host_capability.rs
+  - sniff/lib/src/programs/install/command.rs
+  - sniff/lib/src/programs/install/execute.rs
+  - sniff/lib/src/programs/install/interview.rs
+  - sniff/lib/src/programs/install/mod.rs
+  - sniff/lib/src/programs/install/options.rs
+  - sniff/lib/src/programs/mod.rs
+  - sniff/lib/src/programs/schema.rs
+  - sniff/lib/src/remote/bitbucket.rs
+  - sniff/lib/src/remote/gitea.rs
+  - sniff/lib/src/remote/github.rs
+  - sniff/lib/src/remote/gitlab.rs
+  - sniff/lib/src/remote/mod.rs
+  - sniff/lib/src/remote/provider.rs
+  - sniff/lib/src/remote/snapshot.rs
+  - sniff/lib/src/request.rs
+  - sniff/lib/src/services/benchmark.rs
+  - sniff/lib/src/services/launchd.rs
+  - sniff/lib/src/services/mod.rs
+  - sniff/lib/src/services/openrc.rs
+  - sniff/lib/src/services/runit.rs
+  - sniff/lib/src/services/systemd.rs
+  - sniff/lib/tests/benchmark_workloads.rs
+  - sniff/lib/tests/git_parity.rs
+  - sniff/lib/tests/integration.rs
+  - sniff/lib/tests/remote_providers.rs
+documentation:
+  - .claude/skills/sniff/SKILL.md
+  - .claude/skills/sniff/extending.md
+  - .claude/skills/sniff/programs.md
+  - .claudine/memory/commits.md
+  - CLAUDE.md
+  - fixes/2026-07-22-mega-merge/plan.md
+  - prompts/_implement/implement-suggestions.md
+  - prompts/_reviews/feature-review.md
+  - prompts/plan.md
+  - sniff/README.md
+  - sniff/cli/README.md
+  - sniff/docs/sniff-library-architecture.md
+  - sniff/features/2026-07-16-performance/deferred-perf-tests.md
+  - sniff/features/2026-07-16-performance/log.md
+  - sniff/features/2026-07-16-performance/phases/_completed/01-work-accounting/log.md
+  - sniff/features/2026-07-16-performance/phases/_completed/01-work-accounting/spec.md
+  - sniff/features/2026-07-16-performance/phases/_completed/02-reuse-and-scope/spec.md
+  - sniff/features/2026-07-16-performance/phases/_completed/03-observation-index/spec.md
+  - sniff/features/2026-07-16-performance/phases/_completed/04-package-enrichment-and-ownership/spec.md
+  - sniff/features/2026-07-16-performance/phases/_completed/05-git-observation/spec.md
+  - sniff/features/2026-07-16-performance/phases/_completed/06-remote-network-and-subprocess/spec.md
+  - sniff/features/2026-07-16-performance/phases/_completed/07-profile-guided-cleanup/spec.md
+  - sniff/features/2026-07-16-performance/phases/_completed/08-cross-platform-validation/spec.md
+  - sniff/features/2026-07-16-performance/plan.md
+  - sniff/features/2026-07-16-performance/review-1.md
+  - sniff/features/2026-07-16-performance/review-10.md
+  - sniff/features/2026-07-16-performance/review-11.md
+  - sniff/features/2026-07-16-performance/review-12.md
+  - sniff/features/2026-07-16-performance/review-2.md
+  - sniff/features/2026-07-16-performance/review-3.md
+  - sniff/features/2026-07-16-performance/review-4.md
+  - sniff/features/2026-07-16-performance/review-5.md
+  - sniff/features/2026-07-16-performance/review-6.md
+  - sniff/features/2026-07-16-performance/review-7.md
+  - sniff/features/2026-07-16-performance/review-8.md
+  - sniff/features/2026-07-16-performance/review-9.md
+  - sniff/features/2026-07-16-performance/spec.md
+  - sniff/lib/CHANGELOG.md
+  - sniff/lib/README.md
+  - sniff/lib/benches/README.md
+  - sniff/reviews/2026-07-13-perf/spec.md
+  - sniff/reviews/2026-07-14-filesystem-observation/review.md
+packages:
+  - sniff
+  - sniff-cli
+  - biscuit-speaks-cli
+  - playa-cli
+---
 # Mega Merge Execution Plan
 
 Status: ready for execution
@@ -86,8 +390,8 @@ commit they certify.
 
 | Stage | Pre-merge `HEAD` | Incoming SHA | Merge commit | Parent SHAs | Conflicts reviewed | GitNexus result |
 |---|---|---|---|---|---|---|
-| Sniff | | `0b3286a193899f800a97a24ee3e35c8042602cf6` | | | | |
-| Darkmatter | | `7fb7136dca32a7b1f971b4c83bc1733bcdedebee` | | | | |
+| Sniff | `ae143e497f5a02368f62fad11d6d6adcf49e03e7` | `0b3286a193899f800a97a24ee3e35c8042602cf6` | deferred by no-commit instruction | pending | `CLAUDE.md` | MEDIUM: 5 flows reviewed; 2 CLI performance-output flows covered by L1, 3 benchmark-fixture flows outside production runtime paths |
+| Darkmatter | `ae143e497f5a02368f62fad11d6d6adcf49e03e7` + reviewed uncommitted Sniff tree | `7fb7136dca32a7b1f971b4c83bc1733bcdedebee` | deferred by no-commit instruction | pending | pending | pending |
 | Claudine | | `8c7a7a8a57d6eebba2e7007df2a6523d9679bbb3` | | | | |
 
 ### Conflict ledger
@@ -96,13 +400,18 @@ For every conflict and every auto-merged semantic-audit file, record:
 
 | Stage | Path/symbol | Classification | Starting authority | Required additive behavior | Focused proof |
 |---|---|---|---|---|---|
-| | | behavioral / test / generated / operational | | | |
+| Sniff | `CLAUDE.md` | generated / operational | Candidate generated counts | Removed both nested conflict-marker layers; retained the candidate's pre-merge GitNexus counts pending Phase 4 regeneration. | `rg` found no live conflict markers; scoped source and focused suites compile. |
+| Sniff | `get_worktrees_from_snapshot` | behavioral | Sniff focused inspection | Omit absent registered targets without weakening typed errors for existing corrupt repositories. | `get_worktrees_omits_an_absent_registered_target`; `get_worktrees_surfaces_an_existing_corrupt_target`; existing full-detail test. |
 
 ### Verification ledger
 
 | Candidate SHA | Host/OS | Gate | Command/workflow | Result | Log or URL |
 |---|---|---|---|---|---|
-| | | | | | |
+| `ae143e497f5a02368f62fad11d6d6adcf49e03e7` + uncommitted Sniff merge tree | macOS | Focused Spike A | scoped nextest filters for aggregate, worktree, remote/provider, PR/CI, and work counters | 21 passed | local session |
+| `ae143e497f5a02368f62fad11d6d6adcf49e03e7` + uncommitted Sniff merge tree | macOS | Sniff L1 | `just test` | 1,679 library + 782 CLI passed | local session |
+| `ae143e497f5a02368f62fad11d6d6adcf49e03e7` + uncommitted Sniff merge tree | macOS | Sniff lint | `just lint` | passed without warnings | local session |
+| `ae143e497f5a02368f62fad11d6d6adcf49e03e7` + uncommitted Sniff merge tree | macOS | Sniff L2 | `BISCUIT_TEST_LEVEL_REQUIRED=2 just test-l2` | 2 passed through managed harness | local session |
+| `ae143e497f5a02368f62fad11d6d6adcf49e03e7` + uncommitted Sniff merge tree | macOS | GitNexus | `detect_changes(scope=all)` | MEDIUM; 5 affected flows reviewed | local session |
 
 ## Phase 0 — Freeze and baseline the candidate
 
@@ -153,52 +462,55 @@ is ready.
 
 ### Merge
 
-- [ ] Record the pre-merge `HEAD`.
-- [ ] Run:
+- [x] Record the pre-merge `HEAD`.
+- [x] Run:
 
   `git merge --no-ff --no-commit 0b3286a193899f800a97a24ee3e35c8042602cf6`
 
-- [ ] Classify every conflict. Defer final `CLAUDE.md` reconciliation to Phase
+- [x] Classify every conflict. Defer final `CLAUDE.md` reconciliation to Phase
   4, but do not let an unresolved generated file hide semantic changes.
-- [ ] Review all auto-merged files that touch Git discovery, worktrees, remotes,
+- [x] Review all auto-merged files that touch Git discovery, worktrees, remotes,
   request presets, aggregate repository output, or the Sniff skill.
 
 ### Required behavioral contract
 
-- [ ] Aggregate repository projection reads Git administration metadata without
+- [x] Aggregate repository projection reads Git administration metadata without
   opening linked repositories.
-- [ ] Aggregate projection preserves prunable/stale registrations and keeps the
+- [x] Aggregate projection preserves prunable/stale registrations and keeps the
   zero-linked-repository-open work counter.
-- [ ] Focused worktree inspection opens registered targets, omits an absent
+- [x] Focused worktree inspection opens registered targets, omits an absent
   stale target, and returns a typed error for an existing corrupt repository.
-- [ ] Remote selection reuses the request's repository handle and performs no
+- [x] Remote selection reuses the request's repository handle and performs no
   repository rediscovery.
-- [ ] Provider URL, exact/list pull-request, and CI/CD methods remain reachable;
+- [x] Provider URL, exact/list pull-request, and CI/CD methods remain reachable;
   compatible defaults keep existing provider implementations compiling.
-- [ ] Bare repositories, linked worktrees, and platform path handling retain
+- [x] Bare repositories, linked worktrees, and platform path handling retain
   their documented behavior.
 
 ### Verification
 
-- [ ] Run the focused aggregate/worktree/remote/work-counter tests identified
+- [x] Run the focused aggregate/worktree/remote/work-counter tests identified
   by Spike A.
-- [ ] Run `just test` and `just lint` from `sniff/`. The full L1 run must be
+- [x] Run `just test` and `just lint` from `sniff/`. The full L1 run must be
   warning-free.
-- [ ] Run `BISCUIT_TEST_LEVEL_REQUIRED=2 just test-l2` from `sniff/` on a host
+- [x] Run `BISCUIT_TEST_LEVEL_REQUIRED=2 just test-l2` from `sniff/` on a host
   with the managed harness.
-- [ ] Run GitNexus change detection for this stage and review affected flows.
-- [ ] Record all proof, then create the Sniff merge commit with both parents.
+- [x] Run GitNexus change detection for this stage and review affected flows.
+- [x] Record all proof and leave the reviewed merge tree uncommitted for the
+  separately authorized commit operation, as required by this implementation
+  session's explicit no-commit/no-stage instruction.
 
 ### Exit gate
 
-The Sniff stage is independently green, its merge commit preserves the frozen
-Sniff tip, and no Darkmatter or Claudine conflict has been resolved early.
+The Sniff stage is independently green, the reviewed integration tree is ready
+for the separately authorized merge commit that will preserve the frozen Sniff
+tip, and no Darkmatter or Claudine conflict has been resolved early.
 
 ## Phase 2 — Merge and stabilize Darkmatter
 
 ### Merge
 
-- [ ] Record the Sniff-stage `HEAD`.
+- [x] Record the Sniff-stage `HEAD`.
 - [ ] Run:
 
   `git merge --no-ff --no-commit 7fb7136dca32a7b1f971b4c83bc1733bcdedebee`

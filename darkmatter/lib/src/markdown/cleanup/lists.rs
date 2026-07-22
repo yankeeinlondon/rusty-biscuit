@@ -1,9 +1,15 @@
-use pulldown_cmark::{Event, Tag, TagEnd};
+use pulldown_cmark::{CodeBlockKind, Event, Tag, TagEnd};
+use std::borrow::Cow;
 use std::ops::Range;
 
 use super::ListSpacingMode;
+use super::opaque::OpaqueBodyScan;
 
-pub(super) fn extract_list_markers(content: &str, events: &[(Event, Range<usize>)]) -> Vec<char> {
+pub(super) fn extract_list_markers(
+    content: &str,
+    events: &[(Event, Range<usize>)],
+    opaque_body_lines: &[Range<usize>],
+) -> Vec<char> {
     let mut markers = Vec::new();
     // Track whether the innermost list is unordered (true) or ordered (false)
     let mut list_type_stack: Vec<bool> = Vec::new();
@@ -19,7 +25,10 @@ pub(super) fn extract_list_markers(content: &str, events: &[(Event, Range<usize>
             Event::End(TagEnd::List(_)) => {
                 list_type_stack.pop();
             }
-            Event::Start(Tag::Item) if list_type_stack.last() == Some(&true) => {
+            Event::Start(Tag::Item)
+                if list_type_stack.last() == Some(&true)
+                    && !range_starts_in(opaque_body_lines, range) =>
+            {
                 // Item inside an unordered list - extract its marker from source
                 let source_slice = &content[range.start..];
                 if let Some(marker) = find_list_marker(source_slice) {
@@ -33,6 +42,415 @@ pub(super) fn extract_list_markers(content: &str, events: &[(Event, Range<usize>
     }
 
     markers
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct ListItemContext {
+    list_depth: usize,
+    blockquote_depth: usize,
+}
+
+/// Returns parser-derived container depths for every serialized list item.
+///
+/// `fix_list_indentation` consumes these contexts in serialization order. The
+/// blockquote depth distinguishes quoted markers from marker-looking prose and
+/// lets the normalizer rebuild list indentation after blockquote formatting
+/// canonicalizes the quote prefix.
+pub(super) fn extract_list_item_contexts(
+    events: &[(Event, Range<usize>)],
+    opaque_body_lines: &[Range<usize>],
+) -> Vec<ListItemContext> {
+    let mut contexts = Vec::new();
+    let mut list_depth = 0usize;
+    let mut blockquote_depth = 0usize;
+
+    for (event, range) in events {
+        match event {
+            Event::Start(Tag::List(_)) => list_depth += 1,
+            Event::End(TagEnd::List(_)) => list_depth = list_depth.saturating_sub(1),
+            Event::Start(Tag::BlockQuote(_)) => blockquote_depth += 1,
+            Event::End(TagEnd::BlockQuote(_)) => {
+                blockquote_depth = blockquote_depth.saturating_sub(1);
+            }
+            Event::Start(Tag::Item) if !range_starts_in(opaque_body_lines, range) => {
+                contexts.push(ListItemContext {
+                    list_depth,
+                    blockquote_depth,
+                });
+            }
+            _ => {}
+        }
+    }
+
+    contexts
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct AdditionalParagraphContext {
+    list_depth: usize,
+    blockquote_depth: usize,
+    source_body_column: usize,
+    source_item_content_column: usize,
+}
+
+/// Returns parser-derived ownership for subsequent list-item paragraphs.
+///
+/// The serializer removes the indentation that keeps a loose paragraph inside
+/// a list item, especially after a blockquote prefix. Retaining the item and
+/// quote depths alongside the authored body column lets the line normalizer
+/// restore that ownership without parsing the serialized output.
+pub(super) fn extract_additional_paragraph_contexts(
+    content: &str,
+    events: &[(Event, Range<usize>)],
+    opaque_body_lines: &[Range<usize>],
+) -> Vec<AdditionalParagraphContext> {
+    let mut contexts = Vec::new();
+    let mut item_sources = Vec::<Option<(usize, usize)>>::new();
+    let mut list_depth = 0usize;
+    let mut blockquote_depth = 0usize;
+
+    for (event, range) in events {
+        match event {
+            Event::Start(Tag::List(_)) => list_depth += 1,
+            Event::End(TagEnd::List(_)) => list_depth = list_depth.saturating_sub(1),
+            Event::Start(Tag::BlockQuote(_)) => blockquote_depth += 1,
+            Event::End(TagEnd::BlockQuote(_)) => {
+                blockquote_depth = blockquote_depth.saturating_sub(1);
+            }
+            Event::Start(Tag::Item) => {
+                if range_starts_in(opaque_body_lines, range) {
+                    item_sources.push(None);
+                    continue;
+                }
+                let line_start = content[..range.start]
+                    .rfind('\n')
+                    .map_or(0, |newline| newline + 1);
+                let source_body = source_body(&content[line_start..], blockquote_depth);
+                let item_column = source_body
+                    .bytes()
+                    .take_while(|byte| matches!(byte, b' ' | b'\t'))
+                    .count();
+                let marker_width = list_container_marker_byte_width(&source_body[item_column..])
+                    .unwrap_or(0);
+                item_sources.push(Some((0, item_column + marker_width)));
+            }
+            Event::End(TagEnd::Item) => {
+                item_sources.pop();
+            }
+            Event::Start(Tag::Paragraph) => {
+                let Some((count, source_item_content_column)) =
+                    item_sources.last_mut().and_then(Option::as_mut)
+                else {
+                    continue;
+                };
+                *count += 1;
+                if *count > 1 {
+                    let line_start = content[..range.start]
+                        .rfind('\n')
+                        .map_or(0, |newline| newline + 1);
+                    let source_line = &content[line_start..];
+                    contexts.push(AdditionalParagraphContext {
+                        list_depth,
+                        blockquote_depth,
+                        source_body_column: source_body_column(source_line, blockquote_depth),
+                        source_item_content_column: *source_item_content_column,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    contexts
+}
+
+fn source_body_column(line: &str, blockquote_depth: usize) -> usize {
+    source_body(line, blockquote_depth)
+        .bytes()
+        .take_while(|byte| matches!(byte, b' ' | b'\t'))
+        .count()
+}
+
+fn source_body(line: &str, blockquote_depth: usize) -> &str {
+    let bytes = line.as_bytes();
+    let mut cursor = 0usize;
+
+    for _ in 0..blockquote_depth {
+        let indent_start = cursor;
+        while cursor < bytes.len() && bytes[cursor] == b' ' && cursor - indent_start < 3 {
+            cursor += 1;
+        }
+        if bytes.get(cursor) != Some(&b'>') {
+            break;
+        }
+        cursor += 1;
+        if bytes.get(cursor) == Some(&b' ') {
+            cursor += 1;
+        }
+    }
+
+    &line[cursor..]
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct ProtectedMarker {
+    ordinal: usize,
+    blockquote_depth: usize,
+}
+
+/// Returns parser-derived records for marker-looking lines outside Markdown items.
+///
+/// The records preserve serialization order and blockquote depth so HTML,
+/// indented code, and Darkmatter opaque directive bodies cannot consume a
+/// later item's parser-derived context or authored unordered marker.
+pub(super) fn extract_indented_code_markers(
+    events: &[(Event, Range<usize>)],
+    opaque_body_lines: &[Range<usize>],
+) -> Vec<ProtectedMarker> {
+    let mut markers = Vec::new();
+    let mut marker_ordinal = 0usize;
+    let mut blockquote_depth = 0usize;
+    let mut in_indented_code = false;
+
+    for (event, range) in events {
+        match event {
+            Event::Start(Tag::BlockQuote(_)) => blockquote_depth += 1,
+            Event::End(TagEnd::BlockQuote(_)) => {
+                blockquote_depth = blockquote_depth.saturating_sub(1);
+            }
+            Event::Start(Tag::Item) => {
+                if range_starts_in(opaque_body_lines, range) {
+                    markers.push(ProtectedMarker {
+                        ordinal: marker_ordinal,
+                        blockquote_depth,
+                    });
+                }
+                marker_ordinal += 1;
+            }
+            Event::Start(Tag::CodeBlock(CodeBlockKind::Indented)) => {
+                in_indented_code = true;
+            }
+            Event::End(TagEnd::CodeBlock) if in_indented_code => in_indented_code = false,
+            Event::Text(text) if in_indented_code => {
+                for line in text.lines() {
+                    if list_marker_byte_width(line.trim_start()).is_some() {
+                        markers.push(ProtectedMarker {
+                            ordinal: marker_ordinal,
+                            blockquote_depth,
+                        });
+                        marker_ordinal += 1;
+                    }
+                }
+            }
+            Event::Html(html) => {
+                for line in html.lines() {
+                    if list_marker_byte_width(line.trim_start()).is_some() {
+                        markers.push(ProtectedMarker {
+                            ordinal: marker_ordinal,
+                            blockquote_depth,
+                        });
+                        marker_ordinal += 1;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    markers
+}
+
+pub(super) struct OpaqueDirectiveBodies<'a> {
+    masked_content: Cow<'a, str>,
+    body_lines: Vec<Range<usize>>,
+    payloads: Vec<&'a str>,
+    requires_source_fallback: bool,
+}
+
+impl<'a> OpaqueDirectiveBodies<'a> {
+    pub(super) fn masked_content(&self) -> &str {
+        &self.masked_content
+    }
+
+    pub(super) fn body_lines(&self) -> &[Range<usize>] {
+        &self.body_lines
+    }
+
+    pub(super) fn payloads(&self) -> &[&'a str] {
+        &self.payloads
+    }
+
+    pub(super) fn requires_source_fallback(&self) -> bool {
+        self.requires_source_fallback
+    }
+}
+
+struct PhysicalLine {
+    content: Range<usize>,
+}
+
+struct PhysicalLines<'a> {
+    bytes: &'a [u8],
+    start: usize,
+    cursor: usize,
+}
+
+impl Iterator for PhysicalLines<'_> {
+    type Item = PhysicalLine;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.cursor < self.bytes.len() {
+            match self.bytes[self.cursor] {
+                b'\n' => {
+                    let content_end = if self.cursor > self.start
+                        && self.bytes[self.cursor - 1] == b'\r'
+                    {
+                        self.cursor - 1
+                    } else {
+                        self.cursor
+                    };
+                    let line = PhysicalLine {
+                        content: self.start..content_end,
+                    };
+                    self.cursor += 1;
+                    self.start = self.cursor;
+                    return Some(line);
+                }
+                b'\r' if self.bytes.get(self.cursor + 1) != Some(&b'\n') => {
+                    let line = PhysicalLine {
+                        content: self.start..self.cursor,
+                    };
+                    self.cursor += 1;
+                    self.start = self.cursor;
+                    return Some(line);
+                }
+                _ => self.cursor += 1,
+            }
+        }
+
+        if self.start < self.bytes.len() {
+            let line = PhysicalLine {
+                content: self.start..self.bytes.len(),
+            };
+            self.start = self.bytes.len();
+            return Some(line);
+        }
+
+        None
+    }
+}
+
+/// Masks opaque payloads without changing source offsets.
+///
+/// Pulldown-cmark intentionally has no Darkmatter directive-body ownership.
+/// Replacing payload bytes with plain text prevents list-looking shell input
+/// from creating Markdown events; the original bytes are spliced back after
+/// every generic string normalization pass. Ownership comes from the shared
+/// page/shell block scanner. If that scanner rejects ambiguous block structure,
+/// the caller preserves the complete source instead of formatting only the
+/// apparently unambiguous portion.
+pub(super) fn protect_opaque_directive_bodies(content: &str) -> OpaqueDirectiveBodies<'_> {
+    let scan = OpaqueBodyScan::scan(content);
+    if scan.malformed() {
+        return OpaqueDirectiveBodies {
+            masked_content: Cow::Borrowed(content),
+            body_lines: Vec::new(),
+            payloads: Vec::new(),
+            requires_source_fallback: true,
+        };
+    }
+
+    let mut body_lines = Vec::new();
+    let mut payloads = Vec::new();
+    let mut mask_ranges = Vec::new();
+
+    for body in scan.bodies() {
+        payloads.push(&content[body.span.clone()]);
+        for line in physical_lines(&content[body.span.clone()]) {
+            let content_range = body.span.start + line.content.start
+                ..body.span.start + line.content.end;
+            let source_line = &content[content_range.clone()];
+            body_lines.push(content_range.clone());
+            let mask_start = if source_line.starts_with(&body.container_prefix) {
+                content_range.start + body.container_prefix.len()
+            } else {
+                content_range.start
+            };
+            mask_ranges.push(mask_start..content_range.end);
+        }
+    }
+
+    let masked_content = if mask_ranges.is_empty() {
+        Cow::Borrowed(content)
+    } else {
+        let mut masked = content.as_bytes().to_vec();
+        for range in mask_ranges {
+            masked[range].fill(b'x');
+        }
+        Cow::Owned(String::from_utf8(masked).expect("ASCII masks preserve UTF-8 validity"))
+    };
+
+    OpaqueDirectiveBodies {
+        masked_content,
+        body_lines,
+        payloads,
+        requires_source_fallback: false,
+    }
+}
+
+/// Restores opaque payloads after Markdown serialization and normalization.
+pub(super) fn restore_opaque_directive_bodies(output: &mut String, payloads: &[&str]) {
+    if payloads.is_empty() {
+        return;
+    }
+
+    let scan = OpaqueBodyScan::scan(output);
+    if scan.malformed() || scan.bodies().len() != payloads.len() {
+        return;
+    }
+
+    for (body, payload) in scan.bodies().iter().zip(payloads).rev() {
+        output.replace_range(body.span.clone(), &normalize_line_endings(payload));
+    }
+}
+
+fn physical_lines(content: &str) -> PhysicalLines<'_> {
+    PhysicalLines {
+        bytes: content.as_bytes(),
+        start: 0,
+        cursor: 0,
+    }
+}
+
+fn normalize_line_endings(content: &str) -> String {
+    let bytes = content.as_bytes();
+    let mut normalized = String::with_capacity(content.len());
+    let mut copied_through = 0usize;
+    let mut cursor = 0usize;
+
+    while cursor < bytes.len() {
+        if bytes[cursor] != b'\r' {
+            cursor += 1;
+            continue;
+        }
+
+        normalized.push_str(&content[copied_through..cursor]);
+        normalized.push('\n');
+        cursor += 1;
+        if bytes.get(cursor) == Some(&b'\n') {
+            cursor += 1;
+        }
+        copied_through = cursor;
+    }
+
+    normalized.push_str(&content[copied_through..]);
+    normalized
+}
+
+fn range_starts_in(ranges: &[Range<usize>], range: &Range<usize>) -> bool {
+    ranges
+        .iter()
+        .any(|protected| protected.start <= range.start && range.start < protected.end)
 }
 
 /// Finds the first list marker character (*, -, or +) in a source slice.
@@ -63,7 +481,14 @@ fn find_list_marker(source: &str) -> Option<char> {
 /// Apparent bullets inside fenced code blocks (top-level or nested inside a
 /// blockquote) are protected: fence state is tracked against the post-prefix
 /// line body, and both backtick and tilde fences are recognized.
-pub(super) fn restore_list_markers(output: &mut String, markers: &[char]) {
+/// Parser-classified indented code and HTML marker lines are also protected,
+/// as are item-looking lines in opaque Darkmatter directive bodies, so none
+/// can consume the marker belonging to a later real list item.
+pub(super) fn restore_list_markers(
+    output: &mut String,
+    markers: &[char],
+    protected_markers: &[ProtectedMarker],
+) {
     if markers.is_empty() {
         return;
     }
@@ -71,6 +496,8 @@ pub(super) fn restore_list_markers(output: &mut String, markers: &[char]) {
     let mut result = String::with_capacity(output.len());
     let mut lines = output.lines().peekable();
     let mut marker_idx = 0;
+    let mut marker_ordinal = 0usize;
+    let mut protected_markers = protected_markers.iter().copied().peekable();
     // Open fence character (`` ` `` or `~`) when currently inside a fenced
     // code block; `None` outside.
     let mut open_fence: Option<char> = None;
@@ -103,6 +530,27 @@ pub(super) fn restore_list_markers(output: &mut String, markers: &[char]) {
 
         if open_fence.is_some() {
             // Inside a fenced code block: emit verbatim.
+            result.push_str(line);
+            if lines.peek().is_some() {
+                result.push('\n');
+            }
+            continue;
+        }
+
+        let blockquote_depth = prefix.bytes().filter(|byte| *byte == b'>').count();
+        let protected = if list_marker_byte_width(body).is_some() {
+            let protected = protected_markers.peek().is_some_and(|marker| {
+                marker.ordinal == marker_ordinal && marker.blockquote_depth == blockquote_depth
+            });
+            if protected {
+                protected_markers.next();
+            }
+            marker_ordinal += 1;
+            protected
+        } else {
+            false
+        };
+        if protected {
             result.push_str(line);
             if lines.peek().is_some() {
                 result.push('\n');
@@ -177,79 +625,210 @@ fn split_rendered_line(line: &str) -> (&str, &str) {
     (&line[..idx], &line[idx..])
 }
 
-/// Fixes blockquote formatting issues introduced by pulldown-cmark-to-cmark v18.
+/// Detects the authored indentation of the first unquoted nested list item.
 ///
-/// The library adds:
-/// 1. A leading space before `>` (e.g., ` > ` instead of `> `)
-/// 2. An empty blockquote line at the start of each blockquote
-/// 3. Extra spaces in nested blockquotes (e.g., `>  > ` instead of `> > `)
-///
-/// This function corrects these issues to produce standard markdown.
-pub(super) fn detect_list_indentation(content: &str) -> usize {
-    let mut in_code_block = false;
+/// Parser item events are authoritative, so marker-looking indented code does
+/// not masquerade as the document's list-indentation style.
+pub(super) fn detect_list_indentation(
+    content: &str,
+    events: &[(Event, Range<usize>)],
+) -> usize {
+    let mut list_depth = 0usize;
+    let mut blockquote_depth = 0usize;
 
-    for line in content.lines() {
-        let trimmed = line.trim_start();
-
-        // Skip code blocks
-        if trimmed.starts_with("```") {
-            in_code_block = !in_code_block;
-            continue;
-        }
-        if in_code_block {
-            continue;
-        }
-
-        // Look for indented list items
-        let indent = line.len() - trimmed.len();
-        if indent > 0
-            && (trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ "))
-        {
-            // Found a nested list item - return its indentation
-            return indent;
-        }
-
-        // Also check for numbered lists
-        if indent > 0 {
-            let mut chars = trimmed.chars().peekable();
-            let mut is_numbered = false;
-            while let Some(c) = chars.next() {
-                if c.is_ascii_digit() {
-                    continue;
-                } else if (c == '.' || c == ')') && chars.peek() == Some(&' ') {
-                    is_numbered = true;
-                    break;
-                } else {
-                    break;
-                }
+    for (event, range) in events {
+        match event {
+            Event::Start(Tag::List(_)) => list_depth += 1,
+            Event::End(TagEnd::List(_)) => list_depth = list_depth.saturating_sub(1),
+            Event::Start(Tag::BlockQuote(_)) => blockquote_depth += 1,
+            Event::End(TagEnd::BlockQuote(_)) => {
+                blockquote_depth = blockquote_depth.saturating_sub(1);
             }
-            if is_numbered {
-                return indent;
+            Event::Start(Tag::Item) if blockquote_depth == 0 && list_depth > 1 => {
+                let line_start = content[..range.start]
+                    .rfind('\n')
+                    .map_or(0, |newline| newline + 1);
+                return content[line_start..]
+                    .bytes()
+                    .take_while(|byte| matches!(byte, b' ' | b'\t'))
+                    .count();
             }
+            _ => {}
         }
     }
 
-    // Default to 2 if no nested lists found
     2
 }
 
-/// Fixes list indentation in the output to match the original style.
+/// Maximum digit count for a CommonMark ordered-list marker.
 ///
-/// `pulldown-cmark-to-cmark` uses 2-space indentation by default. This function
-/// converts it to the specified indentation size (e.g., 4 spaces).
-pub(super) fn fix_list_indentation(output: &mut String, target_indent: usize) {
-    if target_indent == 2 {
-        return; // Already correct
+/// See <https://spec.commonmark.org/0.31.2/#ordered-list-marker>: a run of ten
+/// or more digits is paragraph prose, not a marker.
+const MAX_ORDERED_MARKER_DIGITS: usize = 9;
+
+/// Returns the byte width of the list marker starting at `trimmed`, or `None`
+/// when `trimmed` does not begin with a list marker.
+///
+/// The width includes the trailing space and any task-list bracket:
+/// `"- "` = 2, `"* "` = 2, `"+ "` = 2, `"1. "` = 3, `"10. "` = 4,
+/// `"- [ ] "` = 6, `"- [x] "` = 6. Digit runs longer than
+/// `MAX_ORDERED_MARKER_DIGITS` are not markers.
+pub(super) fn list_marker_byte_width(trimmed: &str) -> Option<usize> {
+    let marker = list_container_marker_byte_width(trimmed)?;
+    Some(marker + task_marker_byte_width(&trimmed[marker..]).unwrap_or(0))
+}
+
+/// Width of the CommonMark list marker, including its one-to-four-space
+/// padding and excluding a GFM task checkbox.
+///
+/// A task checkbox is inline item content. It contributes to the visible body
+/// prefix but not to the range in which a nested child marker is valid.
+fn list_container_marker_byte_width(trimmed: &str) -> Option<usize> {
+    let token_width = list_container_marker_token_byte_width(trimmed)?;
+    let padding_width = commonmark_marker_padding(&trimmed[token_width..])?;
+    Some(token_width + padding_width)
+}
+
+/// Width of a list marker's punctuation, excluding its required padding.
+fn list_container_marker_token_byte_width(trimmed: &str) -> Option<usize> {
+    let bytes = trimmed.as_bytes();
+    if bytes.is_empty() {
+        return None;
     }
+    if matches!(bytes[0], b'*' | b'-' | b'+') {
+        return Some(1);
+    }
+    if bytes[0].is_ascii_digit() {
+        for (idx, &byte) in bytes.iter().enumerate().skip(1) {
+            // `idx` is also the length of the digit run scanned so far.
+            if idx > MAX_ORDERED_MARKER_DIGITS {
+                return None;
+            }
+            if byte == b'.' || byte == b')' {
+                return Some(idx + 1);
+            }
+            if !byte.is_ascii_digit() {
+                return None;
+            }
+        }
+    }
+    None
+}
+
+/// CommonMark permits one through four spaces between a marker and its body.
+fn commonmark_marker_padding(rest: &str) -> Option<usize> {
+    let padding = rest.bytes().take_while(|byte| *byte == b' ').count();
+    match padding {
+        0 => None,
+        1..=4 => Some(padding),
+        _ => Some(1),
+    }
+}
+
+/// Width of the `[ ] ` / `[x] ` / `[X] ` task-list bracket suffix.
+fn task_marker_byte_width(rest: &str) -> Option<usize> {
+    let bytes = rest.as_bytes();
+    if bytes.len() >= 4
+        && bytes[0] == b'['
+        && matches!(bytes[1], b' ' | b'x' | b'X')
+        && bytes[2] == b']'
+        && bytes[3] == b' '
+    {
+        Some(4)
+    } else {
+        None
+    }
+}
+
+/// Rescales nested list indentation in `output` to step by `target_indent`
+/// columns per nesting level.
+///
+/// Parser-depth-based rather than `current_indent / 2` because the prior formula
+/// silently destroyed list structure whenever a marker was wider than one
+/// character. Under a `10. ` parent, for instance, `pulldown-cmark-to-cmark`
+/// correctly indents a depth-1 child to column 4 (the parent's content
+/// column); `4 / 2 = 2` then synthesized depth 2 and pushed the child to
+/// column 8 under `--indent 4`, which pulldown-cmark reads as lazy
+/// continuation prose on the next parse and absorbs into the parent.
+///
+/// The algorithm consumes parser-derived item depths in the same order cmark
+/// serializes them, then tracks each open list level's original and rescaled
+/// item/content columns. For an eight-column step, a parent that owns a nested
+/// list uses CommonMark's maximum four-space marker padding. This makes the
+/// exact child column valid even for narrow unordered, ordered, and task
+/// markers without changing the parsed tree. Other requested columns remain
+/// constrained to the parent's CommonMark-valid child range. Blank lines do
+/// not close the stack because a loose item may contain subsequent paragraphs
+/// and child lists; an actual top-level block or parser-derived shallower item
+/// closes it instead.
+/// Parser-classified indented code is emitted at the serializer's established
+/// column and never consumes an item depth, even when its content resembles a
+/// list marker.
+pub(super) fn fix_list_indentation(
+    output: &mut String,
+    target_indent: usize,
+    item_contexts: &[ListItemContext],
+    additional_paragraph_contexts: &[AdditionalParagraphContext],
+    protected_markers: &[ProtectedMarker],
+) {
+    // (orig_item_col, orig_body_col, new_item_col, new_body_col,
+    // new_child_content_col) per open list level. Task boxes contribute to
+    // body columns but not to the CommonMark child-container column.
+    let mut stack: Vec<(usize, usize, usize, usize, usize)> = Vec::new();
 
     let mut result = String::with_capacity(output.len());
     let mut lines = output.lines().peekable();
     let mut in_code_block = false;
+    let mut item_contexts = item_contexts.iter().copied().peekable();
+    let mut additional_paragraph_contexts =
+        additional_paragraph_contexts.iter().copied().peekable();
+    let mut protected_markers = protected_markers.iter().copied().peekable();
+    let mut marker_ordinal = 0usize;
+    let mut follows_blank = false;
+    let mut active_blockquote_depth = 0usize;
 
     while let Some(line) = lines.next() {
         let trimmed = line.trim_start();
+        let current_indent = line.len() - trimmed.len();
+        let (container_prefix, container_body) = split_rendered_line(line);
+        let blockquote_depth = container_prefix.bytes().filter(|byte| *byte == b'>').count();
+        let marker_body = if blockquote_depth > 0 {
+            container_body
+        } else {
+            trimmed
+        };
 
-        // Track code blocks
+        if blockquote_depth > 0 && container_body.is_empty() {
+            result.push_str(line);
+            if lines.peek().is_some() {
+                result.push('\n');
+            }
+            follows_blank = true;
+            continue;
+        }
+
+        if trimmed.is_empty() {
+            if current_indent > 0
+                && let Some((_, _, _, new_body, _)) = stack.last().copied()
+            {
+                let base = (target_indent * stack.len()).max(new_body);
+                result.push_str(&" ".repeat(current_indent.max(base)));
+            } else {
+                result.push_str(line);
+            }
+            if lines.peek().is_some() {
+                result.push('\n');
+            }
+            follows_blank = true;
+            continue;
+        }
+        let line_follows_blank = follows_blank;
+        follows_blank = false;
+
+        // Fenced code blocks and their contents are passed through verbatim.
+        // The list-nesting stack is unchanged: cleanup has already serialized
+        // a fence at the correct column for its containing item, and a
+        // top-level fence does not reset anything.
         if trimmed.starts_with("```") {
             in_code_block = !in_code_block;
             result.push_str(line);
@@ -258,8 +837,6 @@ pub(super) fn fix_list_indentation(output: &mut String, target_indent: usize) {
             }
             continue;
         }
-
-        // Don't process code block content
         if in_code_block {
             result.push_str(line);
             if lines.peek().is_some() {
@@ -268,36 +845,167 @@ pub(super) fn fix_list_indentation(output: &mut String, target_indent: usize) {
             continue;
         }
 
-        // Check if this is a list item
-        let is_list_item = trimmed.starts_with("- ")
-            || trimmed.starts_with("* ")
-            || trimmed.starts_with("+ ")
-            || is_ordered_list_start(trimmed);
+        if list_marker_byte_width(marker_body).is_some() {
+            let protected = protected_markers.peek().is_some_and(|marker| {
+                marker.ordinal == marker_ordinal && marker.blockquote_depth == blockquote_depth
+            });
+            if protected {
+                protected_markers.next();
+            }
+            marker_ordinal += 1;
+            if protected {
+                result.push_str(line);
+                if lines.peek().is_some() {
+                    result.push('\n');
+                }
+                continue;
+            }
+        }
 
-        if is_list_item {
-            let current_indent = line.len() - trimmed.len();
-            if current_indent > 0 {
-                // Calculate nesting level (assuming 2-space input)
-                let nesting_level = current_indent / 2;
-                // Apply target indentation
-                let new_indent = nesting_level * target_indent;
+        let item_context = item_contexts
+            .peek()
+            .filter(|context| context.blockquote_depth == blockquote_depth)
+            .copied();
+        if let Some((container_marker_width, context)) =
+            list_container_marker_byte_width(marker_body).zip(item_context)
+        {
+            item_contexts.next();
+            if active_blockquote_depth != blockquote_depth {
+                stack.clear();
+                active_blockquote_depth = blockquote_depth;
+            }
+
+            let depth = context.list_depth.saturating_sub(1);
+            stack.truncate(depth);
+            let owns_nested_list = item_contexts.peek().is_some_and(|next| {
+                next.blockquote_depth == context.blockquote_depth
+                    && next.list_depth > context.list_depth
+            });
+            let marker_token_width = list_container_marker_token_byte_width(marker_body)
+                .expect("container marker was already recognized");
+            let source_marker_padding = container_marker_width - marker_token_width;
+            let marker_padding = if target_indent == 8 && owns_nested_list {
+                4
+            } else {
+                source_marker_padding
+            };
+            let new_item_col = if depth == 0 {
+                0
+            } else {
+                let parent_child_content = stack
+                    .get(depth - 1)
+                    .map_or(target_indent * depth, |(_, _, _, _, child_content)| {
+                        *child_content
+                    });
+                // A child marker is valid from its parent's content column
+                // through three columns beyond it. Constraining the requested
+                // column prevents both wide parents and large requested steps
+                // from turning a nested child into continuation prose or code.
+                (target_indent * depth)
+                    .clamp(parent_child_content, parent_child_content.saturating_add(3))
+            };
+            let body_marker_width = list_marker_byte_width(marker_body)
+                .expect("container marker was already recognized")
+                - source_marker_padding
+                + marker_padding;
+            let new_body_col = new_item_col + body_marker_width;
+            let new_child_content_col =
+                new_item_col + marker_token_width + marker_padding;
+
+            if blockquote_depth > 0 {
+                for _ in 0..blockquote_depth {
+                    result.push_str("> ");
+                }
+            }
+            result.push_str(&" ".repeat(new_item_col));
+            result.push_str(&marker_body[..marker_token_width]);
+            result.push_str(&" ".repeat(marker_padding));
+            result.push_str(&marker_body[container_marker_width..]);
+            stack.push((
+                if blockquote_depth > 0 {
+                    new_item_col
+                } else {
+                    current_indent
+                },
+                if blockquote_depth > 0 {
+                    new_body_col
+                } else {
+                    current_indent + body_marker_width
+                },
+                new_item_col,
+                new_body_col,
+                new_child_content_col,
+            ));
+        } else if line_follows_blank
+            && let Some(context) = additional_paragraph_contexts
+                .peek()
+                .filter(|context| context.blockquote_depth == blockquote_depth)
+                .copied()
+        {
+            additional_paragraph_contexts.next();
+            stack.truncate(context.list_depth);
+            let relative_offset = context
+                .source_body_column
+                .saturating_sub(context.source_item_content_column);
+            let continuation_column = stack
+                .get(context.list_depth.saturating_sub(1))
+                .map_or(context.source_body_column, |(_, _, _, _, new_content)| {
+                    new_content + relative_offset
+                });
+            if blockquote_depth > 0 {
+                for _ in 0..blockquote_depth {
+                    result.push_str("> ");
+                }
+                result.push_str(&" ".repeat(continuation_column));
+                result.push_str(container_body);
+            } else {
+                result.push_str(&" ".repeat(continuation_column));
+                result.push_str(trimmed);
+            }
+        } else if current_indent > 0 {
+            // Continuation prose or indented content belonging to the deepest
+            // open item. A continuation line at column C cannot belong to an
+            // item whose own marker was at column ≥ C, so those levels are
+            // popped before the offset is computed.
+            while stack
+                .last()
+                .is_some_and(|(orig_item, _, _, _, _)| *orig_item >= current_indent)
+            {
+                stack.pop();
+            }
+
+            if stack.is_empty() {
+                // Top-level indented content that is not inside any list.
+                result.push_str(line);
+            } else {
+                let (_, orig_body, _, new_body, _) = *stack.last().unwrap();
+                // `target_indent * depth` mirrors how list-item markers are
+                // rescaled, so a `- Alpha\n  beta` parent-then-continuation
+                // at cmark's content column lands at `target_indent` rather
+                // than the bare marker-width content column. The `max`
+                // guarantees the result is at least the parent's rescaled
+                // content column, which wide markers (`1234. `, content col
+                // 6) need to stay CommonMark-valid.
+                let depth = stack.len();
+                let base = (target_indent * depth).max(new_body);
+                // Preserve the relative offset from the containing item's
+                // original content column: indented code (typically +4) keeps
+                // its extra indentation, plain continuation prose keeps offset 0.
+                let offset = current_indent.saturating_sub(orig_body);
+                let new_indent = base + offset;
                 result.push_str(&" ".repeat(new_indent));
                 result.push_str(trimmed);
-            } else {
-                result.push_str(line);
             }
+        } else if blockquote_depth == 0 {
+            // Top-level non-list line: clear the stack and pass through.
+            stack.clear();
+            active_blockquote_depth = 0;
+            result.push_str(line);
         } else {
-            // For non-list content that's indented (like continuation text),
-            // apply the same scaling
-            let current_indent = line.len() - trimmed.len();
-            if current_indent > 0 && current_indent % 2 == 0 {
-                let nesting_level = current_indent / 2;
-                let new_indent = nesting_level * target_indent;
-                result.push_str(&" ".repeat(new_indent));
-                result.push_str(trimmed);
-            } else {
-                result.push_str(line);
-            }
+            // Quoted prose keeps the parser-derived list stack alive across
+            // blank quote lines in loose items. Its serialized bytes are
+            // otherwise already canonical.
+            result.push_str(line);
         }
 
         if lines.peek().is_some() {
@@ -313,39 +1021,26 @@ pub(super) fn fix_list_indentation(output: &mut String, target_indent: usize) {
     *output = result;
 }
 
-/// Checks if a line starts with an ordered list marker (e.g., "1. " or "1) ").
-fn is_ordered_list_start(line: &str) -> bool {
-    let mut chars = line.chars().peekable();
-    let mut has_digit = false;
-
-    while let Some(c) = chars.next() {
-        if c.is_ascii_digit() {
-            has_digit = true;
-        } else if has_digit && (c == '.' || c == ')') {
-            return chars.peek() == Some(&' ');
-        } else {
-            return false;
-        }
-    }
-    false
-}
-
-/// Unescapes unnecessarily escaped brackets in the output.
+/// Normalizes blank-line spacing between serialized list items.
 ///
-/// `pulldown-cmark-to-cmark` escapes `[` and `]` characters that could potentially
-/// be interpreted as link syntax. This function unescapes patterns like `\[0%\]`
-/// that are clearly not links (no `](` following them).
-pub(super) fn normalize_list_spacing(output: &mut String, mode: ListSpacingMode) {
+/// Parser-classified indented code is excluded from the marker heuristic so
+/// the blank line that establishes the code block remains intact.
+pub(super) fn normalize_list_spacing(
+    output: &mut String,
+    mode: ListSpacingMode,
+    protected_markers: &[ProtectedMarker],
+) {
     let lines: Vec<&str> = output.lines().collect();
     if lines.len() < 2 {
         return;
     }
+    let protected_marker_lines = protected_marker_lines(&lines, protected_markers);
 
     // Phase 1: strip blank lines between list items to get a clean baseline.
     // Only strip when both the previous non-blank line and the next non-blank
     // line are list item starts. Blank lines before continuation prose or
     // between a list item and non-item content are preserved.
-    let mut stripped: Vec<&str> = Vec::with_capacity(lines.len());
+    let mut stripped: Vec<(&str, bool)> = Vec::with_capacity(lines.len());
     let mut i = 0;
     while i < lines.len() {
         if lines[i].trim().is_empty() && i > 0 {
@@ -357,7 +1052,9 @@ pub(super) fn normalize_list_spacing(output: &mut String, mode: ListSpacingMode)
             // Find the last non-blank line before the gap
             let prev_is_item =
                 is_list_item_start(lines[i - 1].trim_start()) || is_list_continuation(lines[i - 1]);
-            let next_is_item = j < lines.len() && is_list_item_start(lines[j].trim_start());
+            let next_is_item = j < lines.len()
+                && !protected_marker_lines[j]
+                && is_list_item_start(lines[j].trim_start());
 
             // Only strip if both sides are list items (not continuation prose)
             if prev_is_item && next_is_item {
@@ -365,7 +1062,7 @@ pub(super) fn normalize_list_spacing(output: &mut String, mode: ListSpacingMode)
                 continue;
             }
         }
-        stripped.push(lines[i]);
+        stripped.push((lines[i], protected_marker_lines[i]));
         i += 1;
     }
 
@@ -377,11 +1074,11 @@ pub(super) fn normalize_list_spacing(output: &mut String, mode: ListSpacingMode)
     let mut prev_was_blank = false;
     let mut had_continuation = false; // true when continuation content seen since last item
 
-    for (idx, line) in stripped.iter().enumerate() {
+    for (idx, (line, protected_marker)) in stripped.iter().enumerate() {
         let trimmed = line.trim_start();
         let indent = line.len() - trimmed.len();
-        let is_item = is_list_item_start(trimmed);
-        let is_cont = is_list_continuation(line);
+        let is_item = !protected_marker && is_list_item_start(trimmed);
+        let is_cont = *protected_marker || is_list_continuation(line);
 
         if !prev_was_blank && idx > 0 {
             if is_item {
@@ -439,27 +1136,52 @@ pub(super) fn normalize_list_spacing(output: &mut String, mode: ListSpacingMode)
     *output = result;
 }
 
-/// Returns `true` if the line starts a list item (ordered or unordered).
-pub(super) fn is_list_item_start(trimmed: &str) -> bool {
-    // Unordered: *, -, or + followed by space
-    if trimmed.starts_with("* ") || trimmed.starts_with("- ") || trimmed.starts_with("+ ") {
-        return true;
+pub(super) fn protected_marker_lines(
+    lines: &[&str],
+    protected_markers: &[ProtectedMarker],
+) -> Vec<bool> {
+    let mut protected = vec![false; lines.len()];
+    let mut protected_markers = protected_markers.iter().copied().peekable();
+    let mut marker_ordinal = 0usize;
+    let mut open_fence: Option<char> = None;
+
+    for (idx, line) in lines.iter().enumerate() {
+        let (prefix, body) = split_rendered_line(line);
+        let blockquote_depth = prefix.bytes().filter(|byte| *byte == b'>').count();
+        let fence = match body.chars().next() {
+            Some('`') if body.starts_with("```") => Some('`'),
+            Some('~') if body.starts_with("~~~") => Some('~'),
+            _ => None,
+        };
+        if let Some(fence) = fence
+            && (open_fence.is_none() || open_fence == Some(fence))
+        {
+            open_fence = if open_fence == Some(fence) {
+                None
+            } else {
+                Some(fence)
+            };
+            continue;
+        }
+        if open_fence.is_some() || !is_list_item_start(body) {
+            continue;
+        }
+
+        if protected_markers.peek().is_some_and(|marker| {
+            marker.ordinal == marker_ordinal && marker.blockquote_depth == blockquote_depth
+        }) {
+            protected[idx] = true;
+            protected_markers.next();
+        }
+        marker_ordinal += 1;
     }
 
-    // Ordered: digits followed by . or ) and space
-    let bytes = trimmed.as_bytes();
-    if bytes.is_empty() || !bytes[0].is_ascii_digit() {
-        return false;
-    }
-    for (i, &b) in bytes.iter().enumerate().skip(1) {
-        if b == b'.' || b == b')' {
-            return bytes.get(i + 1) == Some(&b' ');
-        }
-        if !b.is_ascii_digit() {
-            return false;
-        }
-    }
-    false
+    protected
+}
+
+/// Returns `true` if the line starts a list item (ordered or unordered).
+pub(super) fn is_list_item_start(trimmed: &str) -> bool {
+    list_marker_byte_width(trimmed).is_some()
 }
 
 /// Returns `true` if the line is indented continuation content within a list.

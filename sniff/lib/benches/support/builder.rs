@@ -414,6 +414,19 @@ pub fn build_huge_monorepo(root: &Path) -> Repository {
 ///
 /// Returns the opened `Repository` handle.
 pub fn build_git_repo_with_dirty_files(root: &Path, dirty_count: usize) -> Repository {
+    build_git_repo_with_dirty_files_of_size(root, dirty_count, 64)
+}
+
+/// Build a git repo with `dirty_count` modified files of exactly `bytes_per_file`.
+///
+/// The payload changes at both ends after the initial commit so full and deep
+/// status requests cannot short-circuit on a shared prefix or suffix. Fixture
+/// construction is intentionally separate from every timed benchmark loop.
+pub fn build_git_repo_with_dirty_files_of_size(
+    root: &Path,
+    dirty_count: usize,
+    bytes_per_file: usize,
+) -> Repository {
     let repo = init_repo(root);
 
     write_file(&root.join(".gitignore"), "target/\n");
@@ -423,23 +436,198 @@ pub fn build_git_repo_with_dirty_files(root: &Path, dirty_count: usize) -> Repos
     );
 
     for i in 0..dirty_count {
-        write_file(
-            &root.join(format!("src/m{i:04}.rs")),
-            &format!("pub fn m{i:04}() -> u32 {{ {i} }}\n"),
-        );
+        let mut payload = vec![b'a'; bytes_per_file.max(1)];
+        payload[0] = b'0' + (i % 10) as u8;
+        let path = root.join(format!("src/m{i:04}.rs"));
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("create dirty fixture directory");
+        }
+        fs::write(path, payload).expect("write tracked dirty fixture file");
     }
 
     commit_all(&repo, "c1: initial dirty-files layout");
 
     // Rewrite every file so each tracked source path is modified.
     for i in 0..dirty_count {
-        write_file(
-            &root.join(format!("src/m{i:04}.rs")),
-            &format!("pub fn m{i:04}() -> u32 {{ {} }}\n", i + 1),
-        );
+        let mut payload = vec![b'b'; bytes_per_file.max(1)];
+        payload[0] = b'0' + ((i + 1) % 10) as u8;
+        fs::write(root.join(format!("src/m{i:04}.rs")), payload)
+            .expect("rewrite dirty fixture file");
     }
 
     repo
+}
+
+/// Build a deep, wide tree whose only formatting evidence is at its root.
+pub fn build_deep_wide_formatting_tree(root: &Path, depth: usize, width: usize) {
+    write_file(&root.join(".editorconfig"), "root = true\n[*]\nindent_size = 4\n");
+    for branch in 0..width {
+        let mut dir = root.join(format!("branch-{branch:03}"));
+        for level in 0..depth {
+            dir = dir.join(format!("level-{level:03}"));
+            write_file(&dir.join("source.rs"), "pub fn fixture() {}\n");
+        }
+    }
+}
+
+/// Build a mixed Cargo, JavaScript, Python, and Go monorepo of `package_count`.
+pub fn build_mixed_monorepo(root: &Path, package_count: usize) -> Repository {
+    let repo = init_repo(root);
+    let rust_count = package_count * 2 / 5;
+    let js_count = package_count * 3 / 10;
+    let python_count = package_count / 5;
+    // The uv workspace root is represented as one virtual package in the
+    // canonical catalog, so reserve one slot for it.
+    let go_count = package_count
+        .saturating_sub(rust_count + js_count + python_count)
+        .saturating_sub(1);
+
+    let cargo_members = (0..rust_count)
+        .map(|i| format!("\"crates/rust-{i:04}\""))
+        .collect::<Vec<_>>()
+        .join(",\n    ");
+    write_file(
+        &root.join("Cargo.toml"),
+        &format!("[workspace]\nresolver = \"2\"\nmembers = [\n    {cargo_members}\n]\n"),
+    );
+    let js_members = (0..js_count)
+        .map(|i| format!("  - 'apps/js-{i:04}'"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    write_file(
+        &root.join("pnpm-workspace.yaml"),
+        &format!("packages:\n{js_members}\n"),
+    );
+    write_file(&root.join("package.json"), "{\"private\":true}\n");
+    write_file(
+        &root.join("pyproject.toml"),
+        "[tool.uv.workspace]\nmembers = [\"python/*\"]\n",
+    );
+    let go_members = (0..go_count)
+        .map(|i| format!("\t./go/mod-{i:04}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    write_file(
+        &root.join("go.work"),
+        &format!("go 1.21\n\nuse (\n{go_members}\n)\n"),
+    );
+    write_file(&root.join("README.md"), "# mixed monorepo\n");
+
+    for i in 0..rust_count {
+        let package = root.join(format!("crates/rust-{i:04}"));
+        write_file(
+            &package.join("Cargo.toml"),
+            &format!("[package]\nname = \"rust-{i:04}\"\nversion = \"0.1.0\"\n"),
+        );
+        write_file(&package.join("src/lib.rs"), "pub fn fixture() {}\n");
+    }
+    for i in 0..js_count {
+        let package = root.join(format!("apps/js-{i:04}"));
+        write_file(
+            &package.join("package.json"),
+            &format!("{{\"name\":\"js-{i:04}\",\"version\":\"0.1.0\"}}\n"),
+        );
+        write_file(&package.join("src/index.ts"), "export const fixture = true;\n");
+    }
+    for i in 0..python_count {
+        let package = root.join(format!("python/py-{i:04}"));
+        write_file(
+            &package.join("pyproject.toml"),
+            &format!("[project]\nname = \"py-{i:04}\"\nversion = \"0.1.0\"\n"),
+        );
+        write_file(&package.join("src/__init__.py"), "FIXTURE = True\n");
+    }
+    for i in 0..go_count {
+        let package = root.join(format!("go/mod-{i:04}"));
+        write_file(
+            &package.join("go.mod"),
+            &format!("module example.test/mod-{i:04}\n\ngo 1.21\n"),
+        );
+        write_file(&package.join("main.go"), "package main\nfunc main() {}\n");
+    }
+    commit_all(&repo, "mixed monorepo fixture");
+    repo
+}
+
+/// Build an over-cap inventory tree with Markdown files distributed through it.
+pub fn build_inventory_docs_tree(root: &Path, file_count: usize, doc_count: usize) {
+    for i in 0..file_count {
+        let directory = root.join(format!("bucket-{:03}", i / 100));
+        if i < doc_count {
+            write_file(
+                &directory.join(format!("doc-{i:05}.md")),
+                &format!("---\ntitle: Doc {i}\n---\n# Doc {i}\n"),
+            );
+        } else {
+            write_file(&directory.join(format!("file-{i:05}.txt")), "fixture\n");
+        }
+    }
+}
+
+/// Add package-owned Markdown documents to an existing mixed monorepo.
+pub fn add_package_documents(root: &Path, package_count: usize, document_count: usize) {
+    let rust_count = (package_count * 2 / 5).max(1);
+    for i in 0..document_count {
+        let owner = i % rust_count;
+        write_file(
+            &root.join(format!("crates/rust-{owner:04}/docs/doc-{i:05}.md")),
+            &format!("---\ntitle: Package Doc {i}\n---\n# Package Doc {i}\n"),
+        );
+    }
+}
+
+/// Add a nested pnpm membership authority below an existing repository root.
+pub fn add_nested_workspace(root: &Path) {
+    write_file(
+        &root.join("nested/pnpm-workspace.yaml"),
+        "packages:\n  - 'packages/*'\n",
+    );
+    write_file(
+        &root.join("nested/package.json"),
+        "{\"private\":true}\n",
+    );
+    write_file(
+        &root.join("nested/packages/member/package.json"),
+        "{\"name\":\"nested-member\",\"version\":\"0.1.0\"}\n",
+    );
+    write_file(
+        &root.join("nested/packages/member/src/index.ts"),
+        "export const nested = true;\n",
+    );
+}
+
+/// Build a long history where only every `match_every`th commit touches `wanted/`.
+pub fn build_sparse_path_history_repo(
+    root: &Path,
+    commits: usize,
+    match_every: usize,
+) -> Repository {
+    let repo = init_repo(root);
+    let cadence = match_every.max(1);
+    for i in 0..commits {
+        let relative = if i % cadence == 0 {
+            "wanted/history.txt"
+        } else {
+            "other/history.txt"
+        };
+        write_file(&root.join(relative), &format!("commit {i}\n"));
+        commit_all_at(&repo, &format!("history {i}"), 1_000 + i as i64);
+    }
+    repo
+}
+
+/// Build paths which differ only by component case.
+pub fn build_case_variant_tree(root: &Path, files_per_variant: usize) {
+    for i in 0..files_per_variant {
+        write_file(
+            &root.join(format!("Case/Tree/file-{i:04}.rs")),
+            "pub fn upper() {}\n",
+        );
+        write_file(
+            &root.join(format!("case/tree/file-{i:04}.rs")),
+            "pub fn lower() {}\n",
+        );
+    }
 }
 
 /// Build a directory tree of markdown documents for docs-parser benchmarks.

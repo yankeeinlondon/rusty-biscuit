@@ -223,6 +223,15 @@ md clean README.md --indent 4
 # Clean from stdin
 cat README.md | md clean
 
+# Emit the v1 diagnostic envelope instead of Markdown
+md clean README.md --json
+
+# Control the effective frontmatter schema
+md clean README.md --schema docs.schema.yaml
+md clean README.md --baseline-schema project-baseline.yaml
+md clean README.md --no-baseline-schema
+md clean README.md --no-trigger-schemas
+
 # Save cleaned file in place and report delta-style changes
 md clean README.md --save
 
@@ -236,11 +245,41 @@ md README.md --save
 By default, `md clean` collapses incidental single newlines in prose before
 running the rest of cleanup. Blank lines, fenced and indented code blocks,
 tables, HTML blocks, transclusion directives, list markers, and blockquote
-prefixes are preserved. Use `--fixed-width <#>` when you want canonical cleanup
-followed by prose wrapping to a target display width, or
+prefixes are preserved. Prose includes paragraphs inside ordered, unordered,
+and task-list items at every nesting depth: default cleanup removes source-only
+continuation indentation, while `--fixed-width <#>` unwraps the complete item
+paragraph and emits list-aware hanging continuation prefixes. For lists inside
+blockquotes, those prefixes retain both the quote and list containers. Use
+`--fixed-width <#>` when you want canonical cleanup followed by prose wrapping
+to a target display width, or
 `--ignore-incidental-newlines` when source line breaks must remain unchanged.
 `--fixed-width` and `--ignore-incidental-newlines` conflict because fixed-width
 reflow first needs the incidental source wrapping removed.
+
+Deterministic YAML frontmatter repairs are also enabled by default. Analysis is
+limited to the frontmatter block; YAML fences in the body are never inspected.
+Without `--save`, the repaired document is printed and the input file remains
+unchanged. With `--save`, accepted repairs are written in place. Report-only
+findings are rendered as suggestions on stderr and still exit `0`; there is no
+`md clean --strict` in v1.
+
+Schema precedence is baseline → matching repository triggers → document
+`$schema`. `--baseline-schema` replaces the default Darkmatter baseline,
+`--no-baseline-schema` removes it, `--no-trigger-schemas` disables trigger
+discovery, and `--schema` replaces the document `$schema` layer. Stdin has no
+document path, so trigger discovery is always inert for stdin, while explicit
+schema and baseline flags remain active.
+
+`--json` writes the version-1 envelope as the sole stdout payload: `version`,
+structured `source` and `frontmatter`, document-position `diagnostics`, the
+repairs actually `applied`, and whole-document `changed`. It suppresses the
+cleaned Markdown, delta report, and human stderr suggestions. Success is exit
+`0`; unrepaired invalid YAML remains exit `1` but still emits the envelope with
+a `yaml.parse` diagnostic on stdout, leaves stderr empty, and does not modify a
+save target. Diagnostic offsets are zero-based, end-exclusive document byte
+offsets; lines and byte columns are one-based. See the
+[clean command guide](../docs/cli/clean.md#version-1-json-envelope) for the
+exact JSON example and full flag behavior.
 
 Frontmatter manipulation is available through `md set` (modify individual properties) and `md compose --fm` (output frontmatter with composed content). The `--state` flag on `compose` fills in null/missing frontmatter keys with default values.
 

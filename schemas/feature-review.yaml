@@ -1,11 +1,9 @@
-kind: schema
-description: |-
-    Provides the shape of metadata provided by a **Feature Review**. This feature
-    review may have been categorized as a "feature" or a "fix" but is always grounded
-    by _specification_ file that defines the target for the implementation.
-
-    > **Note:** in addition to the specification file, some feature reviews will be given
-    > additional documents that support the specification file in their definition.
+# Provides the shape of metadata provided by a **Feature Review**. This feature
+# review may have been categorized as a "feature" or a "fix" but is always grounded
+# by _specification_ file that defines the target for the implementation.
+#
+# > **Note:** in addition to the specification file, some feature reviews will be given
+# > additional documents that support the specification file in their definition.
 $schema:
     - description: string -> description of this _feature review_
       ready: boolean -> whether the reviewer believed that the code is "production ready"

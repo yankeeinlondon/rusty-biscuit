@@ -8,9 +8,11 @@ use schematic_schema::bitbucket::*;
 use schematic_schema::shared::{AuthStrategy, SchematicError, UpdateStrategy};
 
 use super::{
+    count_api_request,
     provider::RemoteRepoProvider,
+    snapshot::{documents_from_tree, RemoteRepoSnapshot, RemoteTree, RemoteTreeFile},
     types::{
-        CiCdInfo, DocumentCategory, DocumentRef, GitProvider, IssueInfo, KeyUrls, OrgInfo,
+        CiCdInfo, DocumentRef, GitProvider, IssueInfo, KeyUrls, OrgInfo,
         OrgRepoRef, PullRequestInfo, PullRequestState, ReleaseInfo, RepoMetadata, TagInfo,
         TagsAndReleases,
     },
@@ -72,6 +74,51 @@ impl BitbucketRemote {
         Ok(Self {
             client: Bitbucket::with_base_url(base_url),
         })
+    }
+
+    /// Builds the report's tree from the root listing plus any doc directories.
+    ///
+    /// ## Notes
+    ///
+    /// Bitbucket has no recursive-tree endpoint, so the "tree" is assembled from
+    /// per-directory listings: the root, plus `docs/` and `doc/` when the root says
+    /// they exist. Those two are independent once the branch is known, so they run
+    /// concurrently (R11.3) rather than as a serial chain.
+    ///
+    /// Depth stops at one level below the root, which is the pre-existing contract —
+    /// nested documents under `docs/guide/` were not detected before this change and
+    /// are not detected now.
+    async fn fetch_tree(
+        &self,
+        workspace: &str,
+        repo_slug: &str,
+        commit: &str,
+    ) -> Result<RemoteTree, SniffError> {
+        let (root_entries, root_truncated) =
+            collect_directory_entries(&self.client, workspace, repo_slug, commit, "").await?;
+
+        let mut files = files_of(&root_entries);
+
+        let listing = |dir: &'static str| {
+            let present = has_directory(&root_entries, dir);
+            async move {
+                if !present {
+                    return None;
+                }
+                collect_directory_entries(&self.client, workspace, repo_slug, commit, dir)
+                    .await
+                    .ok()
+            }
+        };
+        let (docs, doc) = tokio::join!(listing("docs"), listing("doc"));
+
+        let mut truncated = root_truncated;
+        for (entries, was_truncated) in [docs, doc].into_iter().flatten() {
+            files.extend(files_of(&entries));
+            truncated |= was_truncated;
+        }
+
+        Ok(RemoteTree::observed(files, truncated))
     }
 }
 
@@ -191,75 +238,82 @@ fn map_schematic_error(err: SchematicError) -> SniffError {
     }
 }
 
-/// Categorize a file path as a document type.
-fn categorize_document(path: &str) -> Option<DocumentCategory> {
-    let lower = path.to_lowercase();
-    let filename = path.rsplit('/').next().unwrap_or(path).to_lowercase();
 
-    // Files in src/ directories (source documentation) - check first
-    if lower.starts_with("src/") {
-        // Only markdown/text files in src count as source docs
-        if is_documentation_file(&filename) {
-            return Some(DocumentCategory::SourceDoc);
-        }
-        return None;
-    }
-
-    // Files in docs/ or doc/ directories
-    if lower.starts_with("docs/") || lower.starts_with("doc/") {
-        return Some(DocumentCategory::DocsFolder);
-    }
-
-    // README files at root or in non-src directories
-    if filename.starts_with("readme") {
-        return Some(DocumentCategory::Readme);
-    }
-
-    // Other markdown/text files at root or elsewhere
-    if is_documentation_file(&filename) {
-        return Some(DocumentCategory::Other);
-    }
-
-    None
-}
-
-/// Check if a filename is a documentation file.
-fn is_documentation_file(filename: &str) -> bool {
-    let lower = filename.to_lowercase();
-    lower.ends_with(".md")
-        || lower.ends_with(".markdown")
-        || lower.ends_with(".txt")
-        || lower.ends_with(".rst")
-        || lower == "license"
-        || lower == "licence"
-        || lower == "changelog"
-        || lower == "changes"
-        || lower == "history"
-        || lower == "contributing"
-        || lower == "authors"
-        || lower == "contributors"
-        || lower == "code_of_conduct"
-}
-
-/// Recursively collect all entries from a directory tree.
+/// Maximum pages followed for one directory listing.
 ///
-/// Bitbucket's API requires recursive traversal since there's no
-/// recursive=true flag like GitHub. For MVP, we only traverse top-level
-/// and common doc directories.
+/// Bounds the correctness-preserving pagination below. At Bitbucket's 100-item
+/// maximum page size this covers 1,000 entries in a single directory, far past any
+/// real repository root or `docs/` folder — the bound exists so a pathological
+/// directory cannot turn one listing into an unbounded request loop.
+const MAX_LISTING_PAGES: i64 = 10;
+
+/// Collects every entry of one directory, following pagination.
+///
+/// ## Returns
+///
+/// The directory's entries and whether the listing was cut short at
+/// [`MAX_LISTING_PAGES`] with more pages still outstanding.
+///
+/// ## Notes
+///
+/// Bitbucket has no recursive-tree flag, so callers walk directory by directory
+/// and each call is its own request against the tree. Pagination was previously
+/// not followed at all ("For MVP, just return the first page"), which silently
+/// truncated any directory past one page — the same defect as an ignored GitHub
+/// `truncated` flag, just spelled differently (R11.5).
 async fn collect_directory_entries(
     client: &Bitbucket,
     workspace: &str,
     repo_slug: &str,
     commit: &str,
     path: &str,
-) -> Result<Vec<SourceEntry>, SniffError> {
-    let request = ListDirectoryContentsRequest::new(workspace, repo_slug, commit, path);
-    let response: PaginatedResponse<SourceEntry> =
-        client.request(request).await.map_err(map_schematic_error)?;
+) -> Result<(Vec<SourceEntry>, bool), SniffError> {
+    let mut entries = Vec::new();
 
-    // For MVP, just return the first page of results
-    // Full pagination can be added later by following response.next
-    Ok(response.values)
+    for page in 1..=MAX_LISTING_PAGES {
+        let mut request = ListDirectoryContentsRequest::new(workspace, repo_slug, commit, path);
+        request.pagelen = Some(100);
+        if page > 1 {
+            request.page = Some(page);
+            // Pages past the first are continuations, counted separately so a
+            // report distinguishes them from the duplicate root listings this
+            // phase removed.
+            count_api_request("tree_continuation");
+        } else {
+            count_api_request("tree");
+        }
+
+        let response: PaginatedResponse<SourceEntry> =
+            client.request(request).await.map_err(map_schematic_error)?;
+        entries.extend(response.values);
+
+        if response.next.is_none() {
+            return Ok((entries, false));
+        }
+    }
+
+    Ok((entries, true))
+}
+
+/// Keeps file entries and drops directories, normalizing to [`RemoteTreeFile`].
+fn files_of(entries: &[SourceEntry]) -> Vec<RemoteTreeFile> {
+    entries
+        .iter()
+        .filter(|entry| entry.is_file())
+        .filter_map(|entry| {
+            Some(RemoteTreeFile {
+                path: entry.path.clone()?,
+                size: entry.size,
+            })
+        })
+        .collect()
+}
+
+/// Whether `entries` contains a directory named `name`.
+fn has_directory(entries: &[SourceEntry], name: &str) -> bool {
+    entries
+        .iter()
+        .any(|e| e.is_directory() && e.path.as_deref() == Some(name))
 }
 
 #[async_trait]
@@ -274,6 +328,7 @@ impl RemoteRepoProvider for BitbucketRemote {
         repo_slug: &str,
     ) -> Result<RepoMetadata, SniffError> {
         let request = GetRepositoryRequest::new(workspace, repo_slug);
+        count_api_request("metadata");
         let info: Repository = self
             .client
             .request(request)
@@ -328,94 +383,41 @@ impl RemoteRepoProvider for BitbucketRemote {
         })
     }
 
+    async fn snapshot(
+        &self,
+        workspace: &str,
+        repo_slug: &str,
+    ) -> Result<RemoteRepoSnapshot, SniffError> {
+        let metadata = self.get_repo_metadata(workspace, repo_slug).await?;
+        // A tree failure degrades the projections that read it; it must not sink a
+        // report whose required metadata already succeeded (R11.6).
+        let tree = self
+            .fetch_tree(workspace, repo_slug, &metadata.default_branch)
+            .await
+            .unwrap_or_else(|_| RemoteTree::unavailable());
+
+        Ok(RemoteRepoSnapshot {
+            owner: workspace.to_string(),
+            repo: repo_slug.to_string(),
+            metadata,
+            tree,
+        })
+    }
+
     async fn list_documents(
         &self,
         workspace: &str,
         repo_slug: &str,
     ) -> Result<Vec<DocumentRef>, SniffError> {
-        // First get the repo to find the default branch
-        let repo_request = GetRepositoryRequest::new(workspace, repo_slug);
-        let info: Repository = self
-            .client
-            .request(repo_request)
-            .await
-            .map_err(map_schematic_error)?;
+        let snapshot = self.snapshot(workspace, repo_slug).await?;
+        self.list_documents_with(&snapshot).await
+    }
 
-        let commit = info.default_branch().unwrap_or("main").to_string();
-
-        // Get root directory contents
-        let root_entries = collect_directory_entries(
-            &self.client,
-            workspace,
-            repo_slug,
-            &commit,
-            "", // Empty path for root
-        )
-        .await?;
-
-        let mut documents = Vec::new();
-
-        // Process root entries
-        for entry in &root_entries {
-            if entry.is_file()
-                && let Some(path) = &entry.path
-                && let Some(category) = categorize_document(path)
-            {
-                documents.push(DocumentRef {
-                    path: path.clone(),
-                    category,
-                    size: entry.size,
-                });
-            }
-        }
-
-        // Check for docs/ directory
-        let has_docs = root_entries
-            .iter()
-            .any(|e| e.is_directory() && e.path.as_deref() == Some("docs"));
-
-        if has_docs
-            && let Ok(docs_entries) =
-                collect_directory_entries(&self.client, workspace, repo_slug, &commit, "docs").await
-        {
-            for entry in docs_entries {
-                if entry.is_file()
-                    && let Some(path) = &entry.path
-                    && let Some(category) = categorize_document(path)
-                {
-                    documents.push(DocumentRef {
-                        path: path.clone(),
-                        category,
-                        size: entry.size,
-                    });
-                }
-            }
-        }
-
-        // Check for doc/ directory
-        let has_doc = root_entries
-            .iter()
-            .any(|e| e.is_directory() && e.path.as_deref() == Some("doc"));
-
-        if has_doc
-            && let Ok(doc_entries) =
-                collect_directory_entries(&self.client, workspace, repo_slug, &commit, "doc").await
-        {
-            for entry in doc_entries {
-                if entry.is_file()
-                    && let Some(path) = &entry.path
-                    && let Some(category) = categorize_document(path)
-                {
-                    documents.push(DocumentRef {
-                        path: path.clone(),
-                        category,
-                        size: entry.size,
-                    });
-                }
-            }
-        }
-
-        Ok(documents)
+    async fn list_documents_with(
+        &self,
+        snapshot: &RemoteRepoSnapshot,
+    ) -> Result<Vec<DocumentRef>, SniffError> {
+        Ok(documents_from_tree(&snapshot.tree))
     }
 
     async fn get_file_content(
@@ -426,6 +428,7 @@ impl RemoteRepoProvider for BitbucketRemote {
     ) -> Result<String, SniffError> {
         // First get the repo to find the default branch
         let repo_request = GetRepositoryRequest::new(workspace, repo_slug);
+        count_api_request("metadata");
         let info: Repository = self
             .client
             .request(repo_request)
@@ -435,6 +438,7 @@ impl RemoteRepoProvider for BitbucketRemote {
         let commit = info.default_branch().unwrap_or("main").to_string();
 
         let request = GetFileContentRawRequest::new(workspace, repo_slug, &commit, path);
+        count_api_request("contents");
         self.client
             .get_file_content_raw(request)
             .await
@@ -467,15 +471,18 @@ impl RemoteRepoProvider for BitbucketRemote {
         // because no credentials are available, retry once with an explicitly
         // unauthenticated client. Only after the anonymous retry also fails
         // (or on a real 401/403) do we surface a credentials error.
+        count_api_request("pulls");
         let response: PaginatedResponse<PullRequest> =
             match self.client.request(request.clone()).await {
                 Ok(resp) => resp,
                 Err(SchematicError::MissingCredential { .. })
-                | Err(SchematicError::AuthenticationRequired { .. }) => self
-                    .unauthenticated_client()
-                    .request(request)
-                    .await
-                    .map_err(map_schematic_error)?,
+                | Err(SchematicError::AuthenticationRequired { .. }) => {
+                    count_api_request("pulls");
+                    self.unauthenticated_client()
+                        .request(request)
+                        .await
+                        .map_err(map_schematic_error)?
+                }
                 Err(err) => return Err(map_schematic_error(err)),
             };
 
@@ -562,6 +569,7 @@ impl RemoteRepoProvider for BitbucketRemote {
         let request = ListIssuesRequest::new(workspace, repo_slug);
 
         // Bitbucket issues may be disabled - handle 404 gracefully
+        count_api_request("issues");
         let response: PaginatedResponse<Issue> = match self.client.request(request).await {
             Ok(resp) => resp,
             Err(SchematicError::ApiError { status: 404, .. }) => {
@@ -628,6 +636,7 @@ impl RemoteRepoProvider for BitbucketRemote {
     ) -> Result<TagsAndReleases, SniffError> {
         // Fetch tags
         let tags_request = ListTagsRequest::new(workspace, repo_slug);
+        count_api_request("tags");
         let tags_response: PaginatedResponse<Tag> = self
             .client
             .request(tags_request)
@@ -662,6 +671,7 @@ impl RemoteRepoProvider for BitbucketRemote {
 
         // Fetch downloads (Bitbucket's equivalent of releases)
         let downloads_request = ListDownloadsRequest::new(workspace, repo_slug);
+        count_api_request("releases");
         let downloads_response: PaginatedResponse<Download> = self
             .client
             .request(downloads_request)
@@ -707,43 +717,32 @@ impl RemoteRepoProvider for BitbucketRemote {
         workspace: &str,
         repo_slug: &str,
     ) -> Result<Option<CiCdInfo>, SniffError> {
-        // First get the repo to find the default branch
-        let repo_request = GetRepositoryRequest::new(workspace, repo_slug);
-        let info: Repository = self
-            .client
-            .request(repo_request)
-            .await
-            .map_err(map_schematic_error)?;
+        let snapshot = self.snapshot(workspace, repo_slug).await?;
+        self.detect_cicd_with(&snapshot).await
+    }
 
-        let commit = info.default_branch().unwrap_or("main").to_string();
-
-        // Get root directory contents
-        let root_entries =
-            collect_directory_entries(&self.client, workspace, repo_slug, &commit, "").await?;
-
-        // Look for bitbucket-pipelines.yml
-        let has_pipelines = root_entries.iter().any(|entry| {
-            entry.is_file() && entry.path.as_deref() == Some("bitbucket-pipelines.yml")
-        });
-
-        if has_pipelines {
-            Ok(Some(CiCdInfo {
-                provider: "Bitbucket Pipelines".to_string(),
-                config_path: Some("bitbucket-pipelines.yml".to_string()),
-                name: "Bitbucket Pipelines".to_string(),
-                status: "detected".to_string(),
-                conclusion: None,
-                html_url: Some(format!(
-                    "https://bitbucket.org/{}/{}/addon/pipelines/home",
-                    workspace, repo_slug
-                )),
-                started_at: None,
-                head_branch: None,
-                event: None,
-            }))
-        } else {
-            Ok(None)
+    async fn detect_cicd_with(
+        &self,
+        snapshot: &RemoteRepoSnapshot,
+    ) -> Result<Option<CiCdInfo>, SniffError> {
+        if !snapshot.tree.contains("bitbucket-pipelines.yml") {
+            return Ok(None);
         }
+
+        Ok(Some(CiCdInfo {
+            provider: "Bitbucket Pipelines".to_string(),
+            config_path: Some("bitbucket-pipelines.yml".to_string()),
+            name: "Bitbucket Pipelines".to_string(),
+            status: "detected".to_string(),
+            conclusion: None,
+            html_url: Some(format!(
+                "https://bitbucket.org/{}/{}/addon/pipelines/home",
+                snapshot.owner, snapshot.repo
+            )),
+            started_at: None,
+            head_branch: None,
+            event: None,
+        }))
     }
 
     async fn list_org_repos(&self, _workspace: &str) -> Result<Vec<OrgRepoRef>, SniffError> {
@@ -774,65 +773,6 @@ impl RemoteRepoProvider for BitbucketRemote {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_categorize_readme() {
-        assert_eq!(
-            categorize_document("README.md"),
-            Some(DocumentCategory::Readme)
-        );
-        assert_eq!(
-            categorize_document("readme.txt"),
-            Some(DocumentCategory::Readme)
-        );
-        assert_eq!(
-            categorize_document("sub/README.md"),
-            Some(DocumentCategory::Readme)
-        );
-    }
-
-    #[test]
-    fn test_categorize_docs_folder() {
-        assert_eq!(
-            categorize_document("docs/guide.md"),
-            Some(DocumentCategory::DocsFolder)
-        );
-        assert_eq!(
-            categorize_document("doc/api.md"),
-            Some(DocumentCategory::DocsFolder)
-        );
-    }
-
-    #[test]
-    fn test_categorize_source_doc() {
-        assert_eq!(
-            categorize_document("src/README.md"),
-            Some(DocumentCategory::SourceDoc)
-        );
-        // Non-doc files in src/ should be None
-        assert_eq!(categorize_document("src/main.rs"), None);
-    }
-
-    #[test]
-    fn test_categorize_other() {
-        assert_eq!(
-            categorize_document("CHANGELOG.md"),
-            Some(DocumentCategory::Other)
-        );
-        assert_eq!(
-            categorize_document("LICENSE"),
-            Some(DocumentCategory::Other)
-        );
-        assert_eq!(
-            categorize_document("CONTRIBUTING.md"),
-            Some(DocumentCategory::Other)
-        );
-    }
-
-    #[test]
-    fn test_categorize_non_doc() {
-        assert_eq!(categorize_document("main.rs"), None);
-        assert_eq!(categorize_document("lib/utils.js"), None);
-    }
 
     #[test]
     fn test_build_key_urls() {

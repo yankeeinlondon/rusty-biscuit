@@ -19,11 +19,14 @@ use ignore::WalkBuilder;
 
 use crate::Result;
 use crate::filesystem::file_types::should_skip_directory_name;
+use crate::performance;
+use crate::performance::counters;
 
-use super::detection::create_package;
+use super::detection::probe_exists;
+use super::seed::PackageSeed;
 use super::standard::{MonorepoStandard, PackageProvenance};
 use super::topology::DetectorOutcome;
-use super::types::Package;
+
 
 /// Bazel project-root markers. Any one of these promotes a directory to a
 /// (parent or nested) workspace root.
@@ -39,7 +42,7 @@ const BUCK2_LEAF_FILES: [&str; 2] = ["BUCK", "TARGETS"];
 /// One leaf-marker workspace: a root and the package directories it owns.
 struct LeafWorkspace {
     root: PathBuf,
-    packages: Vec<Package>,
+    seeds: Vec<PackageSeed>,
 }
 
 /// Detect a Bazel workspace forest rooted at `root`.
@@ -62,7 +65,7 @@ pub(super) fn detect_bazel_workspace(root: &Path) -> Result<Vec<DetectorOutcome>
 
 /// Detect a Pants workspace rooted at `pants.toml`.
 pub(super) fn detect_pants_workspace(root: &Path) -> Result<Vec<DetectorOutcome>> {
-    if !root.join("pants.toml").exists() {
+    if !probe_exists(&root.join("pants.toml")) {
         return Ok(Vec::new());
     }
     let workspaces = walk_leaf_workspaces(root, &PANTS_LEAF_FILES, &[], MonorepoStandard::Pants);
@@ -71,7 +74,7 @@ pub(super) fn detect_pants_workspace(root: &Path) -> Result<Vec<DetectorOutcome>
 
 /// Detect a Buck2 workspace rooted at `.buckconfig`.
 pub(super) fn detect_buck2_workspace(root: &Path) -> Result<Vec<DetectorOutcome>> {
-    if !root.join(".buckconfig").exists() {
+    if !probe_exists(&root.join(".buckconfig")) {
         return Ok(Vec::new());
     }
     let workspaces = walk_leaf_workspaces(root, &BUCK2_LEAF_FILES, &[], MonorepoStandard::Buck2);
@@ -80,7 +83,7 @@ pub(super) fn detect_buck2_workspace(root: &Path) -> Result<Vec<DetectorOutcome>
 
 /// Whether `dir` contains any of `markers` directly.
 fn has_any_marker(dir: &Path, markers: &[&str]) -> bool {
-    markers.iter().any(|name| dir.join(name).exists())
+    markers.iter().any(|name| probe_exists(&dir.join(name)))
 }
 
 /// Convert resolved workspaces into detector outcomes, dropping empty ones.
@@ -90,11 +93,11 @@ fn into_outcomes(
 ) -> Vec<DetectorOutcome> {
     workspaces
         .into_iter()
-        .filter(|ws| !ws.packages.is_empty())
+        .filter(|ws| !ws.seeds.is_empty())
         .map(|ws| DetectorOutcome {
             standard,
             root: ws.root,
-            packages: ws.packages,
+            seeds: ws.seeds,
         })
         .collect()
 }
@@ -141,25 +144,18 @@ fn walk_leaf_workspaces(
         by_root.entry(owner).or_default().push(dir.clone());
     }
 
-    let lock_versions = None;
     by_root
         .into_iter()
         .map(|(ws_root, leaf_dirs)| {
-            let packages = leaf_dirs
+            let seeds = leaf_dirs
                 .into_iter()
                 .map(|dir| {
-                    create_package(
-                        &dir,
-                        root,
-                        standard,
-                        PackageProvenance::LeafMarkers,
-                        &lock_versions,
-                    )
+                    PackageSeed::new(&dir, root, standard, PackageProvenance::LeafMarkers)
                 })
                 .collect();
             LeafWorkspace {
                 root: ws_root,
-                packages,
+                seeds,
             }
         })
         .collect()
@@ -169,6 +165,7 @@ fn walk_leaf_workspaces(
 /// honoring `.gitignore` and skipping `node_modules` / `target` / `dist` /
 /// `build` exactly as the manifest-index walk does.
 fn walk_dirs(root: &Path) -> Vec<PathBuf> {
+    performance::increment_counter(counters::FS_READ_DIRS, 1);
     let walker = WalkBuilder::new(root)
         .hidden(false)
         .git_ignore(true)
@@ -224,7 +221,7 @@ mod tests {
             .find(|o| o.root == root)
             .expect("parent workspace");
         let mut parent_rels: Vec<String> =
-            parent.packages.iter().map(|p| p.relative.clone()).collect();
+            parent.seeds.iter().map(|s| s.relative.clone()).collect();
         parent_rels.sort();
         assert_eq!(parent_rels, vec!["a".to_string(), "b".to_string()]);
 
@@ -233,7 +230,7 @@ mod tests {
             .find(|o| o.root == root.join("nested"))
             .expect("nested workspace");
         let mut nested_rels: Vec<String> =
-            nested.packages.iter().map(|p| p.relative.clone()).collect();
+            nested.seeds.iter().map(|s| s.relative.clone()).collect();
         nested_rels.sort();
         // The nested subtree is owned by the nested workspace, never the parent.
         // With repo-root-relative framing the nested workspace root and its sub
@@ -272,7 +269,7 @@ mod tests {
         let outcomes = detect_pants_workspace(root).unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(outcomes[0].standard, MonorepoStandard::Pants);
-        assert_eq!(outcomes[0].packages.len(), 2);
+        assert_eq!(outcomes[0].seeds.len(), 2);
     }
 
     #[test]
@@ -285,7 +282,7 @@ mod tests {
 
         let outcomes = detect_buck2_workspace(root).unwrap();
         assert_eq!(outcomes.len(), 1);
-        assert_eq!(outcomes[0].packages.len(), 2);
+        assert_eq!(outcomes[0].seeds.len(), 2);
     }
 
     #[test]

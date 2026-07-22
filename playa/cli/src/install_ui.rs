@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::io::{self, Write};
 
 use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::prose::Prose;
@@ -13,14 +13,46 @@ use sniff::programs::{
     RetryChoice, RetryPrompt,
 };
 
-pub struct CliInstallUi {
+pub struct CliInstallUi<W: Write = io::Stdout> {
     pub terminal: Terminal,
     pub plain: bool,
+    output: W,
 }
 
-impl CliInstallUi {
+impl CliInstallUi<io::Stdout> {
     pub fn new(terminal: Terminal, plain: bool) -> Self {
-        Self { terminal, plain }
+        Self {
+            terminal,
+            plain,
+            output: io::stdout(),
+        }
+    }
+}
+
+impl<W: Write> CliInstallUi<W> {
+    #[cfg(test)]
+    pub(crate) fn with_writer(terminal: Terminal, plain: bool, output: W) -> Self {
+        Self {
+            terminal,
+            plain,
+            output,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn into_writer(self) -> W {
+        self.output
+    }
+
+    /// Renders a prose-carrying event body, newline-terminated so consecutive
+    /// events never share a line.
+    fn render_prose_line(&self, prose: &str) -> String {
+        let rendered = Prose::new(prose.to_owned()).render(&self.terminal);
+        if rendered.ends_with('\n') {
+            rendered
+        } else {
+            format!("{rendered}\n")
+        }
     }
 
     fn emit(&mut self, text: &str) {
@@ -29,31 +61,18 @@ impl CliInstallUi {
         } else {
             text.to_owned()
         };
-        print!("{output}");
-        let _ = std::io::stdout().flush();
+        let _ = self.output.write_all(output.as_bytes());
+        let _ = self.output.flush();
     }
 }
 
-impl InstallInterviewDelegate for CliInstallUi {
+impl<W: Write> InstallInterviewDelegate for CliInstallUi<W> {
     fn on_event(&mut self, event: &InstallInterviewEvent) -> Result<(), SniffInstallationError> {
         match event {
-            InstallInterviewEvent::Announcement { prose } => {
-                let rendered = Prose::new(prose.clone()).render(&self.terminal);
-                let line = if rendered.ends_with('\n') {
-                    rendered
-                } else {
-                    format!("{rendered}\n")
-                };
-                self.emit(&line);
-            }
-
-            InstallInterviewEvent::ConsentWarning { prose } => {
-                let rendered = Prose::new(prose.clone()).render(&self.terminal);
-                let line = if rendered.ends_with('\n') {
-                    rendered
-                } else {
-                    format!("{rendered}\n")
-                };
+            InstallInterviewEvent::Announcement { prose }
+            | InstallInterviewEvent::ConsentWarning { prose }
+            | InstallInterviewEvent::TimeoutWarning { prose } => {
+                let line = self.render_prose_line(prose);
                 self.emit(&line);
             }
 

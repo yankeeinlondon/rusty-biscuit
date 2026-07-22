@@ -1,0 +1,65 @@
+Linux behavioral evidence — Phase 11 cross-platform closeout
+============================================================
+
+Environment
+-----------
+  Container : docker (Docker Desktop linux/arm64 VM), image rust:latest
+  Kernel    : Linux 6.12.76-linuxkit aarch64      <-- a REAL Linux kernel, not a cross-compile
+  Distro    : Debian GNU/Linux 13 (trixie)
+  rustc     : 1.97.0 (2d8144b78 2026-07-07)  [container stable]
+  cargo     : 1.97.0 (c980f4866 2026-06-30)
+  nextest   : cargo-nextest 0.9.140, host aarch64-unknown-linux-gnu
+  source    : rsync copy of the working tree (feature head), target dir host-mounted
+
+  Toolchain note: rust-toolchain.toml pins `channel = "stable"`, not a version, so the
+  container's stable 1.97.0 vs the macOS host's stable 1.96.0 is the pinned policy
+  being honoured on each platform -- not a divergence introduced for this run.
+
+RESULT 1 -- Finding 2 / 21: Unix PTY helper (L2) on real Linux -- PASS  [GAP CLOSED]
+------------------------------------------------------------------------------------
+  $ cargo nextest run -p biscuit-terminal -E 'test(/level2_/)'
+
+      Starting 2 tests across 38 binaries (2849 tests skipped)
+          PASS [   0.221s] (1/2) biscuit-terminal::level2_terminal_osc_cache \
+                                 unix::level2_terminal_construction_emits_single_osc10_request
+          PASS [   0.221s] (2/2) biscuit-terminal::level2_terminal_osc_cache \
+                                 unix::level2_terminal_repeated_construction_latency
+      Summary [   0.228s] 2 tests run: 2 passed, 2849 skipped
+
+  This is the real Linux behavioral run the verification matrix requires for the
+  Unix PTY helper. The expectrl PTY path, the OSC 10 single-request proof, and the
+  repeated-construction latency measurement all execute and pass under a Linux
+  kernel. Phase 3 recorded this as deferred/not-executable; it is now CLOSED.
+
+RESULT 2 -- Findings 17 / 22 / 1 on Linux -- see linux-behavioral-run-2.txt
+---------------------------------------------------------------------------
+  First attempt failed to BUILD (infrastructure, not test failures):
+    * `ld terminated with signal 9 [Killed]` -- the linker was OOM-killed while
+      linking darkmatter's large test binaries (layout_snapshots,
+      reference_integration, level2_render_tree_terminal) inside the VM.
+    * `can't find crate for rand_chacha` -- a truncated cargo registry left by an
+      earlier run that exhausted the container's 59 GB overlay (CARGO_TARGET_DIR
+      had been left inside the container's writable layer; it was moved to a
+      host-mounted directory).
+  Neither is a signal about the code under test. Retried with a cleared registry,
+  --memory=7g, CARGO_BUILD_JOBS=2, and targeted per-binary `cargo test` instead of
+  a whole-package nextest build.
+
+FINDING (pre-existing, NOT this feature's) -- sniff's test suite does not compile on Linux
+------------------------------------------------------------------------------------------
+  error[E0061]: this function takes more arguments than were supplied
+    --> sniff/lib/tests/integration.rs:1800
+     |
+ 1800|     let managers = detect_linux_package_managers(linux_family);
+     |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ -------------- argument #2 is missing
+
+  `test_linux_package_managers_finds_at_least_one` is `#[cfg(target_os = "linux")]`,
+  so it is never compiled on macOS or Windows -- which is why this has gone unnoticed.
+  `detect_linux_package_managers` (sniff/lib/src/os/package_manager.rs:910) gained an
+  `Option<&ExecutableIndex>` parameter and this call site was never updated.
+
+  NOT caused by this feature: the entire sniff diff here is
+  `sniff/lib/src/os/time.rs` + `sniff/lib/README.md` (`git diff --stat sniff/`),
+  neither of which touches package-manager detection. Reported to the owner.
+  Consequence: `just test` for sniff is red on Linux for reasons unrelated to
+  Finding 1, and Finding 1's own seam tests must be run via `--lib` to bypass it.

@@ -2,8 +2,87 @@
 agent: codex/
 total_phases: 8
 created: 2026-07-14
-phase: 1
+phase: 4
 yolo: "true"
+source_files_during_phase_1:
+  - darkmatter/lib/benches/clean_hot_paths.rs
+  - darkmatter/lib/Cargo.toml
+docs_updated_during_phase_1:
+  - darkmatter/features/2026-07-14-invalid-frontmatter/plan.md
+docs_created_during_phase_1:
+  - darkmatter/features/2026-07-14-invalid-frontmatter/decisions.md
+  - darkmatter/features/2026-07-14-invalid-frontmatter/impact-report.md
+  - darkmatter/features/2026-07-14-invalid-frontmatter/baselines.md
+  - darkmatter/features/2026-07-14-invalid-frontmatter/acceptance-matrix.md
+  - darkmatter/features/2026-07-14-invalid-frontmatter/baselines/no-fm.md
+  - darkmatter/features/2026-07-14-invalid-frontmatter/baselines/clean-fm.md
+  - darkmatter/features/2026-07-14-invalid-frontmatter/baselines/invalid-reserved.md
+  - darkmatter/features/2026-07-14-invalid-frontmatter/baselines/coercible.md
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - biscuit-file/lib/src/lib.rs
+  - biscuit-file/lib/src/span.rs
+  - biscuit-file/lib/src/yaml/mod.rs
+  - biscuit-file/lib/src/yaml/types.rs
+  - biscuit-file/lib/src/yaml/location.rs
+  - biscuit-file/lib/src/yaml/analyze/mod.rs
+  - biscuit-file/lib/src/yaml/analyze/diagnostic.rs
+  - biscuit-file/lib/src/yaml/analyze/analysis.rs
+  - biscuit-file/lib/src/yaml/analyze/edit_set.rs
+  - biscuit-file/lib/src/yaml/tests/mod.rs
+  - biscuit-file/lib/src/yaml/tests/location.rs
+  - biscuit-file/lib/src/yaml/tests/retained_source.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/mod.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/analysis.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/diagnostic.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/edit_set.rs
+  - biscuit-file/lib/tests/span_compat.rs
+  - darkmatter/lib/src/markdown/span.rs
+  - darkmatter/lib/tests/span_compat.rs
+docs_updated_during_phase_2:
+  - darkmatter/features/2026-07-14-invalid-frontmatter/plan.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - biscuit-file/lib/src/lib.rs
+  - biscuit-file/lib/src/yaml/mod.rs
+  - biscuit-file/lib/src/yaml/types.rs
+  - biscuit-file/lib/src/yaml/analyze/mod.rs
+  - biscuit-file/lib/src/yaml/analyze/scan.rs
+  - biscuit-file/lib/src/yaml/analyze/engine.rs
+  - biscuit-file/lib/src/yaml/analyze/recover.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/mod.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/scan.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/normalization.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/whitespace.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/reserved_indicator.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/line_endings.rs
+  - biscuit-file/lib/src/yaml/tests/mod.rs
+  - biscuit-file/lib/src/yaml/tests/diagnose.rs
+  - biscuit-file/lib/tests/parse_count.rs
+  - biscuit-file/lib/tests/yaml_safety.rs
+docs_updated_during_phase_3:
+  - darkmatter/features/2026-07-14-invalid-frontmatter/plan.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - biscuit-file/lib/src/yaml/analyze/mod.rs
+  - biscuit-file/lib/src/yaml/analyze/engine.rs
+  - biscuit-file/lib/src/yaml/analyze/scan.rs
+  - biscuit-file/lib/src/yaml/analyze/report.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/mod.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/duplicate_keys.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/anchors.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/multi_document.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/lints.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/classification_gate.rs
+docs_updated_during_phase_4:
+  - darkmatter/features/2026-07-14-invalid-frontmatter/plan.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+packages:
+  - biscuit-file
+  - darkmatter
 ---
 
 # Invalid Frontmatter — Execution Plan
@@ -63,168 +142,168 @@ into `md clean` without inspecting YAML fences in the Markdown body.
 
 ## Phase 1: Contract Freeze, Impact Analysis, and Baselines
 
-- [ ] Refresh the GitNexus index and read the repository context before source
+- [x] Refresh the GitNexus index and read the repository context before source
   edits; if refresh cannot complete within the non-interactive command limit,
   record the stale-index state and verify every graph result against current
   source.
-- [ ] Run upstream GitNexus impact analysis for every existing symbol expected
+- [x] Run upstream GitNexus impact analysis for every existing symbol expected
   to change, including `Yaml`, `YamlSource`, `YamlError`, Darkmatter's
   `SourceSpan` re-export, `EffectiveSchema` validation entry points,
   `extract_frontmatter_block`, `run_clean`, `apply_cleanup`, the clean CLI
   variant, and top-level `--save` dispatch. Record direct callers, affected
   processes, and risk; stop and warn before editing any HIGH or CRITICAL target.
-- [ ] Capture pre-change functional baselines for no-frontmatter input,
+- [x] Capture pre-change functional baselines for no-frontmatter input,
   clean-frontmatter input, malformed `title: @daily-report`, schema-coercible
   `release: 1.20`, stdin, `--save`, verbose delta reporting, and current exit
   codes/channels.
-- [ ] Capture repeatable performance baselines for the two required hot paths:
+- [x] Capture repeatable performance baselines for the two required hot paths:
   a representative document with no frontmatter and a representative document
   with already-clean frontmatter.
-- [ ] Create `decisions.md` and ratify a source-first public API that can return
+- [x] Create `decisions.md` and ratify a source-first public API that can return
   diagnostics for both parseable and unparseable YAML while retaining
   `Yaml::diagnose()` as a convenience for successfully parsed values.
-- [ ] Ratify a per-repair safety matrix instead of applying one contradictory
+- [x] Ratify a per-repair safety matrix instead of applying one contradictory
   gate to every class: define the proof required for parse-equivalent edits,
   schema-proven invalid-to-valid quoting, and invalid-YAML parse-recovery
   quoting. Explicitly resolve how the flagship case is proven when there is no
   original parsed value to compare.
-- [ ] Ratify the exact bounded grammar for the no-schema reserved-indicator
+- [x] Ratify the exact bounded grammar for the no-schema reserved-indicator
   repair, including which indicators and mapping/sequence contexts qualify,
   how the lexeme boundary is found, and which ambiguous cases remain
   report-only.
-- [ ] Ratify the clean pipeline order. Recommended order: raw input and
+- [x] Ratify the clean pipeline order. Recommended order: raw input and
   frontmatter extraction; schema-agnostic diagnostics/accepted repairs;
   Markdown parse; effective-schema diagnostics/accepted repairs; existing body
   cleanup; raw-preserving document assembly.
-- [ ] Ratify raw-source ownership for `YamlSource::Path`. Recommended decision:
+- [x] Ratify raw-source ownership for `YamlSource::Path`. Recommended decision:
   retain the bytes/text read at construction so diagnostics and repairs cannot
   observe a second, TOCTOU-raced file version.
-- [ ] Ratify CLI behavior: “default auto-apply” versus existing `--save`
+- [x] Ratify CLI behavior: “default auto-apply” versus existing `--save`
   semantics, stdout versus in-place writes, `--json` output channel/envelope,
   coexistence of cleaned Markdown and JSON diagnostics, and verbose delta
   behavior when the original frontmatter cannot be parsed.
-- [ ] Ratify clean schema-option semantics and conflicts for
+- [x] Ratify clean schema-option semantics and conflicts for
   `--baseline-schema`, `--no-baseline-schema`, `--schema`, and
   `--no-trigger-schemas`, including whether `--schema` replaces or layers over
   the document's own `$schema` and whether schema flags are meaningful for
   stdin.
-- [ ] Ratify unconstrained-key behavior, exact/stable JSON field names and enum
+- [x] Ratify unconstrained-key behavior, exact/stable JSON field names and enum
   spellings, line/column indexing rules, idempotency expectations, BOM scope,
   line-ending scope, and the corpus licensing/pinning strategy; do not promote
   any undecided item from the spec's Open Questions without this sign-off.
-- [ ] Convert the ratified decisions into an acceptance matrix mapping every
+- [x] Convert the ratified decisions into an acceptance matrix mapping every
   in-scope opportunity, safety invariant, CLI mode, OS newline form, and
   performance case to a named test or benchmark location.
 
 ### Validation Checkpoint
 
-- [ ] Confirm `decisions.md`, the impact report, behavior baselines,
+- [x] Confirm `decisions.md`, the impact report, behavior baselines,
   performance baselines, and acceptance matrix are reviewed and complete
   before any production symbol is edited.
 
 ## Phase 2: `biscuit-file` Source and Diagnostic Foundations
 
-- [ ] Add one shared byte-offset `SourceSpan` vocabulary to `biscuit-file` and
+- [x] Add one shared byte-offset `SourceSpan` vocabulary to `biscuit-file` and
   preserve Darkmatter's existing public import path through a compatible
   re-export or lossless conversion; add compile-time/public-API tests that
   prevent the two crates from silently diverging.
-- [ ] Add serde-capable `YamlDiagnostic`, `YamlRepair`, stable diagnostic-code
+- [x] Add serde-capable `YamlDiagnostic`, `YamlRepair`, stable diagnostic-code
   and certainty-classification enums, and any top-level analysis/repair result
   required by the Phase 1 JSON contract; re-export them from the
   `biscuit_file` root.
-- [ ] Add a structured parse-location projection/accessor around the existing
+- [x] Add a structured parse-location projection/accessor around the existing
   `serde_yaml_ng::Error::location()` data while preserving current
   `YamlError` display text and conversion behavior.
-- [ ] Retain the original source read by path-backed `Yaml` values according to
+- [x] Retain the original source read by path-backed `Yaml` values according to
   the Phase 1 ownership decision; define behavior for text, bytes, and
   `Yaml::from_value`, where no authored source may exist.
-- [ ] Add a source edit-set utility that validates UTF-8 boundaries, rejects
+- [x] Add a source edit-set utility that validates UTF-8 boundaries, rejects
   out-of-range or overlapping repairs, applies accepted edits from the end of
   the source toward the beginning, and returns an audit record of applied and
   rejected candidates.
-- [ ] Add focused unit tests for multibyte spans, CRLF byte offsets, parser
+- [x] Add focused unit tests for multibyte spans, CRLF byte offsets, parser
   byte/line/column projection, retained path content, `from_value` behavior,
   diagnostic JSON serialization, and edit overlap/boundary rejection.
-- [ ] Parallelizable: diagnostic/serde contract tests and raw-source/location
+- [x] Parallelizable: diagnostic/serde contract tests and raw-source/location
   tests may be drafted independently, then merged before the shared edit-set
   utility is finalized.
 
 ### Validation Checkpoint
 
-- [ ] From `biscuit-file`, run focused nextest cases, `just test`, and
+- [x] From `biscuit-file`, run focused nextest cases, `just test`, and
   `just lint`; verify pre-change `YamlError` display snapshots remain
   byte-identical and all new public types are reachable from the crate root.
 
 ## Phase 3: Schema-Agnostic Analyzer and Deterministic Repairs
 
-- [ ] Implement the ratified source-first analyzer entry point so invalid YAML
+- [x] Implement the ratified source-first analyzer entry point so invalid YAML
   returns structured diagnostics instead of failing construction; make
   `Yaml::diagnose()` and repair-candidate convenience methods delegate to the
   same engine for parseable, source-backed `Yaml` values.
-- [ ] Build a context-aware lexical/source map that records mappings,
+- [x] Build a context-aware lexical/source map that records mappings,
   sequences, flow collections, scalar styles, comments, block scalars,
   anchors/aliases, document markers, and exact UTF-8 byte spans without
   reserializing the document.
-- [ ] Parse at most once on the clean-input path, retain the structured parse
+- [x] Parse at most once on the clean-input path, retain the structured parse
   outcome, and generate bounded/local candidates only for a matching
   diagnostic; do not reparse documents that have no candidate edits.
-- [ ] Implement source normalization for the ratified YAML source scope: BOM,
+- [x] Implement source normalization for the ratified YAML source scope: BOM,
   CRLF/CR to LF, trailing whitespace outside scalar content, and final-newline
   handling, with each candidate evaluated under the Phase 1 safety matrix.
-- [ ] Implement parse-equivalent whitespace candidates around flow delimiters
+- [x] Implement parse-equivalent whitespace candidates around flow delimiters
   and commas, mapping colons, and sequence markers; accept only candidates
   whose reparsed `serde_yaml_ng::Value` exactly equals the original value.
-- [ ] Implement the ratified no-schema reserved-indicator quoting algorithm,
+- [x] Implement the ratified no-schema reserved-indicator quoting algorithm,
   quoting the exact authored lexeme and accepting only candidates that satisfy
   the dedicated parse-recovery proof. Keep indentation, delimiter, comment,
   quote, escape, and multi-edit ambiguity outside auto-apply.
-- [ ] Apply multiple deterministic repairs only after checking their combined
+- [x] Apply multiple deterministic repairs only after checking their combined
   non-overlap and final safety result; return diagnostics and candidate/applied
   repair records in stable source order.
-- [ ] Add table-driven tests for every accepted normalization/whitespace/
+- [x] Add table-driven tests for every accepted normalization/whitespace/
   reserved-indicator case and every refusal boundary, including
   `host:localhost`, negative numbers, comments, URLs, Windows paths, block
   scalars, flow nesting, anchors, multibyte text, BOM, LF, CRLF, and lone CR.
-- [ ] Add source-preservation assertions that reconstruct the expected output
+- [x] Add source-preservation assertions that reconstruct the expected output
   solely from accepted spans and prove every untouched byte is unchanged.
 
 ### Validation Checkpoint
 
-- [ ] From `biscuit-file`, run the focused analyzer tests, `just test`, and
+- [x] From `biscuit-file`, run the focused analyzer tests, `just test`, and
   `just lint`; confirm clean input parses once, candidate-free input reparses
   zero times, and all auto-applied edits satisfy the ratified safety proof.
 
 ## Phase 4: Schema-Agnostic Report-Only Diagnostics
 
-- [ ] Detect duplicate mapping keys at every nesting level with source spans
+- [x] Detect duplicate mapping keys at every nesting level with source spans
   for the conflicting entries even though `serde_yaml_ng` rejects the final
   document; offer only the candidate information ratified in Phase 1 and never
   select a repair automatically.
-- [ ] Detect undeclared, forward, misspelled, duplicate, and unused
+- [x] Detect undeclared, forward, misspelled, duplicate, and unused
   anchor/alias conditions that the v1 contract retains; classify every result
   as report-only and preserve graph-sensitive source.
-- [ ] Detect multiple YAML documents for single-document analysis and report
+- [x] Detect multiple YAML documents for single-document analysis and report
   the incompatibility without selecting, splitting, or rewriting a document.
-- [ ] Implement the schema-free `non-deterministic-find` lints named by the
+- [x] Implement the schema-free `non-deterministic-find` lints named by the
   spec: ambiguous scalars, suspicious empty values, block-scalar smells,
   comment-truncation/indicator smells, style/indentation inconsistency, and
   similar/misplaced keys.
-- [ ] Add suppression and confidence boundaries that keep common intentional
+- [x] Add suppression and confidence boundaries that keep common intentional
   YAML quiet; record the reason for every heuristic threshold in tests rather
   than promoting a smell to an error.
-- [ ] Add a single auto-apply filter keyed on classification and prove with
+- [x] Add a single auto-apply filter keyed on classification and prove with
   exhaustive enum tests that neither report-only classification can reach edit
   application, even if a diagnostic carries candidate repairs.
-- [ ] Add positive, negative, nested, comment-preservation, and ordering tests
+- [x] Add positive, negative, nested, comment-preservation, and ordering tests
   for each detector, plus a mixed document proving deterministic repairs can
   coexist with report-only findings without applying the latter.
-- [ ] Parallelizable after Phase 3: Phase 4 can proceed independently of the
+- [x] Parallelizable after Phase 3: Phase 4 can proceed independently of the
   Darkmatter schema-aware work in Phase 5 because both consume the frozen
   shared diagnostic and repair contracts.
 
 ### Validation Checkpoint
 
-- [ ] From `biscuit-file`, run focused detector tests, `just test`, and
+- [x] From `biscuit-file`, run focused detector tests, `just test`, and
   `just lint`; assert report-only diagnostics never change source and remain
   deterministically ordered across runs.
 

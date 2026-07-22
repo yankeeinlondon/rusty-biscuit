@@ -84,9 +84,35 @@ jobs:
       # *code* compiling everywhere. `--all-targets` builds the test, bench, and
       # example targets so a Unix-only import or a macOS-only helper fails here
       # even when the offending test never runs on this OS.
+      #
+      # `--features remote` (which enables `network`) is not optional: sniff-lib
+      # is `default = []`, so without it every `#[cfg(feature = "remote")]` and
+      # `#[cfg(feature = "network")]` target is invisible to this guard — which
+      # is exactly how ~190 tests, including the whole `remote_providers` suite,
+      # went unrun for months. A guard that cannot see the code it guards reads
+      # as coverage without being any.
       - name: Check sniff library (all targets)
-        run: cargo check --color=never -p sniff --all-targets
+        run: cargo check --color=never -p sniff --all-targets --features remote
 
+      # `remote` (and the `network` feature it implies) is NOT a default
+      # feature, so the step above compiles none of `sniff::remote` — not the
+      # provider client, and not the `focused_provider` / `remote_observation`
+      # Wiremock test binaries, which are `cfg`-gated down to empty targets
+      # without it. Selecting it explicitly is what makes this job a compile
+      # guard for the provider surface rather than a guard for everything
+      # except the provider surface.
+      #
+      # `--all-targets` matters here beyond the test binaries: the `perf` bench
+      # and the profiling examples are `network`-gated and are built by no other
+      # cross-platform step (`just test` runs nextest, which does not build
+      # benches).
+      - name: Check sniff library with remote provider surface (all targets)
+        run: cargo check --color=never -p sniff --all-targets --features remote
+
+      # sniff-cli depends on the library as
+      # `features = ["network", "remote"]`, so this step already compiles the
+      # library's provider *source* on every OS. It does not build sniff's own
+      # test/bench targets — that is the step above.
       - name: Check sniff CLI (all targets)
         run: cargo check --color=never -p sniff-cli --all-targets
 
@@ -95,6 +121,11 @@ jobs:
       # filter that excludes the L2/L3/browser/real/slow tiers. This is the
       # sniff-cli nextest decision (plan Phase 4): the host-independent
       # (L1) CLI tests run in the full macOS/Linux/Windows matrix here.
+      #
+      # The `sniff` half of that recipe passes `--features remote`, so the
+      # provider Wiremock suites are executed — not merely compiled — on all
+      # three OSes. Keep it that way: dropping the flag from `sniff/justfile`
+      # would silently reduce those suites to empty binaries.
       - name: Run sniff library and CLI tests
         run: cd sniff && just test
 

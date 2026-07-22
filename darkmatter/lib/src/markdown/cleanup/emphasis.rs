@@ -107,12 +107,42 @@ pub(super) fn preserve_original_emphasis<'a>(
 
 /// Replaces emphasis placeholders with actual markers.
 pub(super) fn restore_emphasis_placeholders(output: &mut String) {
-    // Replace double placeholders first (strong) to avoid partial matches
-    *output = output.replace(UNDERSCORE_STRONG_PLACEHOLDER, "__");
-    *output = output.replace(ASTERISK_STRONG_PLACEHOLDER, "**");
-    // Then replace single placeholders (emphasis)
-    *output = output.replace(UNDERSCORE_EMPHASIS_PLACEHOLDER, "_");
-    *output = output.replace(ASTERISK_EMPHASIS_PLACEHOLDER, "*");
+    // Fast path: no placeholders to restore, avoid the allocation entirely.
+    if !output.contains(UNDERSCORE_EMPHASIS_PLACEHOLDER)
+        && !output.contains(ASTERISK_EMPHASIS_PLACEHOLDER)
+    {
+        return;
+    }
+
+    // Single forward scan replacing all four placeholders at once. A doubled
+    // placeholder run is the strong marker (`__` / `**`); a lone one is the
+    // emphasis marker (`_` / `*`). Greedy left-to-right pairing is byte-identical
+    // to the previous strong-then-emphasis `str::replace` sequence, but does it
+    // in one pass with one allocation instead of four.
+    let mut result = String::with_capacity(output.len());
+    let mut chars = output.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            UNDERSCORE_EMPHASIS_PLACEHOLDER => {
+                if chars.peek() == Some(&UNDERSCORE_EMPHASIS_PLACEHOLDER) {
+                    chars.next();
+                    result.push_str("__");
+                } else {
+                    result.push('_');
+                }
+            }
+            ASTERISK_EMPHASIS_PLACEHOLDER => {
+                if chars.peek() == Some(&ASTERISK_EMPHASIS_PLACEHOLDER) {
+                    chars.next();
+                    result.push_str("**");
+                } else {
+                    result.push('*');
+                }
+            }
+            _ => result.push(c),
+        }
+    }
+    *output = result;
 }
 
 /// Unescapes underscores and asterisks that cmark escaped in plain text.

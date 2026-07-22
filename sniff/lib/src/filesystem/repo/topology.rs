@@ -10,19 +10,24 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use biscuit_file::toml_crate;
-
+use super::detection::{ManifestStore, probe_exists};
 use super::standard::{
     DetectedStandard, DetectionConfidence, MonorepoLayer, MonorepoStandard, RootMembership,
 };
-use super::types::Package;
+use super::seed::PackageSeed;
 
 /// One detector's contribution to the topology: the standard it matched, the
-/// root its marker lives at, and the packages its membership model resolved.
+/// root its marker lives at, and the boundaries its membership model resolved.
+///
+/// ## Notes
+///
+/// Carries [`PackageSeed`]s rather than enriched `Package`s so the topology is
+/// built — and duplicate boundaries collapsed — before any manifest is parsed
+/// for them. `relative` is the only field this module ever needed.
 pub(crate) struct DetectorOutcome {
     pub(crate) standard: MonorepoStandard,
     pub(crate) root: PathBuf,
-    pub(crate) packages: Vec<Package>,
+    pub(crate) seeds: Vec<PackageSeed>,
 }
 
 /// Build the membership layers from detector outcomes.
@@ -32,7 +37,10 @@ pub(crate) struct DetectorOutcome {
 /// Turborepo, Lerna) are attached to each authority at that root. A root whose
 /// only standards orchestrate tasks yields no layer — it has no membership
 /// authority to own packages.
-pub(crate) fn build_monorepo_layers(outcomes: &[DetectorOutcome]) -> Vec<MonorepoLayer> {
+pub(crate) fn build_monorepo_layers(
+    outcomes: &[DetectorOutcome],
+    manifests: &ManifestStore,
+) -> Vec<MonorepoLayer> {
     let mut by_root: BTreeMap<&Path, Vec<&DetectorOutcome>> = BTreeMap::new();
     for outcome in outcomes {
         by_root
@@ -55,11 +63,11 @@ pub(crate) fn build_monorepo_layers(outcomes: &[DetectorOutcome]) -> Vec<Monorep
                 "is_monorepo implies primary authority defines membership (never Unknown)"
             );
             let provenance = outcome.standard.membership_provenance();
-            let root_is_package = root_declares_package(outcome.standard, root);
+            let root_is_package = root_declares_package(outcome.standard, root, manifests);
             let packages = outcome
-                .packages
+                .seeds
                 .iter()
-                .map(|pkg| pkg.relative.clone())
+                .map(|seed| seed.relative.clone())
                 .collect();
             layers.push(MonorepoLayer {
                 root: root.to_path_buf(),
@@ -83,24 +91,21 @@ pub(crate) fn build_monorepo_layers(outcomes: &[DetectorOutcome]) -> Vec<Monorep
 /// inspect the root manifest: a `[workspace]` plus `[package]` in the same
 /// `Cargo.toml` makes the root a package; a virtual `[workspace]`-only
 /// manifest does not.
-fn root_declares_package(standard: MonorepoStandard, root: &Path) -> bool {
+fn root_declares_package(
+    standard: MonorepoStandard,
+    root: &Path,
+    manifests: &ManifestStore,
+) -> bool {
     match standard.spec().root_membership {
         RootMembership::Always => true,
         RootMembership::Never => false,
         RootMembership::WhenManifestDeclaresPackage => {
-            // Today only Cargo uses this policy. The check reads the root
-            // manifest's `[package]` table without spawning — purely a TOML
-            // parse — so the no-subprocess detection boundary is preserved.
             if standard != MonorepoStandard::CargoWorkspace {
                 return false;
             }
-            let Ok(content) = std::fs::read_to_string(root.join("Cargo.toml")) else {
-                return false;
-            };
-            let Ok(parsed) = toml_crate::from_str::<toml_crate::Value>(&content) else {
-                return false;
-            };
-            parsed.get("package").is_some()
+            manifests
+                .cargo(&root.join("Cargo.toml"))
+                .is_some_and(|parsed| parsed.get("package").is_some())
         }
     }
 }
@@ -187,7 +192,7 @@ fn matched_markers(standard: MonorepoStandard, root: &Path) -> Vec<PathBuf> {
         .markers
         .iter()
         .map(|marker| root.join(marker.file))
-        .filter(|path| path.exists())
+        .filter(|path| probe_exists(path))
         .collect()
 }
 
@@ -196,31 +201,32 @@ mod tests {
     use super::*;
     use crate::filesystem::repo::standard::{DetectionConfidence, PackageProvenance};
 
-    fn pkg(name: &str) -> Package {
-        Package {
-            name: name.to_string(),
-            relative: format!("packages/{name}"),
-            ..Package::default()
-        }
+    fn pkg(name: &str) -> PackageSeed {
+        PackageSeed::new(
+            &PathBuf::from("/repo/packages").join(name),
+            Path::new("/repo"),
+            MonorepoStandard::Unknown,
+            PackageProvenance::ManifestScan,
+        )
     }
 
-    fn outcome(standard: MonorepoStandard, packages: Vec<Package>) -> DetectorOutcome {
+    fn outcome(standard: MonorepoStandard, seeds: Vec<PackageSeed>) -> DetectorOutcome {
         DetectorOutcome {
             standard,
             root: PathBuf::from("/repo"),
-            packages,
+            seeds,
         }
     }
 
     fn outcome_at(
         standard: MonorepoStandard,
         root: &str,
-        packages: Vec<Package>,
+        seeds: Vec<PackageSeed>,
     ) -> DetectorOutcome {
         DetectorOutcome {
             standard,
             root: PathBuf::from(root),
-            packages,
+            seeds,
         }
     }
 
@@ -230,7 +236,7 @@ mod tests {
             outcome(MonorepoStandard::PnpmWorkspaces, vec![pkg("a"), pkg("b")]),
             outcome(MonorepoStandard::Nx, vec![pkg("a"), pkg("b")]),
         ];
-        let layers = build_monorepo_layers(&outcomes);
+        let layers = build_monorepo_layers(&outcomes, &ManifestStore::default());
         assert_eq!(layers.len(), 1);
         assert_eq!(layers[0].authority, MonorepoStandard::PnpmWorkspaces);
         assert_eq!(layers[0].orchestrators, vec![MonorepoStandard::Nx]);
@@ -244,14 +250,14 @@ mod tests {
             outcome(MonorepoStandard::CargoWorkspace, vec![pkg("server")]),
             outcome(MonorepoStandard::PnpmWorkspaces, vec![pkg("frontend")]),
         ];
-        let layers = build_monorepo_layers(&outcomes);
+        let layers = build_monorepo_layers(&outcomes, &ManifestStore::default());
         assert_eq!(layers.len(), 2);
     }
 
     #[test]
     fn orchestrator_without_authority_yields_no_layer() {
         let outcomes = vec![outcome(MonorepoStandard::Nx, vec![pkg("a"), pkg("b")])];
-        let layers = build_monorepo_layers(&outcomes);
+        let layers = build_monorepo_layers(&outcomes, &ManifestStore::default());
         assert!(layers.is_empty());
         assert!(!layers_imply_monorepo(&layers));
     }
@@ -259,7 +265,7 @@ mod tests {
     #[test]
     fn nx_only_downgrade_records_inferred_unknown() {
         let outcomes = vec![outcome(MonorepoStandard::Nx, vec![pkg("a")])];
-        let layers = build_monorepo_layers(&outcomes);
+        let layers = build_monorepo_layers(&outcomes, &ManifestStore::default());
         let is_monorepo = layers_imply_monorepo(&layers);
         assert!(!is_monorepo);
         let standards =
@@ -278,7 +284,7 @@ mod tests {
             MonorepoStandard::PnpmWorkspaces,
             vec![pkg("a"), pkg("b")],
         )];
-        let layers = build_monorepo_layers(&outcomes);
+        let layers = build_monorepo_layers(&outcomes, &ManifestStore::default());
         let standards = build_detected_standards(Path::new("/repo"), &outcomes, &layers, true);
         let pnpm = standards
             .iter()
@@ -304,7 +310,7 @@ mod tests {
                 vec![pkg("solo")],
             ),
         ];
-        let layers = build_monorepo_layers(&outcomes);
+        let layers = build_monorepo_layers(&outcomes, &ManifestStore::default());
         assert!(layers_imply_monorepo(&layers));
         let standards = build_detected_standards(Path::new("/repo"), &outcomes, &layers, true);
 
@@ -350,13 +356,13 @@ mod tests {
                 vec![pkg("web"), pkg("api")],
             ),
         ];
-        let layers = build_monorepo_layers(&outcomes);
+        let layers = build_monorepo_layers(&outcomes, &ManifestStore::default());
 
         let catalog: std::collections::HashMap<String, usize> = outcomes
             .iter()
-            .flat_map(|o| o.packages.iter())
-            .fold(std::collections::HashMap::new(), |mut acc, pkg| {
-                *acc.entry(pkg.relative.clone()).or_insert(0) += 1;
+            .flat_map(|o| o.seeds.iter())
+            .fold(std::collections::HashMap::new(), |mut acc, seed| {
+                *acc.entry(seed.relative.clone()).or_insert(0) += 1;
                 acc
             });
 

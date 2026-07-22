@@ -52,6 +52,63 @@ pub use types::{
 use crate::markdown::compose::ComposeOptions;
 use crate::markdown::compose::ComposeWarning;
 
+/// Owns the allow-once reservations taken for one directive's approval flow and
+/// releases any still held when that flow leaves [`prepare_directive`] by ANY
+/// path — including an approval-handler error and a policy-store write failure.
+///
+/// A leaked reservation is not a cosmetic set entry: the next composition of
+/// that same command blocks for the full `RESERVATION_WAIT_TIMEOUT` and then
+/// fails as an approval conflict the user never caused.
+///
+/// Reservations consumed on the success path are handed off explicitly via
+/// [`ReservationGuard::release`], which removes them from the guard, so `Drop`
+/// releases only what is genuinely still held.
+struct ReservationGuard<'a> {
+    runtime: &'a mut ShellExpansionRuntime,
+    held: Vec<String>,
+}
+
+impl<'a> ReservationGuard<'a> {
+    fn new(runtime: &'a mut ShellExpansionRuntime) -> Self {
+        Self {
+            runtime,
+            held: Vec::new(),
+        }
+    }
+
+    fn reserve(&mut self, normalized: &str, may_wait: bool) -> types::ReserveOutcome {
+        let outcome = self.runtime.reserve_allow_once(normalized, may_wait);
+        if outcome == types::ReserveOutcome::Reserved {
+            self.held.push(normalized.to_string());
+        }
+        outcome
+    }
+
+    fn holds_none(&self) -> bool {
+        self.held.is_empty()
+    }
+
+    /// Completes the reservation for `normalized` if this guard owns it.
+    ///
+    /// A command this guard never reserved is already authorized — by the
+    /// whitelist or by a peer's completed allow-once — so it is left alone
+    /// rather than released out from under whoever does own it.
+    fn release(&mut self, normalized: &str, approved: bool) {
+        if let Some(index) = self.held.iter().position(|held| held == normalized) {
+            self.held.swap_remove(index);
+            self.runtime.complete_allow_once(normalized, approved);
+        }
+    }
+}
+
+impl Drop for ReservationGuard<'_> {
+    fn drop(&mut self) {
+        for normalized in std::mem::take(&mut self.held) {
+            self.runtime.complete_allow_once(&normalized, false);
+        }
+    }
+}
+
 /// A directive that has passed alias resolution, policy checks, and approval.
 #[derive(Debug, Clone)]
 pub(crate) struct PreparedShellDirective {
@@ -150,6 +207,22 @@ pub(crate) fn execute_directive_detailed(
 
 /// Resolves aliases, applies policy checks, and records approval decisions
 /// without executing the command yet.
+///
+/// ## Notes
+///
+/// Each directive is judged against a policy view taken at its own entry, so a
+/// rule persisted by an approval earlier in the same stage suppresses a later
+/// directive's prompt — the user-observable prompt frequency callers rely on.
+/// The view is an [`Arc`]-shared borrow of the runtime's rule collections
+/// ([`ShellExpansionRuntime::snapshot`]), not a copy of them, so taking it per
+/// directive costs three refcount bumps.
+///
+/// The policy mutex is held only for those refcount bumps — never across
+/// parsing, approval, or command execution.
+///
+/// Allow-once reservations taken here are owned by a [`ReservationGuard`], so
+/// every exit — handler error, policy-store write failure, conflict, or success
+/// — releases whatever is still reserved and wakes any same-command waiter.
 pub(crate) fn prepare_directive(
     directive: &ShellDirective,
     options: &ComposeOptions,
@@ -236,7 +309,7 @@ pub(crate) fn prepare_directive(
         // skipped. If another thread holds a pending reservation for any
         // command in this chain, treat it as a conflict and require fresh
         // approval rather than implicitly approving the unrelated commands.
-        let mut reserved: Vec<String> = Vec::new();
+        let mut guard = ReservationGuard::new(shell_runtime);
         let mut pending_conflict = false;
 
         for (i, normalized) in normalized_commands.iter().enumerate() {
@@ -247,9 +320,9 @@ pub(crate) fn prepare_directive(
             // Block on a same-command peer approval only while we hold no
             // reservations of our own; otherwise a hold-and-wait cycle across
             // cross-ordered chains could deadlock.
-            match shell_runtime.reserve_allow_once(normalized, reserved.is_empty()) {
-                types::ReserveOutcome::Reserved => reserved.push(normalized.clone()),
-                types::ReserveOutcome::AlreadyAllowed => {}
+            let may_wait = guard.holds_none();
+            match guard.reserve(normalized, may_wait) {
+                types::ReserveOutcome::Reserved | types::ReserveOutcome::AlreadyAllowed => {}
                 types::ReserveOutcome::Pending => {
                     pending_conflict = true;
                     break;
@@ -261,9 +334,7 @@ pub(crate) fn prepare_directive(
             // Release reservations we just made so the conflicting thread can
             // make progress, then surface the conflict as an approval-required
             // error instead of silently approving the rest of the chain.
-            for normalized in &reserved {
-                shell_runtime.complete_allow_once(normalized, false);
-            }
+            drop(guard);
             return Err(ShellExpansionError::ApprovalRequired {
                 ctx: Box::new(directive.ctx.clone()),
                 command: display_command,
@@ -273,7 +344,7 @@ pub(crate) fn prepare_directive(
             });
         }
 
-        if reserved.is_empty() {
+        if guard.holds_none() {
             // Every command in the chain is now authorized (whitelist or a
             // concurrently-completed allow-once). No prompt is needed.
             return Ok(PreparedShellDirective {
@@ -311,9 +382,9 @@ pub(crate) fn prepare_directive(
         match handler.approve(request)? {
             ShellApprovalDecision::AllowExactPersist => {
                 for normalized in &normalized_commands {
-                    shell_runtime.complete_allow_once(normalized, false);
+                    guard.release(normalized, false);
                     store::append_whitelist_exact(policy_paths, normalized)?;
-                    shell_runtime.persist_whitelist_exact(normalized.clone());
+                    guard.runtime.persist_whitelist_exact(normalized.clone());
                 }
                 Ok(PreparedShellDirective {
                     effective,
@@ -322,7 +393,7 @@ pub(crate) fn prepare_directive(
             }
             ShellApprovalDecision::AllowCommandPersist => {
                 for normalized in &normalized_commands {
-                    shell_runtime.complete_allow_once(normalized, false);
+                    guard.release(normalized, false);
                 }
                 // Persist a prefix entry for every unique executable in the
                 // chain so the next run does not re-prompt for later actions.
@@ -330,7 +401,7 @@ pub(crate) fn prepare_directive(
                 for (exe, _) in executables_with_args(&effective) {
                     if persisted.insert(exe.clone()) {
                         store::append_whitelist_prefix(policy_paths, &exe)?;
-                        shell_runtime.persist_whitelist_prefix(exe);
+                        guard.runtime.persist_whitelist_prefix(exe);
                     }
                 }
                 Ok(PreparedShellDirective {
@@ -340,9 +411,9 @@ pub(crate) fn prepare_directive(
             }
             ShellApprovalDecision::AllowOnce => {
                 for normalized in &normalized_commands {
-                    shell_runtime.complete_allow_once(normalized, true);
+                    guard.release(normalized, true);
                 }
-                shell_runtime.approvals_used += 1;
+                guard.runtime.approvals_used += 1;
                 Ok(PreparedShellDirective {
                     effective,
                     display_command,
@@ -350,7 +421,7 @@ pub(crate) fn prepare_directive(
             }
             ShellApprovalDecision::Deny => {
                 for normalized in &normalized_commands {
-                    shell_runtime.complete_allow_once(normalized, false);
+                    guard.release(normalized, false);
                 }
                 Err(ShellExpansionError::Denied {
                     ctx: Box::new(directive.ctx.clone()),
@@ -360,9 +431,9 @@ pub(crate) fn prepare_directive(
             }
             ShellApprovalDecision::BlacklistPersist => {
                 for normalized in &normalized_commands {
-                    shell_runtime.complete_allow_once(normalized, false);
+                    guard.release(normalized, false);
                     store::append_blacklist_exact(policy_paths, normalized)?;
-                    shell_runtime.persist_blacklist_exact(normalized.clone());
+                    guard.runtime.persist_blacklist_exact(normalized.clone());
                 }
                 Err(ShellExpansionError::Blacklisted {
                     ctx: Box::new(directive.ctx.clone()),
@@ -1407,6 +1478,233 @@ name: world
         assert_eq!(handler.approvals(), 2);
         assert_eq!(report.shell_approvals_used, 2);
         assert_eq!(report.shell_expansions_applied, 2);
+    }
+
+    /// F32, half 1 of the policy-visibility contract — a rule persisted by an
+    /// approval in one stage IS policy input for a *subsequent* stage. The root
+    /// body stage persists `prefix echo`; the transcluded child's body stage
+    /// sees it and never prompts.
+    #[test]
+    fn persisted_whitelist_from_one_stage_is_policy_input_for_the_next_stage() {
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path().join("root.md");
+        let child = temp_dir.path().join("child.md");
+
+        std::fs::write(&root, "::shell echo alpha\n\n::file ./child.md\n").unwrap();
+        std::fs::write(&child, "## Child\n\n::shell echo beta\n").unwrap();
+
+        let handler = Arc::new(CountingApprovalHandler::new(
+            ShellApprovalDecision::AllowCommandPersist,
+        ));
+        let options =
+            ComposeOptions::new()
+                .with_source_file(&root)
+                .with_shell(ShellExpansionOptions {
+                    policy_root: Some(temp_dir.path().to_path_buf()),
+                    approval_handler: Some(handler.clone()),
+                    ..Default::default()
+                });
+
+        let (composed, _report) = Markdown::try_from(root.as_path())
+            .unwrap()
+            .compose_with(options)
+            .unwrap();
+
+        assert_eq!(
+            handler.approvals(),
+            1,
+            "the child stage's fresh snapshot must see the whitelist entry the root stage persisted"
+        );
+        assert!(composed.content().contains("alpha"));
+        assert!(composed.content().contains("beta"));
+    }
+
+    /// F32, half 2 of the policy-visibility contract — a rule persisted
+    /// mid-stage IS policy input for later directives in that *same* stage.
+    /// The first `echo` prompts and persists `prefix echo`; the second matches
+    /// that rule and must not prompt.
+    ///
+    /// This pins the user-observable prompt **frequency**: exactly one approval
+    /// for the pair. Finding 32's rule-set sharing must not change it.
+    #[test]
+    fn persistence_mid_stage_is_policy_input_for_the_same_stage() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "::shell echo alpha\n\n::shell echo beta\n";
+        let md: Markdown = content.into();
+
+        let handler = Arc::new(CountingApprovalHandler::new(
+            ShellApprovalDecision::AllowCommandPersist,
+        ));
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(handler.clone()),
+                ..Default::default()
+            });
+
+        let (composed, _report) = md.compose_with(options).unwrap();
+
+        assert_eq!(
+            handler.approvals(),
+            1,
+            "the second directive must observe the `prefix echo` rule the first one persisted, \
+             and not prompt again"
+        );
+        let whitelist = std::fs::read_to_string(temp_dir.path().join(".darkmatter-shell-whitelist"))
+            .unwrap();
+        assert!(
+            whitelist.contains("prefix echo"),
+            "approval must still persist its rule; got: {whitelist:?}"
+        );
+        assert!(composed.content().contains("alpha"));
+        assert!(composed.content().contains("beta"));
+    }
+
+    /// F32 — an exact-command persist mid-stage likewise suppresses a later
+    /// prompt for that same command, while a *different* command in the same
+    /// stage still prompts. Guards against a fix that preserves the frequency
+    /// count by over-authorizing rather than by refreshing the policy view.
+    #[test]
+    fn exact_persist_mid_stage_suppresses_only_the_same_command() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "::shell --no-cache echo alpha\n\n::shell --no-cache echo alpha\n\n::shell --no-cache printf beta\n";
+        let md: Markdown = content.into();
+
+        let handler = Arc::new(CountingApprovalHandler::new(
+            ShellApprovalDecision::AllowExactPersist,
+        ));
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(handler.clone()),
+                ..Default::default()
+            });
+
+        let (_composed, _report) = md.compose_with(options).unwrap();
+
+        assert_eq!(
+            handler.approvals(),
+            2,
+            "the repeated `echo alpha` must reuse the persisted exact rule, but `printf beta` \
+             must still prompt on its own"
+        );
+    }
+
+    /// F32 — the runtime shares its rule collections with a snapshot by pointer
+    /// instead of deep-copying them, and a write copies-on-write so an
+    /// outstanding snapshot keeps observing the rules it was taken with.
+    ///
+    /// This is the structural bound behind the per-directive snapshot: taking a
+    /// view per directive is affordable only because it copies no rules.
+    #[test]
+    fn snapshot_shares_rule_collections_by_pointer() {
+        let mut runtime = ShellExpansionRuntime::new();
+
+        let first = runtime.snapshot();
+        let second = runtime.snapshot();
+        assert!(
+            Arc::ptr_eq(&first.whitelist, &second.whitelist),
+            "two snapshots of an unchanged runtime must share one whitelist allocation"
+        );
+        assert!(
+            Arc::ptr_eq(&first.user_blacklist, &second.user_blacklist),
+            "two snapshots of an unchanged runtime must share one blacklist allocation"
+        );
+        assert!(
+            Arc::ptr_eq(&first.allow_once, &second.allow_once),
+            "two snapshots of an unchanged runtime must share one allow-once allocation"
+        );
+
+        runtime.persist_whitelist_prefix("echo".to_string());
+
+        let third = runtime.snapshot();
+        assert!(
+            !Arc::ptr_eq(&first.whitelist, &third.whitelist),
+            "persisting a rule must not mutate a snapshot taken before it"
+        );
+        assert!(
+            first.whitelist.entries.is_empty(),
+            "the pre-persist snapshot must still observe the rules it was taken with"
+        );
+        assert!(
+            third.whitelist.matches_prefix("echo"),
+            "a snapshot taken after the persist must observe the new rule"
+        );
+    }
+
+    /// F32 — allow-once approvals are arbitrated live through
+    /// `reserve_allow_once` against shared runtime state rather than through a
+    /// snapshot, so one approval covers a repeat of that exact command later in
+    /// the SAME stage (and across concurrent sibling transclusions).
+    #[test]
+    fn allow_once_still_dedupes_within_a_single_stage() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "::shell --no-cache echo same\n\n::shell --no-cache echo same\n";
+        let md: Markdown = content.into();
+
+        let handler = Arc::new(CountingApprovalHandler::new(
+            ShellApprovalDecision::AllowOnce,
+        ));
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(handler.clone()),
+                ..Default::default()
+            });
+
+        let (composed, report) = md.compose_with(options).unwrap();
+
+        assert_eq!(
+            handler.approvals(),
+            1,
+            "one allow-once approval must cover the repeat of that exact command"
+        );
+        assert_eq!(report.shell_expansions_applied, 2);
+        assert_eq!(composed.content().matches("same").count(), 2);
+    }
+
+    /// F32 — the policy mutex must not be held across approval. A handler that
+    /// touches the same runtime (here: by taking a snapshot of it) while the
+    /// stage is mid-approval would deadlock if `prepare_directive` still held
+    /// the lock. The test's own timeout is the failure signal.
+    #[test]
+    fn policy_mutex_is_not_held_across_approval() {
+        struct RuntimeTouchingHandler {
+            runtime: ShellExpansionRuntime,
+        }
+
+        impl ShellApprovalHandler for RuntimeTouchingHandler {
+            fn approve(
+                &self,
+                _request: ShellApprovalRequest,
+            ) -> Result<ShellApprovalDecision, ShellExpansionError> {
+                // Reaching into the shared policy state from inside the approval
+                // callback must not block.
+                let _ = self.runtime.snapshot();
+                Ok(ShellApprovalDecision::AllowOnce)
+            }
+        }
+
+        let temp_dir = TempDir::new().unwrap();
+        let runtime = ShellExpansionRuntime::new();
+        let content = "::shell echo hello\n";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(RuntimeTouchingHandler {
+                    runtime: runtime.clone_for_child(),
+                })),
+                ..Default::default()
+            });
+
+        let (composed, _report) = md.compose_with(options).unwrap();
+        assert!(composed.content().contains("hello"));
     }
 
     /// Regression test: when the source file is a bare filename (no directory
@@ -2534,5 +2832,378 @@ name: world
             msg.contains("Missing command after chain operator"),
             "got: {msg}"
         );
+    }
+
+    /// Every early return from `prepare_directive`'s approval flow must release
+    /// the allow-once reservations it took.
+    ///
+    /// A leak is precisely a normalized command left in the runtime's
+    /// `pending_allow_once` set once the flow that reserved it has returned; its
+    /// user-observable cost is the *next* composition of that command blocking
+    /// for `RESERVATION_WAIT_TIMEOUT` (30s) and then failing as an approval
+    /// conflict the user never caused. These tests therefore assert the
+    /// reservation set itself and then compose the same command again to pin the
+    /// user-observable consequence. Neither oracle measures elapsed time: a
+    /// composition's own preparation cost is unrelated to whether a reservation
+    /// was released, so timing one conflates the two.
+    mod reservation_cleanup {
+        use super::*;
+        use biscuit_terminal::errors::SourceContext;
+        use std::path::{Path, PathBuf};
+        use std::sync::{Condvar, Mutex};
+        use std::time::{Duration, Instant};
+
+        /// Ceiling for a waiter that the failing flow's release must wake.
+        ///
+        /// Unlike a composition's total cost, the two outcomes here are far
+        /// apart and neither depends on host speed: a notified waiter resumes in
+        /// microseconds, an un-notified one parks for the full 30s
+        /// `RESERVATION_WAIT_TIMEOUT`. `prepare_directive` performs no I/O on
+        /// this path, so contention cannot push a healthy waiter near this bound.
+        const NOTIFICATION_BUDGET: Duration = Duration::from_secs(10);
+
+        struct FixedHandler(ShellApprovalDecision);
+
+        impl ShellApprovalHandler for FixedHandler {
+            fn approve(
+                &self,
+                _request: ShellApprovalRequest,
+            ) -> Result<ShellApprovalDecision, ShellExpansionError> {
+                Ok(self.0.clone())
+            }
+        }
+
+        /// Fails the way an interactive prompt does when its terminal read
+        /// errors — the handler is user code and may return any error.
+        struct FailingHandler;
+
+        impl ShellApprovalHandler for FailingHandler {
+            fn approve(
+                &self,
+                _request: ShellApprovalRequest,
+            ) -> Result<ShellApprovalDecision, ShellExpansionError> {
+                Err(handler_error())
+            }
+        }
+
+        fn handler_error() -> ShellExpansionError {
+            ShellExpansionError::PolicyIo {
+                path: PathBuf::from("/approval-handler"),
+                source: std::io::Error::other("approval handler failed"),
+            }
+        }
+
+        fn directive(command: &str) -> ShellDirective {
+            let content = format!("::shell {command}\n");
+            let ctx = SourceContext::new(
+                PathBuf::from("/test.md"),
+                PathBuf::from("test.md"),
+                Arc::from(content.as_str()),
+            );
+            parse_directives(&content, ctx, 0)
+                .unwrap()
+                .pop()
+                .expect("fixture must parse to exactly one directive")
+        }
+
+        fn options(decision: ShellApprovalDecision) -> ComposeOptions {
+            ComposeOptions::new().with_shell_approval_handler(Arc::new(FixedHandler(decision)))
+        }
+
+        fn policy_paths(temp: &TempDir) -> ShellPolicyPaths {
+            ShellPolicyPaths {
+                whitelist: temp.path().join(".darkmatter-shell-whitelist"),
+                blacklist: temp.path().join(".darkmatter-shell-blacklist"),
+            }
+        }
+
+        /// Makes a policy file reject an append the way a read-only checkout or
+        /// a root-owned policy file does, so the persistence arms fail for real
+        /// rather than through a test-only seam.
+        fn make_unwritable(path: &Path) {
+            std::fs::write(path, "").unwrap();
+            let mut perms = std::fs::metadata(path).unwrap().permissions();
+            perms.set_readonly(true);
+            std::fs::set_permissions(path, perms).unwrap();
+        }
+
+        /// Asserts the failed flow released every reservation it took, then that
+        /// composing `command` again still prompts and is approved rather than
+        /// rejected as a conflict.
+        ///
+        /// The reservation-set assertion is the oracle and runs first: it is the
+        /// exact definition of the defect, and failing on it reports the leaked
+        /// command by name instead of letting the second composition stall for
+        /// the full 30s `RESERVATION_WAIT_TIMEOUT`.
+        fn assert_reservations_released(
+            runtime: &mut ShellExpansionRuntime,
+            paths: &ShellPolicyPaths,
+            command: &str,
+        ) {
+            let leaked = runtime.pending_allow_once_for_test();
+            assert!(
+                leaked.is_empty(),
+                "the failed flow left {leaked:?} reserved: the next composition of each would \
+                 block for RESERVATION_WAIT_TIMEOUT and then fail as an approval conflict the \
+                 user never caused"
+            );
+
+            if let Err(err) = prepare_directive(
+                &directive(command),
+                &options(ShellApprovalDecision::AllowOnce),
+                paths,
+                runtime,
+            ) {
+                panic!("a released command must not surface an approval conflict; got: {err}");
+            }
+        }
+
+        /// Error class 1 — the approval handler returns an error before any
+        /// reservation is completed.
+        #[test]
+        fn approval_handler_error_releases_every_reservation() {
+            let temp = TempDir::new().unwrap();
+            let paths = policy_paths(&temp);
+            let mut runtime = ShellExpansionRuntime::new();
+
+            let failing =
+                ComposeOptions::new().with_shell_approval_handler(Arc::new(FailingHandler));
+            let err = prepare_directive(
+                &directive("echo alpha && echo beta"),
+                &failing,
+                &paths,
+                &mut runtime,
+            )
+            .expect_err("the handler's error must propagate unchanged");
+            assert!(
+                matches!(err, ShellExpansionError::PolicyIo { .. }),
+                "got: {err}"
+            );
+
+            assert_reservations_released(&mut runtime, &paths, "echo beta");
+        }
+
+        /// Error class 2 — `append_whitelist_exact` fails mid-chain. `echo
+        /// alpha` is released and its append fails, so `echo beta` is still
+        /// reserved when the error propagates.
+        #[test]
+        fn whitelist_exact_write_failure_releases_the_rest_of_the_chain() {
+            let temp = TempDir::new().unwrap();
+            let paths = policy_paths(&temp);
+            make_unwritable(&paths.whitelist);
+            let mut runtime = ShellExpansionRuntime::new();
+
+            let err = prepare_directive(
+                &directive("echo alpha && echo beta"),
+                &options(ShellApprovalDecision::AllowExactPersist),
+                &paths,
+                &mut runtime,
+            )
+            .expect_err("an unwritable whitelist must fail the persist");
+            assert!(
+                matches!(err, ShellExpansionError::PolicyIo { .. }),
+                "got: {err}"
+            );
+
+            assert_reservations_released(&mut runtime, &paths, "echo beta");
+        }
+
+        /// Error class 3 — `append_whitelist_prefix` fails. This arm releases
+        /// the whole chain before its first fallible write, so it holds nothing
+        /// to leak; the test pins that ordering against a future edit that
+        /// interleaves release and persist the way the exact arm does.
+        #[test]
+        fn whitelist_prefix_write_failure_leaves_no_reservation() {
+            let temp = TempDir::new().unwrap();
+            let paths = policy_paths(&temp);
+            make_unwritable(&paths.whitelist);
+            let mut runtime = ShellExpansionRuntime::new();
+
+            let err = prepare_directive(
+                &directive("echo alpha && pwd"),
+                &options(ShellApprovalDecision::AllowCommandPersist),
+                &paths,
+                &mut runtime,
+            )
+            .expect_err("an unwritable whitelist must fail the persist");
+            assert!(
+                matches!(err, ShellExpansionError::PolicyIo { .. }),
+                "got: {err}"
+            );
+
+            assert_reservations_released(&mut runtime, &paths, "pwd");
+        }
+
+        /// Error class 4 — `append_blacklist_exact` fails mid-chain.
+        #[test]
+        fn blacklist_exact_write_failure_releases_the_rest_of_the_chain() {
+            let temp = TempDir::new().unwrap();
+            let paths = policy_paths(&temp);
+            make_unwritable(&paths.blacklist);
+            let mut runtime = ShellExpansionRuntime::new();
+
+            let err = prepare_directive(
+                &directive("echo alpha && echo beta"),
+                &options(ShellApprovalDecision::BlacklistPersist),
+                &paths,
+                &mut runtime,
+            )
+            .expect_err("an unwritable blacklist must fail the persist");
+            assert!(
+                matches!(err, ShellExpansionError::PolicyIo { .. }),
+                "got: {err}"
+            );
+
+            assert_reservations_released(&mut runtime, &paths, "echo beta");
+        }
+
+        /// Longest the approver will spin waiting for the peer to park before
+        /// declaring the test setup broken.
+        ///
+        /// This bounds a correctness precondition, not the behavior under test:
+        /// the waiter's fixtures are already built, so it reaches
+        /// `reserve_allow_once` and increments the parked-waiter count in
+        /// microseconds. Exceeding this means the waiter never parked — the
+        /// synchronization the test depends on failed — so we panic loudly here
+        /// rather than release early and silently stop exercising notification.
+        const WAITER_PARK_DEADLINE: Duration = Duration::from_secs(5);
+
+        /// The release must also notify a peer already parked in
+        /// `reserve_allow_once`, not merely leave a clean set behind for the
+        /// next caller.
+        ///
+        /// The approver reserves `echo shared`, enters its handler, and does not
+        /// return its error until `parked_waiters_for_test` proves the waiter is
+        /// enqueued on `reservation_done`. Because that count is incremented
+        /// under the shared mutex immediately before `wait_timeout_while`'s
+        /// atomic park, a positive reading is proof of parking — not the
+        /// inference from a sleep the previous version relied on. Only then does
+        /// the handler error, releasing the reservation and firing `notify_all`;
+        /// a waiter that was merely late (having reserved the command itself)
+        /// can no longer make this test pass, so it cannot silently stop
+        /// exercising the notification path.
+        #[test]
+        fn handler_error_notifies_a_waiter_blocked_on_the_same_command() {
+            struct SignalingHandler {
+                entered: Arc<(Mutex<bool>, Condvar)>,
+                probe: ShellExpansionRuntime,
+            }
+
+            impl ShellApprovalHandler for SignalingHandler {
+                fn approve(
+                    &self,
+                    _request: ShellApprovalRequest,
+                ) -> Result<ShellApprovalDecision, ShellExpansionError> {
+                    let (lock, signal) = &*self.entered;
+                    *lock.lock().unwrap() = true;
+                    signal.notify_all();
+                    // Hold the reservation open until the peer is *provably*
+                    // parked on it, observed through the shared runtime the
+                    // probe handle points at. `parked_waiters_for_test` reads
+                    // the count under the same mutex the waiter incremented
+                    // before its atomic park, so a positive reading cannot
+                    // precede the park. Releasing before that would let the
+                    // waiter reserve the command itself and pass without ever
+                    // exercising notification — the defect this test exists to
+                    // catch.
+                    let deadline = Instant::now() + WAITER_PARK_DEADLINE;
+                    while self.probe.parked_waiters_for_test("echo shared") == 0 {
+                        assert!(
+                            Instant::now() < deadline,
+                            "the waiter never parked within {WAITER_PARK_DEADLINE:?}: the test \
+                             can no longer prove release wakes a parked peer, so it is failing \
+                             rather than silently degrading into a no-op"
+                        );
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    Err(handler_error())
+                }
+            }
+
+            let temp = TempDir::new().unwrap();
+            let paths = policy_paths(&temp);
+            let runtime = ShellExpansionRuntime::new();
+            let entered = Arc::new((Mutex::new(false), Condvar::new()));
+
+            // Build the waiter's fixtures up front. `ComposeOptions::new`
+            // captures a runtime context — host and repo discovery costing
+            // seconds. Paying it after the signal below would delay the waiter's
+            // park and needlessly widen `WAITER_PARK_DEADLINE`; it also keeps
+            // that cost out of `NOTIFICATION_BUDGET`.
+            let waiter_directive = directive("echo shared");
+            let waiter_options = options(ShellApprovalDecision::AllowOnce);
+
+            let mut approver_runtime = runtime.clone_for_child();
+            let approver_paths = paths.clone();
+            let approver_entered = Arc::clone(&entered);
+            // The probe shares the same `Arc<Mutex<..>>` as every other handle
+            // (via `clone_for_child`), so `parked_waiters_for_test` on it sees
+            // the count the waiter's own handle increments.
+            let approver_probe = runtime.clone_for_child();
+            let approver = std::thread::spawn(move || {
+                let handler = Arc::new(SignalingHandler {
+                    entered: approver_entered,
+                    probe: approver_probe,
+                });
+                let opts = ComposeOptions::new().with_shell_approval_handler(handler);
+                prepare_directive(
+                    &directive("echo shared"),
+                    &opts,
+                    &approver_paths,
+                    &mut approver_runtime,
+                )
+                .expect_err("the handler's error must propagate unchanged")
+            });
+
+            // Wait until the approver provably holds the reservation before
+            // starting the waiter, so the waiter parks on the approver's
+            // reservation rather than winning the race and reserving first.
+            {
+                let (lock, signal) = &*entered;
+                let mut in_handler = lock.lock().unwrap();
+                while !*in_handler {
+                    in_handler = signal.wait(in_handler).unwrap();
+                }
+            }
+
+            // The waiter runs on its own thread so a missed notification is
+            // reported here rather than stalling the test thread for the full
+            // 30s `RESERVATION_WAIT_TIMEOUT` — long enough that nextest's
+            // terminate-after ceiling would kill the run first and report a
+            // timeout instead of the real defect. Its fixtures are already
+            // built, so it reaches `reserve_allow_once` and parks immediately;
+            // the approver's handler is blocked until that park is observed.
+            let (outcome_tx, outcome_rx) = std::sync::mpsc::channel();
+            let mut waiter_runtime = runtime.clone_for_child();
+            let waiter_paths = paths.clone();
+            std::thread::spawn(move || {
+                let prepared = prepare_directive(
+                    &waiter_directive,
+                    &waiter_options,
+                    &waiter_paths,
+                    &mut waiter_runtime,
+                );
+                let _ = outcome_tx.send(prepared.map(|_| ()).map_err(|err| err.to_string()));
+            });
+
+            match outcome_rx.recv_timeout(NOTIFICATION_BUDGET) {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => panic!(
+                    "the waiter must be notified and approved, not left to time out into a \
+                     conflict; got: {err}"
+                ),
+                Err(_) => panic!(
+                    "the waiter was still parked after {NOTIFICATION_BUDGET:?}: the failed flow \
+                     released its reservation without waking it, so the waiter is sitting out the \
+                     full RESERVATION_WAIT_TIMEOUT"
+                ),
+            }
+            approver.join().unwrap();
+
+            assert!(
+                runtime.pending_allow_once_for_test().is_empty(),
+                "the notified waiter's own approval must leave the reservation set clean"
+            );
+        }
     }
 }

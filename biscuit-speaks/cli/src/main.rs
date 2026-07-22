@@ -1118,6 +1118,15 @@ fn install_client_via_interview(client: TtsClient, dry_run: bool) {
         | Ok(InstallInterviewOutcome::NotInstallable) => {
             std::process::exit(1);
         }
+        // The interview already emitted the detached-descendant warning as a
+        // `TimeoutWarning` event; this arm only supplies the terminal verdict.
+        Ok(InstallInterviewOutcome::TimedOut { .. }) => {
+            eprintln!(
+                "  {} Installation timed out.",
+                "✗".red().bold()
+            );
+            std::process::exit(1);
+        }
         Err(e) => {
             eprintln!("  {} Install interview error: {}", "✗".red().bold(), e);
             std::process::exit(1);

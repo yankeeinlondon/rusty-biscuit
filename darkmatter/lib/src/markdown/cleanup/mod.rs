@@ -8,9 +8,12 @@ mod blockquote;
 mod brackets;
 mod emphasis;
 mod lists;
+mod opaque;
 mod reflow;
 mod tables;
 
+#[cfg(test)]
+mod perf_profile;
 #[cfg(test)]
 mod tests;
 
@@ -25,8 +28,10 @@ use emphasis::{
     unescape_emphasis_chars,
 };
 use lists::{
-    detect_list_indentation, extract_list_markers, fix_list_indentation, normalize_list_spacing,
-    restore_list_markers,
+    detect_list_indentation, extract_additional_paragraph_contexts,
+    extract_indented_code_markers, extract_list_item_contexts, extract_list_markers,
+    fix_list_indentation, normalize_list_spacing, protect_opaque_directive_bodies,
+    restore_list_markers, restore_opaque_directive_bodies,
 };
 pub use reflow::{reflow_to_width, strip_incidental_newlines};
 use tables::align_tables_in_stream;
@@ -34,6 +39,46 @@ use tables::align_tables_in_stream;
 /// Returns parser options suitable for cleanup operations.
 fn cleanup_parser_options() -> Options {
     Options::all() - Options::ENABLE_SMART_PUNCTUATION - Options::ENABLE_DEFINITION_LIST
+}
+
+/// Constructs the Markdown parser for a cleanup-path pass.
+///
+/// Every cleanup-path parse is funneled through this one constructor so the
+/// parse count per public entry point is a measurable property rather than an
+/// assumption. Spec acceptance criterion 15 caps that count; `tests::parse_count`
+/// asserts it. Adding a `Parser::new_ext` call to the cleanup path without
+/// routing it here would make that assertion silently under-count.
+fn cleanup_parser(content: &str) -> Parser<'_> {
+    #[cfg(test)]
+    parse_count::record();
+    Parser::new_ext(content, cleanup_parser_options())
+}
+
+/// Thread-local tally of cleanup-path Markdown parses, for acceptance-criterion
+/// 15's structural budget.
+///
+/// Thread-local rather than global so the count is unaffected by tests running
+/// concurrently in one process.
+#[cfg(test)]
+pub(super) mod parse_count {
+    use std::cell::Cell;
+
+    thread_local! {
+        static COUNT: Cell<usize> = const { Cell::new(0) };
+    }
+
+    /// Records one cleanup-path parse.
+    pub(crate) fn record() {
+        COUNT.with(|count| count.set(count.get() + 1));
+    }
+
+    /// Runs `operation` and returns its value alongside the number of
+    /// cleanup-path Markdown parses it performed.
+    pub(crate) fn measure<T>(operation: impl FnOnce() -> T) -> (T, usize) {
+        let before = COUNT.with(Cell::get);
+        let value = operation();
+        (value, COUNT.with(Cell::get) - before)
+    }
 }
 
 /// Emphasis style used for italics in markdown.
@@ -92,8 +137,12 @@ impl EmphasisStyle {
 pub const DEFAULT_INDENT: usize = 4;
 
 pub fn cleanup_content(content: &str) -> String {
-    let content = strip_incidental_newlines(content);
-    cleanup_content_internal(&content, Some(DEFAULT_INDENT), ListSpacingMode::Normal)
+    cleanup_content_internal(
+        content,
+        Some(DEFAULT_INDENT),
+        ListSpacingMode::Normal,
+        IncidentalNewlineMode::Strip,
+    )
 }
 
 /// Cleans up markdown content in compact mode.
@@ -111,8 +160,12 @@ pub fn cleanup_content(content: &str) -> String {
 /// assert!(cleaned.contains("1. First\n2. Second"));
 /// ```
 pub fn cleanup_content_compact(content: &str) -> String {
-    let content = strip_incidental_newlines(content);
-    cleanup_content_internal(&content, Some(DEFAULT_INDENT), ListSpacingMode::Compact)
+    cleanup_content_internal(
+        content,
+        Some(DEFAULT_INDENT),
+        ListSpacingMode::Compact,
+        IncidentalNewlineMode::Strip,
+    )
 }
 
 /// Cleans up markdown content in loose mode.
@@ -130,14 +183,21 @@ pub fn cleanup_content_compact(content: &str) -> String {
 /// assert!(cleaned.contains("1. First\n\n2. Second"));
 /// ```
 pub fn cleanup_content_loose(content: &str) -> String {
-    let content = strip_incidental_newlines(content);
-    cleanup_content_internal(&content, Some(DEFAULT_INDENT), ListSpacingMode::Loose)
+    cleanup_content_internal(
+        content,
+        Some(DEFAULT_INDENT),
+        ListSpacingMode::Loose,
+        IncidentalNewlineMode::Strip,
+    )
 }
 
 /// Cleans up markdown content and enforces a consistent list indentation width.
 ///
-/// When `indent_size` is provided, every nested list level is normalized to that
-/// number of spaces.
+/// `indent_size` is the configured column step between nested levels. An
+/// eight-column step uses legal marker padding on parent items when needed so
+/// narrow unordered, ordered, and task markers retain their parsed structure.
+/// Programmatic values outside the CLI-supported `2`, `4`, and `8` remain
+/// constrained to columns that CommonMark can parse as the same list tree.
 ///
 /// ## Examples
 ///
@@ -149,8 +209,12 @@ pub fn cleanup_content_loose(content: &str) -> String {
 /// assert!(cleaned.contains("\n    - Child"));
 /// ```
 pub fn cleanup_content_with_indent(content: &str, indent_size: usize) -> String {
-    let content = strip_incidental_newlines(content);
-    cleanup_content_internal(&content, Some(indent_size.max(1)), ListSpacingMode::Normal)
+    cleanup_content_internal(
+        content,
+        Some(indent_size.max(1)),
+        ListSpacingMode::Normal,
+        IncidentalNewlineMode::Strip,
+    )
 }
 
 /// Cleans markdown content with forced indentation without stripping incidental newlines.
@@ -158,13 +222,22 @@ pub fn cleanup_content_with_indent_preserving_incidental(
     content: &str,
     indent_size: usize,
 ) -> String {
-    cleanup_content_internal(content, Some(indent_size.max(1)), ListSpacingMode::Normal)
+    cleanup_content_internal(
+        content,
+        Some(indent_size.max(1)),
+        ListSpacingMode::Normal,
+        IncidentalNewlineMode::Preserve,
+    )
 }
 
 /// Cleans up markdown content with forced indentation in compact mode.
 pub fn cleanup_content_with_indent_compact(content: &str, indent_size: usize) -> String {
-    let content = strip_incidental_newlines(content);
-    cleanup_content_internal(&content, Some(indent_size.max(1)), ListSpacingMode::Compact)
+    cleanup_content_internal(
+        content,
+        Some(indent_size.max(1)),
+        ListSpacingMode::Compact,
+        IncidentalNewlineMode::Strip,
+    )
 }
 
 /// Cleans compact markdown content with forced indentation without stripping incidental newlines.
@@ -172,13 +245,22 @@ pub fn cleanup_content_with_indent_compact_preserving_incidental(
     content: &str,
     indent_size: usize,
 ) -> String {
-    cleanup_content_internal(content, Some(indent_size.max(1)), ListSpacingMode::Compact)
+    cleanup_content_internal(
+        content,
+        Some(indent_size.max(1)),
+        ListSpacingMode::Compact,
+        IncidentalNewlineMode::Preserve,
+    )
 }
 
 /// Cleans up markdown content with forced indentation in loose mode.
 pub fn cleanup_content_with_indent_loose(content: &str, indent_size: usize) -> String {
-    let content = strip_incidental_newlines(content);
-    cleanup_content_internal(&content, Some(indent_size.max(1)), ListSpacingMode::Loose)
+    cleanup_content_internal(
+        content,
+        Some(indent_size.max(1)),
+        ListSpacingMode::Loose,
+        IncidentalNewlineMode::Strip,
+    )
 }
 
 /// Cleans loose markdown content with forced indentation without stripping incidental newlines.
@@ -186,7 +268,12 @@ pub fn cleanup_content_with_indent_loose_preserving_incidental(
     content: &str,
     indent_size: usize,
 ) -> String {
-    cleanup_content_internal(content, Some(indent_size.max(1)), ListSpacingMode::Loose)
+    cleanup_content_internal(
+        content,
+        Some(indent_size.max(1)),
+        ListSpacingMode::Loose,
+        IncidentalNewlineMode::Preserve,
+    )
 }
 
 /// Cleans Markdown prose by stripping incidental newlines and wrapping it to a fixed width.
@@ -215,14 +302,25 @@ fn cleanup_content_internal(
     content: &str,
     forced_indent: Option<usize>,
     list_spacing: ListSpacingMode,
+    incidental_newlines: IncidentalNewlineMode,
 ) -> String {
     // Parse with source ranges to preserve list markers and emphasis styles
     // Use custom options that exclude ENABLE_SMART_PUNCTUATION to preserve original quotes
-    let parser = Parser::new_ext(content, cleanup_parser_options());
+    let opaque_bodies = protect_opaque_directive_bodies(content);
+    if opaque_bodies.requires_source_fallback() {
+        return content.to_string();
+    }
+    let parser = cleanup_parser(opaque_bodies.masked_content());
     let events_with_ranges: Vec<(Event, Range<usize>)> = parser.into_offset_iter().collect();
 
     // Extract list markers from source for each list
-    let list_markers = extract_list_markers(content, &events_with_ranges);
+    let opaque_body_lines = opaque_bodies.body_lines();
+    let list_markers = extract_list_markers(content, &events_with_ranges, opaque_body_lines);
+    let list_item_contexts = extract_list_item_contexts(&events_with_ranges, opaque_body_lines);
+    let additional_paragraph_contexts =
+        extract_additional_paragraph_contexts(content, &events_with_ranges, opaque_body_lines);
+    let protected_markers =
+        extract_indented_code_markers(&events_with_ranges, opaque_body_lines);
 
     // Determine emphasis style:
     // 1. If PREFER_ITALICS env var is set, use that style (standardize all emphasis)
@@ -233,8 +331,10 @@ fn cleanup_content_internal(
     // Transform events: replace emphasis/strong events with placeholder characters.
     // This prevents cmark from normalizing them or escaping literal underscores/asterisks.
     // If preferred_style is set, emphasis will be standardized; strong always preserves original.
-    let events: Vec<Event> =
-        preserve_original_emphasis(content, &events_with_ranges, preferred_style);
+    let collapsed_events = (incidental_newlines == IncidentalNewlineMode::Strip)
+        .then(|| reflow::collapse_incidental_soft_break_events(content, &events_with_ranges));
+    let cleanup_events = collapsed_events.as_deref().unwrap_or(&events_with_ranges);
+    let events: Vec<Event> = preserve_original_emphasis(content, cleanup_events, preferred_style);
 
     // Add "text" language to empty fenced code blocks
     let with_text_lang = add_text_language_to_empty_code_blocks(events);
@@ -277,30 +377,48 @@ fn cleanup_content_internal(
     //   Normal:  blank lines at level transitions, none between same-level items
     //   Compact: no blank lines between any list items
     //   Loose:   blank lines between all list items
-    normalize_list_spacing(&mut output, list_spacing);
+    normalize_list_spacing(
+        &mut output,
+        list_spacing,
+        &protected_markers,
+    );
 
     // Post-process to fix blockquote formatting issues from pulldown-cmark-to-cmark
-    fix_blockquote_formatting(&mut output);
+    fix_blockquote_formatting(&mut output, &protected_markers);
 
     // Restore original list markers (the library normalizes to '*')
-    restore_list_markers(&mut output, &list_markers);
+    restore_list_markers(
+        &mut output,
+        &list_markers,
+        &protected_markers,
+    );
 
     // Normalize nested list indentation.
     // When forced indentation is provided, use it for consistent nesting.
     // Otherwise preserve the source style when it differs from cmark's 2-space output.
     if let Some(indent_size) = forced_indent {
-        if indent_size != 2 {
-            fix_list_indentation(&mut output, indent_size);
-        }
+        fix_list_indentation(
+            &mut output,
+            indent_size,
+            &list_item_contexts,
+            &additional_paragraph_contexts,
+            &protected_markers,
+        );
     } else {
-        let original_indent = detect_list_indentation(content);
-        if original_indent > 2 {
-            fix_list_indentation(&mut output, original_indent);
-        }
+        let original_indent = detect_list_indentation(content, &events_with_ranges);
+        fix_list_indentation(
+            &mut output,
+            original_indent,
+            &list_item_contexts,
+            &additional_paragraph_contexts,
+            &protected_markers,
+        );
     }
 
     // Unescape unnecessarily escaped brackets (e.g., \[0%\] -> [0%])
     unescape_brackets(&mut output);
+
+    restore_opaque_directive_bodies(&mut output, opaque_bodies.payloads());
 
     // Trim leading blank lines, then normalize to exactly one trailing newline
     // for non-empty documents.

@@ -1,8 +1,8 @@
 ---
 name: monorepos
 description: Expert knowledge for building and managing monorepos across JavaScript, TypeScript, Rust, Go, and JVM — workspace standards (npm, pnpm, Yarn, Cargo, Go workspaces, Gradle, Maven), task-orchestration tools (Nx, Turborepo, Bazel, Pants, Rush, Lerna, moon), and versioning (Changesets). Use when structuring a monorepo, choosing task-orchestration tooling, or setting up workspace versioning and release flows.
-last_updated: 2026-01-03T00:00:00Z
-hash: 9dd032e824d98586
+last_updated: 2026-07-15T00:00:00Z
+hash: a275077af6cb393c-a1926b83eb6b8e02
 ---
 
 # Monorepos
@@ -21,6 +21,20 @@ Expert guidance for structuring and managing monorepos—single repositories con
 - **Hermetic builds for scale** - Bazel/Pants/Buck2 when reproducibility and massive scale matter
 - **Incremental adoption** - Start with workspaces only, add orchestration when needed
 - **Choose one orchestrator** - Don't mix Nx + Turbo; pick based on needs and commit
+
+## Rusty Biscuit Verification Override
+
+The generic workspace-wide Cargo examples in monorepo references are not local
+verification advice. Rusty Biscuit has 48 workspace members:
+
+- Identify changed packages and upstream/downstream symbol impact first, then
+  map it to package areas with `sniff`.
+- Run each affected area’s `just build`, `just test`, and `just lint` recipes,
+  or exact package selectors when a narrower supported recipe is sufficient.
+- Do not use `cargo build --workspace`, `cargo check --workspace`, a bare root
+  Cargo lifecycle command, or an unscoped root `just` lifecycle recipe as a
+  routine safety net. Workspace-wide aggregation requires an explicit user or
+  CI/release requirement and a documented reason.
 
 ## Mental Model
 

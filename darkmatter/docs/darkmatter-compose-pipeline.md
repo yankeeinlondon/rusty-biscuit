@@ -113,7 +113,7 @@ However, even in this example, we don't know how expensive the operation is unti
 
 ### 3. Inline Post
 
-- [Cleaning](./inline/cleaning.md) - makes the markdown as standard bearing and consistent as possible. Cleanup strips incidental single newlines by default, then applies list spacing and indentation cleanup, and can finally reflow prose with `ComposeOptions::with_fixed_width(...)`. Programmatic callers can keep source single newlines with `ComposeOptions::with_incidental_newline_mode(IncidentalNewlineMode::Preserve)`; setting `with_fixed_width(...)` overrides `Preserve` and always strips first, so reflow operates on canonical unwrapped prose rather than the source's own wrapping.
+- [Cleaning](./inline/cleaning.md) - makes the markdown as standard bearing and consistent as possible. Cleanup strips incidental single newlines from top-level and list-item prose by default, removing source-only continuation indentation before it applies list spacing and indentation cleanup. `ComposeOptions::with_fixed_width(...)` then reflows each complete logical prose block; list continuations use a hanging prefix that retains every enclosing list and blockquote container. Programmatic callers can keep source single newlines with `ComposeOptions::with_incidental_newline_mode(IncidentalNewlineMode::Preserve)`; setting `with_fixed_width(...)` overrides `Preserve` and always strips first, so reflow operates on canonical unwrapped prose rather than the source's own wrapping.
 - [Normalization](./inline/structural-normalization.md) - ensures that the heading structure is valid and fixes where it is not
 
 ### 4. Finalization

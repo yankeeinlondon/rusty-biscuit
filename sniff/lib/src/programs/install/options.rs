@@ -97,6 +97,14 @@ pub struct InstallCapturedResult {
     pub stdout: String,
     pub stderr: String,
     pub success: bool,
+    /// The command was killed at its deadline rather than exiting on its own.
+    ///
+    /// Termination is best-effort on Unix: the installer's process tree was
+    /// signaled, but a descendant that forked and detached with `setsid()`
+    /// between sniff's samples survives and may still be modifying the host.
+    /// See the `process` module documentation for the exact guarantee per
+    /// platform. Windows containment is kernel-enforced and total.
+    pub timed_out: bool,
 }
 
 /// Two-arm outcome from a captured install run.
@@ -143,6 +151,7 @@ mod tests {
             stdout: "ok\n".into(),
             stderr: String::new(),
             success: true,
+            timed_out: false,
         };
         let outcome = InstallCapturedOutcome::Completed(ok);
         match outcome {

@@ -115,6 +115,113 @@ mod schema_validation_integration {
     }
 
     #[test]
+    fn schema_number_increment_accepts_native_and_quoted_source_numbers() {
+        for review_iterations in ["2", "'2'", "\"2\""] {
+            let dir = tempfile::tempdir().unwrap();
+            let spec = dir.path().join("spec.md");
+            let prompt = dir.path().join("prompt.md");
+            std::fs::write(
+                &spec,
+                format!("---\nreview_iterations: {review_iterations}\n---\nSpec\n"),
+            )
+            .unwrap();
+            std::fs::write(
+                &prompt,
+                "---\n\
+                 $schema:\n\
+                 \x20 spec: file(required;eager)\n\
+                 \x20 iteration: number\n\
+                 spec: spec.md\n\
+                 iteration: \"{{ file_exists(spec) ? (frontmatter(spec, 'review_iterations') || 0) + 1 : 1 }}\"\n\
+                 ---\nBody\n",
+            )
+            .unwrap();
+
+            let md = Markdown::try_from(prompt.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(prompt)
+                .only(&[
+                    ComposeOperation::FrontmatterInterpolation,
+                    ComposeOperation::Interpolation,
+                ]);
+            let (composed, _) = md.compose_with(options).unwrap();
+            assert_eq!(
+                composed.frontmatter().as_map().get("iteration"),
+                Some(&serde_json::json!(3)),
+                "source review_iterations was {review_iterations}"
+            );
+        }
+    }
+
+    #[test]
+    fn schema_number_increment_survives_quoted_persistence_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let spec = dir.path().join("spec.md");
+        let prompt = dir.path().join("prompt.md");
+        std::fs::write(&spec, "---\n---\nSpec\n").unwrap();
+        std::fs::write(
+            &prompt,
+            "---\n\
+             $schema:\n\
+             \x20 spec: file(required;eager)\n\
+             \x20 iteration: number\n\
+             \x20 review: file\n\
+             \x20 previous: file\n\
+             spec: spec.md\n\
+             iteration: \"{{ file_exists(spec) ? (frontmatter(spec, 'review_iterations') || 0) + 1 : 1 }}\"\n\
+             review: \"{{ dirname(spec) + '/review-' + iteration + '.md' }}\"\n\
+             previous: \"{{ iteration < 2 ? null : decrement_file_index(review) }}\"\n\
+             ---\nBody\n",
+        )
+        .unwrap();
+
+        for expected_iteration in 1..=3 {
+            let md = Markdown::try_from(prompt.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(prompt.clone())
+                .only(&[
+                    ComposeOperation::FrontmatterInterpolation,
+                    ComposeOperation::Interpolation,
+                ]);
+            let (composed, _) = md.compose_with(options).unwrap();
+            let frontmatter = composed.frontmatter().as_map();
+
+            assert_eq!(
+                frontmatter.get("iteration"),
+                Some(&serde_json::json!(expected_iteration))
+            );
+            assert!(
+                frontmatter
+                    .get("review")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|path| path.ends_with(&format!("review-{expected_iteration}.md"))),
+                "review should use iteration {expected_iteration}: {frontmatter:?}"
+            );
+            if expected_iteration == 1 {
+                assert_eq!(frontmatter.get("previous"), Some(&serde_json::Value::Null));
+            } else {
+                assert!(
+                    frontmatter
+                        .get("previous")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|path| {
+                            path.ends_with(&format!("review-{}.md", expected_iteration - 1))
+                        }),
+                    "previous should point to the prior iteration: {frontmatter:?}"
+                );
+            }
+
+            std::fs::write(
+                &spec,
+                format!(
+                    "---\nreview_iterations: '{expected_iteration}'\n---\nSpec\n"
+                ),
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
     fn implement_md_three_arm_union_ternaries_coerce_and_defer_shell() {
         // Faithful reproduction of the original failing `claudine compose
         // prompts/implement.md spec=… --claude` invocation: a 3-arm root
@@ -431,4 +538,3 @@ mod schema_validation_integration {
         );
     }
 }
-

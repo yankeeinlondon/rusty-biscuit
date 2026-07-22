@@ -6,9 +6,10 @@
 //! interpolation offset). Every capability is **passive**: the overlay scanners
 //! ([`crate::overlay::directives`] / [`expressions`](crate::overlay::expressions)
 //! / [`shell`](crate::overlay::shell)) parse but never execute, the graph answers
-//! cross-document transclusion queries, and the only filesystem touch is an
-//! existence `stat` for broken-path diagnostics — no process is ever spawned and
-//! no socket is ever opened (spec acceptance criterion 7).
+//! cross-document transclusion queries, and the only filesystem touches are
+//! read-only existence `stat`s — for broken-path diagnostics, and for
+//! [`doc_links`](crate::overlay::doc_links)'s topic-doc lookup. No process is
+//! ever spawned and no socket is ever opened (spec acceptance criterion 7).
 
 use std::path::{Path, PathBuf};
 
@@ -31,8 +32,7 @@ use super::location::line_range;
 use crate::diagnostics::codes::{code, source};
 use crate::graph::normalize_join;
 use crate::overlay::shell::PolicyVerdict;
-use crate::overlay::{directives, expressions, shell};
-use crate::source_map::SourceMap;
+use crate::overlay::{directives, doc_links, expressions, shell};
 use crate::workspace::file_path_to_uri;
 
 // ── Completion ──────────────────────────────────────────────────────────────
@@ -62,7 +62,7 @@ fn directive_name_completions(ctx: &DocumentContext, offset: usize, partial: &st
         .filter(|info| info.keyword[2..].starts_with(partial))
         .filter_map(|info| {
             text_edit_item(
-                ctx.source_map,
+                ctx,
                 start,
                 offset,
                 CompletionCandidate {
@@ -99,7 +99,7 @@ fn directive_option_completions(
                     .filter(|value| value.starts_with(value_partial))
                     .filter_map(|value| {
                         text_edit_item(
-                            ctx.source_map,
+                            ctx,
                             value_start,
                             offset,
                             CompletionCandidate {
@@ -124,7 +124,7 @@ fn directive_option_completions(
                     .filter(|key| key.starts_with(token))
                     .filter_map(|key| {
                         text_edit_item(
-                            ctx.source_map,
+                            ctx,
                             token_start,
                             offset,
                             CompletionCandidate {
@@ -156,7 +156,7 @@ fn interpolation_completions(
         .unwrap_or_default();
     interpolation_candidates(partial, &frontmatter_keys)
         .into_iter()
-        .filter_map(|candidate| text_edit_item(ctx.source_map, token_start, offset, candidate))
+        .filter_map(|candidate| text_edit_item(ctx, token_start, offset, candidate))
         .collect()
 }
 
@@ -1033,12 +1033,12 @@ fn push_span_fold(ctx: &DocumentContext, folds: &mut Vec<FoldingRange>, span: So
 /// nothing is deferred to `completionItem/resolve`, which Zed never uses for
 /// `textEdit`).
 fn text_edit_item(
-    source_map: &SourceMap,
+    ctx: &DocumentContext,
     start: usize,
     offset: usize,
     candidate: CompletionCandidate,
 ) -> Option<CompletionItem> {
-    let range = source_map.byte_range_to_lsp(start..offset)?;
+    let range = ctx.source_map.byte_range_to_lsp(start..offset)?;
     Some(CompletionItem {
         label: candidate.label,
         kind: Some(candidate.kind),
@@ -1046,7 +1046,7 @@ fn text_edit_item(
         documentation: candidate.documentation.map(|value| {
             Documentation::MarkupContent(MarkupContent {
                 kind: MarkupKind::Markdown,
-                value,
+                value: doc_links::resolve(&value, ctx.path).into_owned(),
             })
         }),
         text_edit: Some(CompletionTextEdit::Edit(TextEdit {
@@ -1062,7 +1062,7 @@ fn markup_hover(ctx: &DocumentContext, span: SourceSpan, value: String) -> Hover
     Hover {
         contents: HoverContents::Markup(MarkupContent {
             kind: MarkupKind::Markdown,
-            value,
+            value: doc_links::resolve(&value, ctx.path).into_owned(),
         }),
         range: ctx.source_map.byte_range_to_lsp(span),
     }
@@ -1099,7 +1099,7 @@ mod tests {
     use crate::config::DmlsConfig;
     use crate::graph::WorkspaceGraph;
     use crate::providers::ProviderRegistry;
-    use crate::source_map::PositionEncoding;
+    use crate::source_map::{PositionEncoding, SourceMap};
 
     #[test]
     fn shell_block_commands_enumerates_body_lines() {
@@ -1621,19 +1621,62 @@ mod tests {
         assert!(markdown.contains("not interpolated"));
     }
 
+    /// A `ClientProfile` with every gate off — enough for the pure lowering
+    /// tests, which read none of them.
+    fn bare_profile() -> ClientProfile {
+        ClientProfile {
+            client_name: None,
+            client_version: None,
+            position_encoding: PositionEncoding::Utf16,
+            supports_resource_operations: false,
+            supports_change_annotations: false,
+            supports_code_action_resolve: false,
+            supports_completion_resolve: false,
+            resolve_provides_text_edit: false,
+            supports_snippets: false,
+            client_watches_files: false,
+            needs_watch_fallback: false,
+            supports_file_operations: false,
+            supports_workspace_configuration: false,
+            supports_semantic_tokens: false,
+            supports_semantic_tokens_refresh: false,
+            supports_folding: false,
+            folding_line_only: false,
+            supports_selection_range: false,
+            supports_linked_editing: false,
+            supports_work_done_progress: false,
+            hover_media: HoverMediaProfile::default(),
+            helix_one_char_selection_is_empty: false,
+        }
+    }
+
     #[test]
     fn text_edit_item_carries_eager_edit_and_markdown_documentation() {
-        use crate::source_map::PositionEncoding;
         let text = "hello {{ ctx.pa";
+        let uri: Uri = "file:///t.md".parse().unwrap();
         let source_map = SourceMap::new(
-            "file:///t.md".parse().unwrap(),
+            uri.clone(),
             1,
             PositionEncoding::Utf16,
             text.into(),
         );
+        let graph = WorkspaceGraph::build(&BTreeMap::new(), 1);
+        let config = DmlsConfig::default();
+        let profile = bare_profile();
+        let ctx = DocumentContext {
+            uri: &uri,
+            path: Path::new("/t.md"),
+            text,
+            source_map: &source_map,
+            graph: &graph,
+            doc_id: None,
+            config: &config,
+            profile: &profile,
+            overlay: None,
+        };
         let token_start = text.find("ctx.pa").unwrap();
         let item = text_edit_item(
-            &source_map,
+            &ctx,
             token_start,
             text.len(),
             CompletionCandidate {

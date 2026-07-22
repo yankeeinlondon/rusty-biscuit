@@ -1,18 +1,19 @@
-use std::process::Command;
 use tracing::warn;
 
 use super::Service;
+use crate::process::{self, timeouts};
 
 pub(crate) fn list_launchd_services() -> Vec<Service> {
-    let output = match Command::new("launchctl").arg("list").output().map_err(|e| {
-        warn!(error = %e, cmd = "launchctl", "service detection subprocess failed");
-        e
-    }) {
+    let output = match process::run_with_timeout("launchctl", &["list"], timeouts::SERVICE_COMMAND) {
         Ok(o) if o.status.success() => o,
-        _ => return Vec::new(),
+        Ok(_) => return Vec::new(),
+        Err(e) => {
+            warn!(error = %e, cmd = "launchctl", "service detection subprocess failed");
+            return Vec::new();
+        }
     };
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = output.stdout_lossy();
     let mut services = Vec::new();
 
     for line in stdout.lines().skip(1) {

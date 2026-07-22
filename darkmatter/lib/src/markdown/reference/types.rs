@@ -1,6 +1,12 @@
 //! Core type definitions for the reference analysis subsystem.
 
-use crate::markdown::compose::ComposeSource;
+use super::provenance::{
+    ReferenceDependencyManifest, ReferenceDocumentIdentity, ReferenceGraphMode,
+    ReferenceGraphProvenance,
+};
+use super::snapshot::PreparedHeadingSnapshot;
+use crate::markdown::Markdown;
+use crate::markdown::compose::{ComposeSource, ReferenceGraphOptionsIdentity};
 use crate::markdown::normalize::HeadingLevel;
 use serde::Serialize;
 use std::ops::Range;
@@ -435,23 +441,83 @@ pub struct ReferenceGraphNode {
 }
 
 /// The full reference graph rooted at the entry document.
-#[derive(Debug, Clone)]
+///
+/// A `ReferenceGraph` is an opaque, immutable artifact: it is only ever
+/// produced by the crate's graph builders (which route through
+/// [`ReferenceGraph::from_build`]) and carries private build provenance used by
+/// prebuilt-graph validation. Downstream callers inspect it through the
+/// read-only accessors ([`root`](Self::root), [`nodes`](Self::nodes),
+/// [`iter`](Self::iter), [`node_by_id`](Self::node_by_id),
+/// [`node_count`](Self::node_count)) but cannot construct or mutate one.
+#[derive(Clone)]
 pub struct ReferenceGraph {
     /// The root document node.
-    pub root: ReferenceGraphNode,
+    root: ReferenceGraphNode,
     /// All non-root nodes (children, grandchildren, etc.).
-    pub nodes: Vec<ReferenceGraphNode>,
+    nodes: Vec<ReferenceGraphNode>,
+    /// Private build provenance (root/source/mode/options/dependencies).
+    ///
+    /// Never presented via `Debug` or serialization; read by prebuilt-graph
+    /// validation via [`provenance`](Self::provenance).
+    provenance: ReferenceGraphProvenance,
+    /// Private build-time snapshot of each visited file-sourced node's
+    /// prepared heading slugs.
+    ///
+    /// Never presented via `Debug` or serialization; read by fragment
+    /// validation via [`prepared_headings`](Self::prepared_headings) so a
+    /// post-build heading edit cannot leak into a validation report.
+    prepared_headings: PreparedHeadingSnapshot,
+}
+
+impl std::fmt::Debug for ReferenceGraph {
+    /// Presents only the root and node list, exactly as the previous derived
+    /// `Debug` did; the private provenance never appears.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReferenceGraph")
+            .field("root", &self.root)
+            .field("nodes", &self.nodes)
+            .finish()
+    }
 }
 
 /// A view of a [`ReferenceGraphNode`] with the graph context needed to
 /// serialize child insertions.
-pub struct ReferenceGraphNodeView<'a> {
+///
+/// Crate-internal: public JSON serialization routes through the public
+/// [`ReferenceGraphView`] instead.
+pub(crate) struct ReferenceGraphNodeView<'a> {
     /// The node to serialize.
-    pub node: &'a ReferenceGraphNode,
+    pub(crate) node: &'a ReferenceGraphNode,
     /// The containing graph, used to resolve child node sources.
-    pub graph: &'a ReferenceGraph,
+    pub(crate) graph: &'a ReferenceGraph,
     /// Whether to recursively expand child nodes.
-    pub follow: bool,
+    pub(crate) follow: bool,
+}
+
+/// A serializable, root-anchored view of a [`ReferenceGraph`].
+///
+/// Produced by [`ReferenceGraph::view`]. Its JSON is byte-for-byte
+/// shape-compatible with the prior node-view output (`file`, `source`,
+/// `references`, `transclusions`, and a nested `node` only when `follow` is
+/// set); build provenance, hashes, graph mode, the dependency manifest, and
+/// the heading snapshot never appear.
+pub struct ReferenceGraphView<'a> {
+    graph: &'a ReferenceGraph,
+    follow: bool,
+}
+
+impl Serialize for ReferenceGraphView<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        ReferenceGraphNodeView {
+            node: self.graph.root(),
+            graph: self.graph,
+            follow: self.follow,
+        }
+        .serialize(serializer)
+    }
 }
 
 impl Serialize for ReferenceGraphNodeView<'_> {
@@ -533,6 +599,68 @@ impl Serialize for ReferenceGraphNodeView<'_> {
 }
 
 impl ReferenceGraph {
+    /// Assembles an opaque graph from a completed build, computing provenance
+    /// itself so identities can never be mislabeled.
+    ///
+    /// Root/source/mode/options provenance is derived from `document`,
+    /// `document.source()`, `mode`, and the options identity captured from
+    /// `options.compose`; the visited-descendant `dependencies` manifest and
+    /// the `prepared_headings` snapshot are stored as produced by the build
+    /// runtime.
+    pub(crate) fn from_build(
+        document: &Markdown,
+        options: &ReferenceGraphOptions,
+        mode: ReferenceGraphMode,
+        root: ReferenceGraphNode,
+        nodes: Vec<ReferenceGraphNode>,
+        dependencies: ReferenceDependencyManifest,
+        prepared_headings: PreparedHeadingSnapshot,
+    ) -> ReferenceGraph {
+        let provenance = ReferenceGraphProvenance::new(
+            ReferenceDocumentIdentity::capture(document),
+            document.source().clone(),
+            mode,
+            ReferenceGraphOptionsIdentity::capture(&options.compose),
+            dependencies,
+        );
+        ReferenceGraph {
+            root,
+            nodes,
+            provenance,
+            prepared_headings,
+        }
+    }
+
+    /// The root document node.
+    pub fn root(&self) -> &ReferenceGraphNode {
+        &self.root
+    }
+
+    /// The non-root nodes (children, grandchildren, etc.).
+    pub fn nodes(&self) -> &[ReferenceGraphNode] {
+        &self.nodes
+    }
+
+    /// Iterates over every node, yielding the root exactly once first.
+    pub fn iter(&self) -> impl Iterator<Item = &ReferenceGraphNode> + '_ {
+        std::iter::once(&self.root).chain(self.nodes.iter())
+    }
+
+    /// The private build provenance, used by prebuilt-graph validation.
+    pub(crate) fn provenance(&self) -> &ReferenceGraphProvenance {
+        &self.provenance
+    }
+
+    /// The private build-time heading snapshot, used by fragment validation.
+    pub(crate) fn prepared_headings(&self) -> &PreparedHeadingSnapshot {
+        &self.prepared_headings
+    }
+
+    /// Returns a serializable, root-anchored view of this graph.
+    pub fn view(&self, follow: bool) -> ReferenceGraphView<'_> {
+        ReferenceGraphView { graph: self, follow }
+    }
+
     /// Finds a node by its ID.
     pub fn node_by_id(&self, id: &str) -> Option<&ReferenceGraphNode> {
         if self.root.node_id.as_ref() == id {
@@ -1049,17 +1177,17 @@ mod tests {
                 },
             }],
         };
-        let graph = ReferenceGraph {
+        let graph = ReferenceGraph::from_build(
+            &Markdown::new(""),
+            &ReferenceGraphOptions::default(),
+            ReferenceGraphMode::Full,
             root,
-            nodes: vec![child],
-        };
+            vec![child],
+            ReferenceDependencyManifest::default(),
+            PreparedHeadingSnapshot::default(),
+        );
 
-        let value = serde_json::to_value(ReferenceGraphNodeView {
-            node: &graph.root,
-            graph: &graph,
-            follow: false,
-        })
-        .unwrap();
+        let value = serde_json::to_value(graph.view(false)).unwrap();
         let obj = value.as_object().unwrap();
         assert_eq!(obj.get("file").unwrap(), "root.md");
         assert_eq!(
@@ -1104,19 +1232,82 @@ mod tests {
                 },
             }],
         };
-        let graph = ReferenceGraph {
+        let graph = ReferenceGraph::from_build(
+            &Markdown::new(""),
+            &ReferenceGraphOptions::default(),
+            ReferenceGraphMode::Full,
             root,
-            nodes: vec![child],
-        };
+            vec![child],
+            ReferenceDependencyManifest::default(),
+            PreparedHeadingSnapshot::default(),
+        );
 
-        let value = serde_json::to_value(ReferenceGraphNodeView {
-            node: &graph.root,
-            graph: &graph,
-            follow: true,
-        })
-        .unwrap();
+        let value = serde_json::to_value(graph.view(true)).unwrap();
         let ins = value["transclusions"][0].as_object().unwrap();
         assert!(ins.contains_key("node"));
         assert_eq!(ins["node"]["file"], "child.md");
+    }
+
+    /// Builds a two-node opaque graph for accessor/presentation assertions.
+    fn two_node_graph() -> ReferenceGraph {
+        let child = ReferenceGraphNode {
+            node_id: NodeId::from("child"),
+            source: ComposeSource::File(PathBuf::from("/tmp/child.md")),
+            local_references: ReferenceSet { records: Vec::new() },
+            child_insertions: Vec::new(),
+        };
+        let root = ReferenceGraphNode {
+            node_id: NodeId::from("root"),
+            source: ComposeSource::File(PathBuf::from("/tmp/root.md")),
+            local_references: ReferenceSet { records: Vec::new() },
+            child_insertions: Vec::new(),
+        };
+        ReferenceGraph::from_build(
+            &Markdown::new(""),
+            &ReferenceGraphOptions::default(),
+            ReferenceGraphMode::Full,
+            root,
+            vec![child],
+            ReferenceDependencyManifest::default(),
+            PreparedHeadingSnapshot::default(),
+        )
+    }
+
+    #[test]
+    fn iter_yields_root_exactly_once_then_nodes_in_order() {
+        let graph = two_node_graph();
+        let ids: Vec<&str> = graph.iter().map(|n| n.node_id.as_ref()).collect();
+        assert_eq!(ids, vec!["root", "child"]);
+        // `iter()` visits every node once and agrees with `node_count()`.
+        assert_eq!(graph.iter().count(), graph.node_count());
+        assert_eq!(graph.iter().count(), 2);
+        // Root appears exactly once across the whole iteration.
+        assert_eq!(ids.iter().filter(|id| **id == "root").count(), 1);
+    }
+
+    #[test]
+    fn accessors_agree_with_iteration() {
+        let graph = two_node_graph();
+        assert_eq!(graph.root().node_id.as_ref(), "root");
+        assert_eq!(graph.nodes().len(), 1);
+        assert_eq!(graph.nodes()[0].node_id.as_ref(), "child");
+        assert!(graph.node_by_id("child").is_some());
+        assert!(graph.node_by_id("root").is_some());
+        assert!(graph.node_by_id("absent").is_none());
+    }
+
+    #[test]
+    fn debug_presents_root_and_nodes_without_leaking_provenance() {
+        let graph = two_node_graph();
+        let dbg = format!("{graph:?}");
+        // Preserves the previous derived presentation …
+        assert!(dbg.contains("ReferenceGraph"));
+        assert!(dbg.contains("root"));
+        assert!(dbg.contains("nodes"));
+        // … and never exposes private provenance or its hashes/mode/manifest.
+        assert!(!dbg.contains("provenance"));
+        assert!(!dbg.to_lowercase().contains("fingerprint"));
+        assert!(!dbg.contains("dependencies"));
+        assert!(!dbg.contains("prepared_headings"));
     }
 }

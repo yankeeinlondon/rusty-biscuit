@@ -372,6 +372,12 @@ impl EvaluationLookup for ShortcutLookup<'_> {
     fn resolution_context(&self) -> Option<ResolutionContext> {
         self.resolution_context.clone()
     }
+
+    fn resolution_context_ref(&self) -> Option<&ResolutionContext> {
+        // Borrowed path (Finding 12) — condition evaluation reuses the context
+        // without cloning it per read-side function call.
+        self.resolution_context.as_ref()
+    }
 }
 
 #[cfg(test)]

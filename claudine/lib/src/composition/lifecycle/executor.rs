@@ -1254,6 +1254,19 @@ fn collect_variable_paths(expr: &Expr, paths: &mut Vec<String>) {
                 collect_variable_paths(arg, paths);
             }
         }
+        // A container literal reads every path its elements read, so
+        // `[ctx.area, ctx.package]` must contribute both capture hints.
+        // Object keys are authored text, not variable references.
+        Expr::ArrayLiteral(elements) => {
+            for element in elements {
+                collect_variable_paths(element, paths);
+            }
+        }
+        Expr::ObjectLiteral(entries) => {
+            for (_, value) in entries {
+                collect_variable_paths(value, paths);
+            }
+        }
     }
 }
 

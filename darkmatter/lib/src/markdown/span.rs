@@ -3,11 +3,12 @@
 //! Spans are byte-offset ranges into the exact source text handed to the
 //! parser — no line-ending normalization is applied, so offsets remain valid
 //! against the caller's original document (including CRLF content).
+//!
+//! [`SourceSpan`] itself is owned by `biscuit-file` (the shared span
+//! vocabulary for the workspace) and re-exported here unchanged; both paths
+//! name the same `Range<usize>`.
 
-use std::ops::Range;
-
-/// Byte-offset range into a source document.
-pub type SourceSpan = Range<usize>;
+pub use biscuit_file::SourceSpan;
 
 /// A value paired with the source span it was parsed from.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,11 +54,40 @@ pub fn line_of_offset(source: &str, offset: usize) -> usize {
     source[..offset].bytes().filter(|&b| b == b'\n').count() + 1
 }
 
+/// Byte offsets of every `\n` in `content`, in ascending order.
+///
+/// Precomputed once so [`line_at_offset`] can binary-search instead of
+/// rescanning a growing prefix per lookup.
+pub(crate) fn newline_offset_table(content: &str) -> Vec<usize> {
+    content
+        .bytes()
+        .enumerate()
+        .filter_map(|(i, byte)| (byte == b'\n').then_some(i))
+        .collect()
+}
+
+/// Returns the 1-indexed line for `offset`, byte-identical to
+/// `content[..offset].lines().count() + 1`, using the precomputed
+/// [`newline_offset_table`].
+///
+/// `str::lines` treats a trailing line terminator as *not* starting a new line,
+/// so the count is the number of `\n` before `offset` plus one only when the
+/// prefix is non-empty and does not end on a `\n`. This differs from a plain
+/// newline count when `offset` lands mid-line (e.g. an inline link or a heading
+/// nested in a blockquote), which is why the public [`line_of_offset`] is not
+/// substitutable for callers that must reproduce `lines().count()`.
+pub(crate) fn line_at_offset(newline_offsets: &[usize], content: &str, offset: usize) -> usize {
+    let newlines = newline_offsets.partition_point(|&pos| pos < offset);
+    let trailing = usize::from(offset > 0 && content.as_bytes()[offset - 1] != b'\n');
+    newlines + trailing + 1
+}
+
 /// Returns the 1-indexed `(line, column)` for byte `offset` in `source`.
 ///
 /// The column is a **byte** column within the line (1-indexed), not a
 /// character or UTF-16 column; encoding-aware projection is the caller's
-/// responsibility. Offsets past the end of `source` are clamped.
+/// responsibility. LF, CRLF, and lone CR are recognized as line endings.
+/// Offsets past the end of `source` are clamped.
 ///
 /// ## Examples
 ///
@@ -70,9 +100,30 @@ pub fn line_of_offset(source: &str, offset: usize) -> usize {
 /// ```
 pub fn line_col_of_offset(source: &str, offset: usize) -> (usize, usize) {
     let offset = offset.min(source.len());
-    let before = &source[..offset];
-    let line = before.bytes().filter(|&b| b == b'\n').count() + 1;
-    let line_start = before.rfind('\n').map(|idx| idx + 1).unwrap_or(0);
+    let bytes = source.as_bytes();
+    let mut line = 1;
+    let mut line_start = 0;
+    let mut index = 0;
+
+    while index < offset {
+        match bytes[index] {
+            b'\r' if bytes.get(index + 1) == Some(&b'\n') => {
+                if index + 2 > offset {
+                    break;
+                }
+                index += 2;
+                line += 1;
+                line_start = index;
+            }
+            b'\r' | b'\n' => {
+                index += 1;
+                line += 1;
+                line_start = index;
+            }
+            _ => index += 1,
+        }
+    }
+
     (line, offset - line_start + 1)
 }
 
@@ -118,6 +169,13 @@ mod tests {
     fn test_line_col_of_offset_empty_source() {
         assert_eq!(line_col_of_offset("", 0), (1, 1));
         assert_eq!(line_col_of_offset("", 5), (1, 1));
+    }
+
+    #[test]
+    fn test_line_col_of_offset_handles_crlf_and_lone_cr() {
+        assert_eq!(line_col_of_offset("ab\r\ncd", 4), (2, 1));
+        assert_eq!(line_col_of_offset("ab\rcd", 3), (2, 1));
+        assert_eq!(line_col_of_offset("ab\rcd", 4), (2, 2));
     }
 
     #[test]

@@ -26,8 +26,8 @@
 //!    `foo.bar`, `foo[0]`, `(expr)`)
 //! 2. Unary `!`, `-`
 //! 3. Multiplicative `*`, `/`, `%`
-//! 4. Additive `+`, `-` (`+` doubles as string concatenation when either
-//!    operand is a string)
+//! 4. Additive `+`, `-` (`+` coerces a numeric string paired with a number,
+//!    and otherwise doubles as string concatenation)
 //! 5. Comparison `==`, `!=`, `>`, `>=`, `<`, `<=`
 //! 6. Logical AND `&&`
 //! 7. Logical OR / Fallback `||`
@@ -57,8 +57,8 @@
 //! ## Arithmetic Errors
 //!
 //! Division by zero (`x / 0`) and remainder by zero (`x % 0`) raise
-//! evaluator errors. Non-numeric operands for `-`, `*`, `/`, `%` (and `+`
-//! when neither side is a string) also raise errors.
+//! evaluator errors. Non-numeric operands for `-`, `*`, `/`, `%` also raise
+//! errors; `+` concatenates operands that do not form a mixed numeric pair.
 //!
 //! For full grammar, helper catalog, and timezone behavior see the
 //! [Darkmatter Expressions](../../../../docs/topics/darkmatter-expressions.md)
@@ -80,10 +80,12 @@ pub mod semantics;
 pub use ast::{BinaryOp, Expr, SpannedExpr, SpannedExprKind};
 pub use catalog::{
     expression_function_descriptors, generate_expression_function_table,
-    DataType, ExpressionFunctionDescriptor, ParamType, ReturnType,
+    DataType, ExpressionFunctionDescriptor, ParamType, ReturnType, ReturnValueType,
 };
 pub use ctx::CtxLookup;
-pub use error::{ArityBound, ExpressionError, FileRefFailure, FileReferenceDiagnostic};
+pub use error::{
+    ArityBound, ExpressionError, FileRefFailure, FileReferenceDiagnostic, ProviderFailureKind,
+};
 pub use file_suggestions::{collect_sibling_candidates, suggest_sibling_files};
 pub(crate) use path_projection::{make_portable_relative, make_relative};
 pub use resolve_ctx::ResolutionContext;
@@ -202,10 +204,8 @@ pub trait EvaluationLookup {
         }
     }
 
-    /// Returns the document-relative resolution context that the seven
-    /// read-side functions (`file_exists`, `frontmatter`, `markdown_title`,
-    /// `markdown_body_empty`, `validate_schema`, `absolute`, `relative`)
-    /// resolve their path arguments against.
+    /// Returns the resolution context for read-side filesystem, document, and
+    /// repository functions.
     ///
     /// The default `None` is the **opt-out / test** case: a lookup that has no
     /// document anchor (or a unit test that does not exercise read-side
@@ -217,6 +217,24 @@ pub trait EvaluationLookup {
     /// grammar runs. A `None`-returning lookup makes a read-side function
     /// return the recoverable "requires a document resolution context" error.
     fn resolution_context(&self) -> Option<ResolutionContext> {
+        None
+    }
+
+    /// Borrowed companion to [`resolution_context`](Self::resolution_context).
+    ///
+    /// The owned method above is the public, compatibility-preserving accessor.
+    /// This borrowed variant lets the evaluator dispatch a read-side function
+    /// against a lookup's context **without cloning** it (Finding 12): a
+    /// document with many `frontmatter()` / `file_exists()` calls would
+    /// otherwise deep-clone the context — its `PathBuf`s, magic-path vector, and
+    /// captured `ctx` map — once per call. Implementors that own or borrow a
+    /// context override this to return `Some(&ctx)`; the evaluator prefers it
+    /// and only falls back to the owned clone when it yields `None`.
+    ///
+    /// The default returns `None`, so a lookup that overrides only the owned
+    /// method keeps working unchanged (the evaluator's owned fallback covers
+    /// it).
+    fn resolution_context_ref(&self) -> Option<&ResolutionContext> {
         None
     }
 
@@ -398,6 +416,16 @@ pub fn evaluate<L: EvaluationLookup>(expr: &Expr, lookup: &L) -> Result<Value, E
             Ok(Value::Number(num))
         }
         Expr::BoolLiteral(b) => Ok(Value::Bool(*b)),
+        Expr::ArrayLiteral(items) => items
+            .iter()
+            .map(|item| evaluate(item, lookup))
+            .collect::<Result<Vec<_>, _>>()
+            .map(Value::Array),
+        Expr::ObjectLiteral(entries) => entries
+            .iter()
+            .map(|(key, value)| Ok((key.clone(), evaluate(value, lookup)?)))
+            .collect::<Result<serde_json::Map<_, _>, ExpressionError>>()
+            .map(Value::Object),
         Expr::Paren(inner) => evaluate(inner, lookup),
         Expr::UnaryNot(inner) => {
             let value = evaluate(inner, lookup)?;
@@ -478,7 +506,17 @@ pub fn evaluate<L: EvaluationLookup>(expr: &Expr, lookup: &L) -> Result<Value, E
 }
 
 fn evaluate_binary(op: BinaryOp, left: &Value, right: &Value) -> Result<Value, ExpressionError> {
-    if op == BinaryOp::Add && (left.is_string() || right.is_string()) {
+    let mixed_number_and_numeric_string = op == BinaryOp::Add
+        && matches!(
+            (left, right),
+            (Value::Number(_), Value::String(_)) | (Value::String(_), Value::Number(_))
+        )
+        && to_number_arithmetic(left).is_some()
+        && to_number_arithmetic(right).is_some();
+    if op == BinaryOp::Add
+        && (left.is_string() || right.is_string())
+        && !mixed_number_and_numeric_string
+    {
         return Ok(Value::String(format!(
             "{}{}",
             scalar_string(left),
@@ -684,7 +722,15 @@ fn evaluate_function<L: EvaluationLookup>(
                 .iter()
                 .map(|arg| evaluate(arg, lookup))
                 .collect::<Result<_, _>>()?;
-            if let Some(ctx) = lookup.resolution_context()
+            // Prefer the borrowed context (Finding 12) so a read-side function
+            // dispatched here does not deep-clone the lookup's context; only
+            // fall back to the owned clone for lookups that expose only the
+            // owned accessor.
+            let ctx = lookup
+                .resolution_context_ref()
+                .map(std::borrow::Cow::Borrowed)
+                .or_else(|| lookup.resolution_context().map(std::borrow::Cow::Owned));
+            if let Some(ctx) = ctx
                 && let Some(result) = functions::dispatch_fs(other, &evaluated, &ctx)
             {
                 return result.map_err(|error| match error {
@@ -1189,6 +1235,30 @@ mod tests {
             assert_eq!(
                 binary(BinaryOp::Add, json!(5), json!(" items")).unwrap(),
                 json!("5 items")
+            );
+        }
+
+        #[test]
+        fn mixed_numeric_string_and_number_addition_is_arithmetic() {
+            assert_eq!(
+                binary(BinaryOp::Add, json!("2"), json!(1)).unwrap(),
+                json!(3)
+            );
+            assert_eq!(
+                binary(BinaryOp::Add, json!(1), json!("2")).unwrap(),
+                json!(3)
+            );
+            assert_eq!(
+                binary(BinaryOp::Add, json!("2.5"), json!(1)).unwrap(),
+                json!(3.5)
+            );
+        }
+
+        #[test]
+        fn two_numeric_strings_still_concatenate() {
+            assert_eq!(
+                binary(BinaryOp::Add, json!("2"), json!("1")).unwrap(),
+                json!("21")
             );
         }
 

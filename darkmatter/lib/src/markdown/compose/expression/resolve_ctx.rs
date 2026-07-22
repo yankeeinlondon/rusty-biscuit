@@ -1,12 +1,18 @@
-//! Resolution context for filesystem-aware expression functions.
+//! Resolution context for filesystem- and repository-aware expression functions.
 //!
 //! Read-only: these helpers resolve and read paths; they never mutate.
 
-use biscuit_file::{FileReference, FileReferenceError, PathPosition};
+use biscuit_file::{FetchPolicy, FileReference, FileReferenceError, PathPosition};
 use serde_json::{Map, Value};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 
+use super::ExpressionError;
 use crate::markdown::compose::remote_fetch::RemoteFetchRuntime;
+
+type ProviderQueryResult = Result<Value, ExpressionError>;
+type ProviderQuerySlot = Arc<OnceLock<ProviderQueryResult>>;
 
 /// The document-relative resolution environment passed to filesystem
 /// expression functions (`absolute`, `relative`, `frontmatter`, …).
@@ -32,6 +38,8 @@ pub struct ResolutionContext {
     /// Run-local remote-fetch runtime for URL-typed arguments. `None` disables
     /// remote reads in expression functions.
     pub(crate) remote_fetch: Option<RemoteFetchRuntime>,
+    /// Run-local memoization and single-flight slots for normalized provider calls.
+    pub(crate) provider_queries: Arc<Mutex<HashMap<String, ProviderQuerySlot>>>,
     /// Captured context values (e.g. `ctx.agent`) available to read-side
     /// functions. Populated by production surfaces; tests can inject values
     /// directly via [`Self::with_ctx_value`].
@@ -50,6 +58,7 @@ impl ResolutionContext {
             magic_paths: Vec::new(),
             file_ref_fallback_dir: None,
             remote_fetch: None,
+            provider_queries: Arc::new(Mutex::new(HashMap::new())),
             ctx_values: Map::new(),
             home_dir: None,
         }
@@ -62,6 +71,13 @@ impl ResolutionContext {
     pub fn with_file_ref_fallback_dir(mut self, dir: impl Into<PathBuf>) -> Self {
         self.file_ref_fallback_dir = Some(dir.into());
         self
+    }
+
+    /// Returns the launch directory when available, otherwise the document base directory.
+    pub(crate) fn caller_dir(&self) -> &Path {
+        self.file_ref_fallback_dir
+            .as_deref()
+            .unwrap_or(&self.base_dir)
     }
 
     /// Sets a captured context value (e.g. `agent`) for read-side functions.
@@ -82,6 +98,41 @@ impl ResolutionContext {
     /// Returns the captured value for a context key, if present.
     pub(crate) fn ctx_value(&self, key: &str) -> Option<&Value> {
         self.ctx_values.get(key)
+    }
+
+    /// Returns the run's shared exact-host policy, or deny-all when remote reads are disabled.
+    pub(crate) fn remote_policy(&self) -> FetchPolicy {
+        self.remote_fetch
+            .as_ref()
+            .map(RemoteFetchRuntime::policy)
+            .unwrap_or_else(FetchPolicy::deny_all)
+    }
+
+    /// Runs one normalized provider query once per compose context.
+    ///
+    /// The cache slot stores the typed [`ExpressionError`] itself rather than
+    /// its rendered text, so a focused provider classification
+    /// ([`ExpressionError::Provider`]) survives memoization and the replayed
+    /// failure is byte-identical to the original — re-wrapping rendered text
+    /// was what flattened the classification and risked a doubled `fn():`
+    /// prefix.
+    pub(crate) fn cached_provider_query(
+        &self,
+        function: &'static str,
+        key: String,
+        query: impl FnOnce() -> Result<Value, ExpressionError>,
+    ) -> Result<Value, ExpressionError> {
+        if let Some(remote_fetch) = &self.remote_fetch {
+            return remote_fetch.cached_provider_query(key, query);
+        }
+        let slot = {
+            let mut queries = self.provider_queries.lock().map_err(|_| ExpressionError::Other {
+                function: function.to_string(),
+                message: "provider query cache lock was poisoned".to_string(),
+            })?;
+            queries.entry(key).or_default().clone()
+        };
+        slot.get_or_init(query).clone()
     }
 
     /// Returns the executing agent name.
@@ -256,6 +307,15 @@ mod tests {
         assert_eq!(ctx.file_ref_fallback_dir.as_deref(), Some(std::path::Path::new("/tmp/launch")));
     }
 
+    #[test]
+    fn caller_dir_prefers_launch_fallback_and_otherwise_uses_base_dir() {
+        let document_only = ResolutionContext::new(PathBuf::from("/tmp/docdir"));
+        assert_eq!(document_only.caller_dir(), Path::new("/tmp/docdir"));
+
+        let launched_elsewhere = document_only.with_file_ref_fallback_dir("/tmp/launch");
+        assert_eq!(launched_elsewhere.caller_dir(), Path::new("/tmp/launch"));
+    }
+
     /// A same-named file present in BOTH the document dir and the launch-area
     /// fallback resolves to the document-dir copy — document-first contract
     /// (verification goal #9).
@@ -332,14 +392,8 @@ mod tests {
         let rt = RemoteFetchRuntime::with_policy(policy);
         let url = format!("{}/dynamic.md", server.uri());
 
-        let ctx = ResolutionContext {
-            base_dir: PathBuf::from("/tmp"),
-            magic_paths: Vec::new(),
-            file_ref_fallback_dir: None,
-            remote_fetch: Some(rt),
-            ctx_values: Map::new(),
-            home_dir: None,
-        };
+        let mut ctx = ResolutionContext::new(PathBuf::from("/tmp"));
+        ctx.remote_fetch = Some(rt);
 
         // The URL was never registered by discovery; the read-side function
         // must register-and-fetch it now and return the body.
@@ -359,14 +413,8 @@ mod tests {
 
         // Deny-all policy: even a well-formed URL must be denied at registration.
         let rt = RemoteFetchRuntime::with_policy(FetchPolicy::deny_all());
-        let ctx = ResolutionContext {
-            base_dir: PathBuf::from("/tmp"),
-            magic_paths: Vec::new(),
-            file_ref_fallback_dir: None,
-            remote_fetch: Some(rt),
-            ctx_values: Map::new(),
-            home_dir: None,
-        };
+        let mut ctx = ResolutionContext::new(PathBuf::from("/tmp"));
+        ctx.remote_fetch = Some(rt);
 
         let result = tokio::task::spawn_blocking(move || {
             ctx.fetch_remote_text("https://blocked.example/doc.md")
@@ -374,5 +422,41 @@ mod tests {
         .await
         .unwrap();
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn provider_queries_are_run_local_single_flight_and_memoized() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let context = ResolutionContext::new(PathBuf::from("/tmp"));
+        let executions = Arc::new(AtomicUsize::new(0));
+        let mut workers = Vec::new();
+        for _ in 0..2 {
+            let context = context.clone();
+            let executions = Arc::clone(&executions);
+            workers.push(std::thread::spawn(move || {
+                context
+                    .cached_provider_query("pr", "pr:123".to_string(), || {
+                        executions.fetch_add(1, Ordering::SeqCst);
+                        std::thread::sleep(std::time::Duration::from_millis(20));
+                        Ok(Value::String("result".to_string()))
+                    })
+                    .unwrap()
+            }));
+        }
+
+        for worker in workers {
+            assert_eq!(worker.join().unwrap(), Value::String("result".to_string()));
+        }
+        assert_eq!(executions.load(Ordering::SeqCst), 1);
+
+        let second_context = ResolutionContext::new(PathBuf::from("/tmp"));
+        second_context
+            .cached_provider_query("pr", "pr:123".to_string(), || {
+                executions.fetch_add(1, Ordering::SeqCst);
+                Ok(Value::Null)
+            })
+            .unwrap();
+        assert_eq!(executions.load(Ordering::SeqCst), 2);
     }
 }

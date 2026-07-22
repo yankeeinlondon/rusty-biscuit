@@ -13,6 +13,7 @@
 //! touches the YAML parser or the schema library directly.
 
 pub mod directives;
+pub mod doc_links;
 pub mod expressions;
 pub mod frontmatter;
 pub mod schema;
@@ -24,16 +25,19 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use biscuit_hash::xx_hash_bytes;
-use darkmatter::markdown::schemas::SchemaError;
-use darkmatter::markdown::schemas::StandaloneSchemaEnvelope;
-use darkmatter::markdown::schemas::SuggestionLintProblem;
+use darkmatter::markdown::schemas::{
+    SchemaError, StandaloneSchemaDocument, StandaloneSchemaEnvelope,
+    SuggestionLintProblem, parse_standalone_schema_document,
+};
 use darkmatter::markdown::schemas::triggers::{TriggerRegistry, scan as scan_triggers};
 use lsp_types::Uri;
 
 use crate::config::DmlsConfig;
 
 pub use frontmatter::{FmEntry, FmValueKind, FrontmatterAst, YamlParseError};
-pub use schema::SchemaBundle;
+pub use schema::{
+    FrontmatterSchemaValue, MetaSchemaKind, SchemaAuthoringState, SchemaBundle,
+};
 
 /// The outcome of assembling a document's effective schema.
 #[derive(Clone)]
@@ -85,8 +89,8 @@ pub struct DocumentOverlay {
     /// The frontmatter tree. `None` when the current buffer failed to parse and
     /// no previous good tree exists.
     pub ast: Option<Arc<FrontmatterAst>>,
-    /// Whether [`ast`](Self::ast) is a stale last-good tree (the current buffer
-    /// did not parse).
+    /// Whether [`ast`](Self::ast) is a stale last-good frontmatter tree (the
+    /// current buffer did not parse).
     pub stale: bool,
     /// The current buffer's YAML parse error, if any.
     pub parse_error: Option<YamlParseError>,
@@ -94,6 +98,8 @@ pub struct DocumentOverlay {
     pub schema: SchemaOutcome,
     /// Suggestion-lint state for `suggest(...)` candidate diagnostics.
     pub suggestions: SuggestionState,
+    /// Parsed semantic schema-authoring regions and standalone state.
+    pub schema_authoring: SchemaAuthoringState,
 }
 
 impl DocumentOverlay {
@@ -108,7 +114,7 @@ impl DocumentOverlay {
 
     /// Whether this overlay is a standalone schema authoring document.
     pub fn is_standalone_schema(&self) -> bool {
-        matches!(self.suggestions, SuggestionState::Standalone { .. })
+        matches!(self.schema_authoring, SchemaAuthoringState::Standalone { .. })
     }
 }
 
@@ -125,6 +131,8 @@ struct OverlayCache {
     /// Source text paired with `last_good`; schema matching must use this text
     /// while the current YAML is malformed so activation does not flap.
     last_good_text: HashMap<String, String>,
+    /// Last successfully parsed standalone schema model per document URI.
+    standalone_last_good: HashMap<String, Arc<StandaloneSchemaDocument>>,
     /// Last transactionally loaded registry for each document walk within a
     /// boundary. A failed rescan leaves the previous value installed.
     trigger_registries: HashMap<(PathBuf, PathBuf), TriggerRegistry>,
@@ -175,8 +183,8 @@ impl OverlayState {
     ///
     /// `None` for a document with no frontmatter block and no standalone
     /// SimplifiedSchema envelope. `Some` otherwise, carrying the (possibly
-    /// stale) tree, the current parse error, the schema outcome, and the
-    /// suggestion-lint state.
+    /// stale) tree, the current parse error, effective schema outcome,
+    /// suggestion-lint state, and semantic schema-authoring state.
     pub fn for_document(
         &self,
         uri: &Uri,
@@ -217,7 +225,15 @@ impl OverlayState {
                 workspace_roots,
             );
             let suggestions = suggestions::inline_lints(text, ast.as_deref());
-            return Some(DocumentOverlay { ast, stale, parse_error, schema, suggestions });
+            let schema_authoring = schema::frontmatter_authoring(ast.as_deref(), &schema);
+            return Some(DocumentOverlay {
+                ast,
+                stale,
+                parse_error,
+                schema,
+                suggestions,
+                schema_authoring,
+            });
         }
 
         // Trigger-schema authoring path. Only claimed, malformed envelopes are
@@ -236,6 +252,7 @@ impl OverlayState {
                         parse_error: None,
                         schema: SchemaOutcome::Ready(None),
                         suggestions: SuggestionState::TriggerError(Arc::new(error)),
+                        schema_authoring: SchemaAuthoringState::Inactive,
                     });
                 }
                 Ok(Some(_)) => {
@@ -253,6 +270,7 @@ impl OverlayState {
                             parse_error: None,
                             schema: SchemaOutcome::Ready(None),
                             suggestions: SuggestionState::TriggerError(error),
+                            schema_authoring: SchemaAuthoringState::Inactive,
                         });
                     }
                 }
@@ -260,16 +278,83 @@ impl OverlayState {
             }
         }
 
-        // Standalone SimplifiedSchema YAML envelope path. A standalone YAML
-        // buffer is classified by content, not filename or glob.
-        if let Some(suggestions) = suggestions::standalone_lints(text, path) {
-            return Some(DocumentOverlay {
-                ast: None,
-                stale: false,
-                parse_error: None,
-                schema: SchemaOutcome::Ready(None),
-                suggestions,
-            });
+        // Standalone SimplifiedSchema YAML envelope path. A lexical content
+        // claim keeps the last-good semantic model alive through malformed
+        // edits; the current parse result always owns diagnostics.
+        let claim = schema::standalone_envelope_claim(text);
+        match parse_standalone_schema_document(text, path) {
+            Ok(Some(document)) => {
+                let envelope = document.envelope;
+                let problems = document.suggestion_lints.clone();
+                let model = Arc::new(document);
+                let mut cache = self.inner.lock().expect("overlay lock poisoned");
+                cache
+                    .standalone_last_good
+                    .insert(uri.as_str().to_string(), Arc::clone(&model));
+                return Some(DocumentOverlay {
+                    ast: None,
+                    stale: false,
+                    parse_error: None,
+                    schema: SchemaOutcome::Ready(None),
+                    suggestions: SuggestionState::Standalone {
+                        envelope,
+                        problems,
+                        error: None,
+                    },
+                    schema_authoring: SchemaAuthoringState::Standalone {
+                        envelope,
+                        model: Some(model),
+                        stale: false,
+                        error: None,
+                    },
+                });
+            }
+            Ok(None) if claim.is_none() => {}
+            result => {
+                let envelope = claim?;
+                let error = match result {
+                    Err(error) => Arc::new(error),
+                    Ok(None) => {
+                        // The claim is lexical and the parser is authoritative.
+                        // When the buffer is well-formed YAML the parser has
+                        // simply declined it, so the claim over-reached: an
+                        // ordinary document stays inert rather than inheriting
+                        // an envelope's diagnostics. Only genuinely malformed
+                        // text — the mid-edit case the claim exists to serve —
+                        // keeps the last-good model alive.
+                        let Err(malformed) =
+                            serde_yaml_ng::from_str::<serde_yaml_ng::Value>(text)
+                        else {
+                            return None;
+                        };
+                        Arc::new(SchemaError::SchemaDocument {
+                            path: path.to_path_buf(),
+                            message: malformed.to_string(),
+                        })
+                    }
+                    Ok(Some(_)) => unreachable!("handled above"),
+                };
+                let cache = self.inner.lock().expect("overlay lock poisoned");
+                let model = cache.standalone_last_good.get(uri.as_str()).map(Arc::clone);
+                let stale = model.is_some();
+                return Some(DocumentOverlay {
+                    ast: None,
+                    stale: false,
+                    parse_error: None,
+                    schema: SchemaOutcome::Ready(None),
+                    suggestions: SuggestionState::Standalone {
+                        envelope,
+                        problems: Vec::new(),
+                        error: Some(Arc::clone(&error)),
+                    },
+                    schema_authoring: SchemaAuthoringState::Standalone {
+                        envelope,
+                        model,
+                        stale,
+                        error: Some(error),
+                    },
+                });
+            }
         }
 
         None
@@ -280,6 +365,7 @@ impl OverlayState {
         let mut cache = self.inner.lock().expect("overlay lock poisoned");
         cache.last_good.remove(uri.as_str());
         cache.last_good_text.remove(uri.as_str());
+        cache.standalone_last_good.remove(uri.as_str());
         cache.schema.remove(uri.as_str());
     }
 
@@ -421,6 +507,8 @@ fn deps_unchanged(deps: &[(PathBuf, u64)]) -> bool {
 mod tests {
     use super::*;
 
+    use darkmatter::markdown::schemas::{SchemaSourcePath, SchemaSpanKind, SimplifiedSchema};
+
     fn uri(s: &str) -> Uri {
         s.parse().unwrap()
     }
@@ -547,6 +635,58 @@ mod tests {
     }
 
     #[test]
+    fn schema_cache_invalidates_on_terminal_file_in_a_reference_chain() {
+        // `doc.md` -> `a.yaml` -> `b.yaml`: `a.yaml` is a pure redirect, so the
+        // declaration the document actually validates against lives two hops
+        // away. Every hop must reach `effective.dependencies()`, otherwise
+        // editing the terminal file leaves the document validating against a
+        // stale cached schema.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.yaml"), "$schema: ./b.yaml\n").unwrap();
+        std::fs::write(root.join("b.yaml"), "$schema:\n  value: 'enum(a, b)'\n").unwrap();
+        let doc_path = root.join("doc.md");
+        let text = "---\n$schema: ./a.yaml\nvalue: a\n---\n\nbody\n";
+        let state = OverlayState::default();
+        let doc = uri("file:///w/doc.md");
+        let roots = [root.to_path_buf()];
+
+        let first = state
+            .for_document(&doc, text, &doc_path, &DmlsConfig::default(), &roots)
+            .unwrap();
+        let bundle1 = ready_bundle(&first);
+        let report1 = bundle1.effective.validate(&bundle1.frontmatter_json);
+        assert!(report1.valid, "`a` is a valid enum(a, b): {:?}", report1.problems);
+        assert!(
+            bundle1
+                .effective
+                .dependencies()
+                .iter()
+                .any(|p| p.ends_with("b.yaml")),
+            "the terminal hop must be a dependency edge: {:?}",
+            bundle1.effective.dependencies(),
+        );
+
+        // Edit the TERMINAL file only — `a.yaml` and the document are untouched.
+        std::fs::write(root.join("b.yaml"), "$schema:\n  value: 'enum(x, y)'\n").unwrap();
+
+        let second = state
+            .for_document(&doc, text, &doc_path, &DmlsConfig::default(), &roots)
+            .unwrap();
+        let bundle2 = ready_bundle(&second);
+        assert!(
+            !Arc::ptr_eq(&bundle1, &bundle2),
+            "a terminal-hop change must reassemble the bundle"
+        );
+        let report2 = bundle2.effective.validate(&bundle2.frontmatter_json);
+        assert!(
+            !report2.valid,
+            "`a` is no longer a valid enum(x, y): {:?}",
+            report2.problems
+        );
+    }
+
+    #[test]
     fn schema_cache_invalidates_on_extension_baseline_change() {
         // An extension baseline is merged into the baseline JSON schema before
         // the effective schema is assembled, so its dependency edges never reach
@@ -638,6 +778,342 @@ mod tests {
         assert!(overlay.parse_error.is_some());
         let ast = overlay.ast.expect("last-good tree retained");
         assert_eq!(ast.entry_by_dotted("title").unwrap().key, "title");
+    }
+
+    #[test]
+    fn standalone_pure_and_tagged_models_carry_schema_and_authored_spans() {
+        for (uri_text, path, text, property) in [
+            (
+                "file:///w/notes.txt",
+                Path::new("/w/notes.txt"),
+                "$schema:\r\n  café: \"string(required)\"\r\n",
+                "café",
+            ),
+            (
+                "file:///w/types.data",
+                Path::new("/w/types.data"),
+                "---\nkind: schema\ntypes:\n  title: 'number(min(1))'\n...\n",
+                "title",
+            ),
+        ] {
+            let state = OverlayState::default();
+            let overlay = state
+                .for_document(
+                    &uri(uri_text),
+                    text,
+                    path,
+                    &DmlsConfig::default(),
+                    &[PathBuf::from("/w")],
+                )
+                .expect("content claims a standalone schema");
+            let SchemaAuthoringState::Standalone { model: Some(model), stale, error, .. } =
+                &overlay.schema_authoring
+            else {
+                panic!("expected a parsed standalone schema model");
+            };
+            assert!(!stale);
+            assert!(error.is_none());
+            let property_path = SchemaSourcePath::root().property(property);
+            let key_span = model
+                .source_map
+                .spans(&property_path, SchemaSpanKind::MappingKey)
+                .first()
+                .expect("mapping-key span");
+            assert_eq!(&text[key_span.clone()], property);
+            let type_span = model
+                .source_map
+                .spans(&property_path, SchemaSpanKind::TypeKeyword)
+                .first()
+                .expect("type-keyword span");
+            assert!(matches!(&text[type_span.clone()], "string" | "number"));
+            assert!(matches!(model.schema(), Some(SimplifiedSchema::Single(_))));
+        }
+    }
+
+    #[test]
+    fn frontmatter_meta_schema_activation_uses_effective_property_definitions() {
+        let text = concat!(
+            "---\n$schema:\n",
+            "  definition_value: [string, type-definition]\n",
+            "  schema_value: schema\n",
+            "  schema_ref: schema\n",
+            "  plain: string\n",
+            "  missing_value: type-definition\n",
+            "definition_value: \"number(min(1))\"\n",
+            "schema_value:\n  title: string(required)\n",
+            "schema_ref: './missing.yaml'\n",
+            "plain: type-definition\n",
+            "---\nBody\n",
+        );
+        let state = OverlayState::default();
+        let overlay = state
+            .for_document(
+                &uri("file:///w/doc.md"),
+                text,
+                Path::new("/w/doc.md"),
+                &DmlsConfig::default(),
+                &[PathBuf::from("/w")],
+            )
+            .expect("frontmatter overlay");
+        let SchemaAuthoringState::Frontmatter(values) = &overlay.schema_authoring else {
+            panic!("expected frontmatter semantic activation");
+        };
+        let kinds = |pointer: &str| {
+            values
+                .iter()
+                .find(|value| value.pointer == pointer)
+                .map(|value| value.kinds.as_slice())
+        };
+        assert_eq!(kinds("/$schema"), Some(&[MetaSchemaKind::Schema][..]));
+        assert_eq!(
+            kinds("/definition_value"),
+            Some(&[MetaSchemaKind::TypeDefinition][..])
+        );
+        assert_eq!(kinds("/schema_value"), Some(&[MetaSchemaKind::Schema][..]));
+        assert_eq!(kinds("/schema_ref"), Some(&[MetaSchemaKind::Schema][..]));
+        assert!(kinds("/plain").is_none(), "key names and value text never activate");
+        assert!(
+            kinds("/missing_value").is_none(),
+            "an effective definition without an authored value has no active region"
+        );
+        for value in values {
+            assert!(!value.value_span.is_empty());
+            assert!(value.value_span.end <= text.len());
+        }
+    }
+
+    #[test]
+    fn standalone_activation_is_content_based_not_path_based() {
+        let state = OverlayState::default();
+        let roots = [PathBuf::from("/w")];
+        for (uri_text, path, text) in [
+            ("file:///w/note.txt", Path::new("/w/note.txt"), "$schema:\n  title: string\n"),
+            (
+                "file:///w/anything.data",
+                Path::new("/w/anything.data"),
+                "kind: schema\ntypes:\n  title: string\n",
+            ),
+        ] {
+            let overlay = state
+                .for_document(
+                    &uri(uri_text),
+                    text,
+                    path,
+                    &DmlsConfig::default(),
+                    &roots,
+                )
+                .expect("content activates regardless of path");
+            assert!(overlay.is_standalone_schema());
+        }
+
+        for (uri_text, path, text) in [
+            (
+                "file:///w/schemas/config.yaml",
+                Path::new("/w/schemas/config.yaml"),
+                "title: ordinary yaml\n",
+            ),
+            (
+                "file:///w/schema.schema.yaml",
+                Path::new("/w/schema.schema.yaml"),
+                "name: filename alone is inert\n",
+            ),
+            (
+                "file:///w/raw.schema.json",
+                Path::new("/w/raw.schema.json"),
+                "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"type\":\"object\"}",
+            ),
+        ] {
+            assert!(
+                state
+                    .for_document(
+                        &uri(uri_text),
+                        text,
+                        path,
+                        &DmlsConfig::default(),
+                        &roots,
+                    )
+                    .is_none(),
+                "path-only activation is forbidden for {path:?}"
+            );
+        }
+    }
+
+    /// Escape-bearing scalars once let the lexical claim over-reach on
+    /// well-formed ordinary YAML, and the resulting disagreement with the
+    /// authoritative parser reached an `expect_err` on a successful parse.
+    /// Such a disagreement must deactivate, never crash.
+    #[test]
+    fn escaped_quotes_stay_inert_without_panicking() {
+        let state = OverlayState::default();
+        let roots = [PathBuf::from("/w")];
+        for (uri_text, path, text) in [
+            (
+                "file:///w/raw.schema.json",
+                Path::new("/w/raw.schema.json"),
+                r#"{"$schema":"https://example.com/quo\"ted","type":"object"}"#,
+            ),
+            (
+                "file:///w/quoted.yaml",
+                Path::new("/w/quoted.yaml"),
+                "description: \"some text\nkind: schema\n\"\n",
+            ),
+            (
+                "file:///w/single.yaml",
+                Path::new("/w/single.yaml"),
+                "description: 'multi\nkind: schema\n'\n",
+            ),
+        ] {
+            assert!(
+                state
+                    .for_document(&uri(uri_text), text, path, &DmlsConfig::default(), &roots)
+                    .is_none(),
+                "escape-bearing ordinary YAML must stay inert: {path:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn standalone_last_good_survives_malformed_yaml_and_shape_edits() {
+        let state = OverlayState::default();
+        let doc = uri("file:///w/schema.yaml");
+        let path = Path::new("/w/schema.yaml");
+        let roots = [PathBuf::from("/w")];
+        let good = "$schema:\n  title: string(required)\n";
+        let first = state
+            .for_document(&doc, good, path, &DmlsConfig::default(), &roots)
+            .expect("valid schema overlay");
+        let SchemaAuthoringState::Standalone { model: Some(first_model), .. } =
+            &first.schema_authoring
+        else {
+            panic!("valid standalone model");
+        };
+
+        for malformed in ["$schema:\n\tbad: string\n", "$schema: 42\n"] {
+            let current = state
+                .for_document(&doc, malformed, path, &DmlsConfig::default(), &roots)
+                .expect("lexical claim remains active");
+            let SchemaAuthoringState::Standalone { model, stale, error, .. } =
+                &current.schema_authoring
+            else {
+                panic!("malformed claimed document stays standalone");
+            };
+            let retained = model.as_ref().expect("last-good model retained");
+            assert!(Arc::ptr_eq(first_model, retained));
+            assert!(*stale);
+            assert!(error.is_some(), "current text owns a parser error");
+            assert!(matches!(
+                current.suggestions,
+                SuggestionState::Standalone { error: Some(_), .. }
+            ));
+        }
+
+        let fresh = OverlayState::default();
+        let malformed = fresh
+            .for_document(
+                &uri("file:///w/fresh.yaml"),
+                "$schema:\n\tbad: string\n",
+                Path::new("/w/fresh.yaml"),
+                &DmlsConfig::default(),
+                &roots,
+            )
+            .expect("lexical claim activates diagnostics");
+        let SchemaAuthoringState::Standalone { model, stale, error, .. } =
+            malformed.schema_authoring
+        else {
+            panic!("fresh malformed claim is standalone");
+        };
+        assert!(model.is_none(), "no semantic model may be invented");
+        assert!(!stale);
+        assert!(error.is_some());
+    }
+
+    #[test]
+    fn forget_clears_standalone_last_good_state() {
+        let state = OverlayState::default();
+        let doc = uri("file:///w/schema.yaml");
+        let path = Path::new("/w/schema.yaml");
+        let roots = [PathBuf::from("/w")];
+        state
+            .for_document(
+                &doc,
+                "$schema:\n  title: string\n",
+                path,
+                &DmlsConfig::default(),
+                &roots,
+            )
+            .expect("seed standalone model");
+        state.forget(&doc);
+        let overlay = state
+            .for_document(
+                &doc,
+                "$schema: 42\n",
+                path,
+                &DmlsConfig::default(),
+                &roots,
+            )
+            .expect("claimed malformed overlay");
+        let SchemaAuthoringState::Standalone { model, stale, error, .. } =
+            overlay.schema_authoring
+        else {
+            panic!("standalone state");
+        };
+        assert!(model.is_none());
+        assert!(!stale);
+        assert!(error.is_some());
+    }
+
+    #[test]
+    fn shipped_schema_corpus_uses_content_classification() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/schemas");
+        let expected = std::collections::BTreeMap::from([
+            ("claudine-types.yaml".to_string(), "ready"),
+            ("claudine.yaml".to_string(), "ready"),
+            ("darkmatter.yaml".to_string(), "ready"),
+            ("env.yaml".to_string(), "ready"),
+            ("err.yaml".to_string(), "error"),
+            ("expression-functions.yaml".to_string(), "inactive"),
+            ("schema-definition.yaml".to_string(), "inactive"),
+        ]);
+        let state = OverlayState::default();
+        let roots = [root.clone()];
+        let mut observed = std::collections::BTreeMap::new();
+        for entry in std::fs::read_dir(&root).expect("schema corpus") {
+            let entry = entry.expect("schema artifact");
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("yaml") {
+                continue;
+            }
+            let name = path.file_name().unwrap().to_str().unwrap().to_string();
+            let text = std::fs::read_to_string(&path).expect("read artifact");
+            let doc: Uri = url::Url::from_file_path(&path).unwrap().as_str().parse().unwrap();
+            let classification = match state.for_document(
+                &doc,
+                &text,
+                &path,
+                &DmlsConfig::default(),
+                &roots,
+            ) {
+                Some(DocumentOverlay {
+                    schema_authoring:
+                        SchemaAuthoringState::Standalone { model: Some(_), error: None, .. },
+                    ..
+                }) => "ready",
+                Some(DocumentOverlay {
+                    schema_authoring:
+                        SchemaAuthoringState::Standalone { error: Some(error), .. },
+                    ..
+                }) => {
+                    if name == "darkmatter.yaml" {
+                        panic!("shipped Darkmatter schema failed passive parsing: {error}");
+                    }
+                    "error"
+                }
+                None => "inactive",
+                Some(_) => "other",
+            };
+            observed.insert(name, classification);
+        }
+        assert_eq!(observed, expected);
     }
 
     fn write_trigger_fixture(root: &Path) {

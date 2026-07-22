@@ -80,7 +80,7 @@ pub const OPERATOR_DESCRIPTORS: &[OperatorDescriptor] = &[
     OperatorDescriptor {
         name: "Additive",
         operators: "`+`, `-`",
-        description: "Left-associative addition and subtraction; `+` also concatenates strings.",
+        description: "Left-associative addition and subtraction; `+` coerces mixed numeric strings and numbers, and otherwise concatenates strings.",
         order: 4,
         example: Some(Example {
             invocation: "\"count: \" + 5",
@@ -588,7 +588,7 @@ pub const ARITHMETIC_OPERATOR_DESCRIPTORS: &[ArithmeticOperatorDescriptor] = &[
     },
     ArithmeticOperatorDescriptor {
         syntax: "`+`",
-        description: "performs string concatenation when either operand is a string",
+        description: "coerces a numeric string paired with a number; otherwise concatenates strings",
         order: 2,
         example: Some(Example {
             invocation: "\"a\" + \"b\"",

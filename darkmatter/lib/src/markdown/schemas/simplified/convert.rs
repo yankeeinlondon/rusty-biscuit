@@ -11,9 +11,8 @@
 //! - **Property-level unions** hoist `required` and `default(...)` from every
 //!   arm onto the parent property. Arm-local constraints stay arm-local. A
 //!   `default(...)` that disagrees across arms is a hard conversion error.
-//! - **`x-darkmatter-*` extensions** are emitted as plain JSON Schema
-//!   annotation keys (`x-darkmatter-url-scheme` for `url(scheme(...))`); the
-//!   custom format validators consume them. `file(match(...))` is the
+//! - **`x-darkmatter-*` extensions** include the URL-scheme validator and the
+//!   grammar-backed semantic meta-type keywords. `file(match(...))` is the
 //!   exception: `match` is suggestion metadata only, so it is **not** emitted
 //!   into the compiled JSON Schema (completion reads the patterns from the
 //!   simplified-schema atom instead).
@@ -38,8 +37,8 @@ use crate::markdown::compose::expression::parse_condition;
 use crate::markdown::schemas::errors::SchemaError;
 use crate::markdown::schemas::format::{
     DARKMATTER_DATETIME_FORMAT, DARKMATTER_EXPRESSION_FORMAT, DARKMATTER_FILE_FORMAT,
-    DARKMATTER_FILE_REFERENCE_FORMAT, DARKMATTER_JSON_FORMAT, DARKMATTER_TIME_FORMAT,
-    DARKMATTER_YAML_FORMAT,
+    DARKMATTER_FILE_REFERENCE_FORMAT, DARKMATTER_JSON_FORMAT, DARKMATTER_SCHEMA_KEYWORD,
+    DARKMATTER_TIME_FORMAT, DARKMATTER_TYPE_DEFINITION_KEYWORD, DARKMATTER_YAML_FORMAT,
 };
 
 /// Draft 2020-12 schema URI emitted on every generated root schema.
@@ -770,6 +769,15 @@ fn type_fragment(
         // evaluated).
         SimplifiedType::Literal => literal_fragment(name, constraints),
         SimplifiedType::Expression => expression_fragment(name, constraints),
+        SimplifiedType::TypeDefinition => semantic_type_fragment(
+            name,
+            "type-definition",
+            DARKMATTER_TYPE_DEFINITION_KEYWORD,
+            constraints,
+        ),
+        SimplifiedType::Schema => {
+            semantic_type_fragment(name, "schema", DARKMATTER_SCHEMA_KEYWORD, constraints)
+        }
         SimplifiedType::Any => any_fragment(name, constraints),
     }
 }
@@ -1057,6 +1065,19 @@ fn expression_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, 
         }
     }
     Ok(json!({ "type": "string", "format": DARKMATTER_EXPRESSION_FORMAT }))
+}
+
+fn semantic_type_fragment(
+    name: &str,
+    type_label: &str,
+    keyword: &str,
+    constraints: &[Constraint],
+) -> Result<Value, SchemaError> {
+    reject_unsupported(name, type_label, constraints, &[])?;
+    let mut fragment = Map::new();
+    fragment.insert("type".into(), json!(["string", "object", "array"]));
+    fragment.insert(keyword.into(), Value::Bool(true));
+    Ok(Value::Object(fragment))
 }
 
 /// Renders an expression `default(...)` value as the source text handed to the

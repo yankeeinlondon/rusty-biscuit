@@ -1,0 +1,20 @@
+Phase 1 pre-change baseline
+Captured: 2026-07-18
+Invocation: DMLS initialize/open/hover normal LSP session path
+Document:
+---
+$schema:
+  title: string
+title: Hello
+---
+Body
+
+Hover at $schema:
+**`$schema`**
+
+Type: **any**
+
+
+
+Declares an inline schema, referenced schema file, root union, or raw JSON Schema for this document. Document schemas override baseline properties on conflict.
+

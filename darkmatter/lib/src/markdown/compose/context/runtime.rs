@@ -35,6 +35,12 @@ struct ComposeContextInner {
     month_name_abbr: String,
     env: HashMap<String, String>,
     values: serde_json::Map<String, serde_json::Value>,
+    /// Lazily-memoized `values` with the compose-time `AGENT`/`MODEL` env
+    /// overrides applied. Computed once on first `get_effective`/`as_object`
+    /// so a `ctx.*` lookup clones only the requested leaf rather than the
+    /// whole context map. Reset by [`ComposeContext::env_mut`] when the env
+    /// (which the overrides derive from) is mutated.
+    overrides: std::sync::OnceLock<serde_json::Map<String, serde_json::Value>>,
     capture_diagnostics: Vec<super::ContextMergeDiagnostic>,
     capture_timings: Vec<(String, Duration)>,
 }
@@ -204,6 +210,7 @@ impl ComposeContext {
                 month_name_abbr: get_str("month_name_abbr"),
                 env,
                 values,
+                overrides: std::sync::OnceLock::new(),
                 capture_diagnostics,
                 capture_timings,
             }),
@@ -217,12 +224,21 @@ impl ComposeContext {
 
     /// Looks up a value after applying compose-time environment overrides.
     pub(crate) fn get_effective(&self, key: &str) -> Option<serde_json::Value> {
-        self.values_with_env_agent_overrides().get(key).cloned()
+        self.effective_values().get(key).cloned()
     }
 
     /// Returns the full context as a JSON object.
     pub fn as_object(&self) -> serde_json::Value {
-        serde_json::Value::Object(self.values_with_env_agent_overrides())
+        serde_json::Value::Object(self.effective_values().clone())
+    }
+
+    /// Returns the `values` map with `AGENT`/`MODEL` env overrides applied,
+    /// memoized once per context so repeated `ctx.*` lookups don't re-clone
+    /// (and re-override) the entire map on every access.
+    fn effective_values(&self) -> &serde_json::Map<String, serde_json::Value> {
+        self.inner
+            .overrides
+            .get_or_init(|| self.values_with_env_agent_overrides())
     }
 
     /// Returns diagnostics from the capture phase.
@@ -249,7 +265,11 @@ impl ComposeContext {
     /// environment overrides before passing the context to
     /// [`ComposeOptions::new_with_context`].
     pub fn env_mut(&mut self) -> &mut HashMap<String, String> {
-        &mut std::sync::Arc::make_mut(&mut self.inner).env
+        let inner = std::sync::Arc::make_mut(&mut self.inner);
+        // Mutating the env can change the AGENT/MODEL-derived overrides, so
+        // discard any memoized effective map; it is rebuilt on next access.
+        inner.overrides = std::sync::OnceLock::new();
+        &mut inner.env
     }
 
     fn values_with_env_agent_overrides(&self) -> serde_json::Map<String, serde_json::Value> {
@@ -315,10 +335,30 @@ impl ComposeContext {
                 month_name_abbr: get_str("month_name_abbr"),
                 env: HashMap::new(),
                 values,
+                overrides: std::sync::OnceLock::new(),
                 capture_diagnostics: Vec::new(),
                 capture_timings: Vec::new(),
             }),
         }
+    }
+
+    /// Returns a copy of [`fixed_for_testing`](Self::fixed_for_testing) with the
+    /// given values inserted (or overwritten).
+    ///
+    /// Lets a test build two contexts that differ only in a single value — e.g.
+    /// a volatile `timestamp` — to prove the reference-graph identity is
+    /// complete rather than reusing the persistent-cache `context_hash`.
+    #[cfg(test)]
+    pub(crate) fn fixed_for_testing_with(
+        extra: impl IntoIterator<Item = (&'static str, serde_json::Value)>,
+    ) -> Self {
+        let mut ctx = Self::fixed_for_testing();
+        let inner = std::sync::Arc::make_mut(&mut ctx.inner);
+        for (key, value) in extra {
+            inner.values.insert(key.to_string(), value);
+        }
+        inner.overrides = std::sync::OnceLock::new();
+        ctx
     }
 }
 

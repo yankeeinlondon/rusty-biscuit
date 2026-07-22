@@ -35,7 +35,9 @@ use super::shell_expansion::types::{
     ChainOperator, ErrorHandling, PipelineRuntime, ShellCommandOrigin, ShellDirective,
     ShellExpansionError, ShellPipeline, ShellPolicyPaths, frontmatter_key_line,
 };
-use super::shell_expansion::{PreparedShellDirective, execute_prepared_directive, prepare_directive};
+use super::shell_expansion::{
+    PreparedShellDirective, execute_prepared_directive, prepare_directive,
+};
 use super::{ComposeOptions, ComposeWarning};
 use crate::markdown::frontmatter::Frontmatter;
 use crate::markdown::span::{SourceSpan, Spanned};
@@ -1304,8 +1306,8 @@ pub(crate) fn execute_frontmatter_shell_expansion(
     // so non-ternary inputs don't pay the cloning cost. The real run carries a
     // resolution context so a ternary condition and its selected branch can use
     // the read-side functions (`file_exists`, `frontmatter`, …) and `doc.*`.
-    // Frontmatter is local-only (Decision B): this context never attaches a
-    // remote-fetch runtime, so a remote URL argument here fails loudly.
+    // Authorized remote reads use the same run-local runtime as body
+    // interpolation, so equivalent calls share policy and single-flight state.
     let resolution_context = options.frontmatter_resolution_context();
     let mut seed_state: Option<FrontmatterSeedState> = None;
 

@@ -1,7 +1,37 @@
 use biscuit_terminal::utils::UnicodeWidthStr;
+use pulldown_cmark::{CowStr, Event};
+use std::ops::Range;
 use unicode_script::{Script, UnicodeScript};
 
-use super::lists::is_list_item_start;
+use super::lists::list_marker_byte_width;
+
+mod semantic;
+
+pub(super) fn collapse_incidental_soft_break_events<'a>(
+    content: &str,
+    events: &[(Event<'a>, Range<usize>)],
+) -> Vec<(Event<'a>, Range<usize>)> {
+    let semantic = semantic::SoftBreakModel::from_events(content, events);
+    let mut boundaries = semantic.boundaries.iter();
+
+    events
+        .iter()
+        .map(|(event, span)| {
+            if matches!(event, Event::SoftBreak) {
+                let boundary = boundaries
+                    .next()
+                    .expect("semantic model records every soft-break event");
+                if boundary.eligible {
+                    let replacement = boundary
+                        .join_separator
+                        .map_or_else(String::new, |separator| separator.to_string());
+                    return (Event::Text(CowStr::from(replacement)), span.clone());
+                }
+            }
+            (event.clone(), span.clone())
+        })
+        .collect()
+}
 
 pub fn strip_incidental_newlines(content: &str) -> String {
     let normalized = content.replace("\r\n", "\n").replace('\r', "\n");
@@ -15,52 +45,137 @@ pub fn strip_incidental_newlines(content: &str) -> String {
     } else {
         lines.len()
     };
-    let trailing_newline = lines.last() == Some(&"");
-    let metadata = LineMetadata::scan(&lines[..line_count]);
+    let semantic = semantic::SoftBreakModel::from_content(&normalized);
+    let metadata = LineMetadata::scan(&lines[..line_count], 0, Some(&semantic.protected), true);
+    // Boundaries arrive in event order, which is source order, so these edits are
+    // sorted by `range.start` by construction. The binding is deliberately not
+    // `mut`: the legacy pass below binary-searches it to decide ownership, and
+    // appending to a vector mid-search destroys the sort order the search
+    // requires. Collecting the legacy edits separately makes that class of bug
+    // unrepresentable rather than merely avoided.
+    let semantic_edits: Vec<StripEdit> = semantic
+        .boundaries
+        .iter()
+        .filter(|boundary| boundary.eligible && boundary.item_depth > 0)
+        .map(|boundary| StripEdit {
+            range: boundary.soft_break.start..boundary.next_prefix.end,
+            separator: boundary.join_separator,
+        })
+        .collect();
+    debug_assert!(
+        semantic_edits
+            .windows(2)
+            .all(|pair| pair[0].range.start < pair[1].range.start),
+        "the ownership probe below requires strictly ascending semantic edit starts"
+    );
 
-    let mut result = String::with_capacity(normalized.len());
-    let mut skip_prefix_len = 0;
-
+    let mut legacy_edits: Vec<StripEdit> = Vec::new();
+    let mut line_start = 0usize;
     for idx in 0..line_count {
         let line = lines[idx];
-        if skip_prefix_len > 0 && line.len() >= skip_prefix_len {
-            result.push_str(&line[skip_prefix_len..]);
-            skip_prefix_len = 0;
-        } else {
-            result.push_str(line);
+        if idx + 1 < line_count {
+            let newline_offset = line_start + line.len();
+            let owned_by_semantic = semantic_edits
+                .binary_search_by_key(&newline_offset, |edit| edit.range.start)
+                .is_ok();
+
+            // The parser model is authoritative for list prose. The legacy
+            // classifier remains the compatibility path for non-list prose.
+            if !owned_by_semantic
+                && let NewlineBoundary::Collapse { skip_next_prefix } =
+                    newline_boundary(&metadata[idx], &metadata[idx + 1])
+            {
+                let next_line = lines[idx + 1];
+                let next_body = if next_line.len() >= skip_next_prefix {
+                    &next_line[skip_next_prefix..]
+                } else {
+                    next_line
+                };
+                legacy_edits.push(StripEdit {
+                    range: newline_offset..newline_offset + 1 + skip_next_prefix,
+                    separator: join_separator(line, next_body),
+                });
+            }
         }
 
-        if idx + 1 < line_count {
-            let boundary = newline_boundary(&metadata[idx], &metadata[idx + 1]);
-            match boundary {
-                NewlineBoundary::Preserve => result.push('\n'),
-                NewlineBoundary::Collapse { skip_next_prefix } => {
-                    let next_line = lines[idx + 1];
-                    let next_body = if next_line.len() >= skip_next_prefix {
-                        &next_line[skip_next_prefix..]
-                    } else {
-                        next_line
-                    };
-                    if let Some(separator) = join_separator(line, next_body) {
-                        result.push(separator);
-                    }
-                    skip_prefix_len = skip_next_prefix;
-                }
-            }
-        } else if trailing_newline {
-            result.push('\n');
+        line_start += line.len();
+        if idx + 1 < lines.len() {
+            line_start += 1;
         }
+    }
+
+    let mut edits = semantic_edits;
+    edits.extend(legacy_edits);
+    apply_strip_edits(&normalized, edits)
+}
+
+#[derive(Debug, Clone)]
+struct StripEdit {
+    range: Range<usize>,
+    separator: Option<char>,
+}
+
+/// Applies `edits` to `content` by walking them from the end of the document
+/// into a pre-sized buffer, replacing each removed range with its separator.
+///
+/// ## Notes
+///
+/// Callers must supply non-overlapping edits; the `debug_assert` below is the
+/// real contract, and a violation is a caller bug worth failing loudly on in
+/// tests. An overlap that survives to a release build is nonetheless dropped
+/// rather than applied, because slicing `content` backwards would panic — and a
+/// formatter that aborts on a document it was asked to format is a worse outcome
+/// than one collapse boundary going unapplied.
+fn apply_strip_edits(content: &str, mut edits: Vec<StripEdit>) -> String {
+    if edits.is_empty() {
+        return content.to_string();
+    }
+
+    // Widest-first on ties so the retained edit is deterministic when the
+    // overlap guard below has to choose between two edits at one offset.
+    edits.sort_unstable_by(|left, right| {
+        left.range
+            .start
+            .cmp(&right.range.start)
+            .then_with(|| right.range.end.cmp(&left.range.end))
+    });
+    debug_assert!(edits.windows(2).all(|pair| pair[0].range.end <= pair[1].range.start));
+    edits.dedup_by(|later, earlier| later.range.start < earlier.range.end);
+
+    let removed = edits.iter().map(|edit| edit.range.len()).sum::<usize>();
+    let inserted = edits
+        .iter()
+        .filter_map(|edit| edit.separator)
+        .map(char::len_utf8)
+        .sum::<usize>();
+    let mut fragments = Vec::with_capacity(edits.len());
+    let mut cursor = content.len();
+
+    for edit in edits.iter().rev() {
+        debug_assert!(edit.range.end <= cursor);
+        fragments.push((edit.separator, &content[edit.range.end..cursor]));
+        cursor = edit.range.start;
+    }
+
+    let mut result = String::with_capacity(content.len() - removed + inserted);
+    result.push_str(&content[..cursor]);
+    for (separator, tail) in fragments.into_iter().rev() {
+        if let Some(separator) = separator {
+            result.push(separator);
+        }
+        result.push_str(tail);
     }
 
     result
 }
 
-/// Reflows Markdown prose lines to `width` display columns.
+/// Reflows Markdown prose blocks to `width` display columns.
 ///
 /// Protected Markdown blocks such as fences, indented code, tables, HTML
-/// blocks, and transclusion directive lines are emitted unchanged. List,
-/// task-list, and blockquote prefixes are preserved while their body text is
-/// wrapped inside the remaining width.
+/// blocks, link-reference definitions, and transclusion directive lines are
+/// emitted unchanged. Existing soft breaks inside list-item paragraphs are
+/// unwrapped before list, task-list, and blockquote container prefixes are
+/// applied to the newly wrapped lines.
 ///
 /// # Panics
 ///
@@ -73,23 +188,69 @@ pub fn reflow_to_width(content: &str, width: usize) -> String {
         return normalized;
     }
 
-    let lines: Vec<&str> = normalized.split('\n').collect();
+    let semantic = semantic::ReflowMap::from_content(&normalized);
+    let mut result = String::with_capacity(normalized.len());
+    let mut cursor = 0usize;
+
+    for block in &semantic.blocks {
+        if block.span.start < cursor {
+            continue;
+        }
+        result.push_str(&reflow_physical_lines(
+            &normalized[cursor..block.span.start],
+            cursor,
+            width,
+            &semantic.protected,
+        ));
+        result.push_str(&reflow_list_block(
+            &normalized,
+            block,
+            &semantic.breaks,
+            width,
+        ));
+        cursor = block.span.end;
+    }
+    result.push_str(&reflow_physical_lines(
+        &normalized[cursor..],
+        cursor,
+        width,
+        &semantic.protected,
+    ));
+
+    result
+}
+
+fn reflow_physical_lines(
+    content: &str,
+    source_offset: usize,
+    width: usize,
+    protected_spans: &[Range<usize>],
+) -> String {
+    if content.is_empty() {
+        return String::new();
+    }
+
+    let lines: Vec<&str> = content.split('\n').collect();
     let line_count = if lines.last() == Some(&"") {
         lines.len().saturating_sub(1)
     } else {
         lines.len()
     };
     let trailing_newline = lines.last() == Some(&"");
-    let metadata = LineMetadata::scan(&lines[..line_count]);
-    let mut result = String::with_capacity(normalized.len());
+    let metadata = LineMetadata::scan(
+        &lines[..line_count],
+        source_offset,
+        Some(protected_spans),
+        false,
+    );
+    let mut result = String::with_capacity(content.len());
 
     for idx in 0..line_count {
         let line = lines[idx];
         if metadata[idx].blank || metadata[idx].protected {
             result.push_str(line);
         } else {
-            let wrapped = reflow_line(line, width);
-            result.push_str(&wrapped);
+            result.push_str(&reflow_line(line, width));
         }
 
         if idx + 1 < line_count || trailing_newline {
@@ -98,6 +259,64 @@ pub fn reflow_to_width(content: &str, width: usize) -> String {
     }
 
     result
+}
+
+fn reflow_list_block(
+    content: &str,
+    block: &semantic::ReflowBlock,
+    breaks: &[semantic::ReflowBreak],
+    width: usize,
+) -> String {
+    let first_line_end = content[block.span.clone()]
+        .find('\n')
+        .map_or(block.span.end, |len| block.span.start + len);
+    let prefix = line_reflow_prefix(&content[block.span.start..first_line_end]);
+    let mut first_prefix = prefix.first.as_str();
+    let mut body = String::new();
+    let mut rendered = Vec::new();
+    let mut cursor = block.span.start + prefix.first_len;
+
+    for boundary in breaks {
+        if boundary.span.start < cursor || block.span.end < boundary.span.end {
+            continue;
+        }
+        body.push_str(&content[cursor..boundary.span.start]);
+        match boundary.kind {
+            semantic::ReflowBreakKind::Soft(separator) => {
+                if let Some(separator) = separator {
+                    body.push(separator);
+                }
+            }
+            semantic::ReflowBreakKind::Hard => {
+                rendered.push(wrap_text_with_suffix(
+                    body.trim(),
+                    first_prefix,
+                    &prefix.continuation,
+                    hard_break_suffix(&content[boundary.span.clone()]),
+                    width,
+                ));
+                body.clear();
+                first_prefix = &prefix.continuation;
+            }
+        }
+        cursor = boundary.next_prefix.end;
+    }
+
+    body.push_str(&content[cursor..block.span.end]);
+    if !body.trim().is_empty() {
+        rendered.push(wrap_text(
+            body.trim(),
+            first_prefix,
+            &prefix.continuation,
+            width,
+        ));
+    }
+
+    rendered.join("\n")
+}
+
+fn hard_break_suffix(span: &str) -> &str {
+    span.trim_end_matches(['\n', '\r'])
 }
 
 #[derive(Debug, Clone)]
@@ -113,12 +332,17 @@ struct LineMetadata {
 }
 
 impl LineMetadata {
-    fn scan(lines: &[&str]) -> Vec<Self> {
+    fn scan(
+        lines: &[&str],
+        source_offset: usize,
+        parsed_protected_spans: Option<&[Range<usize>]>,
+        use_indented_code_fallback: bool,
+    ) -> Vec<Self> {
         let mut metadata = Vec::with_capacity(lines.len());
         let mut fence: Option<String> = None;
         let mut html_block: Option<HtmlBlockEnd> = None;
         let mut inline_code_ticks: Option<usize> = None;
-        let mut shell_block_depth = 0usize;
+        let mut line_offset = source_offset;
 
         for line in lines {
             let trimmed = line.trim_start();
@@ -126,19 +350,21 @@ impl LineMetadata {
             let blank = trimmed.is_empty();
             let was_in_fence = fence.is_some();
             let was_in_html = html_block.is_some();
-            let was_in_shell_block = shell_block_depth > 0;
             let starts_fence = fence.is_none().then(|| fence_marker(trimmed)).flatten();
             let starts_html = html_block.is_none().then(|| html_block_end(trimmed)).flatten();
-            let starts_shell_block = directive_trimmed.starts_with("::shell-block");
-            let ends_shell_block = directive_trimmed.starts_with("::end-block");
-            let list_item = is_list_item_start(trimmed);
+            let list_item = list_marker_byte_width(trimmed).is_some();
+            let line_span = line_offset..line_offset + line.len();
+            let parsed_protected = parsed_protected_spans.is_some_and(|spans| {
+                spans.iter().any(|span| {
+                    span.start <= line_span.end && line_span.start < span.end
+                })
+            });
             let protected = was_in_fence
                 || was_in_html
-                || was_in_shell_block
                 || starts_fence.is_some()
                 || starts_html.is_some()
-                || is_indented_code_line(line)
-                || starts_shell_block
+                || parsed_protected
+                || (use_indented_code_fallback && is_indented_code_line(line))
                 || is_structural_line(trimmed)
                 || is_structural_line(directive_trimmed);
 
@@ -172,11 +398,7 @@ impl LineMetadata {
                 html_block = None;
             }
 
-            if starts_shell_block {
-                shell_block_depth += 1;
-            } else if was_in_shell_block && ends_shell_block {
-                shell_block_depth = shell_block_depth.saturating_sub(1);
-            }
+            line_offset += line.len() + 1;
         }
 
         metadata
@@ -540,83 +762,40 @@ struct ReflowPrefix {
 }
 
 fn line_reflow_prefix(line: &str) -> ReflowPrefix {
-    if let Some(prefix_len) = blockquote_prefix_len(line) {
-        let prefix = line[..prefix_len].to_string();
-        return ReflowPrefix {
-            first: prefix.clone(),
-            continuation: prefix,
-            first_len: prefix_len,
-        };
-    }
-
-    let leading_len = line.len() - line.trim_start().len();
-    let trimmed = &line[leading_len..];
-    if let Some(marker_len) = list_marker_prefix_len(trimmed) {
-        let first_len = leading_len + marker_len;
+    let outer_len = blockquote_prefix_len(line)
+        .unwrap_or_else(|| line.len() - line.trim_start().len());
+    let outer = &line[..outer_len];
+    if let Some(marker_len) = list_marker_byte_width(&line[outer_len..]) {
+        let first_len = outer_len + marker_len;
         let first = line[..first_len].to_string();
         return ReflowPrefix {
-            continuation: " ".repeat(UnicodeWidthStr::width(first.as_str())),
+            continuation: format!(
+                "{outer}{}",
+                " ".repeat(UnicodeWidthStr::width(&line[outer_len..first_len]))
+            ),
             first,
             first_len,
         };
     }
 
     ReflowPrefix {
-        first: String::new(),
-        continuation: " ".repeat(leading_len),
-        first_len: leading_len,
-    }
-}
-
-fn list_marker_prefix_len(trimmed: &str) -> Option<usize> {
-    let marker_len = unordered_marker_prefix_len(trimmed).or_else(|| ordered_marker_prefix_len(trimmed))?;
-    let rest = &trimmed[marker_len..];
-    task_marker_prefix_len(rest).map_or(Some(marker_len), |task_len| Some(marker_len + task_len))
-}
-
-fn unordered_marker_prefix_len(trimmed: &str) -> Option<usize> {
-    let mut chars = trimmed.char_indices();
-    let (_, marker) = chars.next()?;
-    if !matches!(marker, '*' | '-' | '+') {
-        return None;
-    }
-    let (space_idx, space) = chars.next()?;
-    (space == ' ').then_some(space_idx + space.len_utf8())
-}
-
-fn ordered_marker_prefix_len(trimmed: &str) -> Option<usize> {
-    let bytes = trimmed.as_bytes();
-    if bytes.is_empty() || !bytes[0].is_ascii_digit() {
-        return None;
-    }
-
-    for (idx, &byte) in bytes.iter().enumerate().skip(1) {
-        if byte == b'.' || byte == b')' {
-            return (bytes.get(idx + 1) == Some(&b' ')).then_some(idx + 2);
-        }
-        if !byte.is_ascii_digit() {
-            return None;
-        }
-    }
-
-    None
-}
-
-fn task_marker_prefix_len(rest: &str) -> Option<usize> {
-    let bytes = rest.as_bytes();
-    if bytes.len() >= 4
-        && bytes[0] == b'['
-        && matches!(bytes[1], b' ' | b'x' | b'X')
-        && bytes[2] == b']'
-        && bytes[3] == b' '
-    {
-        Some(4)
-    } else {
-        None
+        first: outer.to_string(),
+        continuation: outer.to_string(),
+        first_len: outer_len,
     }
 }
 
 fn wrap_text(text: &str, first_prefix: &str, continuation_prefix: &str, width: usize) -> String {
+    wrap_text_with_suffix(text, first_prefix, continuation_prefix, "", width)
+}
+
+fn wrap_text_with_suffix(
+    text: &str,
+    first_prefix: &str,
+    continuation_prefix: &str,
+    suffix: &str,
+    width: usize,
+) -> String {
     let tokens = reflow_tokens(text);
     if tokens.is_empty() {
         return first_prefix.to_string();
@@ -627,10 +806,18 @@ fn wrap_text(text: &str, first_prefix: &str, continuation_prefix: &str, width: u
     let mut current_width = UnicodeWidthStr::width(first_prefix);
     let mut prefix = first_prefix;
 
-    for token in tokens {
+    let last_token = tokens.len().saturating_sub(1);
+    for (idx, token) in tokens.into_iter().enumerate() {
         let token_width = UnicodeWidthStr::width(token.as_str());
         let separator_width = usize::from(!current.is_empty());
-        if !current.is_empty() && current_width + separator_width + token_width > width {
+        let suffix_width = if idx == last_token {
+            UnicodeWidthStr::width(suffix)
+        } else {
+            0
+        };
+        if !current.is_empty()
+            && current_width + separator_width + token_width + suffix_width > width
+        {
             lines.push(format!("{prefix}{current}"));
             current.clear();
             prefix = continuation_prefix;
@@ -646,7 +833,7 @@ fn wrap_text(text: &str, first_prefix: &str, continuation_prefix: &str, width: u
     }
 
     if !current.is_empty() {
-        lines.push(format!("{prefix}{current}"));
+        lines.push(format!("{prefix}{current}{suffix}"));
     }
 
     lines.join("\n")

@@ -8,10 +8,11 @@ use super::{
     DataType,
     ast::{
         CatalogExample, CatalogFunction, CatalogOverload, CatalogParam, CatalogReturn,
-        CatalogVerification, ExpressionFunctionCatalog,
+        CatalogReturnValue, CatalogVerification, ExpressionFunctionCatalog,
     },
 };
-use crate::markdown::schemas::{parse_yaml_schema, to_json_schema};
+use crate::markdown::schemas::{Constraint, SimplifiedType, TypeExpr, parse_yaml_schema, to_json_schema};
+use crate::markdown::schemas::simplified::grammar::parse_type_expr;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("catalog error{location}: {kind}", location = format_location(.function.as_deref(), *.overload, .field.as_deref()))]
@@ -50,6 +51,10 @@ pub(crate) enum CatalogErrorKind {
     DuplicateParameter(String),
     #[error("unknown or unsupported type keyword `{0}`")]
     UnknownType(String),
+    #[error("invalid enum return type `{0}`")]
+    InvalidReturnEnum(String),
+    #[error("duplicate enum return variant `{0}`")]
+    DuplicateReturnEnum(String),
     #[error("a required parameter cannot follow an optional parameter")]
     RequiredAfterOptional,
     #[error("a variadic parameter must be last")]
@@ -220,11 +225,11 @@ pub(crate) fn parse_expression_function_catalog(
             if !signatures.insert(signature.clone()) {
                 return Err(error(Some(&name), Some(index), Some("parameters"), CatalogErrorKind::DuplicateSignature(signature)));
             }
-            let return_ty = parse_type(&name, index, "returns.type", &overload.returns.ty)?;
+            let return_value = parse_return_type(&name, index, &overload.returns.ty)?;
             let example = validate_example(&name, index, overload.example)?;
             overloads.push(CatalogOverload {
                 parameters,
-                returns: CatalogReturn { ty: return_ty, array: overload.returns.array, fallible: overload.returns.fallible },
+                returns: CatalogReturn { value: return_value, array: overload.returns.array, fallible: overload.returns.fallible },
                 example,
             });
         }
@@ -235,6 +240,72 @@ pub(crate) fn parse_expression_function_catalog(
 
 fn parse_type(function: &str, overload: usize, field: &str, keyword: &str) -> Result<DataType, CatalogParseError> {
     DataType::from_keyword(keyword).ok_or_else(|| error(Some(function), Some(overload), Some(field), CatalogErrorKind::UnknownType(keyword.to_string())))
+}
+
+fn parse_return_type(
+    function: &str,
+    overload: usize,
+    keyword: &str,
+) -> Result<CatalogReturnValue, CatalogParseError> {
+    if let Some(ty) = DataType::from_keyword(keyword) {
+        return Ok(CatalogReturnValue::Data(ty));
+    }
+
+    let trimmed = keyword.trim_start();
+    let enum_candidate = trimmed.strip_prefix("enum").is_some_and(|rest| {
+        rest.is_empty()
+            || rest.starts_with('(')
+            || rest.chars().next().is_some_and(char::is_whitespace)
+    });
+    if !enum_candidate {
+        return Err(error(
+            Some(function),
+            Some(overload),
+            Some("returns.type"),
+            CatalogErrorKind::UnknownType(keyword.to_string()),
+        ));
+    }
+
+    let atom = parse_type_expr("returns", keyword).map_err(|_| {
+        error(
+            Some(function),
+            Some(overload),
+            Some("returns.type"),
+            CatalogErrorKind::InvalidReturnEnum(keyword.to_string()),
+        )
+    })?;
+    if atom.is_array
+        || !atom.array_constraints.is_empty()
+        || atom.description.is_some()
+        || !matches!(atom.ty, TypeExpr::Primitive(SimplifiedType::Enum))
+    {
+        return Err(error(
+            Some(function),
+            Some(overload),
+            Some("returns.type"),
+            CatalogErrorKind::InvalidReturnEnum(keyword.to_string()),
+        ));
+    }
+    let Some(Constraint::Members(variants)) = atom.constraints.into_iter().next() else {
+        return Err(error(
+            Some(function),
+            Some(overload),
+            Some("returns.type"),
+            CatalogErrorKind::InvalidReturnEnum(keyword.to_string()),
+        ));
+    };
+    let mut unique = HashSet::new();
+    for variant in &variants {
+        if !unique.insert(variant.clone()) {
+            return Err(error(
+                Some(function),
+                Some(overload),
+                Some("returns.type"),
+                CatalogErrorKind::DuplicateReturnEnum(variant.clone()),
+            ));
+        }
+    }
+    Ok(CatalogReturnValue::Enum(variants))
 }
 
 fn validate_example(function: &str, overload: usize, raw: RawExample) -> Result<CatalogExample, CatalogParseError> {
@@ -284,7 +355,9 @@ fn format_location(function: Option<&str>, overload: Option<usize>, field: Optio
 mod tests {
     use super::*;
     use crate::catalog::ExampleVerification;
-    use crate::markdown::compose::expression::catalog::expression_function_descriptors;
+    use crate::markdown::compose::expression::catalog::{
+        ReturnValueType, expression_function_descriptors,
+    };
     use crate::markdown::schemas::{SimplifiedType, parse_yaml_schema, to_json_schema};
 
     const AUTHORED_CATALOG: &str =
@@ -341,10 +414,75 @@ functions:
         assert!(overloads[0].parameters[1].array);
         assert!(overloads[0].parameters[2].optional);
         assert!(overloads[1].parameters[0].variadic);
-        assert_eq!(overloads[0].returns, CatalogReturn { ty: DataType::String, array: false, fallible: false });
-        assert_eq!(overloads[1].returns, CatalogReturn { ty: DataType::Number, array: true, fallible: true });
+        assert_eq!(overloads[0].returns, CatalogReturn { value: CatalogReturnValue::Data(DataType::String), array: false, fallible: false });
+        assert_eq!(overloads[1].returns, CatalogReturn { value: CatalogReturnValue::Data(DataType::Number), array: true, fallible: true });
         assert!(matches!(overloads[0].example.verification, CatalogVerification::Executable));
         assert!(matches!(overloads[1].example.verification, CatalogVerification::DisplayOnly(ref reason) if reason == "illustrative"));
+    }
+
+    #[test]
+    fn enum_returns_preserve_variants_and_orthogonal_shapes() {
+        let yaml = replace(
+            SCHEMA,
+            "returns: { type: string }",
+            "returns: { type: 'enum(\"\", github, gitlab)', array: true, fallible: true }",
+        );
+        let catalog = parse_expression_function_catalog(&yaml).unwrap();
+        assert_eq!(
+            catalog.functions[0].overloads[0].returns,
+            CatalogReturn {
+                value: CatalogReturnValue::Enum(vec![
+                    "".to_string(),
+                    "github".to_string(),
+                    "gitlab".to_string(),
+                ]),
+                array: true,
+                fallible: true,
+            }
+        );
+
+        let descriptors = super::super::project_descriptors(catalog);
+        assert_eq!(
+            descriptors[0].returns.value,
+            ReturnValueType::Enum(&["", "github", "gitlab"])
+        );
+        assert_eq!(
+            descriptors[0].typed_signature(),
+            "sample(value: string, items: any[], [suffix: string]) -> enum(\"\", github, gitlab)[] | error"
+        );
+    }
+
+    #[test]
+    fn enum_returns_reject_empty_duplicate_malformed_and_parameter_forms() {
+        let empty = replace(SCHEMA, "returns: { type: string }", "returns: { type: 'enum()' }");
+        assert!(matches!(kind(&empty), CatalogErrorKind::InvalidReturnEnum(_)));
+
+        let duplicate = replace(
+            SCHEMA,
+            "returns: { type: string }",
+            "returns: { type: 'enum(github, github)' }",
+        );
+        assert_eq!(
+            kind(&duplicate),
+            CatalogErrorKind::DuplicateReturnEnum("github".to_string())
+        );
+
+        let malformed = replace(
+            SCHEMA,
+            "returns: { type: string }",
+            "returns: { type: 'enum(github' }",
+        );
+        assert!(matches!(kind(&malformed), CatalogErrorKind::InvalidReturnEnum(_)));
+
+        let parameter = replace(
+            SCHEMA,
+            "- { name: value, type: string }",
+            "- { name: value, type: 'enum(github, gitlab)' }",
+        );
+        assert_eq!(
+            kind(&parameter),
+            CatalogErrorKind::UnknownType("enum(github, gitlab)".to_string())
+        );
     }
 
     #[test]
@@ -360,8 +498,8 @@ functions:
     #[test]
     fn authored_catalog_matches_registration_baseline() {
         let catalog = parse_expression_function_catalog(AUTHORED_CATALOG).unwrap();
-        assert_eq!(catalog.functions.len(), 85);
-        assert_eq!(catalog.functions.iter().map(|function| function.overloads.len()).sum::<usize>(), 88);
+        assert_eq!(catalog.functions.len(), 94);
+        assert_eq!(catalog.functions.iter().map(|function| function.overloads.len()).sum::<usize>(), 101);
 
         let mut functions: Vec<_> = catalog.functions.iter().collect();
         functions.sort_by_key(|function| function.order);
@@ -381,8 +519,17 @@ functions:
             }
             assert_eq!(overload.parameters.iter().map(|parameter| (parameter.ty, parameter.array, parameter.optional, parameter.variadic)).collect::<Vec<_>>(),
                 descriptor.parameters.iter().map(|parameter| (parameter.ty, parameter.array, parameter.optional, parameter.variadic)).collect::<Vec<_>>());
-            assert_eq!((overload.returns.ty, overload.returns.array, overload.returns.fallible),
-                (descriptor.returns.ty, descriptor.returns.array, descriptor.returns.fallible));
+            match (&overload.returns.value, descriptor.returns.value) {
+                (CatalogReturnValue::Data(expected), ReturnValueType::Data(actual)) => {
+                    assert_eq!(expected, &actual);
+                }
+                (CatalogReturnValue::Enum(expected), ReturnValueType::Enum(actual)) => {
+                    assert_eq!(expected.iter().map(String::as_str).collect::<Vec<_>>(), actual);
+                }
+                pair => panic!("return value mismatch for {}: {pair:?}", function.name),
+            }
+            assert_eq!((overload.returns.array, overload.returns.fallible),
+                (descriptor.returns.array, descriptor.returns.fallible));
 
             match descriptor.example {
                 Some(example) => {

@@ -6,6 +6,7 @@ related_specs:
     - "@darkmatter/features/_completed/2026-06-10-schema-improvement/spec.md"
     - "@darkmatter/features/_completed/2026-07-08-schema-plus/spec.md"
     - "@darkmatter/features/_completed/2026-07-09-suggest-constraint/spec.md"
+    - "@darkmatter/features/2026-07-13-meta-schema/spec.md"
 ---
 
 # Schema Definition
@@ -104,9 +105,96 @@ $schema:
 | `yaml`       | A string whose **content** parses as YAML, **or** a native mapping/sequence/scalar coerced to a YAML string. | JSON Schema `format: darkmatter-yaml`. Accepts JSON too (JSON is valid YAML). See [Content-Format Types](#content-format-types-yaml--json).                              |
 | `json`       | A string whose **content** parses as strict JSON, **or** a native value coerced to a JSON string.      | JSON Schema `format: darkmatter-json`. Rejects YAML-only syntax. See [Content-Format Types](#content-format-types-yaml--json).                                                  |
 | `expression` | A string that parses under the Darkmatter expression grammar. Parse-only — never evaluated.            | JSON Schema `format: darkmatter-expression`. The third content-format string type. Native booleans/numbers coerce to their string form. See [Expressions](#expressions).        |
+| `type-definition` | A string type expression, native mapping object definition, or non-empty property union.          | Describes one SimplifiedSchema property definition as data. Parse-only; the value is never resolved or normalized. See [Semantic Meta-Types](#semantic-meta-types).              |
+| `schema`     | An inline schema mapping, local schema reference string, or non-empty root union.                       | Describes one complete `$schema` declaration as data. Parse-only; validation checks syntax without reading referenced files. See [Semantic Meta-Types](#semantic-meta-types).  |
 | `any`        | Anything.                                                                                              | Only `required` is meaningful. `any(required)` is presence-only because `any` already includes `null`.                                                                          |
 
 Append `[]` to any type for an array of that type — e.g. `string[]`, `enum(red,green,blue)[]`, `file(match('*.md'))[]`.
+
+### Semantic Meta-Types
+
+`type-definition` and `schema` are Darkmatter's semantic meta-types: they let a
+SimplifiedSchema describe its own authored grammar without maintaining a
+second JSON meta-schema. The existing Rust parsers remain authoritative.
+Compiled JSON Schema delegates to those parsers through
+`x-darkmatter-type-definition` and `x-darkmatter-schema`.
+
+A semantic meta-type has two distinct type relationships:
+
+- Its **carrier type** is how the definition is represented in YAML. Both
+  meta-types accept string, mapping, and sequence carriers.
+- Its **denoted type** is what that authored definition describes. For example,
+  the value `string(required)` has carrier type `string`, semantic type
+  `type-definition`, and denotes a required string property. A union containing
+  `string` and an object definition denotes `string | object`.
+
+`type-definition` accepts exactly one complete property definition: a scalar
+type expression, a native mapping object definition, or a non-empty property
+union. `schema` accepts exactly one complete document schema declaration: an
+inline mapping, a syntactically valid local `FileReference`, or a non-empty
+root union of those forms. Remote references and malformed or empty unions are
+invalid semantic values.
+
+```yaml
+$schema:
+    field-definition: type-definition(required)
+    document-schema:  schema(required)
+
+field-definition:
+    - string(required)
+    - nested: number
+document-schema: ./schemas/article.yaml
+```
+
+Both meta-types are **parse-only**. Validation never loads a reference, expands
+an import or example, evaluates an expression, runs composition, or accesses
+the network. It also preserves the authored YAML representation: mappings stay
+mappings and sequences stay sequences. Actual `$schema` preparation remains a
+separate operation that may resolve referenced schema files.
+
+#### Source-Aware Presentation Boundary
+
+The semantic parsers operate on YAML values, while DMLS and other diagnostic
+consumers additionally require exact source spans. The v1 source-aware grammar
+is deliberately capped at these authored presentations:
+
+- plain, single-quoted, and double-quoted scalars;
+- block and flow sequences;
+- implicit scalar-key block and flow mappings;
+- explicit scalar-key block mapping pairs, including compact mapping items in
+  block sequences; and
+- mapping-value anchors and scalar aliases used by the shipped schema corpus.
+
+This is a SimplifiedSchema authoring grammar, not a promise to project every
+presentation accepted by a general YAML parser. Tags, block scalars, complex
+keys, explicit flow-mapping keys, directives, and other unlisted YAML
+presentations are outside the v1 source-map and DMLS contract. Authors should
+prefer ordinary `key: value` mappings. Expanding this closed boundary requires
+a separately specified feature; discovering another valid-but-unlisted YAML
+spelling is not a production-readiness regression for these meta-types.
+
+#### Semantic Arrays
+
+The ordinary array postfix remains available. `type-definition[]` and
+`schema[]` mean arrays of independent semantic values. When one array item is
+itself a union, use a nested sequence so the outer sequence remains the
+collection boundary.
+
+```yaml
+$schema:
+    definitions: type-definition[]
+
+definitions:
+    - string
+    - [number, { nested: boolean }]
+```
+
+Only `required`, `default(...)`, and `generated` apply to these nominal types.
+Semantic defaults must themselves parse as the declared artifact. Darkmatter
+does not infer either meta-type in `md schema detect`, because a carrier value
+does not establish the author's semantic intent. Terminal import syntax still
+takes precedence, so `schema@file` and `type-definition@file` remain named-type
+imports rather than primitive meta-type declarations.
 
 ### Universal Constraints
 
@@ -1239,7 +1327,11 @@ let detected = api.detect(&refs, DetectOptions { merge: true });
 - `suggestions_for_path(&SimplifiedSchema, &[&str])` — query lint-valid completion candidates for a property path; returns `Option<SuggestionQuery>` with YAML-safe insertion text.
 - `parse_standalone_schema_document(&str, path)` — classify and parse a standalone YAML file as a SimplifiedSchema authoring document; returns `Option<StandaloneSchemaDocument>` (`None` for ordinary YAML / raw JSON Schema).
 - `darkmatter_base_schema()` — the Darkmatter base frontmatter schema (authored in `docs/schemas/darkmatter.yaml`) as a `SimplifiedSchema`.
-- `darkmatter_base_json_schema()` — the same base schema compiled to Draft 2020-12 JSON Schema.
+- `darkmatter_base_json_schema()` — the same base schema compiled to an independently owned Draft 2020-12 JSON Schema value.
+- `darkmatter_base_json_schema_ref()` — a read-only borrow of the process-cached JSON Schema, avoiding a deep clone.
+
+Use `DarkmatterSchemas::with_darkmatter_baseline_json_schema()` when configuring
+the built-in baseline; each configured instance shares the cached JSON Schema.
 
 ### Span-Aware Validation and Normalization
 
@@ -1260,7 +1352,7 @@ Caller tools (for example Claudine) can render their own schema-language reports
 
 ### Validator Cache
 
-`ValidatorCache` keys compiled validators by the SHA-256 of the canonicalised JSON Schema bytes plus the schema's base directory, and is bounded by an LRU policy. The default cache size is `DEFAULT_CACHE_SIZE` (64) and is configurable via the `DARKMATTER_SCHEMA_CACHE_SIZE` environment variable (`CACHE_SIZE_ENV`). Validating a large corpus reuses compiled validators across files with the same effective schema.
+`ValidatorCache` keys compiled validators by the xxHash (XXH64, via `biscuit-hash`) of the canonicalised JSON Schema bytes plus the schema's base directory and launch-area fallback, and is bounded by an LRU policy. The default cache size is `DEFAULT_CACHE_SIZE` (64) and is configurable via the `DARKMATTER_SCHEMA_CACHE_SIZE` environment variable (`CACHE_SIZE_ENV`). Validating a large corpus reuses compiled validators across files with the same effective schema.
 
 ## Shell-Completion Integration
 
@@ -1389,7 +1481,7 @@ unless the same baseline is supplied explicitly.
 - **No inline object detection.** `md schema detect` continues to emit `object` for object-typed values; inline object schemas must be hand-written.
 - **No quoted inline object property names.** Rename to a valid identifier (alphanumeric, `-`, `_`, leading digits allowed) or use a JSON Schema file.
 - **No escaped commas inside inline object descriptions.** Inline descriptions terminate at the next top-level comma or closing brace — keep descriptions comma-free inside `{ ... }`.
-- **No arrays of unions.** The `[]` suffix binds to a single type expression, and a YAML sequence at a property value is itself the union form. Workaround: reference a JSON Schema file.
+- **No arrays of ordinary denoted-value unions.** For ordinary denoted types, the `[]` suffix binds to a single type expression, and a YAML sequence at a property value is itself the union form. This limitation does not apply to `type-definition[]` or `schema[]`; these semantic arrays support union-valued items through nested sequences, as shown in [Semantic Arrays](#semantic-arrays). Use an external JSON Schema when an ordinary property needs an array of union-valued items.
 - **No coercion opt-out.** [Type coercion](#type-coercion) is default-on with no `--no-coerce` / strict-types flag.
 - **No coercions beyond the matrix.** In particular no `"yes"` / `"no"` / `"1"` / `"0"` → boolean, no string-parsing into `date` / `url` / `email`, and no cross-property coercions. Coercion recurses into inline object fields and inline object arrays when the schema path is unambiguous; for property-level unions, only exactly-one-arm-validates candidates are committed.
 - **No `md schema validate --write`.** The library check path reports post-coercion validity but does not rewrite files; only the compose pipeline mutates the (in-memory) document it composes.

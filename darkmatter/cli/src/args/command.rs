@@ -80,6 +80,26 @@ pub enum Command {
         /// line feeds semantically and the original spelling had a typo.
         #[arg(long, conflicts_with = "fixed_width")]
         ignore_incidental_newlines: bool,
+
+        /// Emit frontmatter diagnostics as JSON instead of the cleaned document
+        #[arg(long)]
+        json: bool,
+
+        /// Explicit schema replacing the document's own `$schema` layer
+        #[arg(long, value_name = "PATH")]
+        schema: Option<PathBuf>,
+
+        /// Baseline SimplifiedSchema YAML file for frontmatter validation
+        #[arg(long, value_name = "PATH", conflicts_with = "no_baseline_schema")]
+        baseline_schema: Option<PathBuf>,
+
+        /// Disable the default Darkmatter baseline frontmatter schema
+        #[arg(long)]
+        no_baseline_schema: bool,
+
+        /// Disable trigger discovery and bare-name schema-root lookup
+        #[arg(long)]
+        no_trigger_schemas: bool,
     },
 
     /// Compose a document through the compose pipeline.

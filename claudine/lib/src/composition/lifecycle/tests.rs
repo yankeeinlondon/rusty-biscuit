@@ -3118,6 +3118,77 @@ fn err_in_control_reason_single_text_arg_is_literal() {
 }
 
 #[test]
+fn err_inside_array_literal_when_clause_is_rejected() {
+    // A container literal references `err` when any element does. A
+    // non-recursing arm would let `err` through in a no-error event.
+    let fm = json!({
+        "start": {
+            "stack": [
+                {"when": "length([err.msg]) > 0", "action": {"say": "leaked"}}
+            ]
+        }
+    });
+    let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+    let err = validate_no_err_in_no_error_events(&config, dummy_path()).unwrap_err();
+    assert!(
+        matches!(err, CompositionError::LifecycleErrNotAvailable { .. }),
+        "got: {err:?}"
+    );
+}
+
+#[test]
+fn err_inside_object_literal_value_when_clause_is_rejected() {
+    let fm = json!({
+        "start": {
+            "stack": [
+                {"when": "{ reason: err.msg }", "action": {"say": "leaked"}}
+            ]
+        }
+    });
+    let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+    let err = validate_no_err_in_no_error_events(&config, dummy_path()).unwrap_err();
+    assert!(
+        matches!(err, CompositionError::LifecycleErrNotAvailable { .. }),
+        "got: {err:?}"
+    );
+}
+
+#[test]
+fn err_span_inside_object_literal_key_is_rejected() {
+    // Object keys may be quoted strings, so a `{{ err … }}` span can hide in
+    // a key. Keys are authored text that reaches the dispatched value, so the
+    // literal-span scan visits them alongside the values.
+    let fm = json!({
+        "start": {
+            "stack": [
+                {"when": "{ \"{{ err.msg }}\": 1 }", "action": {"say": "leaked"}}
+            ]
+        }
+    });
+    let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+    let err = validate_no_err_in_no_error_events(&config, dummy_path()).unwrap_err();
+    assert!(
+        matches!(err, CompositionError::LifecycleErrNotAvailable { .. }),
+        "got: {err:?}"
+    );
+}
+
+#[test]
+fn doc_err_inside_container_literal_is_still_allowed() {
+    // Negative control: the recursion must not over-report. `doc.err` reaches
+    // frontmatter, and a *key* named `err` is authored text, not a reference.
+    let fm = json!({
+        "start": {
+            "stack": [
+                {"when": "{ err: doc.err }", "action": {"say": "fine"}}
+            ]
+        }
+    });
+    let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+    assert!(validate_no_err_in_no_error_events(&config, dummy_path()).is_ok());
+}
+
+#[test]
 fn err_in_shell_command_single_text_arg_is_literal() {
     // `shell` with a positional scalar value takes its command literally, so
     // `err.msg` is text, not an `err`-global reference.
@@ -3319,6 +3390,73 @@ fn stack_undefined_variable_in_when_clause_is_rejected() {
     match err {
         CompositionError::LifecycleUndefinedVariable { property, variable, .. } => {
             assert!(property.contains("when"), "got: {property}");
+            assert_eq!(variable, "missing_var");
+        }
+        other => panic!("expected undefined variable, got: {other:?}"),
+    }
+}
+
+#[test]
+fn stack_undefined_variable_inside_container_literal_is_rejected() {
+    // Every element of a container literal is evaluated, so an undefined
+    // operand buried in `[missing_var]` must be caught like a bare reference.
+    // A non-recursing arm returns `None` and the typo ships silently.
+    for when in [
+        "length([missing_var]) > 0",
+        "{ reason: missing_var }",
+    ] {
+        let fm = json!({
+            "start": { "stack": [{"when": when, "action": {"say": "hi"}}] }
+        });
+        let raw = fm_from_json(fm.clone());
+        let effective = json!({});
+        let lifecycle = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        let err =
+            validate_no_undefined_lifecycle_variables(&raw, &effective, &lifecycle, dummy_path())
+                .unwrap_err();
+        match err {
+            CompositionError::LifecycleUndefinedVariable { variable, .. } => {
+                assert_eq!(variable, "missing_var", "for `when: {when}`");
+            }
+            other => panic!("expected undefined variable for `{when}`, got: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn stack_container_literal_key_is_not_an_undefined_variable() {
+    // Negative control: an object *key* is authored text, never a variable
+    // reference, so it must not be reported as undefined.
+    let fm = json!({
+        "start": {
+            "stack": [{"when": "{ missing_var: 1 }", "action": {"say": "hi"}}]
+        }
+    });
+    let raw = fm_from_json(fm.clone());
+    let effective = json!({});
+    let lifecycle = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+    let result =
+        validate_no_undefined_lifecycle_variables(&raw, &effective, &lifecycle, dummy_path());
+    assert!(result.is_ok(), "an object key is not a reference: {result:?}");
+}
+
+#[test]
+fn top_level_undefined_variable_inside_container_literal_is_rejected() {
+    // The top-level communication-field scan recurses into container
+    // literals for the same reason the stack scan does.
+    let raw = fm_from_json(json!({
+        "start": { "message": "{{ length([missing_var]) }}" }
+    }));
+    let effective = json!({});
+    let err = validate_no_undefined_lifecycle_variables(
+        &raw,
+        &effective,
+        &LifecycleConfig::default(),
+        dummy_path(),
+    )
+    .unwrap_err();
+    match err {
+        CompositionError::LifecycleUndefinedVariable { variable, .. } => {
             assert_eq!(variable, "missing_var");
         }
         other => panic!("expected undefined variable, got: {other:?}"),

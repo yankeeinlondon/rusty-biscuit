@@ -93,17 +93,24 @@ impl Markdown {
         stored: &StoredHash,
         options: &MdHashOptions,
     ) -> MarkdownResult<HashComparison> {
-        // Like-for-like: recompute under the STORED ignore-set, not the env set.
-        let compare_opts = MdHashOptions {
-            property: options.property.clone(),
-            extra_ignored: stored.ignored.clone(),
-            forced_kind: None,
-            strict: options.strict,
-        };
-        let computed = self.compute_hash(stored.kind, &compare_opts);
+        let computed = self.compute_hash(stored.kind, &compare_options(stored, options));
+        self.compare_with_computed(stored, options, &computed)
+    }
 
+    /// [`Self::compare_hash`] against an already-computed artifact.
+    ///
+    /// `computed` **must** be `compute_hash(stored.kind, compare_options(stored,
+    /// options))` — the like-for-like artifact under the *stored* ignore-set.
+    /// Callers that already hold that exact artifact use this to avoid
+    /// recomputing it; everyone else should call [`Self::compare_hash`].
+    pub(super) fn compare_with_computed(
+        &self,
+        stored: &StoredHash,
+        options: &MdHashOptions,
+        computed: &ComputedHash,
+    ) -> MarkdownResult<HashComparison> {
         let (frontmatter_changed, body_changed, detail) =
-            diff_components(&stored.value, &computed, &options.property)?;
+            diff_components(&stored.value, computed, &options.property)?;
 
         let ignore_policy = ignore_policy_advisory(&stored.ignored, &options.extra_ignored);
 
@@ -114,6 +121,22 @@ impl Markdown {
             detail,
             ignore_policy,
         })
+    }
+}
+
+/// The like-for-like options a comparison recomputes under: the document's
+/// *stored* ignore-set, never the current environment's, so results are
+/// reproducible across machines and CI.
+///
+/// This is the identity that decides whether two hash artifacts are the same
+/// artifact — `--save` computes a *second*, different one under the current
+/// options for its new baseline, and the two must not be conflated.
+pub(super) fn compare_options(stored: &StoredHash, options: &MdHashOptions) -> MdHashOptions {
+    MdHashOptions {
+        property: options.property.clone(),
+        extra_ignored: stored.ignored.clone(),
+        forced_kind: None,
+        strict: options.strict,
     }
 }
 

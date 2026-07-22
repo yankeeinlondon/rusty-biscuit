@@ -238,10 +238,17 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
         // Preserve debug/trace logging for variable resolution
         if let Expr::Variable(name) = expr {
             // Bare array interpolation renders line-separated (spec D4); every
-            // other type keeps `get_string`'s byte-identical scalar coercion.
+            // other type keeps `get_string`'s scalar coercion — inlined here so
+            // the lookup runs once instead of `get` + a discarded `get_string`
+            // re-lookup (F31). This coercion is byte-identical to the trait's
+            // `get_string` (every `EvaluationLookup` impl mirrors the default).
             let value = match self.state.get(name) {
                 Some(array @ Value::Array(_)) => interpolation_output_string(&array),
-                _ => self.state.get_string(name),
+                None | Some(Value::Null) => String::new(),
+                Some(Value::String(s)) => s,
+                Some(Value::Number(n)) => n.to_string(),
+                Some(Value::Bool(b)) => b.to_string(),
+                Some(v) => v.to_string(),
             };
             if value.is_empty() {
                 debug!(variable = %name, "interpolation: unresolved variable");

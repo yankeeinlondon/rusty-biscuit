@@ -1,8 +1,8 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
-hash: 87f17662fa397abe-996d58394401202c
-last_updated: 2026-07-14
+hash: 87f17662fa397abe-c0eb7c8a0924fdd4
+last_updated: 2026-07-21
 ---
 
 # darkmatter
@@ -33,12 +33,16 @@ Other entry points:
 - Use the compose pipeline for source transformations before rendering.
 - Use `Markdown::cleanup`, `cleanup_compact`, `cleanup_loose`, and
   `cleanup_with_indent*` for canonical cleanup. These strip incidental
-  single newlines in prose by default before the existing whitespace/list
-  cleanup. Use `Markdown::strip_incidental_newlines` directly for only that
-  pass, or `Markdown::cleanup_with_fixed_width(width)` to clean and then
-  reflow prose to a display-column width. The `md clean` CLI exposes the same
-  behavior with `--fixed-width <#>` and can preserve source single newlines
-  with `--ignore-incidental-newlines`; those two flags conflict.
+  single newlines in top-level and list-item prose by default before the
+  existing whitespace/list cleanup. List soft-break collapse removes
+  source-only continuation indentation. Use
+  `Markdown::strip_incidental_newlines` directly for only that pass, or
+  `Markdown::cleanup_with_fixed_width(width)` to clean and then reflow complete
+  logical prose blocks to a display-column width. Newly wrapped list
+  continuations use a hanging prefix that retains every enclosing list and
+  blockquote container. The `md clean` CLI exposes the same behavior with
+  `--fixed-width <#>` and can preserve source single newlines with
+  `--ignore-incidental-newlines`; those two flags conflict.
 - Use `darkmatter::style` for document `style:` frontmatter.
 - Use `biscuit-terminal` components for rich terminal UI outside ordinary
   parsed Markdown rendering.
@@ -132,6 +136,41 @@ their recognized key lists, while the facade preserves capture sequencing and al
 datetime values. Repository, filesystem, OS, hardware, and GPU discovery must continue to use
 `sniff`. GPU population is independent of CPU/memory population, so a `ctx.gpu`-only request does
 not require the hardware-summary probe.
+
+The `Git` capture group owns `ctx.branch`, `ctx.worktree`, and `ctx.merge_conflicts`. Capture all
+requested Git values from one trusted `sniff::filesystem::git::GitRepo` discovery. A failure in one
+field must not discard its siblings: use `null` for unavailable scalar identity and an empty array
+for unavailable conflicts while recording the field-specific partial-capture diagnostic.
+
+`predict_conflicts(branch)` is a separate read-side expression surface. It calls
+`sniff::filesystem::git::merge_conflicts_with_branch_at` with
+`ResolutionContext::caller_dir()` so the launch-area repository is authoritative,
+then projects Sniff's already sorted portable paths without reordering. It uses
+committed local branch tips only; live index/worktree state does not affect it.
+DMLS completion and hover consume the authored function/context catalogs but
+must never evaluate this function or capture Git state while serving requests.
+
+Remote expression functions use Sniff's one configured-remote resolver and
+focused provider client. `branch_exists_on_remote` and `remote_vendor` remain
+read-only; `pr`/`pr_list` and `cicd`/`cicd_list` return deterministic compact
+Markdown projected from structured Sniff records. Network-capable calls are
+deny-by-default, exact-host allowlisted, redirect-disabled, concurrency-bounded,
+and memoized through the compose run's shared remote runtime. Frontmatter
+interpolation, body interpolation, and `$()` evaluation attach that same
+runtime; DMLS only consumes authored descriptors and never executes a call.
+A focused provider failure (not-found, denied host, authentication, rate
+limit, unsupported capability, incomplete domain, transport failure) is the
+typed `ExpressionError::Provider` carrying a `ProviderFailureKind`; the
+classification survives run-local memoization (cache slots store the typed
+error, not rendered text) and is authoring-fatal on every expression
+surface — composition aborts with the actionable message rather than
+substituting an empty value or leaving an unevaluated `{{ … }}` behind.
+Generic `ExpressionError::Other` stays non-fatal in lenient body mode.
+
+The expression grammar supports immutable JSON-like array and object literals.
+The authored catalog may use `enum(...)` only for return values; variants are
+preserved in public descriptors and typed signatures, including an explicitly
+quoted empty-string member.
 
 ## Grammar Authority
 
@@ -257,6 +296,24 @@ The removed god-files (`args.rs`, `commands.rs`, `output.rs`,
   shapes, so CLI JSON paths should call `serde_json` on the library values.
 - `darkmatter::markdown::reference::validate::ValidationReportView` is the
   terminal view for reference validation reports.
+- `ReferenceGraph` is an **opaque, immutable, builder-produced artifact**. It
+  has no public constructor and no public/`pub(crate)` data fields — only the
+  crate's builders (`Markdown::reference_graph` / `transclusion_graph`, routed
+  through the private `from_build`) produce one, and it carries private build
+  provenance (document/source/mode/options identities + a visited-descendant
+  dependency manifest). Downstream callers **inspect** via the read-only
+  accessors `root()`, `nodes()`, `iter()` (root once, then children),
+  `node_by_id()`, `node_count()`, `to_mermaid()`, `to_dot()`, and serialize via
+  `graph.view(follow)` — never field access. Provenance is JSON-invisible and
+  absent from `Debug`. `Markdown::validate_references_with_graph` verifies the
+  prebuilt graph's provenance (document → source → `Full`-mode → `options.graph`)
+  **and** re-reads every visited local descendant from disk before flattening; a
+  mismatch or changed/missing/unreadable child is a hard
+  `ReferenceError::ReferenceGraphMismatch` — it never silently rebuilds, so
+  plain build-and-validate callers should use `validate_references`. Identity is
+  clone-stable (a graph built from `options.clone()` still validates against the
+  original — the Finding 18 reuse guard). See
+  `darkmatter/features/2026-07-15-reference-graph/`.
 - `darkmatter::style::CliStyleClaims`, `apply_cli_claims`, and the
   `*_style_overrides_from_claims` helpers are the single authority for CLI
   style precedence.
@@ -607,9 +664,11 @@ The compose pipeline runs in four phases:
 **Inline Post** (serial):
 
 - Cleanup and normalization. Cleanup strips incidental single newlines by
-  default, applies list/indent normalization, and can reflow prose with
-  `ComposeOptions::with_fixed_width(...)`. Programmatic callers can preserve
-  source single newlines with
+  default from top-level and list-item prose, removes source-only list
+  continuation indentation, applies list/indent normalization, and can reflow
+  complete logical prose blocks with `ComposeOptions::with_fixed_width(...)`.
+  Reflowed list continuations retain their full list/blockquote container
+  prefix. Programmatic callers can preserve source single newlines with
   `ComposeOptions::with_incidental_newline_mode(IncidentalNewlineMode::Preserve)`.
 
 **Finalization** (root-only):
@@ -650,6 +709,19 @@ Darkmatter defines, detects, and evaluates schemas for Markdown frontmatter via 
 
 - Composition primitives (schema-plus). SimplifiedSchema composes named types and dictionaries on top of the base grammar: `example(...)` attaches documentation-only example artifacts (validated at schema-load time, emitted as the `x-darkmatter-example` extension); `Name@file` / `Name@this` inline a named type's definition from another schema file's top-level `$schema:` entries (eager, bounded, cycle-checked — `SchemaError::ImportCycle`, dependency edges on `ResolvedSchema.imports`); pattern keys (`<string>` → `additionalProperties`, `<starting::P>` / `<ending::S>` / `<pattern::RE>` → `patternProperties` with literal-key precedence via negative-lookahead wrapping) plus `min-keys` / `max-keys` (authored postfix or via the reserved `$constraints` block key) type dictionaries; `suggest(...)` provides advisory, non-validating completion candidates for `string` and `number` properties (at most one per complete property definition; emitted as `x-darkmatter-suggest`, never `examples`; library-owned structured linting via `lint_suggestions()` → `SuggestionLintProblem`; DMLS completion via `suggestions_for_path()` → `SuggestionQuery`/`SuggestionItem`); and `yaml` / `json` are content-format string types (`format: darkmatter-yaml` / `darkmatter-json`) that accept a string or a coerced native value. A malformed example is `SchemaError::InvalidExample`. Schemas emitting a lookaround-bearing pattern validate on `jsonschema`'s `fancy-regex` engine per-schema; all others keep the ReDoS-safe linear engine.
 - `literal(value)` and `expression` types. `literal(value)` (`SimplifiedType::Literal` + `Constraint::LiteralValue(serde_json::Value)`) validates a property against exactly one scalar: it compiles to JSON Schema `const`, types its bare value like YAML (bare `true`/`2` typed, quoted → string, bare `null` rejected), permits only `required` and an equal `default`, coerces non-string document values to the literal's scalar type, and is trigger-match-safe. `literal` arms with a shared discriminant key drive a presentation-neutral union-arm selector (`schemas::select_literal_discriminant_arm`, in `schemas/discriminant.rs`) reused by both library validation narrowing and DMLS. `expression` is the third content-format string type alongside `yaml`/`json` (`format: darkmatter-expression`, registered in `format.rs`): parse-only (a pure `parse_condition(value).is_ok()` check accepting either dialect), never evaluated, native bool/number values coerce to their string form, and it flips on DMLS expression completion/hover/`dm.expression.*` diagnostics inside frontmatter values. Neither type is ever inferred by `md schema detect`; `expression(condition)` is reserved and rejected in v1. See `darkmatter/features/2026-07-12-literal-expression/`.
+- SimplifiedSchema semantic meta-types are canonical primitive keywords:
+  `type-definition` denotes one complete `PropertyDef`, while `schema` denotes
+  one complete `$schema` declaration. Both permit only `required`,
+  `default(...)`, and `generated` at the definition level; semantic defaults
+  are checked through the passive `parse_property_definition` /
+  `parse_schema_declaration` authorities without I/O. Terminal import syntax
+  still wins (`schema@file` and `type-definition@file` remain named imports),
+  and `md schema detect` never infers either nominal type. Each type lowers to
+  the `string | object | array` carrier domain plus its registered
+  `x-darkmatter-*` keyword, whose validator delegates to the same passive
+  parser. Trigger matching is likewise parse-based; validation, matching, and
+  coercion perform no I/O and never rewrite the carrier value. See
+  `darkmatter/features/2026-07-13-meta-schema/`.
 
 See `darkmatter/docs/topics/schema-definition.md` for the full topic documentation.
 

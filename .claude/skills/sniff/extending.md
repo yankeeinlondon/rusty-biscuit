@@ -14,7 +14,7 @@ sniff/lib/src/
 ├── network/      # Interface enumeration
 ├── filesystem/   # Git, repo, languages, docs, file types, blast radius, just
 ├── package/      # Package manager abstraction (110+)
-├── programs/     # Installed program detection and install (8 categories)
+├── programs/     # Program detection (10 categories; 8 installable)
 ├── remote/       # Remote repo inspection (GitHub, GitLab, Gitea, Bitbucket)
 └── services/     # Init system and service detection
 

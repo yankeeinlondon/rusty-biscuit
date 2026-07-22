@@ -1,5 +1,6 @@
 ---
-hash: ef46db3751d8e999-288d1ea4dad3a7d1
+hash: ef46db3751d8e999-fd3fb8e6e2ed5d86
+last_updated: 2026-07-18
 ---
 # Compose Pipeline
 
@@ -34,8 +35,11 @@ Inline Pre, Transclusion, Inline Post, and Finalization.
 **Inline Post** (serial):
 
 - **Cleanup** - Normalizes markdown formatting. It strips incidental single
-  newlines by default, then applies list/indent cleanup, and can reflow prose
-  with `ComposeOptions::with_fixed_width(...)`. Use
+  newlines from top-level and list-item prose by default, removing source-only
+  list continuation indentation before applying list/indent cleanup. It can
+  reflow complete logical prose blocks with
+  `ComposeOptions::with_fixed_width(...)`; newly wrapped list continuations
+  retain their complete list and blockquote container prefix. Use
   `ComposeOptions::with_incidental_newline_mode(IncidentalNewlineMode::Preserve)`
   to keep source single newlines.
 - **Normalization** - Adjusts heading levels
@@ -330,6 +334,26 @@ Shell approval and shell execution are separate concerns:
 - A body/`::shell-block` command embedding a frontmatter value still pending
   frontmatter-shell expansion is rejected up front as
   `ShellExpansionError::DynamicCommandShape` (never a late `NotPreApproved`).
+
+### Interactive approval: the stage policy snapshot
+
+When no pre-approved set is supplied and an `approval_handler` drives approval
+interactively, policy is snapshotted **once per stage**, not per directive. Each
+of the three shell stages (frontmatter `$()`, body `::shell`, `::shell-block`)
+takes one `ShellRuntimeSnapshot` of the whitelist/blacklist/allow-once state at
+stage open, and every directive that stage admits is judged against it. This
+keeps the policy mutex out of parsing, approval, and execution.
+
+Two consequences:
+
+- A rule **persisted** by an `AllowExactPersist` / `AllowCommandPersist`
+  decision is written to the runtime immediately but becomes *policy input*
+  only for a **subsequent** stage (or run). A later directive in the same stage
+  matching that fresh rule therefore prompts again. This is conservative by
+  construction — it can over-prompt, never under-authorize.
+- **Allow-once is exempt.** It is arbitrated live against shared runtime state,
+  so one approval covers repeats of that exact command for the rest of the
+  stage and across concurrently composed sibling transclusions.
 
 Orchestrators (Claudine) call `compose_preflight`, merge in their own harness
 commands, authorize the union once, and pass the merged set back via

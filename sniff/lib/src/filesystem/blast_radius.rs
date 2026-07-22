@@ -62,15 +62,20 @@ pub struct ChangedPathResult {
 ///
 /// ## Errors
 ///
-/// Returns `SniffError::NotARepository` if `base_dir` is not inside a git repo.
-/// Returns an error if `package` or `package_area` is specified but the repo
-/// is not a monorepo.
+/// Returns `SniffError::NotARepository` if `base_dir` is not inside a git repo,
+/// or if the repository is bare. Returns an error if `package` or
+/// `package_area` is specified but the repo is not a monorepo.
 pub fn collect_changed_paths(
     base_dir: &Path,
     query: &ChangedPathQuery,
 ) -> Result<ChangedPathResult> {
     let git_repo = GitRepo::discover(base_dir)?
         .ok_or_else(|| SniffError::NotARepository(base_dir.to_path_buf()))?;
+    // Every scope here is defined against a checkout; a bare repository has no
+    // working tree to diff and no package layout to filter by.
+    if git_repo.is_bare() {
+        return Err(SniffError::NotARepository(base_dir.to_path_buf()));
+    }
     let repo_root = git_repo.repo_root().to_path_buf();
 
     let raw_paths = match query.scope {

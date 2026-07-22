@@ -12,7 +12,11 @@ status: clarified
 > and the Unicode-script join rule in
 > [Decision 2](#decision-2--join-separator-by-unicode-script). Sections are
 > labeled to distinguish **shipped** behavior from **required (not yet
-> implemented)** behavior.
+> implemented)** behavior at the time of this reconciliation. The initial
+> implementation also preserved list prefixes but did not unwrap complete
+> list-item prose blocks before reflow. That later-discovered shipping gap and
+> its list-aware completion are documented in the
+> [fixed-width lists fix](../../../fixes/2026-07-13-fixed-width-lists/spec.md).
 
 In Markdown we have a **clean** operation -- which is reachable from the terminal via `md clean <file>` and it does a number of things to
 help a markdown file be as standard based as possible.
@@ -145,7 +149,9 @@ Implementation constraints:
 - Reflow runs **after** the incidental-newline strip, so it reflows canonical collapsed paragraph form, never
   the source's own wrapping.
 - Reflow only touches unprotected prose lines; code blocks, tables, lists (prefix preserved, body wrapped),
-  headings, blockquotes, HTML blocks, and `::` directives are preserved.
+  headings, blockquotes, HTML blocks, and `::` directives are preserved. The original list-body implementation
+  was incomplete; complete logical list-paragraph reflow and composite hanging prefixes landed in the
+  [fixed-width lists fix](../../../fixes/2026-07-13-fixed-width-lists/spec.md).
 
 **Required (not yet implemented — needs fail-first tests):**
 

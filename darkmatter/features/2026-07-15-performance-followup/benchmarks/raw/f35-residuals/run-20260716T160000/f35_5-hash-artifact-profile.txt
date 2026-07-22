@@ -1,0 +1,97 @@
+Finding 35.5 — `md hash --diff` / `--save` artifact duplication
+===============================================================
+
+Run id:    run-20260716T160000
+Host:      macOS (Darwin 25.5.0), aarch64. SHARED, HEAVILY LOADED host
+           (load average ~29-30).
+Profile:   release. Library numbers via an in-crate harness
+           (`f35_5_profile` in darkmatter/lib/src/markdown/hash/explain.rs,
+           deleted after this capture); CLI numbers via hyperfine against the
+           release `md` binary (the plan's "release CLI runner" contract — CLI
+           evidence is deliberately NOT forced through `just bench`).
+Warm-up:   5. Samples: 200 (library, median) / 40 runs (CLI, mean +/- sigma).
+
+Fixtures (manifest identities, Architecture Decision A):
+  hash_basic.md  — 292 bytes.
+  toc_large.md   — 80936 bytes, prefixed with a 3-line frontmatter block so a
+                   stored hash property can live in it (`large_fm.md`).
+                   The prefix is a CLI-runner input, not a new manifest fixture:
+                   the immutable fixture bytes are unchanged and still hashed.
+  Each seeded with `md hash <f> --kind <simple|detailed> --save`.
+
+Declared threshold (before capture)
+-----------------------------------
+Target operation: one `md hash --diff` / `--save` invocation.
+Minimum repeatable win: >= 5% on the large-document `detailed` target.
+Maximum permitted control regression: 0% on the `simple` and small-document
+shapes.
+
+What was duplicated
+-------------------
+`run_hash_diff` calls `compare_hash` and then `explain_hash_diff`; the latter
+called `compare_hash` AGAIN, and for the `detailed` kind `detailed_body`
+recomputed the artifact a THIRD time. `run_hash_save` adds `plan_hash_save`,
+which computed the stored-policy comparison artifact and, separately, the
+current-policy baseline.
+
+Fix (no public API change): `compare_options` names the like-for-like identity;
+`compare_with_computed` accepts an already-computed artifact. `explain_hash_diff`
+now computes ONE artifact and shares it with both the comparison and
+`detailed_body` — provably the same artifact, since `detailed_body` is only
+reachable via `ComparisonDetail::Detailed`, which only arises when
+`stored.kind == Detailed`. `plan_hash_save` computes the comparison artifact once
+and reuses it for the baseline ONLY when `(selected kind, normalized ignore-set)`
+matches the stored identity; a kind change or ignore-policy change still computes
+the current-policy baseline separately, preserving `--save`'s legitimate
+distinction between its two artifacts.
+
+Library results — full `--diff` sequence (compare_hash + explain_hash_diff)
+---------------------------------------------------------------------------
+  fixture / kind                  before      after     change
+  hash_basic  / Simple            3.1 us      3.2 us    (noise, unchanged)
+  hash_basic  / Structured       13.2 us     13.8 us    (noise, unchanged)
+  hash_basic  / Detailed         19.1 us     13.0 us    -32.0 %
+  toc_large   / Simple          426.3 us    421.0 us    (noise, unchanged)
+  toc_large   / Structured     4223.8 us   4220.2 us    (noise, unchanged)
+  toc_large   / Detailed       7641.9 us   5399.6 us    -29.3 %
+
+  (single compute_hash for reference: toc_large/Detailed = 2299.2 us)
+
+CLI results — hyperfine, release `md`
+--------------------------------------
+  command                                    before            after        change
+  md hash large_fm_detailed.md --diff   17.2 ms +/- 0.5   14.1 ms +/- 0.7   -18.0 %  [TARGET]
+  md hash large_fm_simple.md   --diff    5.5 ms +/- 0.6    5.4 ms +/- 0.4   within sigma  [control]
+  md hash small_detailed.md    --diff    5.0 ms +/- 0.3    4.9 ms +/- 0.3   within sigma  [control]
+  md hash large_fm_detailed.md --save          -          14.0 ms +/- 0.5
+  md hash large_fm_simple.md   --save          -           5.3 ms +/- 0.3
+
+The target's -18.0% is ~4 sigma outside the noise. No control regressed.
+
+Honest residual (NOT fixed, and why)
+-------------------------------------
+`--diff` still computes the artifact TWICE: once in the CLI's `compare_hash`
+(needed for the exit-2 decision) and once in `explain_hash_diff`. Removing that
+last duplicate requires the CLI to derive changed-ness from the explanation, but
+`ExplanationBody`, `FmConcern`, `StructuredBody` and `DetailedBody` are all
+PRIVATE and `HashExplanation` exposes only `render()`. Closing it would therefore
+need either:
+  (a) a new public accessor on `HashExplanation`, or
+  (b) an interior-mutability memo on `Markdown` itself.
+(a) is barred by the standing "no new public Rust API shape change" contract.
+(b) would put a cache inside a value type that is `Clone`/`PartialEq` and shared
+across rayon threads in `run_hash_directory`, introducing a Sync obligation and a
+staleness hazard on a mutable document — disproportionate to the remaining ~2.3 ms.
+This residual is recorded here rather than silently absorbed; it is a candidate
+for a future owner-approved API addition, not an oversight. The `simple` and
+`structured` rows above are unchanged for exactly this reason.
+
+Disposition: ACCEPTED (implementation win) with a recorded residual.
+
+Cross-platform classification: OS-IDENTICAL, confirmed from the actual diff.
+The change is pure call-graph restructuring in `compare.rs` / `explain.rs` /
+`save.rs`: no `cfg`, no filesystem access (the CLI still owns `fs::write`), no
+path handling, no clock. Stored hash semantics are unchanged — proven by the
+round-trip test `saved_baseline_reads_back_as_unchanged` across 5 kinds x 2
+ignore policies. Windows compile + macOS behavioral run + ordinary Linux CI are
+sufficient per the Verification Matrix.

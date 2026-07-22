@@ -4,6 +4,9 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 use tracing::instrument;
 
+use super::analyze::{YamlAnalysis, YamlDiagnostic, YamlRepair, analyze_yaml};
+use super::location::YamlLocation;
+
 /// Source tracking for YAML content.
 #[derive(Debug, Clone)]
 pub enum YamlSource {
@@ -58,6 +61,21 @@ pub enum YamlError {
     /// Max depth exceeded.
     #[error("Max depth exceeded: {0}")]
     MaxDepthExceeded(usize),
+}
+
+impl YamlError {
+    /// Returns the structured source location of a parse error.
+    ///
+    /// Projects the byte offset, line, and column carried by the underlying
+    /// `serde_yaml_ng` error into a [`YamlLocation`]. Returns `None` for
+    /// non-parse variants, which carry no source position.
+    #[must_use]
+    pub fn location(&self) -> Option<YamlLocation> {
+        match self {
+            Self::Parse(error) => error.location().map(YamlLocation::from),
+            _ => None,
+        }
+    }
 }
 
 /// Policy for handling non-string map keys.
@@ -210,6 +228,11 @@ impl<T> ConversionOutput<T> {
 pub struct Yaml {
     source: YamlSource,
     value: serde_yaml_ng::Value,
+    /// Source text read at construction, retained so diagnostics and repairs
+    /// never observe a second, TOCTOU-raced version of the input. Populated
+    /// by every parsing constructor; `None` only for [`Yaml::from_value`],
+    /// which has no authored source.
+    retained_source: Option<String>,
 }
 
 impl Yaml {
@@ -233,6 +256,7 @@ impl Yaml {
         Ok(Self {
             source: YamlSource::Path(path.to_path_buf()),
             value,
+            retained_source: Some(content),
         })
     }
 
@@ -250,6 +274,7 @@ impl Yaml {
         Ok(Self {
             source: YamlSource::Text(input.to_string()),
             value,
+            retained_source: Some(input.to_string()),
         })
     }
 
@@ -262,19 +287,28 @@ impl Yaml {
     pub fn from_bytes(bytes: impl AsRef<[u8]>) -> Result<Self, YamlError> {
         let bytes = bytes.as_ref();
         let value: serde_yaml_ng::Value = serde_yaml_ng::from_slice(bytes)?;
+        // A successful parse implies valid UTF-8; on the unreachable error
+        // arm, fall back to no retained source rather than a lossy copy that
+        // would corrupt byte spans.
+        let retained_source = std::str::from_utf8(bytes).ok().map(str::to_string);
 
         Ok(Self {
             source: YamlSource::Bytes(bytes.to_vec()),
             value,
+            retained_source,
         })
     }
 
     /// Create from an existing parsed value.
+    ///
+    /// The value has no authored source, so [`Yaml::source_text`] returns
+    /// `None` and span-based diagnostics are unavailable.
     #[must_use]
     pub fn from_value(value: serde_yaml_ng::Value) -> Self {
         Self {
             source: YamlSource::Text(String::new()),
             value,
+            retained_source: None,
         }
     }
 
@@ -288,6 +322,91 @@ impl Yaml {
     #[must_use]
     pub fn source(&self) -> &YamlSource {
         &self.source
+    }
+
+    /// Returns the authored source text read at construction.
+    ///
+    /// This is the single read path for span-based diagnostics and repairs:
+    /// for path-backed values it yields the text captured when the file was
+    /// read (never a second filesystem read), and for [`Yaml::from_value`] it
+    /// returns `None` because no authored source exists.
+    #[must_use]
+    pub fn source_text(&self) -> Option<&str> {
+        self.retained_source.as_deref()
+    }
+
+    /// Analyzes the authored source with the source-first analyzer.
+    ///
+    /// This is the entry point to prefer: the returned [`YamlAnalysis`] is a
+    /// single scan from which the diagnostics view
+    /// ([`YamlAnalysis::diagnostics`]), the repairs view
+    /// ([`YamlAnalysis::repairs`]), and the patched source
+    /// ([`YamlAnalysis::apply`]) are all derived without re-scanning. Callers
+    /// that want more than one of those views should retain the analysis
+    /// rather than reach for [`Yaml::diagnose`] and
+    /// [`Yaml::repair_candidates`], which scan once each.
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// use biscuit_file::Yaml;
+    ///
+    /// let yaml = Yaml::from_str("key: value  \n")?;
+    /// if let Some(analysis) = yaml.analyze() {
+    ///     let findings = analysis.diagnostics().len();
+    ///     let offered = analysis.repairs().count();
+    ///     let patched = analysis.apply();
+    ///     assert_eq!(patched.source, "key: value\n");
+    ///     assert!(findings > 0 && offered > 0);
+    /// }
+    /// # Ok::<(), biscuit_file::YamlError>(())
+    /// ```
+    ///
+    /// ## Returns
+    ///
+    /// `None` for values built by [`Yaml::from_value`], which carry no
+    /// authored source. An empty-source analysis is deliberately not
+    /// synthesized: [`YamlAnalysis::apply`] would then report an empty
+    /// document as the patched result, which a caller writing that source
+    /// back to disk would act on destructively.
+    #[must_use]
+    pub fn analyze(&self) -> Option<YamlAnalysis> {
+        self.source_text().map(analyze_yaml)
+    }
+
+    /// Diagnoses the authored source, discarding the rest of the analysis.
+    ///
+    /// Shorthand for the diagnostics view of [`Yaml::analyze`]; it performs
+    /// its own scan, so pairing it with [`Yaml::repair_candidates`] analyzes
+    /// the same source twice. Retain a single [`YamlAnalysis`] when both
+    /// views are needed.
+    ///
+    /// Values constructed via [`Yaml::from_value`] have no authored source
+    /// and return no diagnostics — value-level diagnostics without source
+    /// spans are out of scope.
+    #[must_use]
+    pub fn diagnose(&self) -> Vec<YamlDiagnostic> {
+        self.analyze()
+            .map(|analysis| analysis.diagnostics().to_vec())
+            .unwrap_or_default()
+    }
+
+    /// Returns every candidate repair attached to [`Yaml::diagnose`]
+    /// findings, in stable source order.
+    ///
+    /// Shorthand for the repairs view of [`Yaml::analyze`]; see
+    /// [`Yaml::diagnose`] for the duplicate-scan caveat when both views are
+    /// wanted.
+    ///
+    /// Candidates are only ever attached when they have satisfied their
+    /// safety proof; whether a candidate is eligible for automatic
+    /// application is gated by the diagnostic's classification. Values
+    /// constructed via [`Yaml::from_value`] return no candidates.
+    #[must_use]
+    pub fn repair_candidates(&self) -> Vec<YamlRepair> {
+        self.analyze()
+            .map(|analysis| analysis.repairs().cloned().collect())
+            .unwrap_or_default()
     }
 
     /// Convert to a JSON value with default options.

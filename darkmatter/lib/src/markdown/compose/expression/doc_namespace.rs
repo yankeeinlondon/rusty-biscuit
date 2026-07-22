@@ -15,6 +15,7 @@
 //! `ctx.doc`.
 
 use serde_json::Value;
+use std::collections::HashMap;
 
 /// Returns `true` when `path` addresses the reserved `doc` namespace — either
 /// bare `doc` or a `doc.<path>` traversal.
@@ -34,6 +35,34 @@ pub(crate) fn resolve_doc_namespace(path: &str, root: &Value) -> Option<Value> {
         Some(rest) => doc_nested(root, rest),
         // path == "doc": the whole frontmatter object.
         None => Some(root.clone()),
+    }
+}
+
+/// Map-based variant of [`resolve_doc_namespace`] that resolves against the
+/// effective-state `data` map directly.
+///
+/// Byte-identical to building a `Value::Object` from `data` and calling
+/// [`resolve_doc_namespace`], but a `doc.<path>` traversal borrows into the map
+/// and clones only the resolved leaf instead of deep-cloning the entire state
+/// per lookup (F30). Bare `doc` still materializes the whole object snapshot.
+pub(crate) fn resolve_doc_namespace_in_map(
+    path: &str,
+    data: &HashMap<String, Value>,
+) -> Option<Value> {
+    match path.strip_prefix("doc.") {
+        Some(rest) => {
+            let mut segments = rest.split('.');
+            let mut current = data.get(segments.next()?)?;
+            for segment in segments {
+                match current {
+                    Value::Object(map) => current = map.get(segment)?,
+                    _ => return None,
+                }
+            }
+            Some(current.clone())
+        }
+        // path == "doc": the whole frontmatter object (a snapshot).
+        None => Some(Value::Object(data.clone().into_iter().collect())),
     }
 }
 

@@ -172,6 +172,10 @@ pub(crate) fn run_harness_loop(
 }
 
 #[allow(unused_assignments)]
+#[allow(
+    clippy::result_large_err,
+    reason = "proxy preflight preserves the shared typed CompositionError until lifecycle routing"
+)]
 fn run_harness_loop_inner(ctx: HarnessLoopCtx<'_, '_>) -> Result<LoopStep> {
     let HarnessLoopCtx {
         provider,

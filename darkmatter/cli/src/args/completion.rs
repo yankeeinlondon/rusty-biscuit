@@ -181,6 +181,9 @@ mod tests {
 
         let values = completion_values(complete_indent_values(OsStr::new("4")));
         assert_eq!(values, vec!["4"]);
+
+        let values = completion_values(complete_indent_values(OsStr::new("8")));
+        assert_eq!(values, vec!["8"]);
     }
 
     #[test]

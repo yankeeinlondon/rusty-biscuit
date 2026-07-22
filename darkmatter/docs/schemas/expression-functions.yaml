@@ -1384,8 +1384,7 @@ functions:
             example:
                 expression: validate_schema("fixture.md", {})
                 result: "true"
-                verification: display-only
-                reason: forward-compatible overload with no evaluable behavior yet
+                verification: executable
     - name: and
       category: Logical
       order: 49
@@ -1416,3 +1415,215 @@ functions:
                 expression: or(false, true)
                 result: "true"
                 verification: executable
+    - name: predict_conflicts
+      category: Git
+      order: 90
+      description:
+          Returns the repository-relative paths that would conflict if the
+          named local branch were merged into the caller's current branch.
+      overloads:
+          - parameters:
+                - name: branch
+                  type: string
+            returns:
+                type: string
+                array: true
+                fallible: true
+            example:
+                expression: predict_conflicts("feature/example")
+                result: src/config.rs
+                verification: display-only
+                reason:
+                    Requires a Git fixture with divergent local branch tips.
+    - name: find_first_index
+      category: Filesystem
+      order: 88
+      description:
+          Returns the lowest-indexed existing sibling in the file's directory,
+          with the unindexed base sorting first; returns the input when the
+          family has no existing member.
+      overloads:
+          - parameters:
+                - name: file
+                  type: file
+            returns:
+                type: file
+                fallible: true
+            example:
+                expression: find_first_index("review-2.md")
+                result: review-1.md
+                verification: executable
+    - name: find_last_index
+      category: Filesystem
+      order: 89
+      description:
+          Returns the highest-indexed existing sibling in the file's directory;
+          returns the input when the family has no existing member.
+      overloads:
+          - parameters:
+                - name: file
+                  type: file
+            returns:
+                type: file
+                fallible: true
+            example:
+                expression: find_last_index("review-1.md")
+                result: review-2.md
+                verification: executable
+    - name: branch_exists_on_remote
+      category: Git
+      order: 91
+      description:
+          Returns whether an exact branch exists in the selected remote's live
+          ref advertisement or authoritative provider API.
+      overloads:
+          - parameters: []
+            returns:
+                type: boolean
+                fallible: true
+            example:
+                expression: branch_exists_on_remote()
+                result: "true"
+                verification: display-only
+                reason: Requires an allowlisted remote-provider fixture.
+          - parameters:
+                - name: branch
+                  type: string
+            returns:
+                type: boolean
+                fallible: true
+            example:
+                expression: branch_exists_on_remote("main")
+                result: "true"
+                verification: display-only
+                reason: Requires an allowlisted remote-provider fixture.
+          - parameters:
+                - name: branch
+                  type: string
+                - name: remote
+                  type: string
+            returns:
+                type: boolean
+                fallible: true
+            example:
+                expression: branch_exists_on_remote("main", "origin")
+                result: "true"
+                verification: display-only
+                reason: Requires an allowlisted remote-provider fixture.
+    - name: remote_vendor
+      category: Git
+      order: 92
+      description:
+          Returns the canonical provider token for the selected configured
+          remote, probing an ambiguous self-hosted server only when allowlisted.
+      overloads:
+          - parameters:
+                - name: remote
+                  type: string
+                  optional: true
+            returns:
+                type: 'enum("", github, gitlab, gitea, forgejo, bitbucket, azure_devops, aws_code_commit, source_hut)'
+                fallible: true
+            example:
+                expression: remote_vendor()
+                result: github
+                verification: display-only
+                reason: Requires a configured caller repository remote.
+    - name: pr
+      category: Pull Requests
+      order: 93
+      description: Returns one provider pull or merge request in canonical Markdown form.
+      overloads:
+          - parameters:
+                - name: id
+                  type: any
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: pr(123)
+                result: "[PR #123 — Fix parser](https://provider/pr/123) · open · @alice"
+                verification: display-only
+                reason: Requires an allowlisted remote-provider fixture.
+    - name: pr_list
+      category: Pull Requests
+      order: 94
+      description:
+          Queries pull or merge requests with the canonical bounded filter vocabulary.
+          See the [provider query
+          vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys,
+          enum values, defaults, and bounds.
+      overloads:
+          - parameters:
+                - name: query
+                  type: object
+            returns:
+                type: string
+                array: true
+                fallible: true
+            example:
+                expression: 'pr_list({ state: "open", limit: 5 })'
+                result: "[PR #123 — Fix parser](https://provider/pr/123) · open · @alice"
+                verification: display-only
+                reason: Requires an allowlisted remote-provider fixture.
+          - parameters:
+                - name: count
+                  type: number(integer)
+            returns:
+                type: string
+                array: true
+                fallible: true
+            example:
+                expression: pr_list(5)
+                result: "[PR #123 — Fix parser](https://provider/pr/123) · open · @alice"
+                verification: display-only
+                reason: Requires an allowlisted remote-provider fixture.
+    - name: cicd
+      category: CI/CD
+      order: 95
+      description: Returns one provider-addressable CI/CD job in canonical Markdown form.
+      overloads:
+          - parameters:
+                - name: id
+                  type: any
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: cicd(456)
+                result: "[CI job #456 — test](https://provider/job/456) · failed"
+                verification: display-only
+                reason: Requires an allowlisted remote-provider fixture.
+    - name: cicd_list
+      category: CI/CD
+      order: 96
+      description:
+          Queries CI/CD jobs with bounded direct listing or parent-execution traversal.
+          See the [provider query
+          vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys,
+          enum values, defaults, and bounds.
+      overloads:
+          - parameters:
+                - name: query
+                  type: object
+            returns:
+                type: string
+                array: true
+                fallible: true
+            example:
+                expression: 'cicd_list({ statuses: ["failed"], limit: 5 })'
+                result: "[CI job #456 — test](https://provider/job/456) · failed"
+                verification: display-only
+                reason: Requires an allowlisted remote-provider fixture.
+          - parameters:
+                - name: count
+                  type: number(integer)
+            returns:
+                type: string
+                array: true
+                fallible: true
+            example:
+                expression: cicd_list(5)
+                result: "[CI job #456 — test](https://provider/job/456) · failed"
+                verification: display-only
+                reason: Requires an allowlisted remote-provider fixture.

@@ -113,6 +113,261 @@ mod tests {
     }
 
     #[test]
+    fn test_format_text_keeps_reference_definitions_intact() {
+        let source = concat!(
+            "- Before [label][ref] alpha beta gamma delta.\n",
+            "\n",
+            "[ref]: https://example.com/a/very/long/path \"A descriptive title\"\n"
+        );
+        let mut config = DmlsConfig::default();
+        config.formatting.fixed_width = Some(24);
+
+        let mut md: Markdown = source.into();
+        md.cleanup();
+        let reflowed = reflow_to_width(md.content(), 24);
+        *md.content_mut() = reflowed;
+        let expected = md.as_string();
+
+        assert_eq!(format_text(source, &config), expected);
+        assert_eq!(
+            expected,
+            concat!(
+                "- Before [label][ref]\n",
+                "  alpha beta gamma\n",
+                "  delta.\n",
+                "\n",
+                "[ref]: https://example.com/a/very/long/path \"A descriptive title\"\n"
+            )
+        );
+    }
+
+    #[test]
+    fn test_format_text_reflows_complete_list_paragraph_like_library_cleanup() {
+        let source = "- Alpha beta gamma delta\n    epsilon zeta eta theta.\n";
+        let mut config = DmlsConfig::default();
+        config.formatting.fixed_width = Some(24);
+
+        let mut md: Markdown = source.into();
+        md.cleanup();
+        let reflowed = reflow_to_width(md.content(), 24);
+        *md.content_mut() = reflowed;
+        let expected = md.as_string();
+
+        assert_eq!(format_text(source, &config), expected);
+        assert_eq!(
+            expected,
+            "- Alpha beta gamma delta\n  epsilon zeta eta\n  theta.\n"
+        );
+    }
+
+    #[test]
+    fn test_format_text_preserves_nested_lists_inside_blockquotes() {
+        let fixtures = [
+            concat!(
+                "> - Parent alpha beta gamma delta epsilon.\n",
+                ">   - Child alpha beta gamma delta epsilon.\n"
+            ),
+            concat!(
+                "> 1. Parent alpha beta gamma delta epsilon.\n",
+                ">    1. Child alpha beta gamma delta epsilon.\n"
+            ),
+            concat!(
+                "> - [ ] Parent alpha beta gamma delta epsilon.\n",
+                ">   - [x] Child alpha beta gamma delta epsilon.\n"
+            ),
+        ];
+        let mut config = DmlsConfig::default();
+        config.formatting.fixed_width = Some(24);
+
+        for source in fixtures {
+            let mut md: Markdown = source.into();
+            md.cleanup();
+            let reflowed = reflow_to_width(md.content(), 24);
+            *md.content_mut() = reflowed;
+
+            assert_eq!(format_text(source, &config), md.as_string());
+        }
+    }
+
+    #[test]
+    fn test_format_text_preserves_additional_paragraphs_inside_blockquoted_items() {
+        let fixtures = [
+            (
+                "> - Parent first paragraph.\n>\n>   Second paragraph alpha beta gamma delta.\n>\n>   - Child item alpha beta.\n",
+                CleanupVariant::Default,
+            ),
+            (
+                "> > 1. Parent first paragraph.\n> >\n> >    Second paragraph alpha beta gamma delta.\n> >\n> >    - Child item alpha beta.\n",
+                CleanupVariant::Compact,
+            ),
+            (
+                "> - [ ] Parent first paragraph.\n>\n>   Second café 🙂 alpha beta gamma delta.\n>\n>   1. Child item alpha beta.\n",
+                CleanupVariant::Loose,
+            ),
+        ];
+
+        for (source, cleanup) in fixtures {
+            let mut config = DmlsConfig::default();
+            config.formatting.cleanup = cleanup;
+            config.formatting.fixed_width = Some(24);
+
+            let mut direct: Markdown = source.into();
+            match cleanup {
+                CleanupVariant::Default => direct.cleanup(),
+                CleanupVariant::Compact => direct.cleanup_compact(),
+                CleanupVariant::Loose => direct.cleanup_loose(),
+            };
+            *direct.content_mut() = reflow_to_width(direct.content(), 24);
+            let expected = direct.as_string();
+
+            assert_eq!(format_text(source, &config), expected);
+            assert_eq!(format_text(&expected, &config), expected);
+        }
+    }
+
+    #[test]
+    fn test_format_text_preserves_markers_in_protected_bodies() {
+        let fixtures = [
+            (
+                concat!(
+                    "::shell-block\n",
+                    "- first literal\n",
+                    "+ second literal\n",
+                    "* third literal\n",
+                    "1. ordered literal\n",
+                    "- [ ] task literal\n",
+                    "::end-block\n",
+                    "\n",
+                    "+ Actual item long enough to wrap at width twenty four.\n"
+                ),
+                concat!(
+                    "::shell-block\n",
+                    "- first literal\n",
+                    "+ second literal\n",
+                    "* third literal\n",
+                    "1. ordered literal\n",
+                    "- [ ] task literal\n",
+                    "::end-block\n",
+                    "\n",
+                    "+ Actual item long\n",
+                    "  enough to wrap at\n",
+                    "  width twenty four.\n"
+                ),
+            ),
+            (
+                concat!(
+                    "> ::shell-block\n",
+                    "> - first literal\n",
+                    "> + second literal\n",
+                    "> * third literal\n",
+                    "> 1. ordered literal\n",
+                    "> - [ ] task literal\n",
+                    "> ::end-block\n",
+                    "> \n",
+                    "> + Actual item long enough to wrap at width twenty four.\n"
+                ),
+                concat!(
+                    "> ::shell-block\n",
+                    "> - first literal\n",
+                    "> + second literal\n",
+                    "> * third literal\n",
+                    "> 1. ordered literal\n",
+                    "> - [ ] task literal\n",
+                    "> ::end-block\n",
+                    "> \n",
+                    "> + Actual item long\n",
+                    ">   enough to wrap at\n",
+                    ">   width twenty four.\n"
+                ),
+            ),
+            (
+                concat!(
+                    "::shell-block\n",
+                    "- first literal\n",
+                    "::block condition\n",
+                    "+ second literal\n",
+                    "::end-block\n",
+                    "- third source line\n",
+                    "  continuation remains literal\n",
+                    "::end-block\n",
+                    "\n",
+                    "+ Actual item long enough to wrap at width twenty four.\n"
+                ),
+                concat!(
+                    "::shell-block\n",
+                    "- first literal\n",
+                    "::block condition\n",
+                    "+ second literal\n",
+                    "::end-block\n",
+                    "- third source line\n",
+                    "  continuation remains literal\n",
+                    "::end-block\n",
+                    "\n",
+                    "+ Actual item long\n",
+                    "  enough to wrap at\n",
+                    "  width twenty four.\n"
+                ),
+            ),
+        ];
+        let mut config = DmlsConfig::default();
+        config.formatting.fixed_width = Some(24);
+
+        for (source, expected) in fixtures {
+            assert_eq!(format_text(source, &config), expected);
+            assert_eq!(format_text(expected, &config), expected);
+        }
+    }
+
+    #[test]
+    fn test_format_text_preserves_ten_digit_prose_boundary() {
+        let source = concat!(
+            "123456789) nine-digit item\n",
+            "\n",
+            "- first unordered item\n",
+            "\n",
+            "1. first ordered item\n",
+            "\n",
+            "1234567890. ten-digit prose\n",
+            "\n",
+            "+ second unordered item\n",
+            "\n",
+            "2. second ordered item\n"
+        );
+        let mut config = DmlsConfig::default();
+        config.formatting.cleanup = CleanupVariant::Loose;
+
+        let mut direct: Markdown = source.into();
+        direct.cleanup_loose();
+        let expected = direct.as_string();
+
+        assert_eq!(format_text(source, &config), expected);
+        assert!(expected.contains("1234567890. ten-digit prose\n\n+ second unordered"));
+        assert_eq!(format_text(&expected, &config), expected);
+    }
+
+    #[test]
+    fn test_format_text_preserves_quoted_marker_looking_indented_code() {
+        let fixtures = [
+            "> - Parent.\n>\n>       - literal code\n>\n> - Later sibling.\n",
+            "> 1. Parent.\n>\n>       1. literal code\n>\n> 2. Later sibling.\n",
+            "> > - Parent.\n> >\n> >       - literal code\n> >\n> > - Later sibling.\n",
+            "> > 1. Parent.\n> >\n> >       1. literal code\n> >\n> > 2. Later sibling.\n",
+        ];
+        let mut config = DmlsConfig::default();
+        config.formatting.fixed_width = Some(24);
+
+        for source in fixtures {
+            let mut direct: Markdown = source.into();
+            direct.cleanup();
+            *direct.content_mut() = reflow_to_width(direct.content(), 24);
+            let expected = direct.as_string();
+
+            assert_eq!(format_text(source, &config), expected);
+            assert_eq!(format_text(&expected, &config), expected);
+        }
+    }
+
+    #[test]
     fn test_format_text_preserves_frontmatter_and_directive_lines() {
         let source = "---\ntitle: Doc\n---\n\n# Body\n\n::file ./intro.md\n";
         let config = DmlsConfig::default();

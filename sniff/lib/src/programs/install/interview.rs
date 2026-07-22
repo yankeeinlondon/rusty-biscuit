@@ -12,8 +12,8 @@ use crate::programs::contract::InstallationMethod;
 
 use super::command::{
     astral_installer_url, build_install_announcement, build_install_failure_status,
-    build_install_success_status, build_retry_choice_prose, build_retry_quit_prose,
-    get_install_command,
+    build_install_success_status, build_install_timeout_warning, build_retry_choice_prose,
+    build_retry_quit_prose, get_install_command,
 };
 use super::execute::execute_install_captured;
 use super::options::{InstallCapturedOutcome, InstallOptions};
@@ -29,6 +29,11 @@ pub enum InstallInterviewEvent {
     Announcement { prose: String },
     /// Warning before a remote-script install (renders as `Prose`).
     ConsentWarning { prose: String },
+    /// Warning that the attempt was killed at its deadline (renders as
+    /// `Prose`). Always emitted before the retry prompt, because a detached
+    /// installer descendant may still be modifying the host while the next
+    /// attempt runs.
+    TimeoutWarning { prose: String },
     /// Captured program output (renders as `BlockQuote`). The body is raw
     /// text without prose markup.
     CapturedOutput {
@@ -123,6 +128,12 @@ pub enum InstallInterviewOutcome {
     DryRun { method: InstallationMethod },
     AbortedByUser,
     Failed { attempted: Vec<InstallationMethod> },
+    /// Every attempt failed and the last one was killed at its deadline rather
+    /// than exiting on its own. A `TimeoutWarning` event was emitted before
+    /// this outcome, so the caller need not re-derive the host-modification
+    /// caveat. Distinct from `Failed` so a caller can choose a different exit
+    /// code or follow-up.
+    TimedOut { attempted: Vec<InstallationMethod> },
     NotInstallable,
 }
 
@@ -134,6 +145,9 @@ pub enum InstallInterviewOutcome {
 ///
 /// `Ok(NotInstallable)` when the plan has no viable method, emitting an error
 /// status first. Otherwise delegates to the private `run_attempt` helper.
+///
+/// `Ok(TimedOut)` when the final attempt was killed at its deadline; a
+/// `TimeoutWarning` event precedes it and any retry prompt.
 ///
 /// ## Errors
 ///
@@ -156,13 +170,26 @@ pub fn run_install_interview<D: InstallInterviewDelegate>(
         .chosen()
         .cloned()
         .expect("successful plan has a chosen option");
-    run_attempt(input, options, delegate, chosen.kind, Vec::new())
+    run_attempt(
+        input,
+        options,
+        delegate,
+        &execute_install_captured,
+        chosen.kind,
+        Vec::new(),
+    )
 }
+
+/// Executes one install attempt. Tests substitute this for the real spawner to
+/// drive timeout and failure paths without a subprocess.
+type InstallExecutor<'a> =
+    dyn Fn(&InstallationMethod, &InstallOptions) -> InstallCapturedOutcome + 'a;
 
 fn run_attempt<D: InstallInterviewDelegate>(
     input: &InstallInterviewInput,
     options: &InstallInterviewOptions,
     delegate: &mut D,
+    executor: &InstallExecutor<'_>,
     method: InstallationMethod,
     mut attempted: Vec<InstallationMethod>,
 ) -> Result<InstallInterviewOutcome, SniffInstallationError> {
@@ -174,8 +201,10 @@ fn run_attempt<D: InstallInterviewDelegate>(
                 input,
                 options,
                 delegate,
+                executor,
                 Some((InstallOutputStream::Stderr, e.to_string())),
                 attempted,
+                false,
             );
         }
     };
@@ -202,7 +231,7 @@ fn run_attempt<D: InstallInterviewDelegate>(
     if needs_consent {
         exec_opts.approve_remote_bash = true;
     }
-    let outcome = execute_install_captured(&method, &exec_opts);
+    let outcome = executor(&method, &exec_opts);
     attempted.push(method.clone());
 
     match outcome {
@@ -210,8 +239,10 @@ fn run_attempt<D: InstallInterviewDelegate>(
             input,
             options,
             delegate,
+            executor,
             Some((InstallOutputStream::Stderr, e.to_string())),
             attempted,
+            false,
         ),
         InstallCapturedOutcome::Completed(r) if r.success && !r.executed => {
             delegate.on_event(&InstallInterviewEvent::Status {
@@ -234,6 +265,7 @@ fn run_attempt<D: InstallInterviewDelegate>(
             Ok(InstallInterviewOutcome::Installed { method })
         }
         InstallCapturedOutcome::Completed(r) => {
+            let timed_out = r.timed_out;
             let body = if !r.stderr.trim().is_empty() {
                 r.stderr
             } else {
@@ -243,19 +275,29 @@ fn run_attempt<D: InstallInterviewDelegate>(
                 input,
                 options,
                 delegate,
+                executor,
                 Some((InstallOutputStream::Stderr, body)),
                 attempted,
+                timed_out,
             )
         }
     }
 }
 
+/// Emits the failure events for one attempt and either prompts for a retry or
+/// terminates the session.
+///
+/// `timed_out` selects the timeout contract: a `TimeoutWarning` event is
+/// emitted before the retry prompt, and a terminal outcome becomes `TimedOut`
+/// rather than `Failed`.
 fn handle_failure<D: InstallInterviewDelegate>(
     input: &InstallInterviewInput,
     options: &InstallInterviewOptions,
     delegate: &mut D,
+    executor: &InstallExecutor<'_>,
     captured_body: Option<(InstallOutputStream, String)>,
     attempted: Vec<InstallationMethod>,
+    timed_out: bool,
 ) -> Result<InstallInterviewOutcome, SniffInstallationError> {
     if let Some((stream, body)) = captured_body
         && !body.trim().is_empty()
@@ -267,9 +309,19 @@ fn handle_failure<D: InstallInterviewDelegate>(
         text: build_install_failure_status(&input.program, input.website),
     })?;
 
+    if timed_out {
+        delegate.on_event(&InstallInterviewEvent::TimeoutWarning {
+            prose: build_install_timeout_warning(&input.program, options.install.timeout_secs),
+        })?;
+    }
+
     let alts = input.plan.retryable_alternatives(&attempted);
     if alts.is_empty() || !options.prompt_on_failure {
-        return Ok(InstallInterviewOutcome::Failed { attempted });
+        return Ok(if timed_out {
+            InstallInterviewOutcome::TimedOut { attempted }
+        } else {
+            InstallInterviewOutcome::Failed { attempted }
+        });
     }
 
     let prompt = RetryPrompt {
@@ -286,7 +338,9 @@ fn handle_failure<D: InstallInterviewDelegate>(
 
     match delegate.choose_retry(&prompt)? {
         RetryChoice::Quit => Ok(InstallInterviewOutcome::AbortedByUser),
-        RetryChoice::RetryWith(next) => run_attempt(input, options, delegate, next, attempted),
+        RetryChoice::RetryWith(next) => {
+            run_attempt(input, options, delegate, executor, next, attempted)
+        }
     }
 }
 
@@ -310,10 +364,15 @@ mod runner_tests {
     use super::*;
     use crate::programs::install::plan::{InstallPlan, InstallPlanOption, InstallPlanReason};
 
+    use crate::programs::install::options::InstallCapturedResult;
+
     struct RecordingDelegate {
         events: Vec<InstallInterviewEvent>,
         consent_answer: bool,
         retry_answer: Option<RetryChoice>,
+        /// `events.len()` at the moment `choose_retry` was first called, so a
+        /// test can assert an event was emitted *before* the retry prompt.
+        retry_prompt_at: Option<usize>,
     }
 
     impl RecordingDelegate {
@@ -322,7 +381,14 @@ mod runner_tests {
                 events: Vec::new(),
                 consent_answer: true,
                 retry_answer: None,
+                retry_prompt_at: None,
             }
+        }
+
+        fn position_of_timeout_warning(&self) -> Option<usize> {
+            self.events
+                .iter()
+                .position(|e| matches!(e, InstallInterviewEvent::TimeoutWarning { .. }))
         }
     }
 
@@ -338,6 +404,7 @@ mod runner_tests {
             &mut self,
             _p: &RetryPrompt,
         ) -> Result<RetryChoice, SniffInstallationError> {
+            self.retry_prompt_at.get_or_insert(self.events.len());
             Ok(self.retry_answer.clone().unwrap_or(RetryChoice::Quit))
         }
     }
@@ -385,6 +452,132 @@ mod runner_tests {
                 .iter()
                 .any(|e| matches!(e, InstallInterviewEvent::CapturedOutput { .. }))
         );
+    }
+
+    /// Builds an executor that reports every attempt as failed, with
+    /// `timed_out` under the caller's control.
+    fn failing_executor(timed_out: bool) -> impl Fn(&InstallationMethod, &InstallOptions) -> InstallCapturedOutcome
+    {
+        move |method: &InstallationMethod, _opts: &InstallOptions| {
+            InstallCapturedOutcome::Completed(InstallCapturedResult {
+                command: method.manager_name().to_string(),
+                executed: true,
+                exit_code: None,
+                stdout: String::new(),
+                stderr: "timed out".into(),
+                success: false,
+                timed_out,
+            })
+        }
+    }
+
+    fn brew_then_cargo_plan() -> InstallInterviewInput {
+        InstallInterviewInput {
+            program: "Ripgrep".into(),
+            website: "https://github.com/BurntSushi/ripgrep",
+            plan: InstallPlan {
+                program: "Ripgrep".into(),
+                website: "https://github.com/BurntSushi/ripgrep",
+                successful: true,
+                options: vec![
+                    InstallPlanOption {
+                        kind: InstallationMethod::Brew("ripgrep"),
+                        requires_sudo: false,
+                        choose: true,
+                        reason_type: InstallPlanReason::Selected,
+                        reason: "chosen".into(),
+                    },
+                    InstallPlanOption {
+                        kind: InstallationMethod::Cargo("ripgrep"),
+                        requires_sudo: false,
+                        choose: false,
+                        reason_type: InstallPlanReason::LowerPriorityAlternative,
+                        reason: "alternative".into(),
+                    },
+                ],
+            },
+        }
+    }
+
+    #[test]
+    fn timed_out_attempt_without_alternatives_returns_timed_out_and_warns() {
+        let input = brew_plan();
+        let opts = InstallInterviewOptions::default();
+        let mut d = RecordingDelegate::new();
+
+        let outcome = run_attempt(
+            &input,
+            &opts,
+            &mut d,
+            &failing_executor(true),
+            InstallationMethod::Brew("ripgrep"),
+            Vec::new(),
+        )
+        .unwrap();
+
+        assert!(
+            matches!(outcome, InstallInterviewOutcome::TimedOut { .. }),
+            "a deadline kill must not be reported as an ordinary Failed"
+        );
+        let warning = d
+            .position_of_timeout_warning()
+            .expect("a timed-out attempt must warn about a possibly detached installer");
+        match &d.events[warning] {
+            InstallInterviewEvent::TimeoutWarning { prose } => {
+                assert!(prose.contains("may still be running"), "prose: {prose}");
+            }
+            other => panic!("expected TimeoutWarning, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn timeout_warning_precedes_the_retry_prompt() {
+        let input = brew_then_cargo_plan();
+        let opts = InstallInterviewOptions::default();
+        let mut d = RecordingDelegate::new();
+        d.retry_answer = Some(RetryChoice::Quit);
+
+        let outcome = run_attempt(
+            &input,
+            &opts,
+            &mut d,
+            &failing_executor(true),
+            InstallationMethod::Brew("ripgrep"),
+            Vec::new(),
+        )
+        .unwrap();
+
+        assert!(matches!(outcome, InstallInterviewOutcome::AbortedByUser));
+        let warning = d
+            .position_of_timeout_warning()
+            .expect("timeout warning must be emitted");
+        let prompt_at = d
+            .retry_prompt_at
+            .expect("retry prompt must have been offered");
+        assert!(
+            warning < prompt_at,
+            "warning at {warning} must precede the retry prompt at {prompt_at}"
+        );
+    }
+
+    #[test]
+    fn ordinary_failure_does_not_emit_a_timeout_warning() {
+        let input = brew_plan();
+        let opts = InstallInterviewOptions::default();
+        let mut d = RecordingDelegate::new();
+
+        let outcome = run_attempt(
+            &input,
+            &opts,
+            &mut d,
+            &failing_executor(false),
+            InstallationMethod::Brew("ripgrep"),
+            Vec::new(),
+        )
+        .unwrap();
+
+        assert!(matches!(outcome, InstallInterviewOutcome::Failed { .. }));
+        assert!(d.position_of_timeout_warning().is_none());
     }
 
     fn remote_bash_plan() -> InstallInterviewInput {
@@ -615,6 +808,9 @@ mod tests {
             InstallInterviewEvent::ConsentWarning {
                 prose: "warn".into(),
             },
+            InstallInterviewEvent::TimeoutWarning {
+                prose: "slow".into(),
+            },
             InstallInterviewEvent::CapturedOutput {
                 stream: InstallOutputStream::Stdout,
                 body: "out".into(),
@@ -628,6 +824,7 @@ mod tests {
             match e {
                 InstallInterviewEvent::Announcement { .. }
                 | InstallInterviewEvent::ConsentWarning { .. }
+                | InstallInterviewEvent::TimeoutWarning { .. }
                 | InstallInterviewEvent::CapturedOutput { .. }
                 | InstallInterviewEvent::Status { .. } => {}
             }

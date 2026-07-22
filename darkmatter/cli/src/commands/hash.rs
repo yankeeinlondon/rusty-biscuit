@@ -148,6 +148,9 @@ fn run_hash_diff(
         std::process::exit(2);
     };
 
+    // Comparison first: a malformed stored value must fail before anything is
+    // printed. Both calls hash the document under the same stored-policy
+    // identity, so `--diff` computes that artifact twice.
     let comparison = md.compare_hash(stored, options)?;
     let explanation = md.explain_hash_diff(stored, options)?;
     println!("{}", explanation.render());
@@ -172,6 +175,15 @@ fn run_hash_save(
         .ok_or_else(|| eyre!("--save requires an input file path (stdin is not supported)"))?;
 
     let decision = md.plan_hash_save(stored, options)?;
+
+    // A first baseline has nothing to compare against, so it has no explanation.
+    // Computed here, before the write below, so it describes the in-memory
+    // document against its *previous* stored hash.
+    let explanation = match stored {
+        Some(stored) => Some(md.explain_hash_diff(stored, options)?),
+        None => None,
+    };
+
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
 
     if let Some(written) = md.apply_hash_save(&decision, options, &today) {
@@ -180,11 +192,8 @@ fn run_hash_save(
             .wrap_err_with(|| format!("Failed to write hash to {:?}", resolved))?;
     }
 
-    match stored {
-        Some(stored) => {
-            let explanation = md.explain_hash_diff(stored, options)?;
-            println!("{}", explanation.render());
-        }
+    match explanation {
+        Some(explanation) => println!("{}", explanation.render()),
         None => {
             println!(
                 "No stored hash found; wrote initial {} baseline",

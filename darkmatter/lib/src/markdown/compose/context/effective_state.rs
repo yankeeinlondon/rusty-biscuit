@@ -180,8 +180,9 @@ impl EffectiveState {
         // before the bare-name `ctx.*` fallback, so a missing `doc.*` never
         // collapses into `ctx.*`.
         if super::super::expression::doc_namespace::is_doc_namespace(path) {
-            let root = Value::Object(self.data.clone().into_iter().collect());
-            return super::super::expression::doc_namespace::resolve_doc_namespace(path, &root);
+            return super::super::expression::doc_namespace::resolve_doc_namespace_in_map(
+                path, &self.data,
+            );
         }
 
         // Handle special prefixes
@@ -373,6 +374,13 @@ impl super::super::expression::EvaluationLookup for ResolvingLookup<'_> {
 
     fn resolution_context(&self) -> Option<super::super::expression::ResolutionContext> {
         Some(self.resolution_context.clone())
+    }
+
+    fn resolution_context_ref(&self) -> Option<&super::super::expression::ResolutionContext> {
+        // Borrowed path (Finding 12): body interpolation evaluates every
+        // read-side function through this adapter; returning a borrow avoids
+        // cloning the context per call.
+        Some(&self.resolution_context)
     }
 
     fn is_valid_context_variable(&self, name: &str) -> bool {

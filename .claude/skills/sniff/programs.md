@@ -1,6 +1,6 @@
 # Program Detection
 
-Parallel detection across 8 categories with macOS app bundle and Windows fallback support. A single shared `ExecutableIndex` scans `PATH` and platform-specific fallback directories once, then all categories perform O(1) HashMap lookups against it in parallel via `rayon::join` pairs.
+Parallel detection across 10 categories with macOS app bundle and Windows fallback support. A single shared `ExecutableIndex` scans `PATH` and platform-specific fallback directories once, then all categories perform O(1) HashMap lookups against it in parallel via `rayon::join` pairs.
 
 ## Categories
 
@@ -14,6 +14,8 @@ Parallel detection across 8 categories with macOS app bundle and Windows fallbac
 | Terminal Apps | `terminal_apps` | `TerminalApp` | alacritty, wezterm, kitty, iTerm2 |
 | Headless Audio | `headless_audio` | `HeadlessAudio` | afplay, pacat, aplay |
 | AI CLI | `ai_clients` | `AiCli` | claude, aider, goose |
+| Notification Helpers | `notification_helpers` | `NotificationHelper` | notify-send, terminal-notifier, dunstify |
+| Test Runners | `test_runners` | `TestRunner` | cargo test, vitest, pytest, go test |
 
 ## Usage
 
@@ -88,12 +90,14 @@ sniff software test-runners             # Host test-runner availability
 sniff software --json                   # JSON with full metadata
 ```
 
-**Install subcommand (per category or all):**
+**Install subcommand (eight installable categories or aggregate):**
 ```bash
 sniff software editors install          # Interactive picker
 sniff software editors install nvim     # Install specific program
-sniff software install                  # Pick from all categories
+sniff software install                  # Pick from all installable categories
 ```
+
+Notification helpers and test runners are report-only categories; they do not expose `install` or `install-plan` actions.
 
 ## Adding a Program Category
 

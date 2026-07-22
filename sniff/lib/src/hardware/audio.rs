@@ -803,41 +803,24 @@ fn parse_cim_sound_devices(contents: &str) -> Vec<(String, String)> {
 /// PowerShell, non-zero exit, or timeout.
 ///
 /// The probe is best-effort: any failure reports no devices rather than
-/// hanging, mirroring the polling-with-timeout pattern used elsewhere for
-/// external command probes.
+/// hanging.
+#[cfg(any(target_os = "windows", test))]
+fn powershell_audio_args(command: &str) -> [&str; 4] {
+    ["-NoProfile", "-NonInteractive", "-Command", command]
+}
+
 #[cfg(target_os = "windows")]
 fn run_powershell_with_timeout(command: &str, timeout: std::time::Duration) -> Option<String> {
-    use std::process::{Command, Stdio};
-    use std::time::Instant;
-
-    let mut child = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", command])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-
-    let start = Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                if !status.success() {
-                    return None;
-                }
-                let output = child.wait_with_output().ok()?;
-                return Some(String::from_utf8_lossy(&output.stdout).into_owned());
-            }
-            Ok(None) => {
-                if start.elapsed() >= timeout {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return None;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(20));
-            }
-            Err(_) => return None,
-        }
+    let output = crate::process::run_with_timeout(
+        "powershell",
+        &powershell_audio_args(command),
+        timeout,
+    )
+    .ok()?;
+    if !output.status.success() {
+        return None;
     }
+    Some(output.stdout_lossy().into_owned())
 }
 
 /// Detects audio devices on Windows via a PowerShell CIM probe.
@@ -848,10 +831,11 @@ fn run_powershell_with_timeout(command: &str, timeout: std::time::Duration) -> O
 /// PowerShell, a failed query, or a parse failure reports no devices.
 #[cfg(target_os = "windows")]
 pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
-    const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
     const COMMAND: &str = "Get-CimInstance Win32_SoundDevice | Select-Object Name,Status | ConvertTo-Csv -NoTypeInformation";
 
-    let Some(output) = run_powershell_with_timeout(COMMAND, PROBE_TIMEOUT) else {
+    let Some(output) =
+        run_powershell_with_timeout(COMMAND, crate::process::timeouts::WINDOWS_AUDIO)
+    else {
         return Vec::new();
     };
 
@@ -1267,5 +1251,47 @@ mod tests {
             classify_windows_audio_kind("Realtek High Definition Audio"),
             AudioDeviceKind::Unknown
         );
+    }
+
+    #[test]
+    fn windows_audio_probe_constructs_noninteractive_powershell_command() {
+        assert_eq!(
+            powershell_audio_args("Get-CimInstance Win32_SoundDevice"),
+            [
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Get-CimInstance Win32_SoundDevice"
+            ]
+        );
+        assert_eq!(
+            crate::process::timeouts::WINDOWS_AUDIO,
+            std::time::Duration::from_secs(5)
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_audio_probe_drains_large_stdout_and_stderr() {
+        let output = run_powershell_with_timeout(
+            "[Console]::Out.Write(('o' * 1048576 -join '')); [Console]::Error.Write(('e' * 1048576 -join ''))",
+            std::time::Duration::from_secs(30),
+        )
+        .expect("verbose PowerShell probe should complete");
+
+        assert_eq!(output.len(), 1_048_576);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_audio_probe_honors_injected_deadline() {
+        let started = std::time::Instant::now();
+        let output = run_powershell_with_timeout(
+            "Start-Sleep -Seconds 30",
+            std::time::Duration::from_millis(100),
+        );
+
+        assert!(output.is_none());
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
     }
 }

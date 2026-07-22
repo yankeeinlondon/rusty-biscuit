@@ -5,36 +5,37 @@ use std::path::Path;
 use tracing::debug;
 
 use crate::Result;
+use crate::performance;
+use crate::performance::counters;
 
 use super::detection::{
-    DetectorOutcome, collect_default_workspace_patterns, dedupe_packages, dedupe_patterns,
-    discover_packages_with_optional_index, resolve_internal_deps,
+    DetectorOutcome, ManifestStore, RepoEvidence, collect_default_workspace_patterns,
+    dedupe_patterns, discover_seeds_with_optional_index, probe_exists,
 };
 use super::glob::expand_membership_globs;
-use super::manifest_index::ManifestIndex;
+use super::seed::merge_seeds;
 use super::standard::{GlobDialect, MonorepoStandard, PackageProvenance};
 
 pub(super) fn detect_nx(
     root: &Path,
-    index: Option<&ManifestIndex>,
+    evidence: RepoEvidence<'_>,
+    manifests: &ManifestStore,
 ) -> Result<Option<DetectorOutcome>> {
     let nx_json = root.join("nx.json");
-    if !nx_json.exists() {
+    if !probe_exists(&nx_json) {
         return Ok(None);
     }
 
-    let mut patterns = collect_default_workspace_patterns(root);
+    let mut patterns = collect_default_workspace_patterns(root, manifests);
     patterns.extend(parse_nx_layout_patterns(&nx_json));
     patterns = dedupe_patterns(patterns);
 
-    let lock_versions = None;
-    let mut packages = if patterns.is_empty() {
-        discover_packages_with_optional_index(
+    let mut seeds = if patterns.is_empty() {
+        discover_seeds_with_optional_index(
             root,
             MonorepoStandard::Nx,
             PackageProvenance::LeafMarkers,
-            &lock_versions,
-            index,
+            evidence.manifest_index,
         )
     } else {
         let dialect = MonorepoStandard::Nx
@@ -46,46 +47,42 @@ pub(super) fn detect_nx(
             dialect,
             MonorepoStandard::Nx,
             None,
-            &lock_versions,
+            evidence,
         )
     };
-    if packages.is_empty() {
-        packages = discover_packages_with_optional_index(
+    if seeds.is_empty() {
+        seeds = discover_seeds_with_optional_index(
             root,
             MonorepoStandard::Nx,
             PackageProvenance::LeafMarkers,
-            &lock_versions,
-            index,
+            evidence.manifest_index,
         );
     }
-    packages = dedupe_packages(packages);
-    resolve_internal_deps(&mut packages);
 
     Ok(Some(DetectorOutcome {
         standard: MonorepoStandard::Nx,
         root: root.to_path_buf(),
-        packages,
+        seeds: merge_seeds(seeds),
     }))
 }
 
 pub(super) fn detect_turborepo(
     root: &Path,
-    index: Option<&ManifestIndex>,
+    evidence: RepoEvidence<'_>,
+    manifests: &ManifestStore,
 ) -> Result<Option<DetectorOutcome>> {
     let turbo_json = root.join("turbo.json");
-    if !turbo_json.exists() {
+    if !probe_exists(&turbo_json) {
         return Ok(None);
     }
 
-    let patterns = collect_default_workspace_patterns(root);
-    let lock_versions = None;
-    let mut packages = if patterns.is_empty() {
-        discover_packages_with_optional_index(
+    let patterns = collect_default_workspace_patterns(root, manifests);
+    let mut seeds = if patterns.is_empty() {
+        discover_seeds_with_optional_index(
             root,
             MonorepoStandard::Turborepo,
             PackageProvenance::Globbed,
-            &lock_versions,
-            index,
+            evidence.manifest_index,
         )
     } else {
         let dialect = MonorepoStandard::Turborepo
@@ -97,49 +94,45 @@ pub(super) fn detect_turborepo(
             dialect,
             MonorepoStandard::Turborepo,
             None,
-            &lock_versions,
+            evidence,
         )
     };
-    if packages.is_empty() {
-        packages = discover_packages_with_optional_index(
+    if seeds.is_empty() {
+        seeds = discover_seeds_with_optional_index(
             root,
             MonorepoStandard::Turborepo,
             PackageProvenance::Globbed,
-            &lock_versions,
-            index,
+            evidence.manifest_index,
         );
     }
-    packages = dedupe_packages(packages);
-    resolve_internal_deps(&mut packages);
 
     Ok(Some(DetectorOutcome {
         standard: MonorepoStandard::Turborepo,
         root: root.to_path_buf(),
-        packages,
+        seeds: merge_seeds(seeds),
     }))
 }
 
 pub(super) fn detect_lerna(
     root: &Path,
-    index: Option<&ManifestIndex>,
+    evidence: RepoEvidence<'_>,
+    manifests: &ManifestStore,
 ) -> Result<Option<DetectorOutcome>> {
     let lerna_json = root.join("lerna.json");
-    if !lerna_json.exists() {
+    if !probe_exists(&lerna_json) {
         return Ok(None);
     }
 
     let mut patterns = parse_lerna_workspace_patterns(&lerna_json).unwrap_or_default();
-    patterns.extend(collect_default_workspace_patterns(root));
+    patterns.extend(collect_default_workspace_patterns(root, manifests));
     patterns = dedupe_patterns(patterns);
 
-    let lock_versions = None;
-    let mut packages = if patterns.is_empty() {
-        discover_packages_with_optional_index(
+    let mut seeds = if patterns.is_empty() {
+        discover_seeds_with_optional_index(
             root,
             MonorepoStandard::Lerna,
             PackageProvenance::Globbed,
-            &lock_versions,
-            index,
+            evidence.manifest_index,
         )
     } else {
         let dialect = MonorepoStandard::Lerna
@@ -151,35 +144,35 @@ pub(super) fn detect_lerna(
             dialect,
             MonorepoStandard::Lerna,
             None,
-            &lock_versions,
+            evidence,
         )
     };
-    if packages.is_empty() {
-        packages = discover_packages_with_optional_index(
+    if seeds.is_empty() {
+        seeds = discover_seeds_with_optional_index(
             root,
             MonorepoStandard::Lerna,
             PackageProvenance::Globbed,
-            &lock_versions,
-            index,
+            evidence.manifest_index,
         );
     }
-    packages = dedupe_packages(packages);
-    resolve_internal_deps(&mut packages);
 
     Ok(Some(DetectorOutcome {
         standard: MonorepoStandard::Lerna,
         root: root.to_path_buf(),
-        packages,
+        seeds: merge_seeds(seeds),
     }))
 }
 
 pub(super) fn parse_lerna_workspace_patterns(lerna_json_path: &Path) -> Option<Vec<String>> {
+    performance::increment_counter(counters::FS_FILE_OPENS, 1);
     let content = std::fs::read_to_string(lerna_json_path)
         .map_err(|e| {
             debug!(path = %lerna_json_path.display(), error = %e, "could not read file");
             e
         })
         .ok()?;
+    performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
+    performance::increment_counter(counters::REPO_CONFIG_PARSES, 1);
     let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
 
     parsed
@@ -193,10 +186,13 @@ pub(super) fn parse_lerna_workspace_patterns(lerna_json_path: &Path) -> Option<V
 }
 
 pub(super) fn parse_nx_layout_patterns(nx_json_path: &Path) -> Vec<String> {
+    performance::increment_counter(counters::FS_FILE_OPENS, 1);
     let content = match std::fs::read_to_string(nx_json_path) {
         Ok(content) => content,
         Err(_) => return Vec::new(),
     };
+    performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
+    performance::increment_counter(counters::REPO_CONFIG_PARSES, 1);
     let parsed: serde_json::Value = match serde_json::from_str(&content) {
         Ok(parsed) => parsed,
         Err(_) => return Vec::new(),

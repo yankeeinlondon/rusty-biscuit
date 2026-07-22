@@ -1,0 +1,7 @@
+COLORTERM=truecolor
+KITTY_INSTALLATION_DIR=/usr/lib/kitty
+KITTY_PID=20
+KITTY_PUBLIC_KEY=1:f~sNU!sR4jm^vv>Skm@jX7xraY)!>+Hd_OnJ}*^j
+KITTY_WINDOW_ID=1
+TERM=xterm-kitty
+TERMINFO=/usr/lib/kitty/terminfo

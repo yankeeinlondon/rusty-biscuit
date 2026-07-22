@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use biscuit_test_harness::shared::SharedHarness;
+use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
 use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use std::fs;
@@ -24,8 +25,13 @@ pub fn wezterm_decision() -> LevelDecision {
 /// `Drop` on `static` values).
 pub static SHARED_HARNESS: SharedHarness<WezTermHarness> = SharedHarness::new();
 
+/// Shared headless pane for tests that need deterministic geometry or need
+/// `COLORFGBG` to remain authoritative because tmux does not answer OSC-11.
+pub static SHARED_TMUX_HARNESS: SharedHarness<TmuxHarness> = SharedHarness::new();
+
 /// Monotonic counter for sentinel uniqueness across tests in this binary.
 static SENTINEL_COUNTER: AtomicU32 = AtomicU32::new(0);
+static TMUX_SENTINEL_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 /// Absolute path to the `md` binary built for *this* workspace, injected by
 /// Cargo at compile time. Using it instead of a bare `md` keeps Level 2 tests
@@ -125,30 +131,21 @@ pub fn link_or_copy(target: &std::path::Path, link: &std::path::Path) -> std::io
 /// Returns `true` if `candidate` and `built` point at the same file or
 /// at content-equivalent copies.
 ///
-/// Fast path: file identity (inode on Unix, volume-serial + file-index
-/// on Windows). Works for symlinks (after `metadata` follows them) and
-/// for hard links.
+/// Fast path (Unix only): inode identity. Works for symlinks (after
+/// `metadata` follows them) and for hard links.
 ///
 /// Slow path: byte-for-byte content comparison. Handles the copy
 /// fallback from [`link_or_copy`] where shim and target are different
-/// inodes but identical content.
+/// inodes but identical content. This is the only path on Windows —
+/// `MetadataExt::{volume_serial_number, file_index}` are the unstable
+/// `windows_by_handle` feature, and `rust-toolchain.toml` pins stable, so
+/// the equivalent identity check cannot be written here. Content
+/// comparison returns the same answer; it is merely slower.
 pub fn is_same_binary(candidate: &std::path::Path, built: &std::path::Path) -> bool {
     #[cfg(unix)]
     if let (Ok(ma), Ok(mb)) = (fs::metadata(candidate), fs::metadata(built)) {
         use std::os::unix::fs::MetadataExt;
         if ma.ino() == mb.ino() && ma.dev() == mb.dev() {
-            return true;
-        }
-    }
-    #[cfg(windows)]
-    if let (Ok(ma), Ok(mb)) = (fs::metadata(candidate), fs::metadata(built)) {
-        use std::os::windows::fs::MetadataExt;
-        let va = ma.volume_serial_number();
-        let ia = ma.file_index();
-        // Identity is conclusive only when both fields are present and
-        // match. `None` means the filesystem did not report the field;
-        // fall through to the content comparison below.
-        if va.is_some() && va == mb.volume_serial_number() && ia == mb.file_index() {
             return true;
         }
     }
@@ -162,6 +159,68 @@ pub fn is_same_binary(candidate: &std::path::Path, built: &std::path::Path) -> b
 /// sentinel to appear in the pane. Generous — most `md` invocations finish
 /// in well under a second; this is a safety net for first-run cold builds.
 const SENTINEL_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn wait_for_tmux_sentinel(
+    harness: &mut TmuxHarness,
+    sentinel: &str,
+) -> Result<CapturedFrame, CapturedFrame> {
+    let deadline = Instant::now() + SENTINEL_TIMEOUT;
+    let mut last = CapturedFrame::from_raw(String::new());
+    while Instant::now() < deadline {
+        if let Ok(frame) = harness.capture() {
+            if frame.plain.lines().any(|line| line.trim() == sentinel) {
+                return Ok(frame);
+            }
+            last = frame;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    Err(last)
+}
+
+fn run_tmux_command(
+    harness: &mut TmuxHarness,
+    command: &str,
+    env: &[(&str, &str)],
+) -> CapturedFrame {
+    let id = TMUX_SENTINEL_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let sentinel = format!("__DM_CODE_TMUX_DONE_{id}__");
+    let wrapped = format!("{command}; printf '\\n{sentinel}\\n'");
+    harness
+        .send_command_with_env(&wrapped, env)
+        .expect("send_command_with_env failed");
+    match wait_for_tmux_sentinel(harness, &sentinel) {
+        Ok(frame) => frame,
+        Err(last) => panic!(
+            "timed out waiting for sentinel {sentinel} after {SENTINEL_TIMEOUT:?}. \
+             last plain capture:\n{}",
+            last.plain
+        ),
+    }
+}
+
+/// Runs the Cargo-built `md` in a headless tmux pane.
+pub fn run_md_in_tmux(
+    file_body: &str,
+    shell_prefix: Option<&str>,
+    extra_args: &str,
+    env: &[(&str, &str)],
+) -> CapturedFrame {
+    let dir = tempdir().expect("create markdown fixture directory");
+    let file_path = dir.path().join("layout.md");
+    fs::write(&file_path, file_body).expect("write markdown fixture");
+
+    let mut guard = SHARED_TMUX_HARNESS
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let harness = guard.as_mut().expect("tmux harness present");
+
+    run_tmux_command(harness, "clear", &[]);
+    let md_command = format!("{} {} {extra_args}", md_shim(), file_path.display());
+    let command = shell_prefix
+        .map(|prefix| format!("{prefix}; {md_command}"))
+        .unwrap_or(md_command);
+    run_tmux_command(harness, &command, env)
+}
 
 /// Polls the pane every 50 ms looking for `sentinel`, returning the final
 /// captured frame once it appears. Returns the last attempted capture on

@@ -290,7 +290,7 @@ use super::*;
         // the protection is not observable through `cleanup_content`.
         let input = "> ```\n> * this is code\n> ```\n";
         let mut buffer = input.to_string();
-        restore_list_markers(&mut buffer, &['-']);
+        restore_list_markers(&mut buffer, &['-'], &[]);
 
         assert_eq!(
             buffer, input,
@@ -305,7 +305,7 @@ use super::*;
         // CommonMark accepts and which the cmark pipeline can emit.
         let input = "> ~~~\n> * this is code\n> ~~~\n";
         let mut buffer = input.to_string();
-        restore_list_markers(&mut buffer, &['-']);
+        restore_list_markers(&mut buffer, &['-'], &[]);
 
         assert_eq!(
             buffer, input,
@@ -517,6 +517,68 @@ use super::*;
             !cleaned.contains("\n\n    - Level 3"),
             "no blank line before a tight grandchild, got:\n{}",
             cleaned
+        );
+    }
+
+    /// Regression for the wide-marker defect reviewed in H1 of
+    /// `fixes/2026-07-13-fixed-width-lists/review-2.md`. The pre-stack
+    /// `fix_list_indentation` derived nesting depth as `current_indent / 2`
+    /// from the absolute column, which silently invented depth whenever the
+    /// parent marker was wider than one character. Under a `1234. ` parent
+    /// (cmark content col 6), a depth-1 child was miscounted as depth 3 and
+    /// pushed to col 12 with `--indent 4`, then absorbed into the parent's
+    /// prose on the next cleanup pass.
+    ///
+    /// The stack-based replacement tracks each open level's actual item
+    /// column, so depth is derived from real nesting rather than from the
+    /// absolute column. The child stays at cmark's canonical position (the
+    /// parent's content column) and the cleanup is idempotent.
+    #[test]
+    fn fix_list_indentation_handles_wide_markers_without_inventing_depth() {
+        // `1234. ` parent (marker width 6) with a `- ` child. cmark serializes
+        // the child at column 6 — the parent's content column. The rescaled
+        // child must stay at column 6 (the parent's content column), not be
+        // invented as depth 3 and pushed to column 12.
+        let content = "1234. Parent\n      - Child alpha beta gamma delta epsilon.";
+        let first = cleanup_content_with_indent(content, 4);
+
+        assert!(
+            first.contains("\n      - Child"),
+            "depth-1 child under a 6-wide marker must stay at column 6, got:\n{first}"
+        );
+        assert!(
+            !first.contains("\n            - Child"),
+            "depth-1 child must not be invented as depth 3 (column 12), got:\n{first}"
+        );
+
+        // `10. ` parent (marker width 4) with a `- ` child at column 4.
+        // The rescaled child stays at column 4 — `max(target*1, 4) = 4`.
+        let content_wide_4 = "10. Parent\n    - Child alpha beta gamma delta epsilon.";
+        let first_wide_4 = cleanup_content_with_indent(content_wide_4, 4);
+        assert!(
+            first_wide_4.contains("\n    - Child"),
+            "depth-1 child under a 4-wide marker must stay at column 4, got:\n{first_wide_4}"
+        );
+        assert!(
+            !first_wide_4.contains("\n        - Child"),
+            "depth-1 child must not be invented as depth 2 (column 8), got:\n{first_wide_4}"
+        );
+
+        // Idempotence: running cleanup a second time on the first-pass output
+        // is byte-identical. The pre-stack implementation flattened the
+        // structure entirely on the second pass.
+        let second = cleanup_content_with_indent(&first, 4);
+        assert_eq!(
+            first, second,
+            "cleanup_content_with_indent(_, 4) must be idempotent on wide markers\n\
+             first:\n{first}\nsecond:\n{second}"
+        );
+
+        let second_wide_4 = cleanup_content_with_indent(&first_wide_4, 4);
+        assert_eq!(
+            first_wide_4, second_wide_4,
+            "cleanup_content_with_indent(_, 4) must be idempotent on `10. ` markers\n\
+             first:\n{first_wide_4}\nsecond:\n{second_wide_4}"
         );
     }
 

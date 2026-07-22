@@ -125,6 +125,54 @@ pub struct FileReferenceDiagnostic {
     pub source: Option<Arc<biscuit_file::FileReferenceError>>,
 }
 
+/// The focused classification of a remote-provider query failure.
+///
+/// These kinds mirror the distinctions the provider layer already makes in
+/// [`sniff::SniffError`] (spec AC27): not-found, denied host, authentication,
+/// rate limit, unsupported capability, incomplete domain, and transport
+/// failure. Carrying the classification as data — rather than only in the
+/// message text — is what lets the memoization layer preserve it and lets
+/// every expression surface apply one fatality rule to provider failures
+/// without widening the generic [`ExpressionError::Other`] catch-all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderFailureKind {
+    /// The addressed item does not exist on the provider (a genuine 404, or
+    /// a shorthand no provider could resolve).
+    NotFound,
+    /// The provider host was denied by the run's network policy before any
+    /// request was issued.
+    DeniedHost,
+    /// Credentials are missing, were rejected by the provider, or the
+    /// provider denied the authenticated operation.
+    Authentication,
+    /// The provider rate-limited the request.
+    RateLimit,
+    /// The provider or selected API flavor cannot honor the requested
+    /// operation or canonical filter.
+    UnsupportedCapability,
+    /// A bounded traversal stopped before the provider's result domain was
+    /// exhausted, so no complete answer exists.
+    IncompleteDomain,
+    /// The endpoint could not be reached, its response could not be used, or
+    /// the provider client could not be constructed.
+    Transport,
+}
+
+impl ProviderFailureKind {
+    /// The stable snake_case slug for this failure kind.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ProviderFailureKind::NotFound => "not_found",
+            ProviderFailureKind::DeniedHost => "denied_host",
+            ProviderFailureKind::Authentication => "authentication",
+            ProviderFailureKind::RateLimit => "rate_limit",
+            ProviderFailureKind::UnsupportedCapability => "unsupported_capability",
+            ProviderFailureKind::IncompleteDomain => "incomplete_domain",
+            ProviderFailureKind::Transport => "transport",
+        }
+    }
+}
+
 /// The expected argument count for an [`ExpressionError::Arity`] error.
 ///
 /// Models the three arity shapes the builtins express today: an exact count
@@ -220,6 +268,28 @@ pub enum ExpressionError {
         op: &'static str,
     },
 
+    /// A focused remote-provider query failed (`pr`, `pr_list`, `cicd`,
+    /// `cicd_list`, `branch_exists_on_remote`, `remote_vendor`).
+    ///
+    /// Kept distinct from [`Other`] so the failure classification survives
+    /// the run-local memoization layer (which previously flattened every
+    /// provider failure to text and rebuilt it as `Other`) and so the
+    /// frontmatter/body/`$()` surfaces can apply one fatality rule to it.
+    /// Provider failures are authoring-fatal on every surface: the spec
+    /// forbids replacing them with empty values or demoting them to warnings
+    /// that leave the unevaluated `{{ … }}` behind.
+    ///
+    /// [`Other`]: ExpressionError::Other
+    #[error("{function}(): {message}")]
+    Provider {
+        /// The provider function's name.
+        function: String,
+        /// The focused failure classification.
+        kind: ProviderFailureKind,
+        /// The actionable provider detail.
+        message: String,
+    },
+
     /// Migration catch-all for the long tail of pure builtins not yet
     /// individually classified. Always carries the function name, so it is never
     /// *less* informative than today's string.
@@ -248,7 +318,7 @@ impl ExpressionError {
     /// Whether this error halts lenient (non-`fail_fast`) composition.
     ///
     /// This is the checked-`match` replacement for the string-prefix
-    /// `is_fatal_eval_error` gate (design §5). Two classes of failure are
+    /// `is_fatal_eval_error` gate (design §5). Three classes of failure are
     /// authoring-fatal even in lenient body interpolation:
     ///
     /// - [`UnknownFunction`] — an unknown symbol can never resolve, so it must be
@@ -263,13 +333,23 @@ impl ExpressionError {
     ///   resolution is attempted; a reference that is actually evaluated and
     ///   misses is surfaced rather than silently swallowed.
     ///
-    /// Every other variant (arity, arg-type, parse, arithmetic, …) is demoted to
-    /// a `ComposeWarning` in lenient body interpolation. [`RemoteNotEnabled`] is
+    /// - [`Provider`] — a focused provider failure (denied host, missing or
+    ///   rejected credentials, rate limit, unsupported capability, incomplete
+    ///   domain, transport failure, genuine not-found) is actionable state the
+    ///   author must see; the spec requires the same fatal behavior on
+    ///   frontmatter, body, and `$()` surfaces and forbids replacing it with an
+    ///   empty value or an unevaluated `{{ … }}`.
+    ///
+    /// Every other variant (arity, arg-type, parse, arithmetic, generic
+    /// [`Other`], …) is demoted to a `ComposeWarning` in lenient body
+    /// interpolation. [`RemoteNotEnabled`] is
     /// also non-fatal here: it is a v1 capability gap governed by its own "remote
     /// not supported" policy, not an error in the reference itself.
     ///
     /// [`UnknownFunction`]: ExpressionError::UnknownFunction
     /// [`FileReference`]: ExpressionError::FileReference
+    /// [`Provider`]: ExpressionError::Provider
+    /// [`Other`]: ExpressionError::Other
     /// [`Malformed`]: FileRefFailure::Malformed
     /// [`NotFound`]: FileRefFailure::NotFound
     /// [`FoundElsewhere`]: FileRefFailure::FoundElsewhere
@@ -277,6 +357,7 @@ impl ExpressionError {
     pub fn is_authoring_fatal(&self) -> bool {
         match self {
             ExpressionError::UnknownFunction { .. } => true,
+            ExpressionError::Provider { .. } => true,
             // A present file reference that fails to resolve is fatal (see the
             // doc comment for the WHY). `RemoteNotEnabled` is deliberately *not*
             // in this set: it is a v1 capability gap, not a reference mistake.
@@ -454,6 +535,28 @@ mod tests {
             };
             assert!(!err.is_authoring_fatal());
         }
+
+        #[test]
+        fn provider_is_authoring_fatal() {
+            // Every focused provider failure kind aborts lenient composition;
+            // the classification — not the message text — drives the verdict.
+            for kind in [
+                ProviderFailureKind::NotFound,
+                ProviderFailureKind::DeniedHost,
+                ProviderFailureKind::Authentication,
+                ProviderFailureKind::RateLimit,
+                ProviderFailureKind::UnsupportedCapability,
+                ProviderFailureKind::IncompleteDomain,
+                ProviderFailureKind::Transport,
+            ] {
+                let err = ExpressionError::Provider {
+                    function: "pr".to_string(),
+                    kind,
+                    message: "boom".to_string(),
+                };
+                assert!(err.is_authoring_fatal(), "{kind:?} must be fatal");
+            }
+        }
     }
 
     mod display {
@@ -540,6 +643,35 @@ mod tests {
                 message: "boom".to_string(),
             };
             assert_eq!(err.to_string(), "round(): boom");
+        }
+
+        #[test]
+        fn provider_display_matches_other_shape() {
+            // The wire shape is deliberately identical to `Other` (`fn(): msg`)
+            // so messages stay single-prefixed; only the typed `kind` differs.
+            let err = ExpressionError::Provider {
+                function: "pr".to_string(),
+                kind: ProviderFailureKind::RateLimit,
+                message: "rate limited by Gitea API".to_string(),
+            };
+            assert_eq!(err.to_string(), "pr(): rate limited by Gitea API");
+        }
+
+        #[test]
+        fn provider_failure_kind_slugs_are_snake_case() {
+            assert_eq!(ProviderFailureKind::NotFound.as_str(), "not_found");
+            assert_eq!(ProviderFailureKind::DeniedHost.as_str(), "denied_host");
+            assert_eq!(ProviderFailureKind::Authentication.as_str(), "authentication");
+            assert_eq!(ProviderFailureKind::RateLimit.as_str(), "rate_limit");
+            assert_eq!(
+                ProviderFailureKind::UnsupportedCapability.as_str(),
+                "unsupported_capability"
+            );
+            assert_eq!(
+                ProviderFailureKind::IncompleteDomain.as_str(),
+                "incomplete_domain"
+            );
+            assert_eq!(ProviderFailureKind::Transport.as_str(), "transport");
         }
     }
 }

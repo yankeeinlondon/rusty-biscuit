@@ -70,7 +70,8 @@ pub use normalize::{
 };
 pub use reference::file_tree::{FileTree, FileTreeError};
 pub use reference::{
-    ReferenceError, ReferenceGraph, ReferenceGraphOptions, ReferenceKind, ReferenceRecord,
+    DependencyMismatchKind, ReferenceError, ReferenceGraph, ReferenceGraphMismatchError,
+    ReferenceGraphMismatchKind, ReferenceGraphOptions, ReferenceKind, ReferenceRecord,
     ReferenceSet, TransclusionRef, extract_document_references,
 };
 #[allow(deprecated)]
@@ -1310,6 +1311,28 @@ title: Test
         assert_eq!(
             md.content(),
             "This paragraph is long\nenough to wrap at a\nnarrow display width."
+        );
+    }
+
+    /// Wrapped top-level prose followed by a wrapped list once produced two
+    /// overlapping strip edits for the list's soft break and panicked in both
+    /// debug and release. See `cleanup::reflow`'s mixed prose/list regressions.
+    #[test]
+    fn test_cleanup_with_fixed_width_method_mixes_prose_and_wrapped_list() {
+        let content = concat!(
+            "Wrapped prose\ncontinues here with more words.\n\n",
+            "- first item that is long\n  and wrapped\n",
+        );
+        let mut md: Markdown = content.into();
+
+        md.cleanup_with_fixed_width(30);
+
+        assert_eq!(
+            md.content(),
+            concat!(
+                "Wrapped prose continues here\nwith more words.\n\n",
+                "- first item that is long and\n  wrapped\n",
+            )
         );
     }
 

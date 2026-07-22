@@ -7,8 +7,11 @@
 
 #[cfg(test)]
 use std::collections::HashSet;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock, Weak};
 
 use biscuit_file::file_reference::fetch::{FetchPolicy, HostPattern, PolicyClient};
 use dashmap::DashMap;
@@ -16,6 +19,7 @@ use url::Url;
 
 use super::cache::FileStore;
 use super::cache::remote_cache::{RemoteCacheConfig, RemoteOutcomeEvent, fetch_with_cache};
+use super::expression::ExpressionError;
 use super::remote::{RemoteReadConfig, RemoteReadError};
 
 /// Default cache config for test constructors: no TTL override, no forced
@@ -97,6 +101,9 @@ pub struct RemoteFetchRuntime {
 
 struct RemoteFetchInner {
     slots: DashMap<String, Arc<SlotGuard>>,
+    provider_queries: ProviderQueryCache,
+    provider_in_flight: Mutex<usize>,
+    provider_notify: Condvar,
     policy: FetchPolicy,
     stats: Mutex<RemoteFetchStats>,
     /// Shared redirect-disabled HTTP client reused for every fetch in a compose
@@ -131,6 +138,23 @@ struct RemoteFetchInner {
     cache_config: RemoteCacheConfig,
 }
 
+/// Provider query slots store the typed expression error so a focused
+/// provider classification survives memoization; see
+/// [`ResolutionContext::cached_provider_query`].
+///
+/// [`ResolutionContext::cached_provider_query`]: super::expression::ResolutionContext
+type ProviderQueryCache =
+    Mutex<HashMap<String, Arc<OnceLock<Result<serde_json::Value, ExpressionError>>>>>;
+
+/// A provider-query cache infrastructure failure (poisoned lock, concurrency
+/// gate). Not a provider failure, so it stays the generic catch-all.
+fn provider_cache_infrastructure_error(message: &str) -> ExpressionError {
+    ExpressionError::Other {
+        function: "provider_query".to_string(),
+        message: message.to_string(),
+    }
+}
+
 impl RemoteFetchInner {
     /// Returns the shared fetch runtime, building it on first use.
     ///
@@ -140,6 +164,7 @@ impl RemoteFetchInner {
     fn runtime(&self) -> Option<&tokio::runtime::Runtime> {
         self.runtime
             .get_or_init(|| {
+                count_executor_build();
                 tokio::runtime::Builder::new_multi_thread()
                     .worker_threads(self.concurrency.max(1))
                     .enable_all()
@@ -177,6 +202,118 @@ impl Drop for RemoteFetchInner {
     }
 }
 
+thread_local! {
+    /// Handle to the compose run's shared executor, installed for the duration
+    /// of one provider-query closure.
+    ///
+    /// The expression evaluator is synchronous and `provider::run` takes no
+    /// context argument, so the run's executor reaches the sync bridge through
+    /// this scoped slot rather than through a parameter.
+    static RUN_PROVIDER_EXECUTOR: RefCell<Option<tokio::runtime::Handle>> =
+        const { RefCell::new(None) };
+}
+
+/// Process-wide executor for provider queries issued outside any compose run
+/// that owns a `RemoteFetchRuntime`.
+///
+/// Never dropped. `Runtime`'s own `Drop` shuts down blockingly and panics when
+/// that happens inside an async context; a `static` is never dropped, so the
+/// hazard cannot arise. `None` means the build failed.
+static FALLBACK_PROVIDER_EXECUTOR: OnceLock<Option<tokio::runtime::Runtime>> = OnceLock::new();
+
+/// Counts every provider-executor runtime constructed in this process.
+///
+/// The whole point of the shared executor is that this stays flat across a
+/// run's provider queries, which is only observable with a counter.
+#[cfg(test)]
+static EXECUTOR_BUILDS: AtomicUsize = AtomicUsize::new(0);
+
+fn count_executor_build() {
+    #[cfg(test)]
+    EXECUTOR_BUILDS.fetch_add(1, Ordering::SeqCst);
+}
+
+/// Number of provider-executor runtimes constructed so far in this process.
+#[cfg(test)]
+pub(crate) fn executor_builds() -> usize {
+    EXECUTOR_BUILDS.load(Ordering::SeqCst)
+}
+
+/// Restores the previously scoped provider executor when dropped, so nested
+/// compose runs do not leak one run's executor into another.
+struct ProviderExecutorScope(Option<tokio::runtime::Handle>);
+
+impl ProviderExecutorScope {
+    fn enter(handle: Option<tokio::runtime::Handle>) -> Self {
+        Self(RUN_PROVIDER_EXECUTOR.with(|cell| cell.replace(handle)))
+    }
+}
+
+impl Drop for ProviderExecutorScope {
+    fn drop(&mut self) {
+        let previous = self.0.take();
+        RUN_PROVIDER_EXECUTOR.with(|cell| cell.replace(previous));
+    }
+}
+
+/// Why a provider future produced no value.
+pub(crate) enum SharedExecutorError {
+    /// No executor could be built, so the future was never polled.
+    Unavailable,
+    /// The future panicked, or its executor shut down before it completed.
+    Panicked,
+}
+
+/// Runs `future` to completion on the compose run's shared executor.
+///
+/// The future is `spawn`ed onto a *foreign* runtime and the calling thread
+/// blocks on a channel for its result. This never calls `block_on`, so a caller
+/// that is itself inside a Tokio runtime does not hit the "cannot start a
+/// runtime from within a runtime" panic — the property the previous
+/// thread-per-query bridge existed to provide.
+///
+/// ## Errors
+///
+/// Returns [`SharedExecutorError::Panicked`] when the task drops its sender
+/// without sending, which covers both an unwinding future and a shut-down
+/// executor. A panic therefore surfaces as a value rather than unwinding into
+/// the compose run.
+pub(crate) fn block_on_shared_executor<T>(
+    future: impl Future<Output = T> + Send + 'static,
+) -> Result<T, SharedExecutorError>
+where
+    T: Send + 'static,
+{
+    let handle = RUN_PROVIDER_EXECUTOR
+        .with(|cell| cell.borrow().clone())
+        .or_else(fallback_executor_handle)
+        .ok_or(SharedExecutorError::Unavailable)?;
+
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    handle.spawn(async move {
+        let _ = sender.send(future.await);
+    });
+    receiver.recv().map_err(|_| SharedExecutorError::Panicked)
+}
+
+fn fallback_executor_handle() -> Option<tokio::runtime::Handle> {
+    FALLBACK_PROVIDER_EXECUTOR
+        .get_or_init(|| {
+            count_executor_build();
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(DEFAULT_PROVIDER_CONCURRENCY)
+                .enable_all()
+                .build()
+                .ok()
+        })
+        .as_ref()
+        .map(|runtime| runtime.handle().clone())
+}
+
+/// Worker count for the fallback executor, matching the default remote
+/// concurrency cap used by `RemoteFetchRuntime`.
+const DEFAULT_PROVIDER_CONCURRENCY: usize = 4;
+
 impl std::fmt::Debug for RemoteFetchInner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RemoteFetchInner")
@@ -186,7 +323,70 @@ impl std::fmt::Debug for RemoteFetchInner {
     }
 }
 
+/// Clone-stable weak identity handle for a [`RemoteFetchRuntime`].
+///
+/// Retains only a `Weak` reference to the shared inner allocation, so identity
+/// tracking never extends the runtime's lifetime and never stores a raw pointer
+/// address. Cloning a `RemoteFetchRuntime` shares the same allocation, so both
+/// handles compare equal; a dropped or independently constructed runtime never
+/// compares equal even when its visible configuration matches. This is an
+/// in-process instance-identity guard, not a cryptographic identity.
+// `same_instance` is exercised by the graph-options identity comparison, which
+// the graph does not consume until the opacity cutover; allowance is temporary.
+#[allow(dead_code)]
+#[derive(Clone)]
+pub(crate) struct RemoteFetchWeakId(Weak<RemoteFetchInner>);
+
+#[allow(dead_code)]
+impl RemoteFetchWeakId {
+    /// Returns `true` when both handles still point at the same live
+    /// allocation.
+    ///
+    /// Uses `Weak::upgrade` + `Arc::ptr_eq` so a dropped instance (whose weak
+    /// upgrade yields `None`) is never equivalent — this is ABA-safe because
+    /// the live `Weak` keeps the allocation's control block from being reused
+    /// while either handle exists.
+    pub(crate) fn same_instance(&self, other: &Self) -> bool {
+        match (self.0.upgrade(), other.0.upgrade()) {
+            (Some(a), Some(b)) => Arc::ptr_eq(&a, &b),
+            _ => false,
+        }
+    }
+
+    /// Drop-probe: `true` while the referenced runtime allocation is still
+    /// live. Lets a test that has already released its own strong handle prove
+    /// the runtime was actually dropped — i.e. that nothing else (notably a
+    /// graph) retained a strong reference to it.
+    #[cfg(test)]
+    pub(crate) fn is_alive(&self) -> bool {
+        self.0.upgrade().is_some()
+    }
+}
+
 impl RemoteFetchRuntime {
+    /// Returns the exact host policy shared by all run-local remote reads.
+    pub(crate) fn policy(&self) -> FetchPolicy {
+        self.inner.policy.clone()
+    }
+
+    /// Returns a clone-stable weak identity handle for this runtime.
+    ///
+    /// The narrow accessor exists so identity capture never reaches through the
+    /// private `inner` field; it only downgrades the shared allocation.
+    pub(crate) fn weak_id(&self) -> RemoteFetchWeakId {
+        RemoteFetchWeakId(Arc::downgrade(&self.inner))
+    }
+
+    /// Strong-reference count of the shared runtime allocation.
+    ///
+    /// Test-only observation handle: identity capture and graph ownership only
+    /// ever *downgrade* this `Arc`, so this count lets a graph-level test prove
+    /// that building (and dropping) a graph adds no strong reference.
+    #[cfg(test)]
+    pub(crate) fn strong_count(&self) -> usize {
+        Arc::strong_count(&self.inner)
+    }
+
     /// Creates a runtime from the remote-read config with an optional
     /// persistent cache store for cross-run remote artifact caching.
     pub fn with_store(config: &RemoteReadConfig, store: Option<Arc<FileStore>>) -> Self {
@@ -241,6 +441,9 @@ impl RemoteFetchRuntime {
         Self {
             inner: Arc::new(RemoteFetchInner {
                 slots: DashMap::new(),
+                provider_queries: Mutex::new(HashMap::new()),
+                provider_in_flight: Mutex::new(0),
+                provider_notify: Condvar::new(),
                 policy,
                 stats: Mutex::new(RemoteFetchStats::default()),
                 client: OnceLock::new(),
@@ -254,6 +457,50 @@ impl RemoteFetchRuntime {
                 cache_config,
             }),
         }
+    }
+
+    /// Shares one normalized provider result across every surface in this run.
+    pub(crate) fn cached_provider_query(
+        &self,
+        key: String,
+        query: impl FnOnce() -> Result<serde_json::Value, ExpressionError>,
+    ) -> Result<serde_json::Value, ExpressionError> {
+        let slot = {
+            let mut queries = self
+                .inner
+                .provider_queries
+                .lock()
+                .map_err(|_| provider_cache_infrastructure_error("provider query cache lock was poisoned"))?;
+            queries.entry(key).or_default().clone()
+        };
+        slot.get_or_init(|| {
+            let _permit = self.acquire_provider_permit()?;
+            // Provider futures run on the same executor as this run's URL
+            // fetches, so provider work shares the run's executor lifecycle
+            // instead of standing up a runtime of its own.
+            let _executor = ProviderExecutorScope::enter(
+                self.inner.runtime().map(|runtime| runtime.handle().clone()),
+            );
+            query()
+        })
+        .clone()
+    }
+
+    fn acquire_provider_permit(&self) -> Result<ProviderPermit<'_>, ExpressionError> {
+        let mut in_flight = self
+            .inner
+            .provider_in_flight
+            .lock()
+            .map_err(|_| provider_cache_infrastructure_error("provider concurrency lock was poisoned"))?;
+        while *in_flight >= self.inner.concurrency {
+            in_flight = self
+                .inner
+                .provider_notify
+                .wait(in_flight)
+                .map_err(|_| provider_cache_infrastructure_error("provider concurrency lock was poisoned"))?;
+        }
+        *in_flight += 1;
+        Ok(ProviderPermit { runtime: self })
     }
 
     /// Checks whether a URL is allowed by policy, returning a
@@ -462,6 +709,19 @@ impl RemoteFetchRuntime {
     }
 }
 
+struct ProviderPermit<'a> {
+    runtime: &'a RemoteFetchRuntime,
+}
+
+impl Drop for ProviderPermit<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut in_flight) = self.runtime.inner.provider_in_flight.lock() {
+            *in_flight = in_flight.saturating_sub(1);
+            self.runtime.inner.provider_notify.notify_one();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -523,6 +783,73 @@ mod tests {
         rt.register_and_fetch(url);
         let urls = rt.registered_urls();
         assert!(urls.contains("https://example.com/doc.md"));
+    }
+
+    /// A provider query must execute on the run's own executor, not on the
+    /// process-wide fallback, so provider work follows the run's lifecycle.
+    ///
+    /// Enumerating the run executor's worker threads and asserting membership
+    /// is not sound: tokio work-stealing migrates a task between workers across
+    /// an await point. The build counter is the deterministic discriminator —
+    /// falling through to the fallback would construct a second executor.
+    #[test]
+    fn provider_queries_run_on_the_runs_own_executor() {
+        let runtime = RemoteFetchRuntime::with_policy(FetchPolicy::deny_all());
+        let builds_before = executor_builds();
+
+        let observed = runtime
+            .cached_provider_query("probe".to_string(), || {
+                let id = block_on_shared_executor(async {
+                    format!("{:?}", std::thread::current().id())
+                })
+                .unwrap_or_else(|_| panic!("shared executor is available"));
+                Ok(serde_json::json!(id))
+            })
+            .expect("query succeeds");
+
+        assert_eq!(
+            executor_builds() - builds_before,
+            1,
+            "exactly one executor — the run's own — may be built; a second \
+             build means the provider future fell through to the process-wide \
+             fallback instead of using the run's executor"
+        );
+        assert_ne!(
+            observed.as_str().expect("thread id string"),
+            format!("{:?}", std::thread::current().id()),
+            "the future must run on the executor, not inline on the caller"
+        );
+    }
+
+    #[test]
+    fn provider_queries_share_the_remote_concurrency_cap() {
+        let runtime = RemoteFetchRuntime::with_policy_and_concurrency(
+            FetchPolicy::deny_all(),
+            2,
+        );
+        let active = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let mut workers = Vec::new();
+        for index in 0..6 {
+            let runtime = runtime.clone();
+            let active = Arc::clone(&active);
+            let peak = Arc::clone(&peak);
+            workers.push(std::thread::spawn(move || {
+                runtime
+                    .cached_provider_query(format!("query:{index}"), || {
+                        let now = active.fetch_add(1, Ordering::SeqCst) + 1;
+                        peak.fetch_max(now, Ordering::SeqCst);
+                        std::thread::sleep(std::time::Duration::from_millis(20));
+                        active.fetch_sub(1, Ordering::SeqCst);
+                        Ok(serde_json::Value::Null)
+                    })
+                    .unwrap();
+            }));
+        }
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        assert_eq!(peak.load(Ordering::SeqCst), 2);
     }
 }
 

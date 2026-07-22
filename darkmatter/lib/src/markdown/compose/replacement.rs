@@ -38,11 +38,12 @@ use super::EffectiveState;
 use serde_json::Value;
 use tracing::debug;
 
+use aho_corasick::{AhoCorasick, MatchKind};
+
 /// A replacement rule with key and coerced string value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ReplacementRule {
     key: String,
-    key_char_len: usize,
     value: String,
 }
 
@@ -118,7 +119,6 @@ fn build_replacement_rules(state: &EffectiveState) -> Option<Vec<ReplacementRule
 
             Some(ReplacementRule {
                 key: key.clone(),
-                key_char_len: key.chars().count(),
                 value: string_value,
             })
         })
@@ -160,39 +160,45 @@ fn coerce_to_string(value: &Value) -> Option<String> {
 
 /// Scans content and applies replacements in a single pass.
 ///
-/// At each position, tries to match the longest key first (rules are pre-sorted).
-/// Replacement output is NOT re-scanned (non-recursive).
+/// Uses an Aho–Corasick automaton in [`MatchKind::LeftmostLongest`] mode
+/// (Finding 13), which reproduces the original hand-rolled scanner's contract
+/// exactly: matches are found left-to-right and non-overlapping, the **longest**
+/// key wins at any shared start position, and replacement output is **not**
+/// re-scanned (matches are located in `content` only). This replaces the
+/// previous per-character loop — which retried every rule via `starts_with` at
+/// every character offset (`O(content × rules × key_len)`) — with a single
+/// linear automaton pass.
+///
+/// The lexical tie-break the rule order still encodes (equal length → ascending
+/// key) never affects output: two *distinct* equal-length keys cannot both match
+/// at the same start position, so leftmost-longest alone is deterministic. UTF-8
+/// boundaries are preserved because every rule key is a valid substring, so its
+/// match range always lands on character boundaries; empty keys are already
+/// filtered in [`build_replacement_rules`], and scalar coercion is unchanged.
 fn scan_and_replace(content: &str, rules: &[ReplacementRule]) -> (String, usize) {
+    let automaton = match AhoCorasick::builder()
+        .match_kind(MatchKind::LeftmostLongest)
+        .build(rules.iter().map(|rule| &rule.key))
+    {
+        Ok(automaton) => automaton,
+        // A build failure (e.g. a degenerate pattern set) is not a compose
+        // fault: fall back to leaving the content unchanged, matching the
+        // "no applicable rules" outcome rather than aborting the pipeline.
+        Err(_) => return (content.to_string(), 0),
+    };
+
     let mut result = String::with_capacity(content.len());
     let mut replacement_count = 0;
+    let mut last_end = 0;
 
-    // Char boundary lookup table so we can slice by byte offset without
-    // rebuilding a prefix string at each cursor step.
-    let mut char_starts: Vec<usize> = content.char_indices().map(|(idx, _)| idx).collect();
-    char_starts.push(content.len());
-    let content_len = char_starts.len().saturating_sub(1);
-    let mut pos = 0;
-
-    while pos < content_len {
-        let byte_pos = char_starts[pos];
-        let remaining = &content[byte_pos..];
-
-        // Try to match rules in order (longest first due to sorting)
-        let matched = rules.iter().find(|rule| remaining.starts_with(&rule.key));
-
-        if let Some(rule) = matched {
-            // Found a match - append replacement value
-            result.push_str(&rule.value);
-            replacement_count += 1;
-            // Advance by the number of chars in the key
-            pos += rule.key_char_len;
-        } else {
-            // No match - append current character
-            let next_byte_pos = char_starts[pos + 1];
-            result.push_str(&content[byte_pos..next_byte_pos]);
-            pos += 1;
-        }
+    for mat in automaton.find_iter(content) {
+        // Copy the verbatim gap since the previous match, then the replacement.
+        result.push_str(&content[last_end..mat.start()]);
+        result.push_str(&rules[mat.pattern().as_usize()].value);
+        last_end = mat.end();
+        replacement_count += 1;
     }
+    result.push_str(&content[last_end..]);
 
     (result, replacement_count)
 }

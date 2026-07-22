@@ -36,28 +36,50 @@ use crate::markdown::schemas::DarkmatterSchemas;
 use crate::markdown::schemas::coerce::coerce_frontmatter_with_pending;
 use crate::markdown::types::{MarkdownError, MarkdownResult};
 
+/// Single-pass convenience wrapper around [`run_with_registry`] used by the
+/// module's own tests. Production passes a shared registry slot so the two
+/// compose passes reuse one scan.
+#[cfg(test)]
+pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> MarkdownResult<()> {
+    run_with_registry(markdown, options, &mut None)
+}
+
 /// Runs schema validation against the document's effective frontmatter,
 /// coercing schema-recognized scalar values to their declared types and
 /// writing the coerced values back into the document's frontmatter.
 ///
-/// 1. Checks whether either document `$schema` or `ComposeOptions::baseline_schema`
-///    is present; if neither exists, returns `Ok(())` without constructing a validator.
-/// 2. Builds `DarkmatterSchemas::new()` plus `.with_baseline(...)` when
-///    `ComposeOptions::baseline_schema` is set.
-/// 3. Resolves the effective schema, coerces the frontmatter against it via
+/// 1. Checks whether document `$schema`, `ComposeOptions::baseline_schema`, or
+///    trigger schemas are in play; if none, returns `Ok(())` without
+///    constructing a validator.
+/// 2. Builds `DarkmatterSchemas::new()` plus the baseline: the process-cached
+///    compiled JSON Schema when the baseline is the Darkmatter default (F9),
+///    else `.with_baseline(...)` for a caller-supplied `SimplifiedSchema`.
+/// 3. Resolves the effective schema once, coerces the frontmatter against it via
 ///    [`coerce_frontmatter_with_pending`], and writes coerced top-level properties back into
 ///    `markdown.frontmatter_mut()` (skipping any value still composition-pending
 ///    — a `$(...)` shell expression or an unresolved `{{ ... }}` template). The
 ///    pending-key set is passed through so a root-union arm can be committed when
 ///    its only residual problems are composition-pending keys, letting resolved
 ///    siblings still coerce and write back.
-/// 4. Calls `.validate(&markdown)` on the now-coerced frontmatter.
+/// 4. Validates the coerced frontmatter through the held [`EffectiveSchema`]
+///    (F5); with active triggers, re-resolves via `schemas.validate` because
+///    trigger matching depends on the coerced values.
 /// 5. Converts schema-preparation `SchemaError` into
 ///    `MarkdownError::SchemaValidationFailed`, preserving the original error
 ///    on the variant's `source` field for `Error::source()` recovery.
 /// 6. Converts `ValidationReport { valid: false, problems }` into the same
 ///    error variant. On success, returns `Ok(())`.
-pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> MarkdownResult<()> {
+///
+/// `trigger_registry` carries a trigger-schema registry across the two compose
+/// passes (pre- and post-shell): the first pass that performs discovery fills
+/// the slot, and the second reuses it instead of re-scanning the `schemas/`
+/// ancestry from disk (F8). Matching is re-evaluated against the current
+/// frontmatter in each pass regardless.
+pub(crate) fn run_with_registry(
+    markdown: &mut Markdown,
+    options: &ComposeOptions,
+    trigger_registry: &mut Option<crate::markdown::schemas::triggers::TriggerRegistry>,
+) -> MarkdownResult<()> {
     let has_document_schema = markdown.frontmatter().as_map().contains_key("$schema");
     let has_baseline = options.baseline_schema.is_some();
 
@@ -77,30 +99,44 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
         if let Some(fallback) = options.file_ref_fallback_dir.clone() {
             builder = builder.with_file_ref_fallback_dir(fallback);
         }
-        if let Some(baseline) = options.baseline_schema.clone() {
-            builder = builder.with_baseline(baseline).map_err(|err| {
-                MarkdownError::SchemaValidationFailed {
-                    path: path.clone(),
-                    problems: Vec::new(),
-                    summary: format!("schema could not be prepared: {err}"),
-                    description: description.clone(),
-                    source: Some(Box::new(err)),
-                }
+        if let Some(baseline) = &options.baseline_schema {
+            // The Darkmatter default baseline shares the process-cached compiled
+            // JSON Schema (F9); a caller-supplied baseline still converts here.
+            let built = if options.baseline_is_darkmatter_default {
+                builder.with_darkmatter_baseline_json_schema()
+            } else {
+                builder.with_baseline(baseline.clone())
+            };
+            builder = built.map_err(|err| MarkdownError::SchemaValidationFailed {
+                path: path.clone(),
+                problems: Vec::new(),
+                summary: format!("schema could not be prepared: {err}"),
+                description: description.clone(),
+                source: Some(Box::new(err)),
             })?;
         }
         if options.trigger_schemas
             && let Some(ComposeSource::File(document_path)) = markdown.source()
             && let Some(boundary) = crate::markdown::compose::find_git_root_from(document_path)
         {
-            builder = builder
-                .with_trigger_discovery(document_path, boundary)
-                .map_err(|err| MarkdownError::SchemaValidationFailed {
-                    path: path.clone(),
-                    problems: Vec::new(),
-                    summary: format!("trigger schemas could not be prepared: {err}"),
-                    description: description.clone(),
-                    source: Some(Box::new(err)),
-                })?;
+            builder = if let Some(registry) = trigger_registry.take() {
+                builder.with_trigger_registry(registry)
+            } else {
+                builder
+                    .with_trigger_discovery(document_path, boundary)
+                    .map_err(|err| MarkdownError::SchemaValidationFailed {
+                        path: path.clone(),
+                        problems: Vec::new(),
+                        summary: format!("trigger schemas could not be prepared: {err}"),
+                        description: description.clone(),
+                        source: Some(Box::new(err)),
+                    })?
+            };
+            // Preserve the scanned registry so a later compose pass reuses it
+            // rather than re-walking the `schemas/` ancestry from disk.
+            if let Some(registry) = builder.trigger_registry() {
+                *trigger_registry = Some(registry.clone());
+            }
         }
         builder
     };
@@ -143,15 +179,43 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
         }
     }
 
-    let report = schemas.validate(markdown).map_err(|err| {
-        MarkdownError::SchemaValidationFailed {
-            path: path.clone(),
-            problems: Vec::new(),
-            summary: format!("schema could not be prepared: {err}"),
-            description: description.clone(),
-            source: Some(Box::new(err)),
+    // Validate through the effective schema already resolved above instead of
+    // re-running `effective_for` inside `schemas.validate` (F5) — but only when
+    // no trigger registry is active. `effective_for`'s result depends on
+    // frontmatter values solely through trigger matching; the coercion
+    // write-back above can change a value a trigger matches on, so with active
+    // triggers the effective schema must be re-resolved on the coerced
+    // frontmatter to stay byte-identical with the prior behavior. Without
+    // triggers the effective schema is a pure function of `$schema` + baseline
+    // (both stable across coercion), so reusing the held instance is exact and
+    // skips one full resolution pass.
+    let triggers_active = schemas
+        .trigger_registry()
+        .is_some_and(|registry| !registry.is_empty());
+    let report = if triggers_active {
+        schemas.validate(markdown).map_err(|err| {
+            MarkdownError::SchemaValidationFailed {
+                path: path.clone(),
+                problems: Vec::new(),
+                summary: format!("schema could not be prepared: {err}"),
+                description: description.clone(),
+                source: Some(Box::new(err)),
+            }
+        })?
+    } else {
+        match effective.as_ref() {
+            Some(effective) => {
+                let frontmatter_value = crate::markdown::schemas::frontmatter_as_json(markdown);
+                let positions = crate::markdown::schemas::positions_for(markdown);
+                effective.validate_with_positions(&frontmatter_value, &positions)
+            }
+            None => crate::markdown::schemas::ValidationReport {
+                valid: true,
+                problems: Vec::new(),
+                pending: Vec::new(),
+            },
         }
-    })?;
+    };
 
     // Defer problems whose value will be re-resolved later in composition. The
     // compose-time validator runs after template interpolation but BEFORE shell
@@ -373,6 +437,39 @@ mod tests {
         let mut md = md_with_schema("name: alice\n");
         let options = ComposeOptions::new();
         assert!(run(&mut md, &options).is_ok());
+    }
+
+    #[test]
+    fn trigger_schemas_enabled_but_no_effective_schema_is_vacuously_valid() {
+        // `trigger_schemas` clears the early no-op return, but with no document
+        // `$schema`, no baseline, and (for a non-file source) no discovered
+        // triggers, `effective_for` yields `None`. The held-effective
+        // validation path (F5) must treat that as vacuously valid rather than
+        // panicking or re-resolving.
+        let mut md = md_with_schema("name: alice\n");
+        let options = ComposeOptions::new().with_trigger_schemas(true);
+        assert!(run(&mut md, &options).is_ok());
+        assert_eq!(
+            md.frontmatter().as_map().get("name"),
+            Some(&serde_json::json!("alice"))
+        );
+    }
+
+    #[test]
+    fn darkmatter_default_baseline_validates_through_cached_json() {
+        // The Darkmatter default baseline reuses the process-cached compiled
+        // JSON Schema (F9). A document carrying only Darkmatter-owned keys must
+        // still validate, and coercion driven by that baseline still runs — the
+        // string "true" against the baseline's boolean-typed `ctx.*`-adjacent
+        // shape is not asserted here; instead we assert the fast path is a
+        // functional no-op on a plain document.
+        let mut md = md_with_schema("title: Hello\n");
+        let options = ComposeOptions::new().with_darkmatter_baseline_schema();
+        assert!(run(&mut md, &options).is_ok());
+        assert_eq!(
+            md.frontmatter().as_map().get("title"),
+            Some(&serde_json::json!("Hello"))
+        );
     }
 
     #[test]

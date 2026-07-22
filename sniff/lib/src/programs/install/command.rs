@@ -161,6 +161,21 @@ pub fn build_install_failure_status(program: &str, website: &str) -> String {
     )
 }
 
+/// Builds the user-facing warning prose for an installation that was killed at
+/// its deadline.
+///
+/// The "may still be running" caveat is load-bearing, not hedging: on Unix
+/// sniff signals the installer's process tree, but a descendant that forked and
+/// detached with `setsid()` between samples survives the kill.
+pub fn build_install_timeout_warning(program: &str, timeout_secs: u64) -> String {
+    format!(
+        "<yellow>Warning:</yellow> installing <b>{program}</b> did not finish within \
+         <b>{timeout_secs}s</b> and was terminated. Termination is best-effort: an installer \
+         process that detached from sniff may still be running and modifying this host. Check \
+         for a partial <b>{program}</b> install before retrying.",
+    )
+}
+
 /// Builds the prose for a retry-with-alternative-manager choice in the interview.
 pub fn build_retry_choice_prose(method: &InstallationMethod) -> String {
     let manager = method.manager_name();

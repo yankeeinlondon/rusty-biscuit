@@ -45,8 +45,19 @@ dashmap = "6.1"
 # Utilities
 lazy_static = "1.5"
 regex = "1.11"
+# Exact multi-pattern (leftmost-longest) automaton for `replace:` text
+# replacement (Finding 13). Already compiled transitively via `regex`, so no
+# added build cost.
+aho-corasick = "1.1"
 tempfile = "3.8"
 globset = "0.4"
+# Blocking child-process wait that stays killable from another thread, so shell
+# directives wait on an OS event instead of a 10ms poll loop (Finding 17).
+# `default-features = false` drops the `timeout` feature: its `wait_timeout` is
+# built on a process-wide SIGCHLD handler (via `sigchld`/`signal-hook`), and
+# Darkmatter is a library that must not hijack a host's signal disposition. The
+# ungated `wait`/`kill` core we use is `waitid`-based and installs nothing.
+shared_child = { version = "1.1", default-features = false }
 chrono = { version = "0.4", default-features = false, features = ["std", "clock", "now"] }
 which = "7"
 dirs = "6"
@@ -87,7 +98,7 @@ biscuit-terminal = { path = "../../biscuit-terminal/lib", features = ["image"] }
 biscuit-hash = { path = "../../biscuit-hash/lib" }
 
 # System detection (OS, hardware, repo, docs)
-sniff = { path = "../../sniff/lib" }
+sniff = { path = "../../sniff/lib", features = ["remote"] }
 serde_yaml_ng = "0.10"
 
 # Unicode Script lookup for cleanup's join-separator decision (spaceless scripts
@@ -103,7 +114,6 @@ jsonschema = { version = "0.42", default-features = false }
 # added build cost; used both to select `jsonschema`'s fancy-regex pattern engine
 # for such schemas and to validate emitted patterns at conversion time.
 fancy-regex = "0.17"
-sha2 = "0.10"
 
 [dev-dependencies]
 # Re-declares the renderable path dep with the test-only `hint-access-counter`
@@ -118,6 +128,8 @@ insta = "1.41"
 serial_test = "3.0"
 # Only used to `init` a throwaway repo in transclusion tests; pure-Rust, no libgit2.
 gix = { version = "=0.84.0", default-features = false, features = ["sha1"] }
+# Builds committed branch-tip fixtures for `predict_conflicts()` integration tests.
+git2 = "0.20.3"
 proptest = "1.6"
 criterion = { version = "0.5", features = ["html_reports"] }
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
@@ -137,6 +149,10 @@ wiremock = "0.6"
 
 [[bench]]
 name = "schema_validation"
+harness = false
+
+[[bench]]
+name = "effective_schema_ownership"
 harness = false
 
 [[bench]]
@@ -165,4 +181,32 @@ harness = false
 
 [[bench]]
 name = "render_code_heavy"
+harness = false
+
+[[bench]]
+name = "reference_graph"
+harness = false
+
+[[bench]]
+name = "phase6_interpolation"
+harness = false
+
+[[bench]]
+name = "phase8_render"
+harness = false
+
+[[bench]]
+name = "phase9_remote"
+harness = false
+
+[[bench]]
+name = "phase10_residuals"
+harness = false
+
+[[bench]]
+name = "phase11_evidence"
+harness = false
+
+[[bench]]
+name = "clean_hot_paths"
 harness = false

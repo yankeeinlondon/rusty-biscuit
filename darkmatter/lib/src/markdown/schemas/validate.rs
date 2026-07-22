@@ -7,9 +7,10 @@
 //! - **Validator construction** — wires up Darkmatter's custom formats
 //!   ([`format::DARKMATTER_FILE_FORMAT`],
 //!   [`format::DARKMATTER_FILE_REFERENCE_FORMAT`]) and the
-//!   [`format::DARKMATTER_URL_SCHEME_KEYWORD`] keyword on top of Draft
-//!   2020-12. (`match(...)` is suggestion metadata only and has no validation
-//!   keyword.)
+//!   [`format::DARKMATTER_URL_SCHEME_KEYWORD`],
+//!   [`format::DARKMATTER_TYPE_DEFINITION_KEYWORD`], and
+//!   [`format::DARKMATTER_SCHEMA_KEYWORD`] keywords on top of Draft 2020-12.
+//!   (`match(...)` is suggestion metadata only and has no validation keyword.)
 //! - **Caching** — compiling a `Validator` is several milliseconds of work;
 //!   the [`ValidatorCache`] hashes the canonicalised schema bytes and reuses
 //!   compiled validators across calls. The default bound (64 entries) is
@@ -31,7 +32,6 @@ use jsonschema::{
     error::{TypeKind, ValidationErrorKind},
 };
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 
 use super::{
     FileReferenceDiagnostic, JsonPointer, ValidationProblem, ValidationProblemCode,
@@ -49,25 +49,31 @@ pub const CACHE_SIZE_ENV: &str = "DARKMATTER_SCHEMA_CACHE_SIZE";
 /// Default validator-cache bound. Matches the value documented in the spec.
 pub const DEFAULT_CACHE_SIZE: usize = 64;
 
-/// Process-wide cache of compiled validators keyed by canonicalised schema
-/// hash.
+/// Cache of compiled validators keyed by canonicalised schema hash.
 ///
 /// The hashmap entry stores the compiled validator together with an internal
 /// LRU "tick" so eviction is `O(n)` over the cache rather than requiring a
 /// linked structure. With the default cap of 64 entries this is fast enough
 /// and trades implementation complexity for predictable behaviour.
 ///
+/// The inner map is an `Arc<Mutex<..>>`, so cloning a cache shares its entries.
+/// [`DarkmatterSchemas::new`](super::DarkmatterSchemas::new) hands out clones of
+/// one process-wide cache, so validators compiled for one document (or one
+/// compose) are reused by the next — including the second `schema_validation`
+/// pass a trigger-schema compose runs after shell expansion.
+///
 /// ## File-reference resolution invariant
 ///
-/// A single cache carries one [`Self::file_ref_fallback_dir`] (the launch-area
-/// fallback), set at construction via [`Self::with_file_ref_fallback_dir`].
-/// The prompt document directory (`base_dir`) is supplied per call to
-/// [`Self::validator_for`] because it varies per document, and is folded into
-/// the cache key alongside the schema JSON: two documents sharing the same
-/// schema JSON but living in different directories get distinct cached
-/// validators, each resolving `format: darkmatter-file` values document-first
-/// against its own directory. Mixing fallbacks still requires separate caches
-/// (i.e. separate `DarkmatterSchemas` instances).
+/// [`Self::file_ref_fallback_dir`] (the launch-area fallback) is set per clone
+/// via [`Self::with_file_ref_fallback_dir`], and the prompt document directory
+/// (`base_dir`) is supplied per call to [`Self::validator_for`]. Both anchors
+/// parameterize the compiled `format: darkmatter-file` validator, so both are
+/// folded into the cache key alongside the schema JSON: two documents sharing a
+/// schema JSON but living in different directories — or resolving against
+/// different launch-area fallbacks — get distinct cached validators, each
+/// resolving `file` values against its own anchors. Because the fallback is in
+/// the key (not merely baked per instance), a single shared cache safely serves
+/// clones carrying different fallbacks.
 #[derive(Clone)]
 pub struct ValidatorCache {
     inner: Arc<Mutex<CacheInner>>,
@@ -85,7 +91,7 @@ impl Default for ValidatorCache {
 }
 
 struct CacheInner {
-    entries: HashMap<[u8; 32], CacheEntry>,
+    entries: HashMap<u64, CacheEntry>,
     tick: u64,
     capacity: usize,
 }
@@ -148,7 +154,7 @@ impl ValidatorCache {
         schema: &Value,
         base_dir: Option<&Path>,
     ) -> Result<Arc<Validator>, SchemaError> {
-        let key = canonical_hash(schema, base_dir);
+        let key = canonical_hash(schema, base_dir, self.file_ref_fallback_dir.as_deref());
         // Fast path: hit.
         if let Some(hit) = self.lookup(&key) {
             return Ok(hit);
@@ -163,7 +169,7 @@ impl ValidatorCache {
         Ok(validator)
     }
 
-    fn lookup(&self, key: &[u8; 32]) -> Option<Arc<Validator>> {
+    fn lookup(&self, key: &u64) -> Option<Arc<Validator>> {
         let mut guard = self.inner.lock().expect("validator cache lock poisoned");
         guard.tick = guard.tick.wrapping_add(1);
         let tick = guard.tick;
@@ -172,7 +178,7 @@ impl ValidatorCache {
         Some(entry.validator.clone())
     }
 
-    fn insert(&self, key: [u8; 32], validator: Arc<Validator>) {
+    fn insert(&self, key: u64, validator: Arc<Validator>) {
         let mut guard = self.inner.lock().expect("validator cache lock poisoned");
         guard.tick = guard.tick.wrapping_add(1);
         let tick = guard.tick;
@@ -279,6 +285,14 @@ pub(super) fn build_validator(
         .with_keyword(
             format::DARKMATTER_URL_SCHEME_KEYWORD,
             format::url_scheme_keyword_factory,
+        )
+        .with_keyword(
+            format::DARKMATTER_TYPE_DEFINITION_KEYWORD,
+            format::type_definition_keyword_factory,
+        )
+        .with_keyword(
+            format::DARKMATTER_SCHEMA_KEYWORD,
+            format::schema_keyword_factory,
         );
     opts.build(schema)
         .map_err(|err| SchemaError::BuildValidator {
@@ -841,7 +855,7 @@ fn type_label(arm: &Value) -> Option<&'static str> {
 /// unchanged. A union with two or more non-null arms is ambiguous to descend
 /// into, so it is left as-is (the subsequent `properties`/`items` lookup will
 /// fail and resolution degrades to `None`).
-fn unwrap_nullable_arm(node: &Value) -> &Value {
+pub(super) fn unwrap_nullable_arm(node: &Value) -> &Value {
     let Some(arms) = node.get("anyOf").and_then(Value::as_array) else {
         return node;
     };
@@ -854,7 +868,7 @@ fn unwrap_nullable_arm(node: &Value) -> &Value {
 
 /// Whether `arm` is the `{ "type": "null" }` sentinel emitted for optional
 /// (nullable) properties.
-fn is_null_schema(arm: &Value) -> bool {
+pub(super) fn is_null_schema(arm: &Value) -> bool {
     arm.get("type").and_then(Value::as_str) == Some("null")
 }
 
@@ -1000,32 +1014,40 @@ fn default_capacity() -> usize {
     })
 }
 
-/// SHA-256 of the canonicalised JSON Schema bytes (and the document
-/// `base_dir`) used as the cache key.
+/// xxHash (XXH64) of the canonicalised JSON Schema bytes plus both file-reference
+/// anchors (the document `base_dir` and the launch-area `fallback`) used as the
+/// cache key.
 ///
-/// `base_dir` is folded in because it parameterizes the compiled
+/// Both anchors are folded in because they parameterize the compiled
 /// `format: darkmatter-file` validator: the same schema validated for two
-/// documents in different directories must not share a validator, or one
-/// document's `file` values would resolve against the other's directory.
-fn canonical_hash(schema: &Value, base_dir: Option<&Path>) -> [u8; 32] {
+/// documents in different directories — or under two different launch-area
+/// fallbacks — must not share a validator, or one document's `file` values
+/// would resolve against the other's directories. Keying on the fallback (not
+/// just baking it per-cache) is what lets a single process-wide cache serve
+/// every `DarkmatterSchemas` instance safely, regardless of its fallback.
+///
+/// A non-cryptographic hash suffices here: this is a cache identity, not a
+/// security boundary. An accidental collision could only serve a wrong
+/// validator, and XXH64's collision resistance over these small distinct inputs
+/// is more than adequate (repo convention — [`biscuit_hash`]).
+fn canonical_hash(schema: &Value, base_dir: Option<&Path>, fallback: Option<&Path>) -> u64 {
     // `serde_json::to_vec` is stable per the active feature set; this is
     // sufficient for cache identity (false misses are tolerable, false hits
     // are not — which `to_vec` guarantees because identical Values
     // serialise to identical bytes).
-    let bytes = serde_json::to_vec(schema).expect("schema serialises to JSON");
-    let mut hasher = Sha256::new();
-    hasher.update(&bytes);
-    // Domain-separate the base_dir from the schema bytes so a schema ending in
-    // bytes that collide with a path prefix cannot alias a different (schema,
-    // base_dir) pair.
-    hasher.update([0xff]);
+    let mut bytes = serde_json::to_vec(schema).expect("schema serialises to JSON");
+    // Domain-separate each anchor from the schema bytes (and from each other)
+    // so a schema ending in bytes that collide with a path prefix cannot alias
+    // a different (schema, base_dir, fallback) triple.
+    bytes.push(0xff);
     if let Some(dir) = base_dir {
-        hasher.update(dir.to_string_lossy().as_bytes());
+        bytes.extend_from_slice(dir.to_string_lossy().as_bytes());
     }
-    let digest = hasher.finalize();
-    let mut out = [0u8; 32];
-    out.copy_from_slice(&digest);
-    out
+    bytes.push(0xff);
+    if let Some(dir) = fallback {
+        bytes.extend_from_slice(dir.to_string_lossy().as_bytes());
+    }
+    biscuit_hash::xx_hash_bytes(&bytes)
 }
 
 #[cfg(test)]

@@ -1,12 +1,12 @@
 use crate::Result;
 use crate::performance;
+#[cfg(any(target_os = "windows", test))]
+use crate::process::{self, timeouts};
 use crate::request::NetworkRequest;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 #[cfg(feature = "network")]
 use std::net::IpAddr;
-#[cfg(any(target_os = "windows", test))]
-use std::process::Command;
 #[cfg(feature = "network")]
 use std::sync::Mutex;
 use std::time::Instant;
@@ -20,8 +20,25 @@ pub use interface::{
     InterfaceFlags, IpAddresses, Ipv4Address, Ipv4Cidr, Ipv6Address, Ipv6Cidr, NetworkInterface,
 };
 
+/// Default WAN IP echo endpoints, tried in order.
+///
+/// There is more than one on purpose: with a single endpoint the sequential
+/// fallback below has nothing to fall back *to*, so any outage of that one host
+/// is a total failure to detect. Both speak plain-text IP over HTTPS and both
+/// answer for IPv4 and IPv6.
 #[cfg(feature = "network")]
-const DEFAULT_WAN_IP_ENDPOINTS: &[&str] = &["https://api64.ipify.org"];
+const DEFAULT_WAN_IP_ENDPOINTS: &[&str] = &["https://api64.ipify.org", "https://icanhazip.com"];
+
+/// Deadline for establishing a connection to a WAN IP endpoint.
+#[cfg(feature = "network")]
+const WAN_IP_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Deadline for a complete WAN IP request/response.
+///
+/// Applied identically to every endpoint, so a slow first endpoint cannot starve
+/// the rest of the list.
+#[cfg(feature = "network")]
+const WAN_IP_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Environment variable that overrides the WAN IP echo endpoints.
 ///
@@ -358,41 +375,39 @@ fn resolve_wan_ip_endpoints() -> Vec<String> {
         .collect()
 }
 
-/// Sends an HTTP GET request using a short-lived blocking client.
+/// Fetches one endpoint with an already-built client and strictly parses the body.
 ///
-/// This avoids creating a new tokio runtime per call (issue #16) by using
-/// `reqwest::blocking` directly. To avoid the "Cannot drop a runtime in an
-/// async context" panic, the blocking client is created and dropped inside a
-/// dedicated thread whenever a tokio runtime is active.
+/// ## Returns
+///
+/// The echoed address, re-canonicalized through [`IpAddr`] so an endpoint cannot
+/// dictate the string sniff reports. `None` for any transport failure, non-success
+/// status, or a body that is not exactly an IP address — all of which mean the
+/// caller should try the next endpoint.
+///
+/// ## Notes
+///
+/// The response body never leaves this function. A misbehaving or hostile endpoint
+/// can return anything, and that anything must not reach an error message, a log,
+/// or a counter name.
 #[cfg(feature = "network")]
-fn blocking_get(url: &str) -> Option<String> {
-    let url = url.to_string();
-
-    // Check if we're inside a tokio runtime.
-    let in_tokio = tokio::runtime::Handle::try_current().is_ok();
-
-    let fetch = move || {
-        let client = reqwest::blocking::Client::builder()
-            .user_agent("sniff-lib/0.1.0")
-            .timeout(std::time::Duration::from_secs(1))
-            .build()
-            .ok()?;
-        let response = client.get(&url).send().ok()?;
-        if !response.status().is_success() {
-            return None;
-        }
-        response.text().ok()
-    };
-
-    let body = if in_tokio {
-        // Spawn a dedicated thread so the blocking client's internal runtime
-        // is created and dropped outside of tokio's control.
-        std::thread::spawn(fetch).join().ok().flatten()
-    } else {
-        fetch()
-    }?;
-
+fn fetch_wan_ip(client: &reqwest::blocking::Client, url: &str) -> Option<String> {
+    let response = client.get(url).send().ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    let body = response.text().ok()?;
     body.trim().parse::<IpAddr>().ok().map(|ip| ip.to_string())
+}
+
+/// Builds the one blocking client shared across every endpoint attempt.
+#[cfg(feature = "network")]
+fn build_wan_ip_client() -> Option<reqwest::blocking::Client> {
+    reqwest::blocking::Client::builder()
+        .user_agent("sniff-lib/0.1.0")
+        .connect_timeout(WAN_IP_CONNECT_TIMEOUT)
+        .timeout(WAN_IP_REQUEST_TIMEOUT)
+        .build()
+        .ok()
 }
 
 #[cfg(feature = "network")]
@@ -415,18 +430,51 @@ impl WanIpDetector {
         self
     }
 
+    /// Queries endpoints in order and returns the first strictly parsed address.
+    ///
+    /// ## Notes
+    ///
+    /// Sequential, not raced. Racing every endpoint would shave a little latency
+    /// at the cost of disclosing the caller's address to every provider on the
+    /// list even when the first one answers — so a successful first attempt tells
+    /// exactly one endpoint where the host is.
     fn detect(&self) -> Option<String> {
         let endpoints = self.endpoints.clone();
 
-        // Use blocking client via a dedicated thread when in async context,
-        // avoiding both per-call runtime creation and async-context drops.
-        for endpoint in endpoints {
-            if let Some(ip) = blocking_get(&endpoint) {
-                return Some(ip);
+        // One client for the whole ladder. It was previously rebuilt per attempt,
+        // which threw away the connection pool and TLS setup between endpoints.
+        let attempt_all = move || {
+            let client = build_wan_ip_client()?;
+            for endpoint in &endpoints {
+                performance::increment_counter(
+                    crate::performance::counters::NETWORK_WAN_ATTEMPTS,
+                    1,
+                );
+                if let Some(ip) = fetch_wan_ip(&client, endpoint) {
+                    return Some(ip);
+                }
+                debug!("WAN IP endpoint did not yield an address; trying the next");
             }
-        }
+            None
+        };
 
-        None
+        // The blocking client owns an internal runtime, and dropping a runtime
+        // inside an async context panics — so when a tokio runtime is active the
+        // whole ladder runs on a dedicated thread where the client is both built
+        // and dropped (issue #16). The collector must be carried across that hop
+        // by hand or every counter recorded on it is silently discarded.
+        if tokio::runtime::Handle::try_current().is_ok() {
+            let mut worker = performance::WorkerCollector::inherit();
+            std::thread::spawn(move || {
+                worker.activate();
+                attempt_all()
+            })
+            .join()
+            .ok()
+            .flatten()
+        } else {
+            attempt_all()
+        }
     }
 }
 
@@ -670,7 +718,8 @@ fn detect_default_route_interface(interfaces: &[NetworkInterface]) -> Option<Str
 
     #[cfg(target_os = "windows")]
     {
-        command_output("route", &["print", "0.0.0.0"])
+        let (program, args) = windows_default_route_command();
+        command_output(program, &args, timeouts::WINDOWS_DEFAULT_ROUTE)
             .and_then(|output| parse_windows_default_route_interface_ip(&output))
             .and_then(|ip| interface_name_for_ipv4(interfaces, ip))
     }
@@ -711,7 +760,7 @@ fn parse_linux_proc_default_route_interface(output: &str) -> Option<String> {
             Ok(flags) => flags,
             Err(_) => continue,
         };
-        if flags & libc::RTF_UP as u16 == 0 {
+        if flags & libc::RTF_UP == 0 {
             continue;
         }
 
@@ -920,13 +969,18 @@ fn interface_name_from_index(index: u32) -> Option<String> {
 
 #[cfg(any(target_os = "windows", test))]
 #[allow(dead_code)]
-fn command_output(program: &str, args: &[&str]) -> Option<String> {
-    let output = Command::new(program).args(args).output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
+fn windows_default_route_command() -> (&'static str, [&'static str; 2]) {
+    ("route", ["print", "0.0.0.0"])
+}
 
-    String::from_utf8(output.stdout).ok()
+#[cfg(any(target_os = "windows", test))]
+#[allow(dead_code)]
+fn command_output(
+    program: &str,
+    args: &[&str],
+    timeout: std::time::Duration,
+) -> Option<String> {
+    process::run_for_stdout(program, args, timeout)
 }
 
 #[cfg(test)]
@@ -1239,6 +1293,175 @@ mod tests {
             format!("{}/valid", server.uri()),
         ]);
         assert_eq!(detector.detect(), Some("2001:db8::7".to_string()));
+    }
+
+    /// R11.7: more than one default endpoint, or the sequential fallback below has
+    /// nothing to fall back to and "retry" is a fiction.
+    #[cfg(feature = "network")]
+    #[test]
+    fn default_wan_endpoints_provide_an_actual_fallback() {
+        assert!(
+            DEFAULT_WAN_IP_ENDPOINTS.len() >= 2,
+            "a single default endpoint makes the fallback ladder unreachable"
+        );
+        assert!(
+            DEFAULT_WAN_IP_ENDPOINTS
+                .iter()
+                .all(|e| e.starts_with("https://")),
+            "a WAN IP echo over plain HTTP discloses the host address to the path"
+        );
+    }
+
+    /// R11.7: the caller's address must not be disclosed to every endpoint when
+    /// the first one already answered.
+    #[cfg(feature = "network")]
+    #[tokio::test]
+    async fn a_successful_first_endpoint_is_not_followed_by_a_second_request() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/first"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("203.0.113.1"))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/second"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("203.0.113.2"))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let detector = WanIpDetector::new().with_endpoints(vec![
+            format!("{}/first", server.uri()),
+            format!("{}/second", server.uri()),
+        ]);
+        assert_eq!(detector.detect(), Some("203.0.113.1".to_string()));
+
+        // `expect(0)` on /second is verified when the server drops.
+        drop(server);
+    }
+
+    /// Every endpoint failing is `None`, not a panic or a partial value.
+    #[cfg(feature = "network")]
+    #[tokio::test]
+    async fn all_endpoints_failing_yields_no_address() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let detector = WanIpDetector::new()
+            .with_endpoints(vec![format!("{}/a", server.uri()), format!("{}/b", server.uri())]);
+        assert_eq!(detector.detect(), None);
+    }
+
+    /// A body that is not exactly an address is rejected, and the value sniff
+    /// reports is re-canonicalized rather than echoed back verbatim.
+    #[cfg(feature = "network")]
+    #[tokio::test]
+    async fn endpoint_bodies_are_strictly_parsed_and_recanonicalized() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        for (route, body) in [
+            ("/html", "<html>203.0.113.5</html>"),
+            ("/extra", "203.0.113.5 (your ip)"),
+            ("/empty", ""),
+        ] {
+            Mock::given(method("GET"))
+                .and(path(route))
+                .respond_with(ResponseTemplate::new(200).set_body_string(body))
+                .mount(&server)
+                .await;
+        }
+        // An uncompressed IPv6 body must come back compressed, proving the value
+        // went through `IpAddr` rather than being trusted as a string.
+        Mock::given(method("GET"))
+            .and(path("/verbose-v6"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("2001:0db8:0000:0000:0000:0000:0000:0001\n"))
+            .mount(&server)
+            .await;
+
+        for route in ["/html", "/extra", "/empty"] {
+            let detector =
+                WanIpDetector::new().with_endpoints(vec![format!("{}{route}", server.uri())]);
+            assert_eq!(detector.detect(), None, "{route} is not an IP address");
+        }
+
+        let detector =
+            WanIpDetector::new().with_endpoints(vec![format!("{}/verbose-v6", server.uri())]);
+        assert_eq!(detector.detect(), Some("2001:db8::1".to_string()));
+    }
+
+    /// A hanging endpoint must not consume the whole detection — its deadline
+    /// expires and the next endpoint still gets its turn.
+    #[cfg(feature = "network")]
+    #[tokio::test]
+    async fn a_timed_out_endpoint_falls_back_to_the_next() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        // Well past WAN_IP_REQUEST_TIMEOUT, so this endpoint can only ever time out.
+        Mock::given(method("GET"))
+            .and(path("/slow"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string("203.0.113.9")
+                    .set_delay(WAN_IP_REQUEST_TIMEOUT * 4),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/fast"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("203.0.113.8"))
+            .mount(&server)
+            .await;
+
+        let detector = WanIpDetector::new().with_endpoints(vec![
+            format!("{}/slow", server.uri()),
+            format!("{}/fast", server.uri()),
+        ]);
+        assert_eq!(detector.detect(), Some("203.0.113.8".to_string()));
+    }
+
+    /// The WAN ladder runs on a spawned thread inside a tokio context, and a
+    /// counter recorded on a thread the collector never reached is silently lost.
+    #[cfg(feature = "network")]
+    #[tokio::test]
+    async fn endpoint_attempts_are_counted_across_the_thread_hop() {
+        use crate::performance::{PerformanceCollector, with_current_collector};
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let endpoints = vec![format!("{}/a", server.uri()), format!("{}/b", server.uri())];
+        let collector = PerformanceCollector::new_shared();
+        with_current_collector(Some(collector.clone()), || {
+            WanIpDetector::new().with_endpoints(endpoints).detect()
+        });
+
+        let report = collector.snapshot(std::time::Duration::from_millis(1));
+        assert_eq!(
+            report
+                .counters
+                .get(crate::performance::counters::NETWORK_WAN_ATTEMPTS),
+            Some(&2),
+            "both attempts must survive the tokio-context thread hop"
+        );
     }
 
     #[cfg(feature = "network")]
@@ -1862,6 +2085,54 @@ garbage line";
     fn test_parse_windows_default_route_no_routes() {
         let output = "Active Routes:\nNetwork Destination Netmask Gateway Interface Metric";
         assert_eq!(parse_windows_default_route_interface_ip(output), None);
+    }
+
+    #[test]
+    fn test_windows_default_route_command_construction() {
+        assert_eq!(
+            windows_default_route_command(),
+            ("route", ["print", "0.0.0.0"])
+        );
+        assert_eq!(
+            timeouts::WINDOWS_DEFAULT_ROUTE,
+            std::time::Duration::from_secs(3)
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_default_route_probe_drains_large_output() {
+        let command = r#"[Console]::Out.Write(('x' * 1048576 -join '')); [Console]::Out.Write("`n0.0.0.0 0.0.0.0 192.168.1.1 192.168.1.100 25"); [Console]::Error.Write(('e' * 1048576 -join ''))"#;
+        let output = command_output(
+            "powershell",
+            &["-NoProfile", "-NonInteractive", "-Command", command],
+            std::time::Duration::from_secs(30),
+        )
+        .expect("verbose default-route probe should complete");
+
+        assert_eq!(
+            parse_windows_default_route_interface_ip(&output),
+            Some("192.168.1.100".parse().unwrap())
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_default_route_probe_honors_injected_deadline() {
+        let started = std::time::Instant::now();
+        let output = command_output(
+            "powershell",
+            &[
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Start-Sleep -Seconds 30",
+            ],
+            std::time::Duration::from_millis(100),
+        );
+
+        assert!(output.is_none());
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
     }
 
     #[test]

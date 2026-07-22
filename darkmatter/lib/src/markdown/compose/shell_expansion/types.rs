@@ -971,10 +971,15 @@ pub struct ShellExpansionRuntime {
 
 #[derive(Debug, Clone, Default)]
 struct SharedShellExpansionRuntime {
-    allow_once: HashSet<String>,
+    /// The three policy collections below are held behind `Arc` so
+    /// [`ShellExpansionRuntime::snapshot`] is a refcount bump rather than a deep
+    /// copy of every rule — a snapshot is taken once per directive, but rules
+    /// change only on approval. Writers copy-on-write via `Arc::make_mut`, so an
+    /// outstanding snapshot keeps observing the rules it was taken with.
+    allow_once: Arc<HashSet<String>>,
     pending_allow_once: HashSet<String>,
-    whitelist: ShellRuleSet,
-    user_blacklist: ShellRuleSet,
+    whitelist: Arc<ShellRuleSet>,
+    user_blacklist: Arc<ShellRuleSet>,
     policy_paths: Option<ShellPolicyPaths>,
     /// Per-compose memoization of shell command output, keyed by the normalized
     /// command string. Shared across recursive transclusion (same `Arc`), so an
@@ -984,6 +989,16 @@ struct SharedShellExpansionRuntime {
     /// Normalized commands for which a volatile-command discoverability warning
     /// has already been emitted, so the warning fires at most once per command.
     volatile_warned: HashSet<String>,
+    /// Per-command count of threads currently enqueued on `reservation_done`
+    /// inside [`ShellExpansionRuntime::reserve_allow_once`]. Incremented under
+    /// this mutex immediately before the atomic `wait_timeout_while` park and
+    /// decremented immediately after it returns, so any thread that acquires the
+    /// mutex and observes a positive count knows the waiter is provably enqueued
+    /// on the condvar. Exists only to let a notification test synchronize on a
+    /// parked peer instead of inferring it from a sleep; `#[cfg(test)]`-gated so
+    /// production builds carry neither the field nor its bookkeeping.
+    #[cfg(test)]
+    parked_waiters: HashMap<String, usize>,
 }
 
 /// Memoized stdout/stderr for one normalized command in [`SharedShellExpansionRuntime::command_cache`].
@@ -993,11 +1008,19 @@ struct CachedCommandOutput {
     stderr: String,
 }
 
+/// An immutable read-only view of the runtime's policy collections, shared by
+/// pointer with the runtime rather than deep-copied.
+///
+/// ## Notes
+///
+/// Cloning a snapshot costs three refcount bumps. Because writers copy-on-write,
+/// a snapshot is a stable view: rules persisted after it was taken are invisible
+/// to it, and a fresh snapshot is required to observe them.
 #[derive(Debug, Clone)]
 pub(crate) struct ShellRuntimeSnapshot {
-    pub allow_once: HashSet<String>,
-    pub whitelist: ShellRuleSet,
-    pub user_blacklist: ShellRuleSet,
+    pub allow_once: Arc<HashSet<String>>,
+    pub whitelist: Arc<ShellRuleSet>,
+    pub user_blacklist: Arc<ShellRuleSet>,
 }
 
 /// Result of attempting to reserve a normalized command for allow-once
@@ -1051,18 +1074,24 @@ impl ShellExpansionRuntime {
         if shared.policy_paths.is_some() {
             return Ok(());
         }
-        shared.whitelist = super::store::load_ruleset(&paths.whitelist)?;
-        shared.user_blacklist = super::store::load_ruleset(&paths.blacklist)?;
+        shared.whitelist = Arc::new(super::store::load_ruleset(&paths.whitelist)?);
+        shared.user_blacklist = Arc::new(super::store::load_ruleset(&paths.blacklist)?);
         shared.policy_paths = Some(paths.clone());
         Ok(())
     }
 
+    /// Takes an immutable view of the policy collections.
+    ///
+    /// ## Notes
+    ///
+    /// The lock is held only for three `Arc` clones — never across parsing,
+    /// approval, or command execution.
     pub(crate) fn snapshot(&self) -> ShellRuntimeSnapshot {
         let shared = self.shared.lock().unwrap();
         ShellRuntimeSnapshot {
-            allow_once: shared.allow_once.clone(),
-            whitelist: shared.whitelist.clone(),
-            user_blacklist: shared.user_blacklist.clone(),
+            allow_once: Arc::clone(&shared.allow_once),
+            whitelist: Arc::clone(&shared.whitelist),
+            user_blacklist: Arc::clone(&shared.user_blacklist),
         }
     }
 
@@ -1106,6 +1135,19 @@ impl ShellExpansionRuntime {
             // waits before reserving anything), so blocking here cannot
             // deadlock. Wake when the peer either approves it (now in
             // `allow_once`) or releases it (no longer pending).
+            //
+            // The count bump happens under the still-held mutex, then
+            // `wait_timeout_while` atomically releases it as part of parking:
+            // an observer that acquires the mutex and sees a positive count has
+            // proof this thread is enqueued on the condvar. See
+            // `parked_waiters_for_test`.
+            #[cfg(test)]
+            {
+                *shared
+                    .parked_waiters
+                    .entry(normalized.to_string())
+                    .or_insert(0) += 1;
+            }
             let (guard, timeout) = self
                 .reservation_done
                 .wait_timeout_while(shared, RESERVATION_WAIT_TIMEOUT, |state| {
@@ -1114,6 +1156,15 @@ impl ShellExpansionRuntime {
                 })
                 .unwrap();
             shared = guard;
+            #[cfg(test)]
+            {
+                if let Some(count) = shared.parked_waiters.get_mut(normalized) {
+                    *count -= 1;
+                    if *count == 0 {
+                        shared.parked_waiters.remove(normalized);
+                    }
+                }
+            }
             if timeout.timed_out() {
                 return ReserveOutcome::Pending;
             }
@@ -1130,32 +1181,59 @@ impl ShellExpansionRuntime {
             let mut shared = self.shared.lock().unwrap();
             shared.pending_allow_once.remove(normalized);
             if approved {
-                shared.allow_once.insert(normalized.to_string());
+                Arc::make_mut(&mut shared.allow_once).insert(normalized.to_string());
             }
         }
         self.reservation_done.notify_all();
     }
 
+    /// The normalized commands currently held as pending allow-once
+    /// reservations, sorted.
+    ///
+    /// Test seam for the exact definition of a leaked reservation: a command
+    /// left in `pending_allow_once` after the flow that reserved it has
+    /// returned, with no owner left to complete it. Asserting this set beats
+    /// timing a subsequent composition, which cannot distinguish a leak from
+    /// ordinary preparation cost.
+    #[cfg(test)]
+    pub(crate) fn pending_allow_once_for_test(&self) -> Vec<String> {
+        let shared = self.shared.lock().unwrap();
+        let mut pending: Vec<String> = shared.pending_allow_once.iter().cloned().collect();
+        pending.sort();
+        pending
+    }
+
+    /// The number of threads currently parked in [`Self::reserve_allow_once`]
+    /// waiting on `normalized`.
+    ///
+    /// Reads the count under the same mutex the waiter incremented before
+    /// parking, so a positive result proves the waiter is enqueued on
+    /// `reservation_done` — the notification test uses this to release a
+    /// reservation only once a peer is provably parked, rather than after a
+    /// sleep that merely hopes it parked.
+    #[cfg(test)]
+    pub(crate) fn parked_waiters_for_test(&self, normalized: &str) -> usize {
+        let shared = self.shared.lock().unwrap();
+        shared.parked_waiters.get(normalized).copied().unwrap_or(0)
+    }
+
     pub(crate) fn persist_whitelist_exact(&mut self, normalized: String) {
         let mut shared = self.shared.lock().unwrap();
-        shared
-            .whitelist
+        Arc::make_mut(&mut shared.whitelist)
             .entries
             .push(ShellRuleEntry::Exact(normalized));
     }
 
     pub(crate) fn persist_whitelist_prefix(&mut self, executable: String) {
         let mut shared = self.shared.lock().unwrap();
-        shared
-            .whitelist
+        Arc::make_mut(&mut shared.whitelist)
             .entries
             .push(ShellRuleEntry::Prefix(executable));
     }
 
     pub(crate) fn persist_blacklist_exact(&mut self, normalized: String) {
         let mut shared = self.shared.lock().unwrap();
-        shared
-            .user_blacklist
+        Arc::make_mut(&mut shared.user_blacklist)
             .entries
             .push(ShellRuleEntry::Exact(normalized));
     }

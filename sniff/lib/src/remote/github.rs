@@ -8,9 +8,11 @@ use schematic_schema::github::*;
 use schematic_schema::shared::{AuthStrategy, SchematicError, UpdateStrategy};
 
 use super::{
+    count_api_request,
     provider::RemoteRepoProvider,
+    snapshot::{documents_from_tree, RemoteRepoSnapshot, RemoteTree, RemoteTreeFile, CONTINUATION_PREFIXES},
     types::{
-        CiCdInfo, DocumentCategory, DocumentRef, GitProvider, IssueInfo, KeyUrls, LicenseRef,
+        CiCdInfo, DocumentRef, GitProvider, IssueInfo, KeyUrls, LicenseRef,
         OrgInfo, OrgRepoRef, PullRequestInfo, PullRequestState, ReleaseInfo, RepoMetadata, TagInfo,
         TagsAndReleases,
     },
@@ -92,7 +94,93 @@ impl GitHubRemote {
             .auth_update(UpdateStrategy::ChangeTo(AuthStrategy::None))
             .build()
     }
+
+    /// Fetches the recursive root tree once, continuing if GitHub truncated it.
+    ///
+    /// ## Notes
+    ///
+    /// GitHub truncates a recursive tree past ~100k entries or 7 MB and reports it
+    /// in `truncated`. That flag was previously ignored, so a large repository
+    /// reported "no docs, no CI" with full confidence. Completing such a tree would
+    /// cost an unbounded walk; instead this continues only the prefixes the
+    /// document and CI/CD projections actually read (R11.5).
+    async fn fetch_tree(
+        &self,
+        owner: &str,
+        repo: &str,
+        default_branch: &str,
+    ) -> Result<RemoteTree, SniffError> {
+        let request = GetGitTreeRecursiveRequest::new(owner, repo, default_branch);
+        count_api_request("tree");
+        let response: GitTreeResponse = self
+            .client
+            .request(request)
+            .await
+            .map_err(map_schematic_error)?;
+
+        let mut tree = RemoteTree::observed(blobs_of(response.tree), response.truncated);
+        if tree.truncated {
+            self.continue_truncated_tree(owner, repo, default_branch, &mut tree)
+                .await;
+        }
+        Ok(tree)
+    }
+
+    /// Re-requests the document/CI prefixes of a truncated tree, one subtree each.
+    ///
+    /// Failures are swallowed per prefix: a continuation is a best-effort repair of
+    /// evidence that is already known incomplete, so failing one must not discard
+    /// the entries the root tree did return.
+    async fn continue_truncated_tree(
+        &self,
+        owner: &str,
+        repo: &str,
+        default_branch: &str,
+        tree: &mut RemoteTree,
+    ) {
+        let mut recovered = Vec::new();
+
+        for prefix in CONTINUATION_PREFIXES {
+            // `branch:path` addresses a subtree directly, so each continuation is
+            // one bounded request rather than a walk.
+            let request = GetGitTreeRecursiveRequest::new(
+                owner,
+                repo,
+                format!("{default_branch}:{prefix}"),
+            );
+            // Counted under its own slug: a continuation preserves correctness and
+            // must stay distinguishable from the duplicate root-tree requests this
+            // phase removed.
+            count_api_request("tree_continuation");
+            let Ok(response) = self.client.request::<GitTreeResponse>(request).await else {
+                // Almost always a 404 for a prefix this repository does not have.
+                continue;
+            };
+
+            // Subtree paths are relative to the subtree root; re-prefix them so the
+            // projections see repository-root-relative paths like every other entry.
+            recovered.extend(blobs_of(response.tree).into_iter().map(|file| RemoteTreeFile {
+                path: format!("{prefix}/{}", file.path),
+                size: file.size,
+            }));
+        }
+
+        tree.extend_from_continuation(recovered);
+    }
 }
+
+/// Keeps blob entries and drops directories, normalizing to [`RemoteTreeFile`].
+fn blobs_of(entries: Vec<GitTreeEntry>) -> Vec<RemoteTreeFile> {
+    entries
+        .into_iter()
+        .filter(|entry| entry.entry_type == "blob")
+        .map(|entry| RemoteTreeFile {
+            path: entry.path,
+            size: entry.size,
+        })
+        .collect()
+}
+
 
 /// Map a [`SchematicError`] to a [`SniffError`].
 ///
@@ -180,56 +268,6 @@ fn map_schematic_error(err: SchematicError) -> SniffError {
     }
 }
 
-/// Categorize a file path as a document type.
-fn categorize_document(path: &str) -> Option<DocumentCategory> {
-    let lower = path.to_lowercase();
-    let filename = path.rsplit('/').next().unwrap_or(path).to_lowercase();
-
-    // Files in src/ directories (source documentation) - check first
-    if lower.starts_with("src/") {
-        // Only markdown/text files in src count as source docs
-        if is_documentation_file(&filename) {
-            return Some(DocumentCategory::SourceDoc);
-        }
-        return None;
-    }
-
-    // Files in docs/ or doc/ directories
-    if lower.starts_with("docs/") || lower.starts_with("doc/") {
-        return Some(DocumentCategory::DocsFolder);
-    }
-
-    // README files at root or in non-src directories
-    if filename.starts_with("readme") {
-        return Some(DocumentCategory::Readme);
-    }
-
-    // Other markdown/text files at root or elsewhere
-    if is_documentation_file(&filename) {
-        return Some(DocumentCategory::Other);
-    }
-
-    None
-}
-
-/// Check if a filename is a documentation file.
-fn is_documentation_file(filename: &str) -> bool {
-    let lower = filename.to_lowercase();
-    lower.ends_with(".md")
-        || lower.ends_with(".markdown")
-        || lower.ends_with(".txt")
-        || lower.ends_with(".rst")
-        || lower == "license"
-        || lower == "licence"
-        || lower == "changelog"
-        || lower == "changes"
-        || lower == "history"
-        || lower == "contributing"
-        || lower == "authors"
-        || lower == "contributors"
-        || lower == "code_of_conduct"
-}
-
 /// Map a GitHub [`WorkflowRun`] to normalized [`CiCdInfo`].
 fn map_workflow_run(run: WorkflowRun) -> CiCdInfo {
     CiCdInfo {
@@ -253,6 +291,7 @@ impl RemoteRepoProvider for GitHubRemote {
 
     async fn get_repo_metadata(&self, owner: &str, repo: &str) -> Result<RepoMetadata, SniffError> {
         let request = GetRepositoryRequest::new(owner, repo);
+        count_api_request("metadata");
         let info: RepositoryInfo = self
             .client
             .request(request)
@@ -295,41 +334,37 @@ impl RemoteRepoProvider for GitHubRemote {
         })
     }
 
+    async fn snapshot(&self, owner: &str, repo: &str) -> Result<RemoteRepoSnapshot, SniffError> {
+        let metadata = self.get_repo_metadata(owner, repo).await?;
+        // A tree failure degrades the projections that read it; it must not sink a
+        // report whose required metadata already succeeded (R11.6).
+        let tree = self
+            .fetch_tree(owner, repo, &metadata.default_branch)
+            .await
+            .unwrap_or_else(|_| RemoteTree::unavailable());
+
+        Ok(RemoteRepoSnapshot {
+            owner: owner.to_string(),
+            repo: repo.to_string(),
+            metadata,
+            tree,
+        })
+    }
+
     async fn list_documents(
         &self,
         owner: &str,
         repo: &str,
     ) -> Result<Vec<DocumentRef>, SniffError> {
-        // First get the repo to find the default branch
-        let repo_request = GetRepositoryRequest::new(owner, repo);
-        let info: RepositoryInfo = self
-            .client
-            .request(repo_request)
-            .await
-            .map_err(map_schematic_error)?;
+        let snapshot = self.snapshot(owner, repo).await?;
+        self.list_documents_with(&snapshot).await
+    }
 
-        // Use the default branch as the tree SHA
-        let tree_request = GetGitTreeRecursiveRequest::new(owner, repo, &info.default_branch);
-        let tree: GitTreeResponse = self
-            .client
-            .request(tree_request)
-            .await
-            .map_err(map_schematic_error)?;
-
-        let documents: Vec<DocumentRef> = tree
-            .tree
-            .into_iter()
-            .filter(|entry| entry.entry_type == "blob")
-            .filter_map(|entry| {
-                categorize_document(&entry.path).map(|category| DocumentRef {
-                    path: entry.path,
-                    category,
-                    size: entry.size,
-                })
-            })
-            .collect();
-
-        Ok(documents)
+    async fn list_documents_with(
+        &self,
+        snapshot: &RemoteRepoSnapshot,
+    ) -> Result<Vec<DocumentRef>, SniffError> {
+        Ok(documents_from_tree(&snapshot.tree))
     }
 
     async fn get_file_content(
@@ -339,6 +374,7 @@ impl RemoteRepoProvider for GitHubRemote {
         path: &str,
     ) -> Result<String, SniffError> {
         let request = GetRepositoryContentRawRequest::new(owner, repo, path);
+        count_api_request("contents");
         self.client
             .get_repository_content_raw(request)
             .await
@@ -370,14 +406,17 @@ impl RemoteRepoProvider for GitHubRemote {
         // because no credentials are available, retry once with an explicitly
         // unauthenticated client. Only after the anonymous retry also fails
         // (or on a real 401/403) do we surface a credentials error.
+        count_api_request("pulls");
         let prs: Vec<PullRequestSummary> = match self.client.request(request.clone()).await {
             Ok(prs) => prs,
             Err(SchematicError::MissingCredential { .. })
-            | Err(SchematicError::AuthenticationRequired { .. }) => self
-                .unauthenticated_client()
-                .request(request)
-                .await
-                .map_err(map_schematic_error)?,
+            | Err(SchematicError::AuthenticationRequired { .. }) => {
+                count_api_request("pulls");
+                self.unauthenticated_client()
+                    .request(request)
+                    .await
+                    .map_err(map_schematic_error)?
+            }
             Err(err) => return Err(map_schematic_error(err)),
         };
 
@@ -416,6 +455,7 @@ impl RemoteRepoProvider for GitHubRemote {
 
     async fn list_issues(&self, owner: &str, repo: &str) -> Result<Vec<IssueInfo>, SniffError> {
         let request = ListIssuesRequest::new(owner, repo);
+        count_api_request("issues");
         let issues: Vec<IssueSummary> = self
             .client
             .request(request)
@@ -448,6 +488,7 @@ impl RemoteRepoProvider for GitHubRemote {
     ) -> Result<TagsAndReleases, SniffError> {
         // Fetch tags
         let tags_request = ListTagsRequest::new(owner, repo);
+        count_api_request("tags");
         let tags: Vec<RepoTag> = self
             .client
             .request(tags_request)
@@ -456,6 +497,7 @@ impl RemoteRepoProvider for GitHubRemote {
 
         // Fetch releases
         let releases_request = ListReleasesRequest::new(owner, repo);
+        count_api_request("releases");
         let releases: Vec<Release> = self
             .client
             .request(releases_request)
@@ -496,26 +538,16 @@ impl RemoteRepoProvider for GitHubRemote {
     }
 
     async fn detect_cicd(&self, owner: &str, repo: &str) -> Result<Option<CiCdInfo>, SniffError> {
-        // First get the repo to find the default branch
-        let repo_request = GetRepositoryRequest::new(owner, repo);
-        let info: RepositoryInfo = self
-            .client
-            .request(repo_request)
-            .await
-            .map_err(map_schematic_error)?;
+        let snapshot = self.snapshot(owner, repo).await?;
+        self.detect_cicd_with(&snapshot).await
+    }
 
-        // Get the tree to look for CI/CD config files
-        let tree_request = GetGitTreeRecursiveRequest::new(owner, repo, &info.default_branch);
-        let tree: GitTreeResponse = self
-            .client
-            .request(tree_request)
-            .await
-            .map_err(map_schematic_error)?;
-
-        // Look for GitHub Actions workflows
-        let has_workflows = tree.tree.iter().any(|entry| {
-            entry.path.starts_with(".github/workflows/") && entry.entry_type == "blob"
-        });
+    async fn detect_cicd_with(
+        &self,
+        snapshot: &RemoteRepoSnapshot,
+    ) -> Result<Option<CiCdInfo>, SniffError> {
+        let (owner, repo) = (snapshot.owner.as_str(), snapshot.repo.as_str());
+        let has_workflows = snapshot.tree.has_path_under(".github/workflows");
 
         if has_workflows {
             Ok(Some(CiCdInfo {
@@ -545,16 +577,19 @@ impl RemoteRepoProvider for GitHubRemote {
         // Attempt the request with the configured client first. If it fails
         // because no credentials are available, or with a 401/403 response,
         // retry once with an explicitly unauthenticated client.
+        count_api_request("workflow_runs");
         let response: WorkflowRunsResponse = match self.client.request(request.clone()).await {
             Ok(runs) => runs,
             Err(SchematicError::MissingCredential { .. })
             | Err(SchematicError::AuthenticationRequired { .. })
             | Err(SchematicError::ApiError { status: 401, .. })
-            | Err(SchematicError::ApiError { status: 403, .. }) => self
-                .unauthenticated_client()
-                .request(request)
-                .await
-                .map_err(map_schematic_error)?,
+            | Err(SchematicError::ApiError { status: 403, .. }) => {
+                count_api_request("workflow_runs");
+                self.unauthenticated_client()
+                    .request(request)
+                    .await
+                    .map_err(map_schematic_error)?
+            }
             Err(err) => return Err(map_schematic_error(err)),
         };
 
@@ -596,65 +631,6 @@ impl RemoteRepoProvider for GitHubRemote {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_categorize_readme() {
-        assert_eq!(
-            categorize_document("README.md"),
-            Some(DocumentCategory::Readme)
-        );
-        assert_eq!(
-            categorize_document("readme.txt"),
-            Some(DocumentCategory::Readme)
-        );
-        assert_eq!(
-            categorize_document("sub/README.md"),
-            Some(DocumentCategory::Readme)
-        );
-    }
-
-    #[test]
-    fn test_categorize_docs_folder() {
-        assert_eq!(
-            categorize_document("docs/guide.md"),
-            Some(DocumentCategory::DocsFolder)
-        );
-        assert_eq!(
-            categorize_document("doc/api.md"),
-            Some(DocumentCategory::DocsFolder)
-        );
-    }
-
-    #[test]
-    fn test_categorize_source_doc() {
-        assert_eq!(
-            categorize_document("src/README.md"),
-            Some(DocumentCategory::SourceDoc)
-        );
-        // Non-doc files in src/ should be None
-        assert_eq!(categorize_document("src/main.rs"), None);
-    }
-
-    #[test]
-    fn test_categorize_other() {
-        assert_eq!(
-            categorize_document("CHANGELOG.md"),
-            Some(DocumentCategory::Other)
-        );
-        assert_eq!(
-            categorize_document("LICENSE"),
-            Some(DocumentCategory::Other)
-        );
-        assert_eq!(
-            categorize_document("CONTRIBUTING.md"),
-            Some(DocumentCategory::Other)
-        );
-    }
-
-    #[test]
-    fn test_categorize_non_doc() {
-        assert_eq!(categorize_document("main.rs"), None);
-        assert_eq!(categorize_document("lib/utils.js"), None);
-    }
 
     #[test]
     fn test_build_key_urls() {

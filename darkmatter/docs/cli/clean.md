@@ -1,6 +1,16 @@
 ## Overview
 
-The `clean` command normalizes markdown formatting by parsing the input and re-emitting consistent markdown.
+The `clean` command repairs deterministic YAML problems in a document's
+frontmatter and normalizes Markdown formatting. Frontmatter repair is enabled
+by default; there is no opt-in or opt-out flag. Only the YAML between the
+opening and closing frontmatter delimiters is analyzed. The delimiter lines,
+including their surrounding whitespace and line terminators, are preserved
+byte-for-byte. YAML fenced code blocks in the Markdown body are never inspected
+or changed by the YAML analyzer.
+
+Without `--save`, repairs are applied to the document written to stdout; the
+input file is not modified. With `--save`, the resulting document is written
+back to the input file.
 
 It is useful when you want to:
 
@@ -17,6 +27,19 @@ It is useful when you want to:
 md clean README.md
 md clean -
 cat README.md | md clean
+
+# Emit the v1 diagnostic envelope instead of cleaned Markdown
+md clean README.md --json
+
+# Replace the document's $schema layer for this run
+md clean README.md --schema docs.schema.yaml
+
+# Replace or disable the default Darkmatter baseline schema
+md clean README.md --baseline-schema project-baseline.yaml
+md clean README.md --no-baseline-schema
+
+# Disable repository trigger schemas
+md clean README.md --no-trigger-schemas
 
 # Collapse incidental fixed-column wrapping, then re-wrap prose to 80 columns
 md clean README.md --fixed-width 80
@@ -41,9 +64,14 @@ md README.md --save
 
 - `[INPUT]`: Markdown file path (supports `@` file references). Use `-` for stdin. If omitted, reads from stdin.
 - `--save`: Clean in place and print a delta-style change report (same report format used by `md delta`).
-- `--indent <#>`: Normalize nested list indentation width to a consistent number of spaces (`2`, `4`, or `8`).
-- `--fixed-width <#>`: Collapse incidental single newlines, then re-wrap prose to the target display width.
+- `--indent <#>`: Enforce a nested-list indentation step of `2`, `4`, or `8` spaces. For an eight-space step, cleanup uses CommonMark-valid marker padding on parent items when needed to preserve the same list tree.
+- `--fixed-width <#>`: Collapse incidental single newlines, then re-wrap prose, including list-item paragraphs, to the target display width.
 - `--ignore-incidental-newlines`: Preserve source single newlines instead of collapsing fixed-column wrapping.
+- `--json`: Emit the version-1 diagnostic envelope as the sole stdout payload. The cleaned document, human suggestion report, and save-mode delta report are suppressed.
+- `--schema <PATH>`: Replace the document's inline or referenced `$schema` layer with an explicit SimplifiedSchema file. Baseline and matching trigger layers still apply beneath it.
+- `--baseline-schema <PATH>`: Replace the default Darkmatter baseline with an explicit SimplifiedSchema file.
+- `--no-baseline-schema`: Disable the default Darkmatter baseline. Conflicts with `--baseline-schema`.
+- `--no-trigger-schemas`: Disable repository trigger discovery and bare-name schema-root lookup.
 
 `--fixed-width` and `--ignore-incidental-newlines` cannot be used together.
 Fixed-width reflow starts by removing the source wrapping that
@@ -61,6 +89,7 @@ Shell completion notes:
 
 - Prints cleaned markdown to stdout
 - Does not modify files
+- Prints report-only frontmatter suggestions to stderr; suggestions do not change the exit code
 
 **Save mode (`--save`)**
 
@@ -69,6 +98,107 @@ Shell completion notes:
 - Prints a delta-style report instead of cleaned markdown
 - Skips writing when the file is already clean (no changes detected)
 - With `-v`/`--verbose`, also prints frontmatter/content visual diffs
+
+**JSON mode (`--json`)**
+
+- Prints one version-1 JSON envelope to stdout instead of Markdown or a delta report
+- Suppresses human diagnostics on stderr; findings are in `diagnostics`
+- With `--save`, writes the cleaned file and still prints the envelope
+- Reports whole-document `changed`, not merely whether frontmatter was repaired
+
+### Frontmatter Repair and Schema Precedence
+
+`md clean` auto-applies only deterministic repairs whose safety proof passes.
+These include source normalization, parse-equivalent whitespace cleanup,
+reserved-indicator quoting, and schema-proven string quoting. Bytes outside
+accepted edits are preserved. Non-deterministic findings, including duplicate
+keys and suspicious values, are report-only and never mutate the document.
+
+For a non-empty frontmatter block, the effective schema is assembled in this
+order, with later layers taking precedence:
+
+1. The default Darkmatter baseline, an explicit `--baseline-schema`, or no
+   baseline when `--no-baseline-schema` is set.
+2. Matching repository trigger schemas, unless `--no-trigger-schemas` is set.
+3. The document's inline or referenced `$schema`, replaced by `--schema` when
+   that flag is present.
+
+Trigger discovery requires a file-backed document path. It is inert for stdin,
+even when the current directory is inside a repository; `--schema` and
+`--baseline-schema` still apply to stdin. Schema resolution is skipped for
+documents with no frontmatter or an empty frontmatter block.
+
+There is no `md clean --strict` in v1. Report-only findings remain suggestions
+and exit successfully.
+
+### Version-1 JSON Envelope
+
+The v1 envelope has six top-level fields. Diagnostic spans use byte offsets
+into the whole authored document: offsets are zero-based and end-exclusive;
+lines and byte columns are one-based. `applied` contains only repairs actually
+accepted and applied. Existing v1 fields and enum/code spellings are stable;
+later versions may add fields.
+
+Classification spellings are `deterministic`,
+`deterministic_find_non_deterministic_solution`, and
+`non_deterministic_find`. Diagnostic codes are stable dotted lowercase names;
+the `yaml.*` family comes from `biscuit-file` and the `schema.*` family comes
+from Darkmatter's schema-aware layer. Diagnostics are emitted in stable source
+order, and a diagnostic with no candidate repair contains `"repairs": []`.
+
+```json
+{
+  "version": 1,
+  "source": { "kind": "file", "path": "README.md" },
+  "frontmatter": {
+    "present": true,
+    "span": { "start": 4, "end": 25 }
+  },
+  "diagnostics": [
+    {
+      "code": "yaml.reserved-indicator",
+      "classification": "deterministic",
+      "message": "plain scalar begins with the reserved YAML indicator `@` and does not parse",
+      "span": {
+        "start": 11,
+        "end": 24,
+        "start_line": 2,
+        "start_column": 8,
+        "end_line": 2,
+        "end_column": 21
+      },
+      "repairs": [
+        {
+          "span": { "start": 11, "end": 24 },
+          "replacement": "\"@daily-report\"",
+          "explanation": "quote the scalar so the indicator is treated as string content"
+        }
+      ]
+    }
+  ],
+  "applied": [
+    {
+      "span": { "start": 11, "end": 24 },
+      "replacement": "\"@daily-report\"",
+      "explanation": "quote the scalar so the indicator is treated as string content"
+    }
+  ],
+  "changed": true
+}
+```
+
+For stdin, `source` is `{ "kind": "stdin", "path": null }`. When no
+frontmatter is present, `frontmatter` is `{ "present": false }`.
+
+### Exit Status
+
+- Exit `0`: cleanup succeeds, including when report-only suggestions exist.
+- Exit `1`: cleanup cannot complete, including unrepaired invalid YAML or
+  `--save` with stdin. Human mode writes the error to stderr and leaves a save
+  target untouched.
+- With `--json`, unrepaired invalid YAML still exits `1`, but stdout contains
+  the v1 envelope (including `yaml.parse`), stderr is empty, and the file is
+  untouched.
 
 ### Save Mode Constraints
 
@@ -82,27 +212,28 @@ Shell completion notes:
 
 The cleanup process applies these transformations:
 
-1. **Incidental Newlines**: Collapses single newlines in prose by default
-2. **Blank Lines**: Ensures one blank line between block elements
-3. **List Markers**: Preserves original unordered markers (`*`, `-`, `+`)
-4. **Table Alignment**: Pads table cells for aligned columns
-5. **Emphasis Preservation**:
+1. **Frontmatter YAML**: Applies proven deterministic repairs to frontmatter only; reports all other findings without mutation
+2. **Incidental Newlines**: Collapses single newlines in prose by default
+3. **Blank Lines**: Ensures one blank line between block elements
+4. **List Markers**: Preserves original unordered markers (`*`, `-`, `+`)
+5. **Table Alignment**: Pads table cells for aligned columns
+6. **Emphasis Preservation**:
     - Preserves original emphasis markers (`*` vs `_`)
     - `PREFER_ITALICS` can influence emphasis marker style
     - Strong/bold markers are preserved
-6. **Fenced Code Blocks**: Adds `text` language when fence language is missing
-7. **Blockquote Formatting**:
+7. **Fenced Code Blocks**: Adds `text` language when fence language is missing
+8. **Blockquote Formatting**:
     - Fixes leading-space issues before `>`
     - Removes invalid empty leading blockquote lines
     - Normalizes nested blockquote spacing
-8. **List Indentation**:
+9. **List Indentation**:
     - Default: preserves source indentation style
     - With `--indent`: enforces a consistent indentation width at every nested level
-9. **Fixed-Width Reflow**: With `--fixed-width`, wraps prose to the requested display width after cleanup
-10. **Unnecessary Escapes**:
+10. **Fixed-Width Reflow**: With `--fixed-width`, wraps prose to the requested display width after cleanup
+11. **Unnecessary Escapes**:
    - Unescapes `\_` and `\*` outside code/emphasis
    - Unescapes bracket literals when not part of links
-11. **File Ending**: Ensures non-empty output ends with exactly one trailing newline
+12. **File Ending**: Ensures non-empty output ends with exactly one trailing newline
 
 ## Cleanup Modes
 
@@ -127,6 +258,22 @@ Output:
 This paragraph was wrapped by an editor at a fixed column even though Markdown treats it as one paragraph.
 ```
 
+List-item paragraphs follow the same rule. Continuation indentation used only
+for source layout is removed with the soft break:
+
+Input:
+
+```markdown
+- Ratified design: `claudine/features/2026-07-12-rendezvous-dashboard/spec.md`
+    (see the "Decisions" section, especially the implementation stamps).
+```
+
+Output:
+
+```markdown
+- Ratified design: `claudine/features/2026-07-12-rendezvous-dashboard/spec.md` (see the "Decisions" section, especially the implementation stamps).
+```
+
 ### Fixed Width
 
 Input:
@@ -147,6 +294,31 @@ Output:
 ```markdown
 This paragraph was wrapped by an editor at a fixed column and should be collapsed
 before being wrapped to the requested display width.
+```
+
+For list-item paragraphs, the width includes the complete list and blockquote
+container prefix. Newly wrapped continuation lines use a hanging prefix aligned
+with the first body character:
+
+Input:
+
+```markdown
+- Alpha beta gamma delta
+    epsilon zeta eta theta.
+```
+
+Command:
+
+```bash
+md clean --fixed-width 24 -
+```
+
+Output:
+
+```markdown
+- Alpha beta gamma delta
+  epsilon zeta eta
+  theta.
 ```
 
 ### Preserve Incidental Newlines

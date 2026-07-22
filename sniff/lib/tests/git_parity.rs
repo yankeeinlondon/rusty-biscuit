@@ -17,7 +17,6 @@ use std::path::{Path, PathBuf};
 use git2::Repository;
 use tempfile::TempDir;
 
-use sniff::SniffError;
 use sniff::filesystem::detect_git_with_request;
 use sniff::filesystem::git::{
     DeltaKind, FileAction, FileStatus, GitHostingProvider, GitRepo, RefKind, get_commit_files,
@@ -309,24 +308,56 @@ fn golden_worktree_metadata() {
 }
 
 #[test]
+fn stale_linked_worktree_registration_does_not_derail_requested_repo() {
+    let dir = TempDir::new().unwrap();
+    builder::build_git_repo_with_worktrees(dir.path(), 1);
+
+    // Remove the checkout without pruning its registration from the main
+    // repository, matching the state left by an interrupted benchmark or an
+    // externally deleted linked worktree.
+    let wt_path = dir.path().join("_wt").join("wt000");
+    std::fs::remove_dir_all(&wt_path).expect("remove linked worktree checkout");
+    assert!(!wt_path.exists(), "linked worktree checkout should be gone");
+    assert!(
+        dir.path()
+            .join(".git")
+            .join("worktrees")
+            .join("wt000")
+            .exists(),
+        "stale registration should remain"
+    );
+
+    let info = detect_git_with_request(dir.path(), &GitRequest::full())
+        .expect("requested repository detection should succeed")
+        .expect("requested repository should remain discoverable");
+    assert_eq!(
+        norm(&info.repo_root),
+        norm(dir.path()),
+        "detection should stay anchored to the requested repository"
+    );
+    assert!(info.worktrees.is_empty(), "stale worktree should be omitted");
+}
+
+#[test]
 fn worktree_trusted_open_failure_is_propagated() {
     let dir = TempDir::new().unwrap();
     builder::build_git_repo_with_worktrees(dir.path(), 1);
 
-    // Corrupt the linked worktree by removing its `.git` file so
-    // `trusted_open` fails (not a repository).
     let wt_path = dir.path().join("_wt").join("wt000");
-    let git_file = wt_path.join(".git");
-    std::fs::remove_file(&git_file).expect("remove worktree .git file");
-    assert!(!git_file.exists(), ".git file should be gone");
+    std::fs::remove_file(wt_path.join(".git")).expect("remove linked checkout .git file");
+    assert!(wt_path.exists(), "linked checkout target should remain");
 
-    // `get_worktrees` must propagate the open failure rather than
-    // silently omitting the worktree or returning empty metadata.
     let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
-    let result = handle.worktrees();
+    let worktrees = handle.worktrees();
     assert!(
-        result.is_err(),
-        "corrupted linked worktree must surface an error, got {result:?}"
+        worktrees.is_err(),
+        "GitRepo::worktrees must report the corrupt checkout, got {worktrees:?}"
+    );
+
+    let full_detection = detect_git_with_request(dir.path(), &GitRequest::full());
+    assert!(
+        full_detection.is_err(),
+        "full Git detection must report the corrupt checkout, got {full_detection:?}"
     );
 }
 
@@ -399,21 +430,90 @@ fn discovery_genuine_non_repository_returns_ok_none() {
     );
 }
 
+/// Creates a bare repository with one commit on `branch`.
+fn init_bare_with_commit(parent: &Path, branch: &str) -> PathBuf {
+    let bare_path = parent.join("bare.git");
+    let repo = Repository::init_bare(&bare_path).unwrap();
+    repo.set_head(&format!("refs/heads/{branch}")).unwrap();
+    let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+    let tree_id = repo.treebuilder(None).unwrap().write().unwrap();
+    {
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
+            .unwrap();
+    }
+    bare_path
+}
+
 #[test]
-fn discovery_bare_repository_surfaces_error() {
-    // A bare repository discovers successfully but has no working directory;
-    // sniff treats the missing workdir as an error rather than Ok(None). This
-    // is the only error state git2 discovery currently surfaces — Phase 2
-    // widens it to trust/permission/corruption failures under gix.
+fn discovery_bare_repository_is_a_valid_repo_with_head_queries() {
+    // A bare repository has no working directory, but its refs, HEAD, and
+    // objects are all readable — discovery must not reject it.
+    let dir = TempDir::new().unwrap();
+    let bare_path = init_bare_with_commit(dir.path(), "fixture/bare");
+
+    let handle = GitRepo::discover(&bare_path)
+        .expect("bare repo discovery must succeed")
+        .expect("bare repo must be discovered");
+
+    assert!(handle.is_bare(), "bare repo must report is_bare");
+    assert_eq!(
+        handle.current_branch(),
+        Some("fixture/bare".to_string()),
+        "bare repo with symbolic HEAD reports its attached branch"
+    );
+    assert_eq!(
+        handle.try_current_branch().unwrap(),
+        Some("fixture/bare".to_string())
+    );
+    assert_eq!(
+        handle.try_current_worktree_name().unwrap(),
+        None,
+        "bare repo must not substitute a worktree name"
+    );
+    assert_eq!(
+        handle.merge_conflicts().unwrap(),
+        Vec::<PathBuf>::new(),
+        "bare repo has no index and therefore no conflicts"
+    );
+}
+
+#[test]
+fn discovery_bare_repository_unborn_head_has_no_branch() {
     let dir = TempDir::new().unwrap();
     let bare_path: PathBuf = dir.path().join("bare.git");
     Repository::init_bare(&bare_path).unwrap();
 
-    let result = GitRepo::discover(&bare_path);
-    assert!(
-        matches!(result, Err(SniffError::NotARepository(_))),
-        "bare repo (no workdir) should surface an error, got {result:?}"
+    let handle = GitRepo::discover(&bare_path)
+        .expect("bare repo discovery must succeed")
+        .expect("bare repo must be discovered");
+
+    assert!(handle.is_bare());
+    assert_eq!(
+        handle.current_branch(),
+        None,
+        "unborn HEAD has no branch even when the ref name is set"
     );
+    assert_eq!(handle.merge_conflicts().unwrap(), Vec::<PathBuf>::new());
+}
+
+#[test]
+fn discovery_bare_repository_detached_head_has_no_branch() {
+    let dir = TempDir::new().unwrap();
+    let bare_path = init_bare_with_commit(dir.path(), "fixture/bare");
+
+    let repo = Repository::open(&bare_path).unwrap();
+    let head_commit = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.set_head_detached(head_commit.id()).unwrap();
+
+    let handle = GitRepo::discover(&bare_path)
+        .expect("bare repo discovery must succeed")
+        .expect("bare repo must be discovered");
+
+    assert!(handle.is_bare());
+    assert!(handle.is_detached_head());
+    assert_eq!(handle.current_branch(), None);
+    assert_eq!(handle.try_current_branch().unwrap(), None);
 }
 
 // ---------------------------------------------------------------------------
@@ -612,7 +712,7 @@ fn cli_facing_apis_surface_open_failure_instead_of_absence() {
         "commit_files_at"
     );
     assert!(
-        sniff::filesystem::commits_for_path_at(p, "", 5).is_err(),
+        sniff::filesystem::commits_for_path_at(p, "", sniff::filesystem::PathHistoryOptions::new(5)).is_err(),
         "commits_for_path_at"
     );
     assert!(
@@ -731,7 +831,7 @@ fn commits_for_path_at_surfaces_corrupt_ancestor() {
     corrupt_loose_object(dir.path(), &root);
 
     assert!(
-        sniff::filesystem::commits_for_path_at(dir.path(), "", 10).is_err(),
+        sniff::filesystem::commits_for_path_at(dir.path(), "", sniff::filesystem::PathHistoryOptions::new(10)).is_err(),
         "corrupt ancestor must surface through commits_for_path_at"
     );
 }
@@ -835,7 +935,7 @@ fn commits_for_path_at_surfaces_malformed_head() {
     fs::write(dir.path().join(".git").join("HEAD"), b"not a valid head\n").unwrap();
 
     assert!(
-        sniff::filesystem::commits_for_path_at(dir.path(), "", 10).is_err(),
+        sniff::filesystem::commits_for_path_at(dir.path(), "", sniff::filesystem::PathHistoryOptions::new(10)).is_err(),
         "malformed HEAD must surface through commits_for_path_at"
     );
 }
@@ -1800,18 +1900,9 @@ fn phase3_counts_only_matches_full_request_totals() {
     // detailed-count code path. Its totals must agree with the full walk.
     let counts = detect_git_with_request(
         dir.path(),
-        &GitRequest {
-            commit_count: 0,
-            include_file_changes: false,
-            include_file_diffs: false,
-            include_worktrees: true, // keeps is_minimal() false
-            refresh_remote_tracking: false,
-            include_remote_branch_details: false,
-            include_commit_remote_containment: false,
-            max_remote_branches: None,
-            full_worktree_details: false,
-            identity_only: false,
-        },
+        // `include_worktrees` keeps `is_minimal()` false, which is what selects
+        // the detailed-count path being compared here.
+        &GitRequest::minimal().include_worktrees(true),
     )
     .unwrap()
     .expect("repo found");

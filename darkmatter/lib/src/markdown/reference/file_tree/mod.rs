@@ -30,7 +30,9 @@ use biscuit_terminal::utils::layout::{Layout, LayoutTerminalExt};
 use crate::markdown::Markdown;
 use crate::markdown::reference::ReferenceError;
 use crate::markdown::reference::types::{ReferenceGraph, ReferenceGraphOptions};
-use crate::markdown::reference::validate::{ReferenceValidationOptions, ReferenceValidationReport};
+use crate::markdown::reference::validate::{
+    self, ReferenceValidationOptions, ReferenceValidationReport,
+};
 use crate::markdown::types::MarkdownError;
 
 pub use model::{
@@ -238,10 +240,14 @@ impl FileTree {
         let report = if self.do_validate {
             let mut val_opts = self.validation_options.clone();
             val_opts.graph = self.graph_options.clone();
-            Some(self.md.validate_references(val_opts).map_err(|e| match e {
-                MarkdownError::Reference(re) => FileTreeError::Reference(*re),
-                other => FileTreeError::Markdown(other),
-            })?)
+            // Eligible for the fresh seam: the graph was built a few lines
+            // above from this FileTree's own `md` and `graph_options` in this
+            // same method, with no caller handoff in between — descendant
+            // re-verification would only re-confirm identities captured there.
+            Some(
+                validate::validate_fresh_graph(&self.md, &val_opts, &graph)
+                    .map_err(FileTreeError::Reference)?,
+            )
         } else {
             None
         };

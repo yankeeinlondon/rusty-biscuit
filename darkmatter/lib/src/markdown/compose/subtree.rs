@@ -237,6 +237,12 @@ impl<'a> EvaluationLookup for LayeredLookup<'a> {
         self.resolution_context.clone()
     }
 
+    fn resolution_context_ref(&self) -> Option<&ResolutionContext> {
+        // Borrowed path (Finding 12) — avoids cloning the context per read-side
+        // function call during subtree evaluation.
+        self.resolution_context.as_ref()
+    }
+
     fn is_valid_context_variable(&self, name: &str) -> bool {
         self.state.is_valid_context_variable(name)
     }
@@ -555,6 +561,16 @@ fn collect_variable_roots(expr: &Expr, roots: &mut Vec<String>) {
         Expr::FunctionCall { args, .. } => {
             for arg in args {
                 collect_variable_roots(arg, roots);
+            }
+        }
+        Expr::ArrayLiteral(items) => {
+            for item in items {
+                collect_variable_roots(item, roots);
+            }
+        }
+        Expr::ObjectLiteral(entries) => {
+            for (_, value) in entries {
+                collect_variable_roots(value, roots);
             }
         }
     }

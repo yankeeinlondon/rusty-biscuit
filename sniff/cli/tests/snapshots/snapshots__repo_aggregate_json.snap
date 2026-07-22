@@ -1,0 +1,223 @@
+---
+source: sniff/cli/tests/snapshots.rs
+expression: stable
+---
+{
+  "branches": [
+    {
+      "ahead": null,
+      "behind": null,
+      "current": true,
+      "name": "main",
+      "remote_represented": false,
+      "upstream": null
+    }
+  ],
+  "commit_family_keys": {
+    "documentation_changes": null,
+    "recent_commits": "last 3d",
+    "source_code_changes": null
+  },
+  "context": {
+    "area": "root",
+    "is_current_package_area_dirty": false,
+    "package": "",
+    "package_area": "",
+    "package_area_has_source_code_changes": false,
+    "worktree": null
+  },
+  "dependencies": {
+    "dependencies": [
+      {
+        "family": "dependencies",
+        "name": "serde",
+        "package": "alpha",
+        "package_manager": "cargo",
+        "targeted_version": "1"
+      },
+      {
+        "family": "dependencies",
+        "name": "serde",
+        "package": "beta",
+        "package_manager": "cargo",
+        "targeted_version": "1"
+      }
+    ]
+  },
+  "dirty": {
+    "documentation": [
+      "docs/new.md"
+    ],
+    "files": [
+      "area-a/alpha/src/lib.rs",
+      "area-b/beta/src/lib.rs",
+      "docs/new.md"
+    ],
+    "package_areas": [
+      "area-a",
+      "area-b"
+    ],
+    "packages": [
+      "alpha",
+      "beta"
+    ],
+    "source_code": [
+      "area-a/alpha/src/lib.rs",
+      "area-b/beta/src/lib.rs"
+    ]
+  },
+  "git_status": {
+    "current_branch": "main",
+    "file_changes": [
+      {
+        "lines_added": 1,
+        "lines_removed": 0,
+        "path": "area-a/alpha/src/lib.rs",
+        "status": "modified"
+      },
+      {
+        "lines_added": 0,
+        "lines_removed": 0,
+        "path": "area-b/beta/src/lib.rs",
+        "status": "modified"
+      },
+      {
+        "lines_added": 0,
+        "lines_removed": 0,
+        "path": "docs/new.md",
+        "status": "created"
+      }
+    ],
+    "is_dirty": true,
+    "staged_count": 1,
+    "unstaged_count": 1,
+    "untracked_count": 1
+  },
+  "has_merge_conflict": false,
+  "is_monorepo": true,
+  "language": null,
+  "name": "agg-fixture",
+  "package_areas": [
+    "area-a",
+    "area-b"
+  ],
+  "package_count": 2,
+  "package_dependencies": {
+    "packages": [
+      {
+        "dependencies": [
+          {
+            "name": "serde",
+            "package_manager": "cargo",
+            "targeted_version": "1"
+          }
+        ],
+        "depends_on": [],
+        "dev_dependencies": [],
+        "name": "alpha",
+        "used_by": []
+      },
+      {
+        "dependencies": [
+          {
+            "name": "serde",
+            "package_manager": "cargo",
+            "targeted_version": "1"
+          }
+        ],
+        "depends_on": [],
+        "dev_dependencies": [],
+        "name": "beta",
+        "used_by": []
+      }
+    ]
+  },
+  "package_manager": "cargo",
+  "packages": [
+    "alpha",
+    "beta"
+  ],
+  "staged": {
+    "documentation": [],
+    "files": [
+      "area-b/beta/src/lib.rs"
+    ],
+    "package_areas": [
+      "area-b"
+    ],
+    "packages": [
+      "beta"
+    ],
+    "source_code": [
+      "area-b/beta/src/lib.rs"
+    ]
+  },
+  "structure": {
+    "is_monorepo": true,
+    "monorepo_layers": [
+      {
+        "authority": "cargo-workspace",
+        "orchestrators": [],
+        "packages": [
+          "area-a/alpha",
+          "area-b/beta"
+        ],
+        "provenance": "globbed",
+        "root": "[BASE]",
+        "root_is_package": false
+      }
+    ],
+    "monorepo_standards": [
+      {
+        "binary": {
+          "name": "cargo",
+          "path": "/Users/ken/.cargo/bin/cargo",
+          "satisfies_min_version": null,
+          "source": "path",
+          "version": null
+        },
+        "confidence": "marker-confirmed",
+        "matched_markers": [
+          "[BASE]/Cargo.toml"
+        ],
+        "root": "[BASE]",
+        "standard": "cargo-workspace"
+      }
+    ]
+  },
+  "test_runner": "cargo test",
+  "unstaged": {
+    "documentation": [],
+    "files": [
+      "area-a/alpha/src/lib.rs"
+    ],
+    "package_areas": [
+      "area-a"
+    ],
+    "packages": [
+      "alpha"
+    ],
+    "source_code": [
+      "area-a/alpha/src/lib.rs"
+    ]
+  },
+  "untracked": {
+    "documentation": [
+      "docs/new.md"
+    ],
+    "files": [
+      "docs/new.md"
+    ],
+    "package_areas": [],
+    "packages": [],
+    "source_code": []
+  },
+  "version": "0.3.1",
+  "worktrees": [
+    {
+      "branch": "main",
+      "current": false,
+      "detached": false
+    }
+  ]
+}

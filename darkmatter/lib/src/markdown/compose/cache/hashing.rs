@@ -128,88 +128,45 @@ pub(crate) fn context_hash(ctx: &ComposeContext) -> u64 {
     xx_hash(&parts.join("\0"))
 }
 
+/// Precomputed per-transclusion-phase state identity.
+///
+/// [`effective_state_hash`] and [`context_hash`] depend only on the phase-wide
+/// [`EffectiveState`], which is identical for every directive resolved in one
+/// transclusion phase. Capturing the pair once and threading the value avoids
+/// re-canonicalizing the full state and context maps for each `::file`
+/// directive's cache key (Finding 35.1).
+#[derive(Clone, Copy)]
+pub(crate) struct PhaseStateIdentity {
+    pub state_hash: u64,
+    pub context_hash: u64,
+}
+
+impl PhaseStateIdentity {
+    /// Captures the effective-state and context hashes for a transclusion phase.
+    ///
+    /// The result equals [`effective_state_hash`]`(state)` and
+    /// [`context_hash`]`(state.context())` respectively, so hoisting it out of
+    /// the per-directive path preserves every cache key byte-for-byte.
+    pub(crate) fn capture(state: &EffectiveState) -> Self {
+        Self {
+            state_hash: effective_state_hash(state),
+            context_hash: context_hash(state.context()),
+        }
+    }
+}
+
 /// Hash of compose options that affect output.
 ///
 /// Only includes fields that change the composed result. Internal
 /// bookkeeping fields (approval handler, policy root, etc.) are excluded.
+///
+/// Delegates to [`ComposeOptions::compose_cache_fingerprint`], the compose-cache
+/// product of the single exhaustive options field-classification authority
+/// (`compose/context/options.rs`). The reference-graph options identity is the
+/// other product of that same classification, so cache and graph identity share
+/// one field inventory.
 pub(crate) fn options_hash(options: &ComposeOptions) -> u64 {
-    let mut parts = Vec::new();
-
-    // Operation set
-    let ops: Vec<String> = options
-        .enabled_operations
-        .iter()
-        .map(|op| format!("{:?}", op))
-        .collect();
-    parts.push(format!("ops={}", ops.join(",")));
-
-    parts.push(format!("fail_fast={}", options.fail_fast));
-    parts.push(format!("max_depth={}", options.max_transclusion_depth));
-    parts.push(format!(
-        "allow_remote={}",
-        options.allow_remote_transclusion
-    ));
-    parts.push(format!("allow_local_md={}", options.allow_local_markdown));
-    parts.push(format!("allow_local_code={}", options.allow_local_code));
-    parts.push(format!(
-        "code_fallback_lang={}",
-        options.code_fallback_language
-    ));
-    parts.push(format!(
-        "ignore_invalid={:?}",
-        options.ignore_invalid_references
-    ));
-    parts.push(format!("resolve_repo_root={}", options.resolve_repo_root));
-
-    if !options.magic_paths.is_empty() {
-        let paths: Vec<String> = options
-            .magic_paths
-            .iter()
-            .map(|(p, pos)| format!("{}:{:?}", p.display(), pos))
-            .collect();
-        parts.push(format!("magic_paths={}", paths.join(",")));
-    }
-
-    parts.push(format!("list_spacing={:?}", options.list_spacing));
-    parts.push(format!("indent_size={}", options.indent_size));
-    parts.push(format!(
-        "replace_parent_wins={}",
-        options.replace_parent_wins
-    ));
-
-    if let Some(ref one_off) = options.one_off_replace {
-        let canonical = canonical_json_sorted(&Value::Object(one_off.clone()));
-        parts.push(format!("one_off_replace={}", canonical));
-    }
-
-    if let Some(ref ext) = options.external_state {
-        let canonical = canonical_json_sorted(ext);
-        parts.push(format!("external_state={}", canonical));
-    }
-
-    if let Some(ref overrides) = options.set_overrides {
-        let canonical = canonical_json_sorted(overrides);
-        parts.push(format!("set_overrides={}", canonical));
-    }
-
-    if let Some(ref baseline) = options.baseline_schema {
-        let json = crate::markdown::schemas::to_json_schema(baseline)
-            .unwrap_or_else(|_| serde_json::json!({"baseline_schema_error": true}));
-        let canonical = canonical_json_sorted(&json);
-        parts.push(format!("baseline_schema={}", canonical));
-    }
-    parts.push(format!("trigger_schemas={}", options.trigger_schemas));
-
-    // The launch-area anchor changes read-side file resolution (file_exists,
-    // frontmatter, file schema validation), so distinct anchors must not share
-    // a cache entry. A `Some` discriminant keeps `None` distinct from
-    // `Some("")`.
-    match options.file_ref_fallback_dir {
-        Some(ref dir) => parts.push(format!("file_ref_fallback_dir=Some:{}", dir.display())),
-        None => parts.push("file_ref_fallback_dir=None".to_string()),
-    }
-
-    xx_hash(&parts.join("\0"))
+    options.compose_cache_fingerprint()
 }
 
 /// Combines the base options hash with a directive's set-overlay hash.
@@ -686,6 +643,95 @@ mod tests {
         assert_ne!(options_hash(&base), options_hash(&with_a));
         assert_ne!(options_hash(&base), options_hash(&with_b));
         assert_ne!(options_hash(&with_a), options_hash(&with_b));
+    }
+
+    /// The compose-cache fingerprint migrated off the historical `Debug`/
+    /// string-join encoding onto the typed, length-delimited encoder under a
+    /// new cache-key domain (perf-followup Phase 4 / AD-B Checkpoint 4). This
+    /// freezes the pre-migration default value so a regression that silently
+    /// restored value-compatibility — which would let a stale persistent entry
+    /// keyed under the old encoding be read back — fails loudly.
+    ///
+    /// The compose-cache fingerprint excludes the runtime context (that is a
+    /// separate cache dimension), so `ComposeOptions::new()` is deterministic
+    /// here regardless of when it is captured — the frozen constant is stable.
+    #[test]
+    fn options_hash_not_value_compatible_with_pre_migration_encoding() {
+        // xxHash of the historical `cache_parts.join("\0")` for default options,
+        // captured on the immediately-preceding commit.
+        const LEGACY_DEFAULT_OPTIONS_HASH: u64 = 0x60a6_53c1_5cd5_b9d1;
+        assert_ne!(
+            options_hash(&ComposeOptions::new()),
+            LEGACY_DEFAULT_OPTIONS_HASH,
+            "the new cache domain must not reproduce the legacy string-join hash, \
+             or a persistent entry keyed under the old encoding could be read back"
+        );
+        // Determinism guard: the value is context-independent and stable.
+        assert_eq!(
+            options_hash(&ComposeOptions::new()),
+            options_hash(&opts()),
+        );
+    }
+
+    /// The typed encoder distinguishes `None` from a present-but-empty value:
+    /// an absent `external_state` and a `Some(<empty object>)` must not share a
+    /// cache key (they are semantically distinct compose inputs).
+    #[test]
+    fn options_hash_distinguishes_none_from_empty_value() {
+        let absent = opts();
+        let empty_state = opts().with_external_state(serde_json::json!({}));
+        let empty_overrides = opts().with_set_overrides(serde_json::json!({}));
+        assert_ne!(options_hash(&absent), options_hash(&empty_state));
+        assert_ne!(options_hash(&absent), options_hash(&empty_overrides));
+        // And the two distinct empty-valued fields do not collide with each other.
+        assert_ne!(options_hash(&empty_state), options_hash(&empty_overrides));
+    }
+
+    /// The length-prefixed encoding keeps `magic_paths` element boundaries: a
+    /// single path spelled with the historical `,` separator must not hash the
+    /// same as two separate paths. The old comma-join collapsed both.
+    #[test]
+    fn options_hash_magic_path_element_boundaries_are_injective() {
+        let merged = opts().with_magic_path("/a,/b", biscuit_file::PathPosition::Start);
+        let split = opts()
+            .with_magic_path("/a", biscuit_file::PathPosition::Start)
+            .with_magic_path("/b", biscuit_file::PathPosition::Start);
+        assert_ne!(options_hash(&merged), options_hash(&split));
+    }
+
+    /// 35.1: hoisting the state/context hashes to once-per-phase must not
+    /// change the values used per directive. `PhaseStateIdentity::capture`
+    /// must equal the two functions it replaces, for both a non-trivial
+    /// frontmatter state and the empty state.
+    #[test]
+    fn phase_state_identity_matches_underlying_hashes() {
+        use crate::markdown::compose::EffectiveStateBuilder;
+        use std::collections::HashMap;
+
+        let ctx = ComposeContext::capture_for_content(Path::new("."), "");
+
+        // Non-trivial frontmatter so the state hash is not the empty-map hash.
+        let mut fm: HashMap<String, Value> = HashMap::new();
+        fm.insert("title".into(), Value::from("Doc"));
+        fm.insert("count".into(), Value::from(3));
+        let state = EffectiveStateBuilder::new()
+            .with_frontmatter(fm)
+            .with_context(ctx.clone())
+            .build()
+            .unwrap();
+
+        let identity = PhaseStateIdentity::capture(&state);
+        assert_eq!(identity.state_hash, effective_state_hash(&state));
+        assert_eq!(identity.context_hash, context_hash(state.context()));
+
+        // Empty state path.
+        let empty = EffectiveStateBuilder::new()
+            .with_context(ctx)
+            .build()
+            .unwrap();
+        let empty_identity = PhaseStateIdentity::capture(&empty);
+        assert_eq!(empty_identity.state_hash, effective_state_hash(&empty));
+        assert_eq!(empty_identity.context_hash, context_hash(empty.context()));
     }
 
     #[test]

@@ -17,13 +17,37 @@
 //! recognizer table and union algorithm this implements.
 
 use std::collections::HashSet;
+use std::sync::{Arc, LazyLock};
 
 use jsonschema::Validator;
 use serde_json::{Map, Value};
 
-use super::format::{DARKMATTER_JSON_FORMAT, DARKMATTER_YAML_FORMAT};
+use super::format::{
+    DARKMATTER_JSON_FORMAT, DARKMATTER_SCHEMA_KEYWORD, DARKMATTER_TYPE_DEFINITION_KEYWORD,
+    DARKMATTER_YAML_FORMAT,
+};
 use super::simplified::convert::{BOOLISH_VALUES, NUMBERLIKE_PATTERN};
-use super::validate::{self, build_validator, error_top_level_key};
+use super::validate::{self, ValidatorCache, error_top_level_key};
+
+/// Process-wide cache of the throwaway per-arm validators coercion compiles when
+/// probing which union arm a value belongs to (F6). Compiling a `jsonschema`
+/// `Validator` is milliseconds of work, and a single compose re-probes the same
+/// arm schemas repeatedly (once per root-union commit, once per property-union
+/// property, across every re-validation pass). These validators are pure
+/// structural type checks built with no file-reference anchors — exactly the
+/// `build_validator(_, None, None)` shape — so a cache keyed on the arm schema
+/// JSON alone (via [`ValidatorCache`], whose default fallback is `None`) returns
+/// a byte-identical validator on a hit. It is deliberately separate from the
+/// effective-schema validator cache so the many small arm schemas do not churn
+/// that cache's LRU budget.
+static COERCION_VALIDATOR_CACHE: LazyLock<ValidatorCache> = LazyLock::new(ValidatorCache::new);
+
+/// Returns a cached validator for `schema`, compiled with no file-reference
+/// anchors (the coercion probe shape). Equivalent to
+/// `build_validator(schema, None, None)` on a cache miss.
+fn coercion_validator(schema: &Value) -> Option<Arc<Validator>> {
+    COERCION_VALIDATOR_CACHE.validator_for(schema, None).ok()
+}
 
 /// The conversion a recognized property schema asks for.
 ///
@@ -133,6 +157,12 @@ pub fn coercion_target(property_schema: &Value) -> Option<CoercionTarget> {
     }
 
     let obj = property_schema.as_object()?;
+
+    if obj.contains_key(DARKMATTER_TYPE_DEFINITION_KEYWORD)
+        || obj.contains_key(DARKMATTER_SCHEMA_KEYWORD)
+    {
+        return None;
+    }
 
     // A `literal(x)` fragment is a bare `{"const": <value>}` with no `type`
     // key. A non-string const reuses the scalar conversions with an equality
@@ -310,7 +340,7 @@ fn coerce_root_union(
         let wrapped = validate::wrap_arm_as_root_schema(arm);
         // A schema that fails to build cannot be a valid arm; skip it. The
         // surrounding validator already surfaces build failures elsewhere.
-        let Ok(validator) = build_validator(&wrapped, None, None) else {
+        let Some(validator) = coercion_validator(&wrapped) else {
             continue;
         };
         if arm_accepts(&validator, &candidate, shell_pending) {
@@ -433,7 +463,7 @@ fn coerce_property_union(arms: &[Value], value: &Value) -> Option<Value> {
             Some(target) => coerce_value(&target, value).unwrap_or_else(|| value.clone()),
             None => value.clone(),
         };
-        let Ok(validator) = build_validator(arm, None, None) else {
+        let Some(validator) = coercion_validator(arm) else {
             continue;
         };
         if validator.is_valid(&candidate) {
@@ -2012,5 +2042,24 @@ mod tests {
         assert!(outcome.value["frontmatter"].is_string());
         // Non-mutating: the original instance still holds the native mapping.
         assert_eq!(instance, json!({ "frontmatter": { "title": "Foo" } }));
+    }
+
+    #[test]
+    fn semantic_keyword_fragments_are_explicit_no_ops() {
+        for keyword in [
+            "x-darkmatter-type-definition",
+            "x-darkmatter-schema",
+        ] {
+            let mut scalar = serde_json::Map::new();
+            scalar.insert("type".into(), json!(["string", "object", "array"]));
+            scalar.insert(keyword.into(), Value::Bool(true));
+            let scalar = Value::Object(scalar);
+            assert_eq!(coercion_target(&scalar), None);
+
+            let array = json!({ "type": "array", "items": scalar });
+            assert_eq!(coercion_target(&array), None);
+            let instance = json!(["string", { "title": "string(required)" }]);
+            assert_eq!(coerce_value_against_schema(&array, &instance), instance);
+        }
     }
 }

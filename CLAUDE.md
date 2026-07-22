@@ -31,6 +31,22 @@ Root `justfile` exposes `just test|lint|build|install|doctest`, iterating a **cu
 
 Test placement: see `claudine` skill `architecture.md` → Test Placement.
 
+Verification scope must be established before running gates:
+
+- Use GitNexus impact analysis for changed symbols and `sniff` package/package-area
+  discovery to record the affected packages, package areas, and downstream
+  consumers.
+- Run build, test, and lint gates only for that recorded scope. Prefer each
+  affected package area's `just build`, `just test`, and `just lint` recipes;
+  use exact package selectors when a narrower supported recipe is sufficient.
+- Public type or enum changes must include downstream packages identified by
+  impact analysis; do not substitute the entire workspace for dependency
+  analysis.
+- Never use `cargo build --workspace`, `cargo check --workspace`, a bare root
+  `cargo build`/`cargo check`/`cargo test`, or unscoped root `just` lifecycle
+  recipes as a routine final gate. A workspace-wide run is reserved for an
+  explicitly requested release/CI aggregation task with a documented reason.
+
 ## Formatting
 
 `main` branch is the formatting authority.
@@ -121,7 +137,7 @@ Update alongside code changes:
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **rusty-biscuit** (132587 symbols, 263206 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **rusty-biscuit** (133894 symbols, 265810 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 

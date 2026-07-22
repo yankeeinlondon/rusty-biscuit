@@ -26,7 +26,7 @@ use tracing::{info, instrument, trace};
 
 impl Markdown {
     /// Internal pipeline runner.
-    pub(crate) fn run_compose_pipeline(&mut self, options: ComposeOptions) -> MarkdownResult<ComposeReport> {
+    pub(crate) fn run_compose_pipeline(&mut self, mut options: ComposeOptions) -> MarkdownResult<ComposeReport> {
         // Resolve persistent cache root if configured
         let persistent_root = options.cache_root.as_ref().map(|root| {
             cache::FileStore::resolve_cache_root(Some(root), options.cache_namespace.as_deref())
@@ -36,6 +36,7 @@ impl Markdown {
         // walk and this pass fetch each URL once); otherwise build one whose
         // persistent store is shared with the local compose artifact cache.
         let remote_fetch = options.remote_fetch_runtime();
+        options.remote_fetch = Some(remote_fetch.clone());
 
         let mut runtime = shell_expansion::types::PipelineRuntime::with_remote_fetch(
             options.max_transclusion_depth,
@@ -210,9 +211,15 @@ impl Markdown {
             // `ComposeOptions::defer_shell_pending_schema_problems` so a
             // still-literal `$(...)` value is deferred rather than reported as a
             // final violation here.
+            // Trigger-schema registry shared across both schema-validation
+            // passes: the first pass (here) scans the `schemas/` ancestry from
+            // disk; the post-shell pass below reuses that registry instead of
+            // re-walking it (F8). Matching is re-evaluated against the current
+            // frontmatter in each pass regardless.
+            let mut trigger_registry = None;
             {
                 let sv_start = perf.is_enabled().then(std::time::Instant::now);
-                schema_validation::run(self, &options)?;
+                schema_validation::run_with_registry(self, &options, &mut trigger_registry)?;
                 if let Some(start) = sv_start {
                     perf.record(perf::PerfMetricKind::SchemaValidation, start.elapsed());
                 }
@@ -291,7 +298,7 @@ impl Markdown {
                 // snapshot. Re-assemble after shell expansion and interpolation
                 // pass 2 so concrete values can activate or deactivate payloads.
                 if options.trigger_schemas {
-                    schema_validation::run(self, &options)?;
+                    schema_validation::run_with_registry(self, &options, &mut trigger_registry)?;
                 }
             }
 
