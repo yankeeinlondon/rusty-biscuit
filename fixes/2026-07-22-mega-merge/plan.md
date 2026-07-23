@@ -1,5 +1,12 @@
 ---
 total_phases: 8
+source_files_during_phase_4: []
+docs_updated_during_phase_4:
+  - CLAUDE.md
+  - fixes/2026-07-22-mega-merge/plan.md
+  - "~/features/2026-07-20-router-fixture/log.md"
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 source_files_during_phase_3:
   - biscuit-file/cli/tests/cli_tests.rs
   - biscuit-file/lib/src/file_reference/context.rs
@@ -1218,7 +1225,7 @@ documentation:
   - sniff/lib/benches/README.md
   - sniff/reviews/2026-07-13-perf/spec.md
   - sniff/reviews/2026-07-14-filesystem-observation/review.md
-packages:
+packages_during_phase_3:
   - biscuit-file
   - biscuit-file-cli
   - biscuit-terminal
@@ -1232,6 +1239,7 @@ packages:
   - rendezvous-core
   - rendezvous-daemon
   - sniff
+packages: []
 ---
 # Mega Merge Execution Plan
 
@@ -1672,20 +1680,34 @@ green before generated files or skills are finalized.
 
 ## Phase 4 — Generated artifacts and repository hygiene
 
-- [ ] Confirm the purpose and intended final path of the tracked empty
+### Requirement-to-test map recorded before regeneration
+
+| Phase 4 behavior | Concrete observable coverage |
+|---|---|
+| Remove the accidental literal `~/features/2026-07-20-router-fixture/log.md` without weakening the shipped router fixture | Git history/path audit plus `shipped_implement_prompt_runs_real_router_target`, which creates and invokes the intended temporary `features/2026-07-20-router-fixture` path through the shipped router |
+| Provider `data.rs`, catalog, and generated signal tables match their settled inputs | `claudine-gen check`, the generator drift suite, and `just test-gen` |
+| The dispatch inventory is a byte-for-byte census of settled production sources | `dispatch_inventory` compare-mode integration test, its embedded `CLAUDINE_UPDATE_INVENTORY=1` regeneration path, then compare mode again |
+| `CLAUDE.md` and GitNexus counts describe the settled candidate | Canonical `node .gitnexus/run.cjs analyze`, generated-diff classification, and an idempotent second analysis |
+| Lockfile, manifests, shipped schemas/catalogs, symlinks, and local-only settings are coherent | Cargo metadata resolution, shipped schema/corpus guards, explicit tracked-symlink target validation, and Git/path audits for local settings and source-worktree-only files |
+| Every derived artifact is reproducible | A complete second provider/inventory/GitNexus generation pass produces no diff |
+
+- [x] Confirm the purpose and intended final path of the tracked empty
   `~/features/2026-07-20-router-fixture/log.md` path. Keep, move, or delete it
   only from explicit fixture evidence.
-- [ ] Compare generated outputs before regeneration and classify every
+- [x] Compare generated outputs before regeneration and classify every
   difference. Generated files must not smuggle a semantic conflict resolution.
-- [ ] Regenerate provider/catalog outputs once from the settled source, using
+- [x] Regenerate provider/catalog outputs once from the settled source, using
   repository recipes.
-- [ ] Regenerate `CLAUDE.md`/GitNexus counts from the settled candidate rather
+- [x] Regenerate `CLAUDE.md`/GitNexus counts from the settled candidate rather
   than taking either branch's generated copy.
-- [ ] Confirm no local `.claude/settings.local.json` or source-worktree-only
+- [x] Confirm no local `.claude/settings.local.json` or source-worktree-only
   change entered the candidate.
-- [ ] Review `Cargo.lock`, manifests, generated schemas/catalogs, and symlinks
+- [x] Review `Cargo.lock`, manifests, generated schemas/catalogs, and symlinks
   explicitly.
-- [ ] Re-run the focused tests affected by regeneration and verify a second
+  `Cargo.lock` has no integration diff; Cargo metadata resolves every manifest;
+  generated catalog/schema corpus tests pass. The 44 broken cross-agent skill
+  symlinks are inherited unchanged from `main`; this merge changes no symlink.
+- [x] Re-run the focused tests affected by regeneration and verify a second
   generation is clean (idempotent).
 
 ### Exit gate
