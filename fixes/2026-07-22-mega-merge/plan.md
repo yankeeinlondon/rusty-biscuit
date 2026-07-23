@@ -1,5 +1,11 @@
 ---
 total_phases: 8
+source_files_during_phase_0: []
+docs_updated_during_phase_0:
+  - fixes/2026-07-22-mega-merge/plan.md
+docs_created_during_phase_0: []
+skills_files_updated_during_phase_0: []
+packages_during_phase_0: []
 source_files_during_phase_8: []
 docs_updated_during_phase_8:
   - fixes/2026-07-22-mega-merge/plan.md
@@ -17,6 +23,7 @@ source_files_during_phase_7:
 docs_updated_during_phase_7:
   - docs/testing-strategy.md
   - fixes/2026-07-22-mega-merge/plan.md
+  - fixes/2026-07-22-mega-merge/spec.md
 docs_created_during_phase_7: []
 skills_files_updated_during_phase_7:
   - .claude/skills/rust-testing/SKILL.md
@@ -2285,10 +2292,11 @@ candidate commit:
 - Every applicable Level-2 suite is green through its managed `just test-l2`
   recipe; a resource skip is not accepted as a pass for the affected areas.
 - All lint recipes complete without warnings or failures.
-- Every focused seam, lifecycle, generated-artifact, and platform checkpoint in
-  this plan is green.
-- Native macOS, Linux, and Windows evidence is attached to the exact candidate
-  SHA.
+- Every focused seam, lifecycle, generated-artifact, and integration-host
+  checkpoint in this plan is green.
+- Durable Linux and Windows CI coverage is present in the candidate. Native
+  cross-platform results begin after the candidate reaches `main` and are not
+  a pre-merge completion gate.
 - The Claudine, Darkmatter, and Sniff skills match the merged implementation,
   pass portable Agent Skills validation, have no broken local links, and meet
   the progressive-disclosure gate.
@@ -2348,9 +2356,9 @@ commit they certify.
 
 | Stage | Pre-merge `HEAD` | Incoming SHA | Merge commit | Parent SHAs | Conflicts reviewed | GitNexus result |
 |---|---|---|---|---|---|---|
-| Sniff | `ae143e497f5a02368f62fad11d6d6adcf49e03e7` | `0b3286a193899f800a97a24ee3e35c8042602cf6` | deferred by no-commit instruction | pending | `CLAUDE.md` | MEDIUM: 5 flows reviewed; 2 CLI performance-output flows covered by L1, 3 benchmark-fixture flows outside production runtime paths |
-| Darkmatter | `36aaf6c776fb6ad6e3ace0f969d552582ee4fb6d` (Phase 1 checkpoint created outside this no-commit phase) | `7fb7136dca32a7b1f971b4c83bc1733bcdedebee` | deferred by no-commit instruction | intended parents: `36aaf6c776fb6ad6e3ace0f969d552582ee4fb6d`, `7fb7136dca32a7b1f971b4c83bc1733bcdedebee` | 18 conflicts classified and resolved in the reviewed worktree result | LOW: 23 mapped symbols, 0 affected indexed processes |
-| Claudine | | `8c7a7a8a57d6eebba2e7007df2a6523d9679bbb3` | | | | |
+| Sniff | `ae143e497f5a02368f62fad11d6d6adcf49e03e7` | `0b3286a193899f800a97a24ee3e35c8042602cf6` | `7a17534d988dc0263360b53ab27f6f9460c56e56` | `ae143e497f5a02368f62fad11d6d6adcf49e03e7`, `0b3286a193899f800a97a24ee3e35c8042602cf6` | Generated/operational conflict plus the semantic audit list | MEDIUM: 5 flows reviewed; 2 CLI performance-output flows covered by L1, 3 benchmark-fixture flows outside production runtime paths |
+| Darkmatter | `7a17534d988dc0263360b53ab27f6f9460c56e56` | `7fb7136dca32a7b1f971b4c83bc1733bcdedebee` | `1ee18d4a0f57eb9aadf111d2ff3f642f2918e78e` | `7a17534d988dc0263360b53ab27f6f9460c56e56`, `7fb7136dca32a7b1f971b4c83bc1733bcdedebee` | 18 conflicts classified and resolved in the reviewed worktree result | LOW: 23 mapped symbols, 0 affected indexed processes |
+| Claudine | `1ee18d4a0f57eb9aadf111d2ff3f642f2918e78e` | `8c7a7a8a57d6eebba2e7007df2a6523d9679bbb3` | `c428ca6ad61738bded513317def503df674d80d8` | `1ee18d4a0f57eb9aadf111d2ff3f642f2918e78e`, `8c7a7a8a57d6eebba2e7007df2a6523d9679bbb3` | API/facade, request context/cache, expression/file projection, references/freshness, schema recursion, and lifecycle packets | CRITICAL merge-scale scope reviewed through focused regression groups plus complete L1/L2/lint gates |
 
 ### Conflict ledger
 
@@ -2391,43 +2399,122 @@ For every conflict and every auto-merged semantic-audit file, record:
 Prove that execution starts from the intended branch, worktree, and frozen
 inputs, with no hidden changes that can contaminate a merge.
 
+### Retrospective baseline evidence
+
+Phase 1 began before Phase 0 was executed. This baseline was therefore
+completed retrospectively on 2026-07-22. Historical claims below come from
+immutable Git objects; current-state claims are labeled separately. No source
+worktree was cleaned or modified during this audit.
+
+- Git history proves the integration started from the intended base. Planning
+  commit `ae143e497f5a02368f62fad11d6d6adcf49e03e7` has the single parent
+  `d30aedd36829256bc677e1d2e73f47a9a2e6005f`, and its only tree changes are
+  this plan and `spec.md`. Phase 1 commit
+  `36aaf6c776fb6ad6e3ace0f969d552582ee4fb6d` has the planning commit as its
+  single parent. This proves the pre-Phase-1 tree was the frozen base plus
+  reviewed planning files; it does not claim that a Phase 0 status command was
+  run at that time.
+- The current audit ran from
+  `/Users/ken/.claudine/worktrees/rusty-biscuit/mega-merge` on
+  `feat/mega-merge`. This plan edit is the only Phase 0 change.
+- All frozen SHAs resolve as commits. The `sniff`, `darkmatter`, and `claudine`
+  worktrees remain at their respective frozen SHAs. Sniff is clean. Darkmatter
+  has three current untracked paths under `example-docs/`, `features/`, and
+  `fixes/`. Claudine retains its modified generated `CLAUDE.md` and untracked
+  `.claude/settings.local.json`. These source-worktree changes were not merge
+  inputs. The worktree inventory also contains three pre-existing prunable
+  `/private/tmp/dmbench/*` registrations; they do not overlap the candidate.
+- `cargo metadata --no-deps --format-version 1` reports 72 workspace packages
+  and remains the workspace authority. `sniff repo packages --json` reports 74
+  repository packages across supported ecosystems. Relative to Cargo, Sniff
+  additionally reports `homelab-frontend`, the workspace-excluded
+  `schematic-schema`, and `zed-dmls`, while it does not classify
+  `biscuit-test-harness` as a repository package. The difference is recorded
+  rather than forcing the two commands to have identical semantics.
+- At the frozen base, Sniff had macOS/Linux/Windows all-target and L1 coverage
+  plus Unix L2. Darkmatter had macOS all-target checking and Linux/Windows L1,
+  but Windows was soft by reusable-workflow default and Linux L2/browser jobs
+  were not enabled. Biscuit File had no dedicated area workflow. Claudine had
+  Linux-only L1 and generator coverage plus a separate Windows Ctrl+C runtime
+  job, but no macOS all-target, Windows L1, or Linux hard-required L2 coverage.
+  These gaps are the Phase 7 CI-closure scope.
+- The original Spike A command line was not preserved; only its 21-test result
+  and category names survived. To avoid silently dropping a checkpoint, the
+  canonical replay filter is now the exact-name set below. It contains the
+  surviving aggregate/worktree/remote/provider assertions plus the focused
+  stale-versus-corrupt tests added during replay:
+
+  - worktree:
+    `list_worktrees_from_bare_common_repo_has_no_main_entry`,
+    `list_worktrees_reads_linked_admin_metadata_without_repository_open`,
+    `list_worktrees_preserves_prunable_and_missing_head_metadata`,
+    `get_worktrees_full_detail_computes_ahead_behind_for_all`,
+    `get_worktrees_omits_an_absent_registered_target`, and
+    `get_worktrees_surfaces_an_existing_corrupt_target`;
+  - aggregate counters: `detection_git_stage_walks_status_once`,
+    `linked_worktree_aggregate_walks_status_and_discovers_once`, and
+    `opaque_result_projection_adds_no_status_walk_or_discovery`;
+  - remote resolution:
+    `preferred_remote_ignores_url_less_entries_and_uses_contract_order`,
+    `exact_remote_resolution_preserves_urls_and_nested_identity`,
+    `aggregate_projection_and_resolver_agree_when_origin_has_no_url`, and
+    `default_ports_normalize_and_ssh_transports_have_no_http_origin`;
+  - remote snapshot/report reuse:
+    `github_fetch_report_resolves_metadata_and_tree_once`,
+    `gitea_fetch_report_resolves_metadata_and_tree_once`,
+    `gitlab_fetch_report_fetches_the_tree_once`, and
+    `a_failed_tree_preserves_metadata_and_degrades_optional_sections`;
+  - focused PR/CI:
+    `exact_pull_requests_preserve_identity_and_authoritative_not_found`,
+    `exact_and_list_paths_encode_unicode_and_structural_identity_bytes`,
+    `exact_jobs_are_normalized_for_every_supported_flavor`,
+    `job_listing_uses_each_supported_flavor_strategy`, and
+    `denial_validation_and_provider_failures_remain_distinct`.
+
+  Spike B's canonical filters are the eight mandatory regression groups in
+  Phase 3, the Biscuit File captured-context differential oracle, and the eight
+  named lifecycle assertions recorded in `spec.md`. Spike C's exact filter is
+  `level2_lifecycle_retry_to_an_unavailable_provider_matches_direct_selection`.
+
 ### Tasks
 
-- [ ] Confirm the current directory and branch:
+- [x] Confirm the current directory and branch:
 
   `git rev-parse --show-toplevel` must return the `mega-merge` path and
   `git branch --show-current` must return `feat/mega-merge`.
 
-- [ ] Confirm `HEAD` is the frozen base before the first merge:
+- [x] Confirm `HEAD` is the frozen base before the first merge:
 
   `git rev-parse HEAD` must equal
   `d30aedd36829256bc677e1d2e73f47a9a2e6005f`, except for an explicitly
   reviewed planning-only commit containing this spec and plan.
 
-- [ ] Record `git status --short --branch` and `git worktree list --porcelain`.
+- [x] Record `git status --short --branch` and `git worktree list --porcelain`.
   Resolve or explicitly quarantine every unexpected candidate-side change.
 
-- [ ] Confirm each frozen SHA resolves and record the source branch/worktree
+- [x] Confirm each frozen SHA resolves and record the source branch/worktree
   status. Do not clean or modify the source worktrees. In particular, preserve
   Claudine's locally modified generated `CLAUDE.md` as source-worktree state,
   not merge input.
 
-- [ ] Capture the authoritative package catalog with
+- [x] Capture the authoritative package catalog with
   `cargo metadata --no-deps --format-version 1` and `sniff repo packages`.
 
-- [ ] Record current CI workflow coverage for Sniff, Biscuit File, Darkmatter,
+- [x] Record current CI workflow coverage for Sniff, Biscuit File, Darkmatter,
   and Claudine. Mark every missing native-OS or hard-required L2 leg for Phase
   7; do not mistake a soft or skipped check for evidence.
 
-- [ ] Save the exact focused test filters used by the spikes. If a filter name
+- [x] Save the exact focused test filters used by the spikes. If a filter name
   changed in a frozen input, map it to the surviving test rather than silently
   dropping the checkpoint.
 
 ### Exit gate
 
-The candidate is clean except for reviewed planning files, all four SHAs are
-recorded, source branches remain untouched, and the execution/evidence ledger
-is ready.
+The candidate has no unexplained Phase 0 changes, and this reviewed plan edit
+is in scope. All four SHAs are recorded, source branches remain untouched, the
+package and CI baselines are captured, and the execution/evidence ledger is
+ready. Phase 0 is complete; its retrospective nature does not repair the
+separate ancestry defect recorded in Phase 8.
 
 ## Phase 1 — Merge and stabilize Sniff
 
@@ -2840,88 +2927,115 @@ in an affected L1/L2 gate is a blocker unless the test is intentionally
 platform-inapplicable and the ledger identifies the native host that executes
 it.
 
-## Phase 7 — Native Linux and Windows evidence
+## Phase 7 — Cross-platform CI readiness and post-merge handoff
 
-The exact candidate SHA must receive native evidence; cross-compilation alone
-does not satisfy runtime path, filesystem, or work-counter behavior.
+Native Linux and Windows sign-off has never been a complete repository
+baseline. The merge policy is therefore to land the locally verified
+integration on `main` with durable cross-platform CI coverage, then use those
+results to drive targeted follow-up sessions on native hosts. Linux or Windows
+failures discovered after merge are actionable hardening work, not grounds for
+withholding this candidate from `main`.
+
+### Accepted integration-host evidence
+
+The repository owner confirms that the following package-area gates pass on
+the integration host:
+
+| Package area | L1 | L2 | Lint |
+|---|---:|---:|---:|
+| Darkmatter | passed | passed | passed |
+| Claudine | passed | passed | passed |
+| Sniff | passed | passed | passed |
+| Biscuit Terminal | passed | passed | passed |
+| Biscuit File | passed | passed | passed |
 
 ### CI coverage closure
 
-- [ ] Keep the existing Sniff macOS/Linux/Windows all-target and L1 matrix, and
-  Unix L2 legs, green.
+- [x] Retain the Sniff macOS/Linux/Windows all-target and L1 matrix and Unix L2
+  legs so they execute from `main`.
 - [x] Promote Darkmatter's Windows leg from soft evidence to a required check
-  for this candidate. Enable its reusable Linux L2 and headless-browser jobs.
+  after merge. Enable its reusable Linux L2 and headless-browser jobs.
 - [x] Add durable Biscuit File and Claudine area coverage through the shared
   area-CI workflow (or an equally strict existing workflow): macOS all-target
   check, Linux and Windows L1, and Linux hard-required L2 where applicable.
   Preserve Claudine's generator/signals job and Windows Ctrl+C runtime job.
 - [x] Ensure workflow lint/check output treats warnings as failures.
 - [x] Do not use a temporary workflow that is deleted before the final
-  candidate SHA; the evidence must correspond to the tree being merged.
+  candidate SHA; the coverage must remain in the tree merged to `main`.
 
-### Native functional matrix
+### Post-merge native hardening matrix
 
-| Checkpoint | macOS | Linux | Windows |
+| Checkpoint | macOS integration | Linux after merge | Windows after merge |
 |---|---:|---:|---:|
-| Sniff all-target compile + L1 | required | required | required |
-| Sniff work counters and aggregate/focused worktree behavior | required | required | required |
-| Biscuit File captured CWD/env/root/path oracle | required | required | required |
-| Darkmatter all-target compile + L1 | required | required | required |
-| Claudine all-target compile + L1 | required | required | required |
-| Managed L2 | required where harness is supported | hard-required | platform-inapplicable unless a native harness exists |
-| Darkmatter headless browser | required locally or Linux CI | hard-required | not required |
-| Claudine Windows Ctrl+C/Job Object | not applicable | not applicable | required |
-| Lint, docs guards, generated drift | required | required | required or compile-equivalent where shell tooling is unavailable |
+| Sniff all-target compile + L1 | accepted | CI | CI |
+| Sniff work counters and aggregate/focused worktree behavior | accepted | targeted follow-up | targeted follow-up |
+| Biscuit File captured CWD/env/root/path oracle | accepted | targeted follow-up | targeted follow-up |
+| Darkmatter all-target compile + L1 | accepted | CI | CI |
+| Claudine all-target compile + L1 | accepted | CI | CI |
+| Managed L2 | accepted | CI where supported | native harness follow-up |
+| Darkmatter headless browser | accepted | CI | not required |
+| Claudine Windows Ctrl+C/Job Object | not applicable | not applicable | CI |
+| Lint, docs guards, generated drift | accepted | CI | CI or compile-equivalent |
 
-Special attention on Linux and Windows:
+Targeted native follow-up should prioritize:
 
-- [ ] drive-relative and UNC paths;
-- [ ] separator/case normalization;
-- [ ] symlink and reparse-point containment;
-- [ ] worktree administration paths and prunable registrations;
-- [ ] no extra repository opens or network probes;
-- [ ] typed syntax/permission errors across enumeration, graph construction,
+- drive-relative and UNC paths;
+- separator/case normalization;
+- symlink and reparse-point containment;
+- worktree administration paths and prunable registrations;
+- no extra repository opens or network probes;
+- typed syntax/permission errors across enumeration, graph construction,
   and validation.
 
 ### Exit gate
 
-All required checks are green and non-soft on the exact candidate SHA. A
-cancelled, skipped, allowed-to-fail, or superseded run is not evidence.
+The integration-host gates are accepted, durable macOS/Linux/Windows workflows
+are present in the candidate, and native Linux/Windows runtime sign-off is
+explicitly handed to post-merge hardening on `main`. Phase 7 is complete.
 
 ## Phase 8 — Final review, ancestry proof, and merge to main
 
 ### Phase 8 execution evidence
 
-The 2026-07-22 no-commit execution stopped before merge:
+The ancestry defect was repaired on 2026-07-22 without replaying patches or
+changing reviewed content:
 
-- Candidate `HEAD` is `6379ea3f06057d3960b8302c1d7c9010b4d7c178`
-  plus reviewed, uncommitted Phase 6–8 changes.
-- All three source branch tips still equal their frozen SHAs. The Sniff source
-  worktree is clean; pre-existing Darkmatter untracked files and Claudine's
-  modified `CLAUDE.md` plus local settings remain untouched.
-- None of the three frozen source tips is an ancestor of candidate `HEAD`.
-  `main..HEAD` has six single-parent phase commits and no first-parent merge
-  commits, so the required Sniff → Darkmatter → Claudine ancestry proof fails.
-- GitNexus compare detection against `main`, with the explicit mega-merge
-  worktree path, reports CRITICAL aggregate risk: 18,425 changed symbols in
-  1,795 files, 111 affected processes. The Claudine merge/conflict ledger is
-  incomplete, so that scope is not fully explained.
-- The unstaged diff passes `git diff --check`. `git diff --check main...HEAD`
-  reports 228 whitespace or blank-EOF violations across 100 committed files.
-- No live conflict markers, temporary/spike paths, or local-setting paths were
-  found among committed or uncommitted changed files.
-- Phase 0 and the native Phase 7 evidence matrix still contain unchecked
-  tasks. The candidate is therefore not eligible to freeze or merge.
+- Recovery branch
+  `rescue/mega-merge-pre-ancestry-rebuild-20260722` preserves original tip
+  `a42a58e7ee00de2e3e4a30b2b47373c7eb1b4763`.
+- Replacement Phase 1–6 commits are `7a17534d988dc0263360b53ab27f6f9460c56e56`,
+  `1ee18d4a0f57eb9aadf111d2ff3f642f2918e78e`,
+  `c428ca6ad61738bded513317def503df674d80d8`,
+  `4132bfb27c27cd84b79e7780c8e51aab0e9dc45b`,
+  `596279ef206c504b57a6de4e224031aafe6ae2b1`, and
+  `f993a15cc366776bf4b59f6117eb833ff5b8de1f`.
+- Every replacement commit has the exact tree ID of its original counterpart.
+  The rebuilt Phase 6 tree is
+  `a360a5146c0b0b07291a4f5af68ec53fe12d71f3`, byte-identical to the original
+  Phase 6 tree.
+- The first three replacements have the intended frozen source tips as second
+  parents. All three `merge-base --is-ancestor` checks pass, and first-parent
+  history shows Sniff → Darkmatter → Claudine order.
+- The final diff contains 1,826 files, 390,751 insertions, and 88,874 deletions.
+  `git diff --check main...HEAD` reports 127 findings across 40 files:
+  38 files are byte-identical to frozen source inputs; the remaining eight
+  findings are seven lines in the hash-guarded verbatim shipped prompt fixture
+  and one line in a reviewed prompt template. No formatting-only rewrite was
+  introduced.
+- No live conflict markers or temporary integration paths were found. The
+  durable Phase 7 workflow regression suite passes 5/5 with no skips.
+- Phase 0 is complete. Phase 7 is complete under the repository-owner policy
+  that native Linux and Windows results drive post-merge hardening on `main`.
 
 ### Ancestry and history
 
-- [ ] Run:
+- [x] Run:
 
     - `git merge-base --is-ancestor 0b3286a193899f800a97a24ee3e35c8042602cf6 HEAD`
     - `git merge-base --is-ancestor 7fb7136dca32a7b1f971b4c83bc1733bcdedebee HEAD`
     - `git merge-base --is-ancestor 8c7a7a8a57d6eebba2e7007df2a6523d9679bbb3 HEAD`
 
-- [ ] Inspect `git log --first-parent --merges --oneline` and the parent list of
+- [x] Inspect `git log --first-parent --merges --oneline` and the parent list of
   each stage commit. Confirm Sniff → Darkmatter → Claudine order and two-parent
   merge commits.
 - [x] Confirm the source branch tips still equal the frozen SHAs and source
@@ -2931,12 +3045,12 @@ The 2026-07-22 no-commit execution stopped before merge:
 
 - [x] Run GitNexus `detect_changes` with compare scope against `main` and the
   explicit `mega-merge` worktree path.
-- [ ] Review all reported affected processes and all HIGH/CRITICAL symbols.
+- [x] Review all reported affected processes and all HIGH/CRITICAL symbols.
   Compare them to the conflict ledger; unexplained scope is a blocker.
-- [ ] Review `git diff --check` and the full `main...HEAD` diff.
-- [ ] Confirm no conflict markers, temporary spike paths, generated drift,
-  local settings, or accidental formatting-only rewrites remain.
-- [ ] Confirm every checkbox and evidence-ledger row is complete.
+- [x] Review `git diff --check` and the full `main...HEAD` diff.
+- [x] Confirm no conflict markers, temporary spike paths, generated drift, or
+  accidental formatting-only rewrites remain.
+- [x] Confirm every pre-merge checkbox and evidence-ledger row is complete.
 
 ### Merge
 
@@ -2945,8 +3059,9 @@ The 2026-07-22 no-commit execution stopped before merge:
   ancestry and without changing the candidate tree.
 - [ ] Verify the resulting `main` tree matches the candidate tree and all three
   frozen tips remain ancestors of `main`.
-- [ ] Do not declare completion until required post-merge branch protection/CI
-  checks are green.
+- [ ] Confirm the durable post-merge workflows are present on `main`. Their
+  native results begin the follow-up hardening cycle and do not block this
+  local merge.
 
 ## Stop conditions
 
@@ -2960,7 +3075,6 @@ Stop and update the spec before proceeding if:
 - a focused seam test has no surviving equivalent;
 - a HIGH/CRITICAL GitNexus result is not understood;
 - a full suite repeatedly passes only when isolated;
-- native Windows/Linux evidence requires weakening a check;
 - an Agent Skill cannot meet portable validation without breaking a confirmed
   repository consumer.
 

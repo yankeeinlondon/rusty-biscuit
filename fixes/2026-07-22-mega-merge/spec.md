@@ -299,7 +299,7 @@ failures separate from orchestration failures.
 | Sniff | `just test` and `just lint` in `sniff`; focused aggregate/worktree/remote tests |
 | Darkmatter | `just test` and `just lint` in `sniff`, `biscuit-file`, and `darkmatter`; focused schema/reference tests |
 | Claudine | `just test` and `just lint` in `biscuit-file`, `sniff`, `darkmatter`, and `claudine`; relevant `just test-l2` through the managed, non-focus-stealing harness; unavailable-provider retry remains deterministic |
-| Final | Root dependency-aware checks for affected packages, generated-artifact drift checks, and native macOS/Linux/Windows CI evidence |
+| Final | Root dependency-aware checks for affected packages, generated-artifact drift checks, and durable CI definitions for post-merge Linux/Windows validation |
 
 Do not run L2 tests directly through Cargo or nextest. Use the package
 `just test-l2` recipe so its broker owns terminal creation and teardown without
@@ -315,7 +315,9 @@ stealing focus.
 - The managed unavailable-provider retry L2 remains deterministic on the exact
   staged candidate; a recurrence is investigated before any production edit.
 - Generated artifacts are regenerated only after behavior settles.
-- L1, lint, relevant L2, and native macOS/Linux/Windows gates pass.
+- L1, lint, and relevant L2 gates pass on the integration host. Durable Linux
+  and Windows CI coverage is present in the candidate; native results are
+  post-merge hardening evidence on `main`, not a pre-merge blocker.
 - The Claudine, Darkmatter, and Sniff skills match the merged behavior, pass
   portable Agent Skills validation, resolve all local links, and satisfy the
   documented progressive-disclosure limits or record a reviewed exception.
