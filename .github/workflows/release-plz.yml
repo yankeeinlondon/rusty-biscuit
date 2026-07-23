@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
+    types:
+      - closed
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -16,7 +21,7 @@ jobs:
   release-plz-pr:
     name: Create Release PR
     runs-on: ubuntu-latest
-    if: github.repository == 'yankeeinlondon/rusty-biscuit'
+    if: github.event_name == 'push' && github.repository == 'yankeeinlondon/rusty-biscuit'
     concurrency:
       group: release-plz-${{ github.ref }}
       cancel-in-progress: false
@@ -46,11 +51,19 @@ jobs:
   release-plz-release:
     name: Publish Release
     runs-on: ubuntu-latest
-    if: github.repository == 'yankeeinlondon/rusty-biscuit'
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.merged == true &&
+      contains(github.event.pull_request.labels.*.name, 'release') &&
+      github.repository == 'yankeeinlondon/rusty-biscuit'
+    concurrency:
+      group: release-plz-release
+      cancel-in-progress: false
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
 
       - name: Install Rust
