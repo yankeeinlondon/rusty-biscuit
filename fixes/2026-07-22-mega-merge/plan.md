@@ -21,6 +21,7 @@ source_files_during_phase_3:
   - biscuit-test-harness/src/wezterm.rs
   - biscuit-test-harness/src/win_input.rs
   - biscuit-test-harness/src/xdotool.rs
+  - claudine/cli/tests/fixtures/shipped_implement_route/shipped-hashes.json
   - claudine/cli/src/commands/compose/interrupt.rs
   - claudine/cli/src/commands/compose/loop_run.rs
   - claudine/cli/src/commands/compose/mod.rs
@@ -1650,6 +1651,14 @@ Also require:
   Lint, `signals-check`, and `test-gen` passed. Hard-required L2 passed 228/228.
 - The unavailable-provider retry L2 regression passed in the full L2 run and
   in three immediately consecutive focused reruns (four consecutive passes).
+- Recovery verification on 2026-07-22 caught the exact shipped
+  `implement-plan.md` fixture/hash drift before implementation. After syncing
+  only the side-effect-free fixture and its Darkmatter hash, the targeted
+  passive corpus suite passed 3/3 and the real shipped-route L2 test passed
+  1/1 with Level 2 hard-required. Claudine's complete `just test` and
+  `just lint` gates then passed. Final worktree change detection found four
+  changed documentation/artifact files, no affected execution flows, and low
+  risk.
 - GitNexus change detection reported the expected critical merge-scale scope:
   4,304 changed indexed symbols, 98 affected symbols, and 1,204 files relative
   to `main`. Reviewed affected flows center on composition, lifecycle/harness,

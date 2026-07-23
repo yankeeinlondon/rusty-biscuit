@@ -5,13 +5,14 @@ $schema:
     plan: file(eager; required; match(**/*plan*.md)) -> the _plan file_ which is being implemented
     spec: file(eager; match(**/*spec*.md)) -> the _specification file_ which the plan was based on
     pass_icon: string
+    commit_message: string -> if you pass in a git commit message then it will be used as the git message instead of using AI to calcuate it
 description: |-
     Provide either a `plan` or `spec` filepath as a parameter and this
     prompt will detect the number of phases in the plan and then implement
     the project phase by phase.
 plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
 phase: "{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || 1 : null }}"
-area: "{{ ctx.area }}"
+area: "{{ ctx.area ? ctx.area : ctx.is_monorepo ? 'monorepo-root' : 'repo-root' }}"
 pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
 total_phases: "{{ file_exists(plan) ? frontmatter(plan, 'total_phases') || frontmatter(plan, 'phases') || 0 : 0 }}"
 spec: "{{ file_exists(plan) ? file_exists(dirname(plan) + '/spec.md') ? dirname(plan) + '/spec.md'  :  null : null }}"
@@ -21,10 +22,10 @@ spec: "{{ file_exists(plan) ? file_exists(dirname(plan) + '/spec.md') ? dirname(
 #           action: 
 #               - warn: "There was an attempt to implement a phase **<yellow>{{phase}}</yellow>** of the plan which is **too large**. This plan only has **<yellow>{{total_phases}}</yellow>** total phases!"
 start:
-    message: "🎬  starting the implementation of phase **#{{phase}}** of `{{parent_dir(plan)}}` (**area:** {{ctx.area}}, **agent:** {{ctx.agent}}/{{ctx.model}})"
+    message: "🎬  starting the implementation of phase **#{{phase}}** of `{{parent_dir(plan)}}` (**area:** {{area}}, **agent:** {{ctx.agent}}/{{ctx.model}})"
 success: 
-    message: "{{pass_icon}}  phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{parent_dir(plan)}}` successfully completed ({{ctx.area}}, {{ctx.agent}}/{{ctx.model}})"
-    success: "Completed the implementation of {{ link(plan) }} in {{ctx.area}}"
+    message: "{{pass_icon}}  phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{parent_dir(plan)}}` successfully completed ({{area}}, {{ctx.agent}}/{{ctx.model}})"
+    success: "Completed the implementation of <b>phase <yellow>{{phase}}</yellow></b> of the {{link(plan)}} plan"
 blocked:
     message: "💥  phase **{{phase}}** (_of {{total_phases}}_) was **blocked** because it has shell commands which were not approved for execution!"
 failure:
