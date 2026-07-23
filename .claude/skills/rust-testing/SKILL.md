@@ -4,7 +4,7 @@ description: |-
   Monorepo testing guide: L1/L2/L3 taxonomy, canonical just recipes,
   `require_level!` gating, nextest filtersets, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 1acc7c1c76b11142-871864c703979286
+hash: 1acc7c1c76b11142-6a178a04ff761c20
 last_updated: 2026-07-15
 ---
 # Rust Testing — Rusty Biscuit Monorepo
@@ -100,11 +100,18 @@ Before running any final build, test, or lint gate:
    selector when the repository provides a narrower supported recipe.
 4. Report the selected scope and commands with the gate results.
 
-For durable native CI, use `.github/workflows/_area-ci.yml` through a thin
-package-area caller. Integration candidates that require native Windows
-evidence pass `soft-os: '[]'`; enabling `l2` or `browser` makes the Linux
-harness tier hard-required. The shared workflow runs the area's lint/docs
-guards and compiles with warnings denied.
+For durable native CI, register curated package-area policy in
+`.github/ci/areas.json`. The dependency-aware `.github/workflows/ci.yml`
+caller calculates changed workspace packages plus their reverse Cargo
+dependencies, maps them to that policy, and fans the resulting matrix into
+`.github/workflows/_area-ci.yml`. Integration candidates that require native
+Windows evidence set `soft_os` to an empty array; enabling `l2` or `browser`
+makes the Linux harness tier hard-required. The shared workflow runs each
+selected area's lint/docs guards and compiles with warnings denied.
+
+Pull requests generate one LCOV report for the same affected package closure.
+The standalone `coverage.yml` performs one full-workspace pass nightly or on
+manual dispatch; pushes to `main` do not repeat PR coverage.
 
 Do not use `cargo build --workspace`, `cargo check --workspace`, a bare root
 `cargo build`/`cargo check`/`cargo test`, or an unscoped root `just` lifecycle
