@@ -1,7 +1,4 @@
 ---
-$schema:
-    operation: literal(merge-conflict; required)
-    conflicts: file[]
 operation: "merge-conflict"
 conflicts: {{ ctx.merge_conflicts || null }}
 

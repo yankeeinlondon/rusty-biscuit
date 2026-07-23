@@ -627,7 +627,7 @@ second source:
 4. **Stderr-promoted activity and lifecycle.** Claudine opts the
    OpenCode wrapper into the structured stderr stream
    (`--print-logs --log-level INFO`) and classifies INFO log records
-   through [`OpenCodeLogBridge`](../../lib/src/stream/logs/opencode/reasoning.rs).
+   through [`OpenCodeLogBridge`](../../lib/src/stream/logs/opencode/bridge/mod.rs).
    Boot, `service=session` (parent + child), `service=llm` LLM calls,
    `service=session.prompt` step loops and exits, `service=permission`
    evaluations, and `service=default` HTTP responses are promoted to

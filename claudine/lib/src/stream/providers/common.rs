@@ -27,16 +27,34 @@ pub(crate) struct ErrorKeywords {
     pub(crate) kind_buckets: &'static [(SemanticErrorKind, &'static [&'static str])],
     /// Buckets checked against the free-form error message.
     pub(crate) msg_buckets: &'static [(SemanticErrorKind, &'static [&'static str])],
+    /// Exact numeric wire-code → kind mappings (Kimi JSON-RPC codes),
+    /// checked before the kind/message branches when a code is supplied.
+    /// Empty for every provider whose wire protocol carries no numeric
+    /// error code.
+    pub(crate) code_buckets: &'static [(i32, SemanticErrorKind)],
 }
 
 /// The shared keyword cascade every parser's `classify_error` ran by hand:
-/// lowercase the kind then the message, walk the provider's ordered buckets,
-/// first substring hit wins, `AgentNative` as the fallthrough.
+/// an exact numeric-code match first (when a code is supplied), then
+/// lowercase the kind and the message and walk the provider's ordered
+/// buckets, first substring hit wins, `AgentNative` as the fallthrough.
+///
+/// `code` is threaded through for the numeric protocols (Kimi); providers
+/// with no numeric error code pass `None` and their empty `code_buckets`
+/// make the code branch a no-op.
 pub(crate) fn classify_error_by_keywords(
     kw: &ErrorKeywords,
+    code: Option<i32>,
     error_kind: Option<&str>,
     message: Option<&str>,
 ) -> SemanticErrorKind {
+    if let Some(code) = code {
+        for (needle, result) in kw.code_buckets {
+            if *needle == code {
+                return *result;
+            }
+        }
+    }
     for (input, buckets) in [
         (error_kind, kw.kind_buckets),
         (message, kw.msg_buckets),

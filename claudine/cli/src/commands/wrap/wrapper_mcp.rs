@@ -8,7 +8,7 @@
 
 use std::io::IsTerminal;
 
-use color_eyre::eyre::{Result, eyre};
+use color_eyre::eyre::{Result, WrapErr, eyre};
 
 use claudine::provider::Provider;
 
@@ -42,11 +42,10 @@ pub(crate) fn merge_injected_env_into_plan(
                 .env
                 .get(std::ffi::OsStr::new(KEY))
                 .map(|v| v.as_os_str());
-            let overlay = serde_json::from_str(&v).map_err(|e| {
-                eyre!("MCP injection produced invalid OPENCODE_CONFIG_CONTENT: {e}")
-            })?;
+            let overlay = serde_json::from_str(&v)
+                .wrap_err("MCP injection produced invalid OPENCODE_CONFIG_CONTENT")?;
             let merged = claudine::opencode_config::merge_overlay(current, overlay)
-                .map_err(|e| eyre!("failed to merge OPENCODE_CONFIG_CONTENT: {e}"))?;
+                .wrap_err("failed to merge OPENCODE_CONFIG_CONTENT")?;
             env_plan.env.insert(k.into(), merged.into());
         } else {
             env_plan.env.insert(k.into(), v.into());
@@ -104,7 +103,7 @@ pub(crate) fn compose_mcp_session(
             );
         }
         let catalog =
-            McpCatalogStore::load().map_err(|e| eyre!("failed to load MCP catalog: {e}"))?;
+            McpCatalogStore::load().wrap_err("failed to load MCP catalog")?;
         let (cleaned_prompt, prompt_tags) =
             inline::extract_tags_from_prompt(prompt_source.as_inline(), lex_tags);
         if let Some(ref cleaned) = cleaned_prompt {
@@ -129,7 +128,7 @@ pub(crate) fn compose_mcp_session(
                 .ok()
             },
         )
-        .map_err(|e| eyre!("MCP session error: {e}"))?;
+        .wrap_err("MCP session error")?;
         session.cleaned_prompt = cleaned_prompt.clone();
 
         for warning in &session.warnings {
@@ -207,7 +206,7 @@ pub(crate) fn compose_mcp_session(
                 let mut string_env = std::collections::HashMap::new();
                 let result = injector
                     .inject(&session.servers, &mut string_env, shadow)
-                    .map_err(|e| eyre!("MCP injection failed: {e}"))?;
+                    .wrap_err("MCP injection failed")?;
 
                 // Merge injected env vars into the OsString env plan. The
                 // OpenCode inline config is shared with the system-prompt and
@@ -342,8 +341,15 @@ mod tests {
             .insert(OsString::from(KEY), OsString::from_vec(vec![0x66, 0x80]));
         let injected = HashMap::from([(KEY.to_string(), r#"{"mcp":{"srv":{}}}"#.to_string())]);
         let err = merge_injected_env_into_plan(injected, &mut plan).unwrap_err();
-        let message = err.to_string();
-        assert!(message.contains("OPENCODE_CONFIG_CONTENT"));
-        assert!(message.contains("UTF-8"));
+        assert!(err.to_string().contains("OPENCODE_CONFIG_CONTENT"));
+
+        // The UTF-8 diagnosis lives on the typed cause rather than being
+        // pre-flattened into the context line, so assert it through the chain —
+        // which is what the renderer and `err.*` both read.
+        let chain: Vec<String> = err.chain().map(|c| c.to_string()).collect();
+        assert!(
+            chain.iter().any(|c| c.contains("UTF-8")),
+            "UTF-8 diagnosis lost from the cause chain: {chain:?}"
+        );
     }
 }

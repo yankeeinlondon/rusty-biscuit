@@ -9,8 +9,7 @@
 //!   surface in compose mode.
 //! - `inline-compose` targets (files with a `prompt` frontmatter key) do
 //!   **not** surface.
-//! - `@`-prefixed partials resolve to relative paths (the `@` sigil is
-//!   stripped on selection).
+//! - `@`-prefixed partials preserve the shared FileReference insertion prefix.
 //! - Prefix-length progression: 0 chars → no directories; 3+ chars →
 //!   directories are surfaced with a trailing `/`.
 //! - `docs/` and `.claude/skills/` — inline-compose-only extras — do NOT
@@ -515,10 +514,7 @@ fn compose_rejects_non_utf8_markdown() {
 // ---------------------------------------------------------------------
 
 #[test]
-fn compose_magic_path_shaped_prompts_slash_plan_renders_filename() {
-    // `@prompts/plan` constrains the walk to the repo-scope `prompts/` root
-    // (the `prompts` portion is peeled off so the join does not double up)
-    // but renders the basename only.
+fn compose_magic_path_shaped_prompts_slash_plan_retains_scope() {
     let ws = TestWorkspace::named("complete-compose-magic-path-shaped");
     seed_cargo_workspace(ws.path());
     let prompts = ws.path().join("prompts");
@@ -526,15 +522,13 @@ fn compose_magic_path_shaped_prompts_slash_plan_renders_filename() {
 
     let got = run_complete(ws.path(), &["compose", "@prompts/plan"]);
     assert!(
-        got.iter().any(|c| c == "@plan.md"),
-        "path-shaped magic `@prompts/plan` must render `@plan.md`: {got:?}"
+        got.iter().any(|c| c == "@prompts/plan.md"),
+        "path-shaped magic must retain the shared scope: {got:?}"
     );
 }
 
 #[test]
-fn compose_magic_path_shaped_claudine_prompts_renders_filename() {
-    // `@.claudine/prompts/plan` constrains the walk to the repo-scope
-    // `.claudine/prompts/` root but renders the basename only.
+fn compose_magic_path_shaped_claudine_prompts_retains_scope() {
     let ws = TestWorkspace::named("complete-compose-magic-claudine");
     seed_cargo_workspace(ws.path());
     let claudine = ws.path().join(".claudine").join("prompts");
@@ -542,8 +536,8 @@ fn compose_magic_path_shaped_claudine_prompts_renders_filename() {
 
     let got = run_complete(ws.path(), &["compose", "@.claudine/prompts/plan"]);
     assert!(
-        got.iter().any(|c| c == "@plan.md"),
-        "path-shaped magic `@.claudine/prompts/plan` must render `@plan.md`: {got:?}"
+        got.iter().any(|c| c == "@.claudine/prompts/plan.md"),
+        "path-shaped magic must retain the shared scope: {got:?}"
     );
 }
 
@@ -561,8 +555,8 @@ fn compose_plain_git_magic_renders_filename() {
     let got = run_complete(&nested, &["compose", "@.claudine/prompts/plan"]);
     assert_eq!(
         got,
-        vec!["@plan.md".to_string()],
-        "plain git magic must render `@<basename>`, not a path"
+        vec!["@.claudine/prompts/plan.md".to_string()],
+        "plain-git magic must retain the shared authored scope"
     );
 }
 

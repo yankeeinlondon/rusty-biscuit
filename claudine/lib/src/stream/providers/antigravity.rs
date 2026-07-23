@@ -23,7 +23,7 @@
 
 use serde_json::{Map, Value};
 
-use super::parser::{SemanticStreamParser, StreamParseError};
+use super::parser::SemanticStreamParser;
 use super::protocol::antigravity::AntigravityEnvelope;
 use super::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use super::summary::StreamExecutionSummary;
@@ -179,13 +179,12 @@ impl<S: SemanticEventSink> AntigravitySemanticStreamParser<S> {
 }
 
 impl<S: SemanticEventSink> SemanticStreamParser for AntigravitySemanticStreamParser<S> {
-    fn feed_line(&mut self, line: &str) -> Result<(), StreamParseError> {
+    fn feed_line(&mut self, line: &str) {
         // agy buffers the whole response into one JSON object; accumulate until
         // it parses (handles both single-line and pretty-printed output).
         self.buffer.push_str(line);
         self.buffer.push('\n');
         self.try_emit();
-        Ok(())
     }
 
     fn finish(self: Box<Self>, exit_code: i32) -> StreamExecutionSummary {
@@ -251,18 +250,13 @@ fn parse_envelope(raw: &str) -> Option<AntigravityEnvelope> {
 /// no structured error category (print mode returns free text / a `status`
 /// state), so classification is text-based — mirroring the Pi/OpenCode path,
 /// with an auth branch for the keyring/OAuth failure modes agy surfaces.
-const ERROR_KEYWORDS: super::common::ErrorKeywords = super::common::ErrorKeywords {
-    kind_buckets: &[
-    ],
-    msg_buckets: &[
-        (SemanticErrorKind::Configuration, &["sign in", "sign-in", "not logged in", "authentication failed", "authentication", "unauthorized", "401", "403"]),
-        (SemanticErrorKind::ApiRemote, &["rate limit", "quota", "exhausted", "out of credits", "overloaded", "503", "resource_exhausted"]),
-        (SemanticErrorKind::Interrupted, &["abort", "cancel", "interrupt"]),
-    ],
-};
-
 fn classify_error(message: &str) -> SemanticErrorKind {
-    super::common::classify_error_by_keywords(&ERROR_KEYWORDS, None, Some(message))
+    super::common::classify_error_by_keywords(
+        super::vocabulary::error_keywords(Provider::Antigravity),
+        None,
+        None,
+        Some(message),
+    )
 }
 
 #[cfg(test)]
@@ -302,7 +296,7 @@ mod tests {
     #[test]
     fn success_envelope_emits_text_and_turn_complete() {
         let (events, mut parser) = new_parser();
-        parser.feed_line(SUCCESS_ENVELOPE).unwrap();
+        parser.feed_line(SUCCESS_ENVELOPE);
         let summary = parser.finish(0);
 
         let events = events.lock().unwrap();
@@ -325,7 +319,7 @@ mod tests {
     fn pretty_printed_envelope_parses_across_lines() {
         let (events, mut parser) = new_parser();
         for line in ["{", "  \"status\": \"SUCCESS\",", "  \"response\": \"hi\"", "}"] {
-            parser.feed_line(line).unwrap();
+            parser.feed_line(line);
         }
         let summary = parser.finish(0);
         assert!(!summary.is_error);
@@ -341,8 +335,7 @@ mod tests {
         // The lenient reparse recovers the text instead of surfacing an error.
         let (_events, mut parser) = new_parser();
         parser
-            .feed_line("{\"status\":\"SUCCESS\",\"response\":\"line one\nline two\"}")
-            .unwrap();
+            .feed_line("{\"status\":\"SUCCESS\",\"response\":\"line one\nline two\"}");
         let summary = parser.finish(0);
         assert!(!summary.is_error, "raw control char should be tolerated");
         assert_eq!(summary.assistant_text, "line one\nline two");
@@ -352,8 +345,7 @@ mod tests {
     fn error_status_records_terminal_error() {
         let (events, mut parser) = new_parser();
         parser
-            .feed_line(r#"{"status":"ERROR","error":"quota exhausted for this model"}"#)
-            .unwrap();
+            .feed_line(r#"{"status":"ERROR","error":"quota exhausted for this model"}"#);
         let summary = parser.finish(1);
         assert!(summary.is_error);
         assert_eq!(summary.error_kind.as_deref(), Some("api_remote"));
@@ -368,8 +360,7 @@ mod tests {
     fn non_json_stdout_is_classified_on_finish() {
         let (_events, mut parser) = new_parser();
         parser
-            .feed_line("Error: authentication failed or timed out")
-            .unwrap();
+            .feed_line("Error: authentication failed or timed out");
         let summary = parser.finish(1);
         assert!(summary.is_error);
         // Auth failures classify as Configuration (keyring/OAuth, not remote).

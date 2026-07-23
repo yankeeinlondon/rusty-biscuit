@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use color_eyre::eyre::{Result, eyre};
+use color_eyre::eyre::{Result, WrapErr, eyre};
 
 use super::profile::WrapperProfile;
 use super::repo_home;
@@ -20,7 +20,8 @@ pub(crate) use package_context::{
     resolve_launch_workspace_context, select_package_area_for_cwd, select_package_for_cwd,
 };
 pub(crate) use sanitize::{
-    is_sensitive_key, redact_sensitive_args, sanitize_process_env, validate_include_names,
+    admits_sensitive_key, ambient_sensitive_env, is_sensitive_key, redact_sensitive_args,
+    sanitize_process_env, validate_include_names,
 };
 
 /// Shared startup detection results for the direct wrap path.
@@ -60,7 +61,7 @@ pub(crate) fn detect_wrap_startup(
 
     let promptless_at_repo_root = !capture_git_status
         && sniff::filesystem::git::GitRepo::discover(cwd)
-            .map_err(|e| eyre!("startup repo discovery failed for '{}': {e}", cwd.display()))?
+            .wrap_err_with(|| format!("startup repo discovery failed for '{}'", cwd.display()))?
             .is_some_and(|repo| canonical_or_self(repo.repo_root()) == canonical_or_self(cwd));
 
     let filesystem_request = FilesystemRequest::new()
@@ -84,7 +85,7 @@ pub(crate) fn detect_wrap_startup(
         .filesystem(filesystem_request);
 
     let result = sniff::detect_with_plan(plan)
-        .map_err(|e| eyre!("startup detection failed for '{}': {e}", cwd.display()))?;
+        .wrap_err_with(|| format!("startup detection failed for '{}'", cwd.display()))?;
 
     let mut launch_context =
         claudine::system_prompt::LaunchContext::from_sniff_result(&result, cwd);
@@ -161,9 +162,8 @@ pub(crate) fn detect_wrap_startup_or_fallback(
         Ok(startup) => Ok(startup),
         Err(error) => {
             if repo_requested {
-                return Err(eyre!(
-                    "--repo requires startup repo detection, but startup detection failed: {error}"
-                ));
+                return Err(error)
+                    .wrap_err("--repo requires startup repo detection, but startup detection failed");
             }
             deferred_warnings.push(format!(
                 "startup detection failed; continuing without repo/package context: {error}"
@@ -196,6 +196,28 @@ pub(crate) struct EnvPlan {
     /// to microseconds. The caller attaches these as `Breakdown` children of
     /// the `child env build` substage.
     pub(crate) perf_substages: Vec<crate::perf::SubstageTiming>,
+}
+
+/// The child-visible interactivity markers one session mode implies.
+///
+/// `INTERACTIVE` is the `"true"`/`"false"` value wrapped providers and
+/// downstream processes read. `CLAUDINE_INTERACTIVE` is a deliberately distinct
+/// `1`/`0` gate in the `CLAUDINE_` correlation namespace that the hook
+/// subprocess (`claudine handle`) reads: the idle (Trigger 2) producer gates on
+/// it, because a non-interactive turn-complete is the agent auto-proceeding
+/// rather than waiting on a human.
+///
+/// Both are a pure function of the mode, and this is the only place that
+/// function lives. The invocation stamps them into its base child environment
+/// from the *opening* mode; a per-attempt rebuild whose refreshed document moved
+/// `interactive:` restates them from here rather than deriving its own pair,
+/// which is what stops a retry shipping refreshed argv alongside a stale
+/// `INTERACTIVE`.
+pub(crate) fn interactivity_env(interactive: bool) -> [(&'static str, &'static str); 2] {
+    [
+        ("INTERACTIVE", if interactive { "true" } else { "false" }),
+        ("CLAUDINE_INTERACTIVE", if interactive { "1" } else { "0" }),
+    ]
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -290,16 +312,9 @@ pub(crate) fn build_child_env_with_launch(
             "false".to_string()
         },
     );
-    set_added_env(
-        &mut env,
-        &mut added,
-        "INTERACTIVE",
-        if interactive {
-            "true".to_string()
-        } else {
-            "false".to_string()
-        },
-    );
+    for (key, value) in interactivity_env(interactive) {
+        set_added_env(&mut env, &mut added, key, value.to_string());
+    }
     set_added_env(&mut env, &mut added, "AGENT_PARAMS", encoded_agent_params);
     set_added_env(
         &mut env,
@@ -326,9 +341,9 @@ pub(crate) fn build_child_env_with_launch(
             // sanitize — instead of overwriting it.
             let current = env.get(std::ffi::OsStr::new(key)).map(|v| v.as_os_str());
             let overlay: serde_json::Value = serde_json::from_str(value)
-                .map_err(|e| eyre!("invalid OPENCODE_CONFIG_CONTENT override: {e}"))?;
+                .wrap_err("invalid OPENCODE_CONFIG_CONTENT override")?;
             let merged = claudine::opencode_config::merge_overlay(current, overlay)
-                .map_err(|e| eyre!("failed to merge OPENCODE_CONFIG_CONTENT: {e}"))?;
+                .wrap_err("failed to merge OPENCODE_CONFIG_CONTENT")?;
             set_added_env(&mut env, &mut added, key, merged);
         } else {
             set_added_env(&mut env, &mut added, key, value.clone());

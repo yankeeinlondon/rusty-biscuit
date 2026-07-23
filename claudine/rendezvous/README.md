@@ -14,20 +14,69 @@ The **Rendezvous** daemon process is meant to compliment the Claudine CLI by pro
 The implementation is split across three crates:
 
 1. `rendezvous-core` 
-    - shared protobuf/gRPC stubs, identity, signed envelopes, invitations, IPC helpers
+    - shared protobuf/gRPC stubs, identity, signed envelopes, invitations, and the typed `LocalEndpoint` contract
 2. `rendezvous-daemon` 
     - the long-running service
+    - owns local-endpoint and data-root authorization, listener setup, and cleanup
 3. `rendezvous-client` (TESTING)
-    - a thin gRPC test client. 
-    - the local client drives the daemon over a Unix Domain Socket; 
+    - a thin gRPC test client, plus the portable `connect(&LocalEndpoint)` used by the Claudine CLI
+    - the local client drives the daemon over the platform's local endpoint;
     - the daemon persists session logs through a `redb → Loro → DuckDB` pipeline and syncs with remote peers over an authenticated QUIC mesh.
 
+## Two Planes
+
+The daemon speaks over two deliberately separate planes:
+
+| Plane | Transport | Reach | Authorized by |
+|---|---|---|---|
+| **Local control** | tonic gRPC over a Unix-domain stream socket (macOS, Linux, WSL) or a Windows named pipe (native Windows) | Same host, same OS user | The OS: socket/directory ownership and modes on Unix, a current-user pipe DACL on Windows |
+| **Remote mesh** | QUIC (`quinn`) | Explicitly paired nodes, any host | Per-node Ed25519 signatures on every envelope |
+
+Local gRPC is never exposed across hosts, and QUIC is never a local fallback.
+Both are implemented and runtime-tested on macOS, Linux, and Windows.
+
+The local plane is **per stable OS user** — the effective UID on Unix, the
+process token's account SID on Windows, never a username. Exactly one daemon,
+node identity, data root, and endpoint per account.
+
+**The authoritative local-IPC contract is
+[`claudine/docs/rendezvous/local-ipc.md`](../docs/rendezvous/local-ipc.md)**:
+transport selection, endpoint resolution and overrides, Unix permissions and
+cleanup, the Windows DACL and accept behavior, WSL separation, the client
+error/retry vocabulary, and the threat boundary.
 
 ## High Level Architecture
 
 ### Local Interaction Architecture
 
-On a single device/host the interactions are:
+On a single device/host, one portable `spawn_local_server` binds the endpoint to
+a transport-neutral daemon that is built exactly once:
+
+```mermaid
+flowchart TB
+    subgraph clients["Same host · same OS user"]
+        CLI["Claudine CLI<br/>(dashboard · requeue · hooks · session reports)"]
+        TC["rendezvous-test-client"]
+    end
+
+    CONNECT["rendezvous_client::connect(&LocalEndpoint)"]
+
+    subgraph transport["local_transport (the only platform-specific code)"]
+        UNIX["unix.rs<br/>0700 dir · bind · 0600 socket<br/>instance-safe unlink"]
+        WIN["windows.rs<br/>current-user DACL · byte mode<br/>first_pipe_instance · reject remote"]
+    end
+
+    PREP["prepare_daemon(config)<br/><i>transport-neutral · runs once</i><br/>redb · projection · batcher · identity<br/>registers · QUIC · discovery · workers"]
+    SVC["RendezvousService<br/>(tonic gRPC)"]
+
+    CLI --> CONNECT
+    TC --> CONNECT
+    CONNECT -->|"UDS<br/>macOS · Linux · WSL"| UNIX
+    CONNECT -->|"named pipe<br/>Windows"| WIN
+    UNIX --> SVC
+    WIN --> SVC
+    PREP -->|"serve_local_incoming"| SVC
+```
 
 ### Distributed Architecture
 
@@ -38,7 +87,7 @@ On a single device/host the interactions are:
 ```mermaid
 flowchart TB
     subgraph client["rendezvous-client"]
-        TC["Test client<br/>(tonic gRPC over UDS)"]
+        TC["Test client<br/>(tonic gRPC over the local endpoint)"]
     end
 
     subgraph daemon["rendezvous-daemon"]
@@ -71,7 +120,7 @@ flowchart TB
 
     PEER["Remote daemon peer"]
 
-    TC -->|"UDS · gRPC<br/>Ping/Status/AppendEntry/Query/Pairing/Sync"| SVC
+    TC -->|"gRPC over UDS / named pipe<br/>Ping/Status/AppendEntry/Query/Pairing/Sync"| SVC
 
     SVC --> SLM
     SVC --> PROJ
@@ -108,7 +157,9 @@ flowchart TB
   - providing a future-proof path to WebAssembly/Browser clients
   - research found at @claudine/docs/research/rendezvous/web-transport.md
 - **Inter-Process Communication (IPC):** 
-  - **gRPC** via `tonic` over Unix Domain Sockets (UDS) or Named Pipes.
+  - **gRPC** via `tonic` over Unix domain sockets (macOS, Linux, WSL) or Windows named pipes
+  - per stable OS user; modeled by the typed `LocalEndpoint`, never a bare path
+  - contract: [`local-ipc.md`](../docs/rendezvous/local-ipc.md)
   - research found at @claudine/docs/research/rendezvous/tonic.md
 - **Transactional Storage (OLTP):** `redb` 
   - Embedded, high-performance Key-Value store for CRDT binary snapshots and deltas).

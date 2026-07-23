@@ -48,6 +48,8 @@
 - `darkmatter/lib` enables `biscuit-file/fetch` and uses `reqwest`, `tokio`,
   and `url` for remote URL composition, persistent remote cache revalidation,
   and side-effect `http_post` host-policy enforcement.
+- `claudine-gen` uses `biscuit-file`'s `file-reference` feature to resolve
+  schema-constrained empirical research fixtures relative to their topic.
 - `darkmatter/lib` takes a direct `fancy-regex` dependency (already in the tree
   transitively via `jsonschema`) so SimplifiedSchema pattern-key literal
   precedence (Feature C) can emit negative-lookahead `patternProperties`: such

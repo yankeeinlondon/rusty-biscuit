@@ -101,6 +101,7 @@ impl PolicyMutationPlan {
             return Err(ClaudineError::PolicyApplyFailed {
                 path,
                 message: "mutation plan is marked unsupported".to_owned(),
+                source: None,
             });
         }
 
@@ -116,10 +117,11 @@ impl PolicyMutationPlan {
             if let Some(parent) = edit.path.parent() {
                 fs::create_dir_all(parent)?;
             }
-            atomic_write(&edit.path, edit.after_preview.as_bytes()).map_err(|source| {
+            atomic_write(&edit.path, edit.after_preview.as_bytes()).map_err(|error| {
                 ClaudineError::PolicyApplyFailed {
                     path: edit.path.clone(),
-                    message: source.to_string(),
+                    message: error.to_string(),
+                    source: Some(error),
                 }
             })?;
         }

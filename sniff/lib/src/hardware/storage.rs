@@ -125,8 +125,12 @@ fn detect_storage_impl() -> Vec<StorageInfo> {
             for name in &device_names {
                 args.push(name.as_str());
             }
-            if let Ok(output) = std::process::Command::new("diskutil").args(&args).output() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
+            if let Ok(output) = crate::process::run_with_timeout(
+                "diskutil",
+                &args,
+                crate::process::timeouts::DISKUTIL,
+            ) {
+                let stdout = output.stdout_lossy();
                 let mut current_device: Option<&str> = None;
                 for line in stdout.lines() {
                     let trimmed = line.trim();
@@ -180,10 +184,11 @@ fn detect_storage_kind_macos(device: &str) -> StorageKind {
     if dev_name.is_empty() {
         return StorageKind::Unknown;
     }
-    let output = match std::process::Command::new("diskutil")
-        .args(["info", dev_name])
-        .output()
-    {
+    let output = match crate::process::run_with_timeout(
+        "diskutil",
+        &["info", dev_name],
+        crate::process::timeouts::DISKUTIL,
+    ) {
         Ok(o) => o,
         Err(_) => return StorageKind::Unknown,
     };

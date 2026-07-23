@@ -430,9 +430,9 @@ fn opencode_resume_uses_run_with_explicit_session() {
 #[test]
 fn every_provider_profile_supports_resume() {
     // Ratified end-state (2026-07-04): provider-native resume support means
-    // Claudine lifecycle-resume support. All 7 providers have first-class
-    // non-interactive resume per the session-resumption research, so every
-    // profile must implement the `supports_resume` + `build_resume_args`
+    // Claudine lifecycle-resume support. Every compiled provider has
+    // first-class non-interactive resume per the session-resumption research,
+    // so every profile must implement the `supports_resume` + `build_resume_args`
     // pair; a `false` is only ever a not-yet-implemented gap.
     for provider in claudine::provider::PROVIDERS_DISPLAY_ORDER {
         let p = profile(provider);

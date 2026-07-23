@@ -6,6 +6,8 @@ use biscuit_file::toml_crate;
 use tracing::debug;
 
 use crate::package::{DependencyEntry, DependencyKind};
+use crate::performance;
+use crate::performance::counters;
 
 /// Extracts package name from a PEP 508 requirement string.
 pub(super) fn parse_python_requirement_name(requirement: &str) -> Option<String> {
@@ -116,12 +118,15 @@ pub(super) fn pyproject_dependencies_from_value(
 pub(super) fn parse_requirements_txt_dependencies(
     requirements_path: &Path,
 ) -> Option<Vec<DependencyEntry>> {
+    performance::increment_counter(counters::FS_FILE_OPENS, 1);
     let content = std::fs::read_to_string(requirements_path)
         .map_err(|e| {
             debug!(path = %requirements_path.display(), error = %e, "could not read file");
             e
         })
         .ok()?;
+    performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
+    performance::increment_counter(counters::REPO_MANIFEST_PARSES, 1);
     let mut deps = Vec::new();
 
     for line in content.lines() {

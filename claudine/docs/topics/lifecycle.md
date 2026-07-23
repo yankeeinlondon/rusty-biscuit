@@ -33,11 +33,11 @@ This is the consistent rule used everywhere else: a value is literal text and `{
 
 ## When Lifecycle Properties Interpolate
 
-Lifecycle strings keep their authored `{{{ … }}}` spans through the prepare stage — Darkmatter defers the seven lifecycle keys from compose-time resolution — and Claudine re-interpolates each property/action string through Darkmatter (the same composition engine, no second interpolator) just-in-time, immediately before it is used:
+Lifecycle strings keep their authored `{{{ … }}}` spans through the prepare stage — Darkmatter defers the seven lifecycle keys from compose-time resolution (DM1, `ComposeOptions::with_exclude_keys`) — and Claudine re-interpolates each property/action string through Darkmatter (DM2, `SubtreeCompose`; the same composition engine, no second interpolator — the bespoke `lifecycle_executor::interpolate` + `LifecycleLookup` runtime path was removed) just-in-time, immediately before it is used:
 
 - **Communication and action bodies** (`say`, `message`, `notify`, `stderr`, `info`, side-effect args, …) resolve at the instant the event fires, against the live document state plus the in-scope late-binding globals. Resolution is **just-in-time**, not a single snapshot: a `set_frontmatter` run by stack action #1 is visible to action #2 in the same event's stack.
 - **Resolution fails closed.** A malformed expression, an unknown function, an unknown root (a typo), or a late-binding global used outside its legal event fails the event with a typed error *before any side effect is dispatched* — a lifecycle string never silently renders empty for these cases. A *known* surface (a declared frontmatter key, `ctx`/`env`/`doc`, or an in-scope late-binding global) that resolves to `null`/empty still renders empty, as today. To tolerate an *unknown* optional name, opt in with explicit fallback syntax: `{{ maybe || '' }}`.
-- **An evaluation error halts the run on every phase.** This fail-closed raise is an *expression-layer* error (a crashed `when:` guard or interpolation), distinct from a side-effect dispatch failure (below). It is surfaced to stderr as a styled error **at the point of error — before the catch events (`failure`/`finalize`) fire — and exactly once**, so the original crash is visible ahead of any catch-event output rather than buried beneath it. The run exits non-zero. On terminal-phase events (`success`/`failure`/`finalize`/`loop`) it does **not** retroactively fire `failure` (the provider already ran) but does fire `finalize` once with the error exposed as the `err` global, so an author can catch it. If a catch event *itself* raises a new evaluation error, that later crash is the surfaced (and exit-determining) one. A raise inside `finalize` itself surfaces and halts without re-entering `finalize`. A `when:` that evaluates cleanly to `false` is *not* a raise — it just skips its item, unchanged.
+- **An evaluation error halts the run on every phase.** This fail-closed raise is an *expression-layer* error (a crashed `when:` guard or interpolation), distinct from a side-effect dispatch failure (below). It is carried as the typed `CompositionError::LifecycleEvaluationError` and surfaced to stderr as a styled error **at the point of error — before the catch events (`failure`/`finalize`) fire — and exactly once**, so the original crash is visible ahead of any catch-event output rather than buried beneath it. The run exits non-zero. On terminal-phase events (`success`/`failure`/`finalize`/`loop`) it does **not** retroactively fire `failure` (the provider already ran) but does fire `finalize` once with the error exposed as the `err` global, so an author can catch it. If a catch event *itself* raises a new evaluation error, that later crash is the surfaced (and exit-determining) one. A raise inside `finalize` itself surfaces and halts without re-entering `finalize`. A `when:` that evaluates cleanly to `false` is *not* a raise — it just skips its item, unchanged.
 
 ### The `shell` exception
 
@@ -186,16 +186,154 @@ Lifecycle flow control actions terminate the current event's stack and influence
 | `stop` | every event | End this event's stack cleanly; composition continues with the current outcome |
 | `skip` | `initialize` only | Whole-document opt-out: no provider invocation, no `finalize`, no `loop` |
 | `error: "reason"` | every event | Mark this event as failed; at `success`/`finalize` it converts success to failure |
-| `proxy: "@other.md"` | every event | Hand off to another prompt document, entering the target at its own `initialize` |
+| `proxy: "@other.md"` | every event | Hand off to another prompt document, entering the target at its own `initialize`. Key/value form accepts an optional `with:` overlay — see [Proxy Handoffs](#proxy-handoffs) |
 | `retry: 3` | every event | Retry the current prompt N additional times (re-runs pre-flight pre-launch, re-invokes the agent post-launch) |
 | `resume: "message"` | every event | Resume the agent session with a follow-up message. Needs a live session — pre-launch it surfaces a `ResumeWithoutSession` error |
 | `defer: "5m"` | every event | Defer this prompt to **run again later** — a fresh scheduled run after the delay (not an in-place pause), via the rendezvous deferred-execution scheduler. **Not implemented yet:** `defer` parses and dispatches but currently surfaces a typed `LifecycleDeferNotImplemented` error until the rendezvous backend is ready. |
 
 At most one flow-control action may appear in a stack item, and it must be the last action.
 
-**Flow control is universal.** Flow control reacts to **state** — an error, a missing file, an `env` value, frontmatter — and an error is just one kind of state. So `error`/`stop`/`retry`/`resume`/`defer`/`proxy` are valid in **every** event. The headline example: a `success` stack can `resume: "you finished but never wrote abc.md — create it as instructed"` when the agent completed cleanly but an expected artifact is missing. The only placement rule is `skip` (`initialize`-only). Apparent event-specific behavior is **runtime capability**, not placement: `resume` needs a live session (pre-launch → `ResumeWithoutSession`) and `retry`'s re-entry point is derived from whether the provider had launched. This is enforced once, at parse time; at runtime every event's stack dispatches its control through the same event-agnostic path. The iteration `loop:` (while/until) is a separate mechanism and is never coupled to handler dispatch.
+**Proxy target resolution.** A `proxy` target resolves through the shared
+`biscuit-file::FileReference` contract, anchored on the document that authored
+it: a bare implicit path (`other.md`) is repository-root first, then next to the
+authoring document; an explicit `./`/`../` path is source-relative only; `@` is a
+magic-root search (repository root, configured roots, home — **not** a repo-root
+join); and `~/` is home-pinned. The target must name an existing document, so a
+missing target fails loudly with a typed `Unresolvable file reference` rather than
+handing off to a nonexistent path. When a proxied target authors its own proxy,
+the target becomes the new source for that reference.
 
-The provider run-loop events — `start`, `success`, `failure`, `finalize` — dispatch `retry`/`resume`/`proxy` fully (this is where `success` + `resume` lives). The events that sit *outside* that loop — `initialize`, a compose pre-flight `blocked`, and the `loop` gate — handle `error`/`stop` (and `proxy`/`skip` at `initialize`) directly, but `retry`/`proxy` from those events have no re-entry loop to act on yet, so they surface a clear typed error (`LifecycleSetupPhaseRecoveryUnsupported`) rather than a silent no-op. Put recovery on a post-launch event, or use `initialize` `proxy` for pre-launch routing. `defer` (deferred re-execution) is **not implemented in any event yet** — it always surfaces `LifecycleDeferNotImplemented` until its rendezvous backend lands.
+**Flow control is universal.** Flow control reacts to **state** — an error, a missing file, an `env` value, frontmatter — and an error is just one kind of state. So `error`/`stop`/`retry`/`resume`/`defer`/`proxy` are valid in **every** event. The headline example: a `success` stack can `resume: "you finished but never wrote abc.md — create it as instructed"` when the agent completed cleanly but an expected artifact is missing. The only placement rule is `skip` (`initialize`-only). Apparent event-specific behavior is **runtime capability**, not placement: `resume` needs a live session (pre-launch → `ResumeWithoutSession`) and `retry`'s re-entry point is derived from whether the provider had launched. This is enforced once, at parse time (`LifecycleControlAction::is_valid_for` → `LifecycleActionPlacement`); at runtime every event's stack dispatches its control through the same event-agnostic path (`decide_control` + `dispatch_terminal_control`). The iteration `loop:` (while/until) is a separate mechanism and is never coupled to handler dispatch.
+
+The provider run-loop events — `start`, `success`, `failure`, `finalize` — dispatch `retry`/`resume`/`proxy` fully (this is where `success` + `resume` lives). `proxy` from `initialize` is equally complete: the active-document coordinator sits above both the document loop and the provider harness, so an `initialize` handoff is a real transition rather than a reduced pre-launch path, and the target it hands to is prepared exactly as a directly-invoked document would be (see [Proxy Handoffs](#proxy-handoffs)). What remains unsupported is narrower than it once was: `retry` from `initialize`, and `retry`/`resume`/`proxy` from a compose pre-flight `blocked` or from the `loop` gate, have no re-entry loop to act on and surface a typed `LifecycleSetupPhaseRecoveryUnsupported` rather than a silent no-op. `resume` from `initialize` surfaces `ResumeWithoutSession` — there is no session yet to continue. Put those recoveries on a post-launch event. `defer` (deferred re-execution) is **not implemented in any event yet** — it always surfaces `LifecycleDeferNotImplemented` until its rendezvous backend lands.
+
+#### Retry and resume re-entry
+
+`retry` and `resume` replace only the **provider-attempt slice** of the active document; they do not change document identity. Both refresh the document canonically — a fresh read from disk with full validation — and both keep the document's `with:` overlay, its proxy provenance, and their own decrementing budgets (a `retry` cannot reset its budget by replacing the attempt). `initialize` does **not** re-fire: it is once per active document, not once per attempt.
+
+Launch identity is recomputed at that fresh-read boundary, against the document about to run, so a `model:` changed between attempts actually reaches the child environment rather than being pinned to an adoption-time snapshot.
+
+`resume` additionally checks a **session-compatibility key**. It retains the live provider session only when the key still matches across the refresh; when a facet moved, the resume refuses with `CompositionError::LifecycleResumeIncompatible { facets }`, names the changed facets, and recommends `retry` for a fresh session. Note the ordering: `start` fires before the comparison, so a refusal is a post-`start`, pre-spawn failure and owes the ordinary lifecycle tail — `failure` then exactly one `finalize`, both seeing the refusal as `err.*`. `success` does not fire, and the provider is never spawned a second time. Full facet list, reachability, and coverage: [composition.md — Retry and resume re-entry](composition.md#retry-and-resume-re-entry).
+
+#### Lifecycle events and `--dry-run`
+
+`--dry-run` fires **no lifecycle events at all**. The dry-run seam returns before the lifecycle runtime is constructed, so a stack carrying `append_line`, `set_frontmatter`, or `shell` cannot touch the workspace during a rehearsal, and no dynamic `proxy` route can be traversed. Do not author lifecycle stacks expecting a dry run to exercise them; turning dry run into lifecycle simulation is an explicit non-goal. See [composition.md — Dry Run](composition.md#dry-run).
+
+### Proxy Handoffs
+
+`proxy` hands the run to another prompt document. The target enters at its own `initialize` and becomes the **active document**: it owns the remaining lifecycle, the closure, and the output. A clean handoff synthesizes no source-side terminal, `finalize`, or `loop` event — a `proxy` from `success`/`failure` skips that attempt's ordinary `finalize`, and a `proxy` from `finalize` does not re-enter it.
+
+The target is bootstrapped and prepared by the **same canonical preparation service** that prepares a directly-invoked document, so `claudine compose target.md` and a `proxy` to `target.md` see the same stages: the same `initialize`, the same schema validation, the same shell discovery and approval, and the same typed diagnostics. See [composition.md — Document Handoffs and the Equivalence Contract](composition.md#document-handoffs-and-the-equivalence-contract) for what the target recalculates for itself.
+
+Positional form stays compact and is unchanged:
+
+```yaml
+- proxy: "@prompts/next.md"
+```
+
+#### The `with:` overlay
+
+Key/value form accepts an optional `with:` mapping — a **transient overlay** of top-level frontmatter properties for the immediate target:
+
+```yaml
+success:
+  stack:
+    - action:
+        action: proxy
+        target: "@prompts/next.md"
+        with:
+            attempt: "{{ iteration }}"
+            ready: "{{ true }}"
+            label: "phase-{{ iteration }}"
+            files: "{{ changed_files }}"
+            metadata:
+                source: router
+                area: "{{ ctx.area }}"
+```
+
+`with:` is accepted **only** on key/value proxy. `with: {}` parses and means exactly what omitting it means. A non-mapping `with:` (`LifecycleProxyWithNotMapping`), a dynamic key (`LifecycleProxyWithDynamicKey`), a whole-mapping interpolation such as `with: "{{ payload }}"` (`LifecycleProxyWithWholeMapping`, a named v1 out-of-scope), and `with:` on any other action (`LifecycleProxyOnlyParameter`) are all typed, source-aware frontmatter errors. Positional `proxy:` with a sibling `with:` remains the existing `LifecycleStackAmbiguous` diagnostic, whose actionable rewrite points at key/value form.
+
+#### Typed values
+
+Keys are static YAML strings and are never interpolated — they name target frontmatter properties. Values follow the same rule as every other lifecycle action parameter, recursed through nested arrays and objects:
+
+- a mixed string (`"phase-{{ iteration }}"`) resolves to a string;
+- a string whose trimmed content is **exactly one** `{{ … }}` span keeps the expression's resolved type — `"{{ true }}"` installs boolean `true`, not the string `"true"`;
+- authored YAML numbers, booleans, arrays, objects, and nulls keep their authored types; and
+- strings nested inside arrays and objects follow the same rule.
+
+Arrays and objects here are **data**, not positional action arguments — this is the one place in the lifecycle surface where a nested mapping is a legal action value.
+
+#### Source-time evaluation
+
+The whole mapping resolves **once, at the source**, when the event fires — through the same Darkmatter DM2 subtree composition the rest of the lifecycle surface uses, in strict mode, against the source document's live frontmatter plus the globals in scope for that event (`err`, `timing`, `current`). A `set_frontmatter` run earlier in the same stack is visible to `with:`.
+
+What lands on the target is therefore resolved data, not a template. A raw `{{ … }}` span can never survive into the overlay and be re-evaluated at target time — that would make the binding ambiguous, so it is rejected instead.
+
+Evaluation is **atomic**: the target and the complete mapping resolve before any state changes. On failure — an unknown root, a malformed expression, an unknown function, an out-of-scope global — no partial overlay is installed, the target is never touched, the source stays active for diagnostic attribution, and the run follows the normal failure routing for the event that requested the handoff. `no_error` is accepted (it is a universal key/value field) but does **not** suppress this: proxy has no side-effect dispatch phase, and an overlay failure is an expression-layer error. The diagnostic (`LifecycleProxyWithEvaluationFailed`) names the lifecycle event, the proxy action, the target, and the deepest representable path inside `with` — never a resolved value, which may hold a secret.
+
+#### Precedence and lifetime
+
+The overlay merges into **every** read of the target's authored frontmatter — the bootstrap read before target `initialize` and the fresh read after initialize-time mutations — before composition and schema validation. Precedence, lowest to highest:
+
+1. target-authored frontmatter;
+2. the immediate proxy's `with:` mapping;
+3. caller-supplied compose overrides (`key=value` / `--set`).
+
+**The original caller stays authoritative.** A router cannot silently overwrite an explicit caller value with `with:`.
+
+The merge is shallow at the top level: a scalar or array replaces the target's value, an object **replaces** the target's object at that key rather than deep-merging into it, and `null` removes the target-authored property before composition. A caller override can restore a key the overlay removed.
+
+The overlay is scoped to the **immediate** target:
+
+- it survives that target's retry, resume, and loop-iteration refreshes;
+- it is visible to every lifecycle event and to body composition for that target;
+- it is **never written to disk** — neither document's bytes or `hash:` change; and
+- it is discarded when that target proxies onward.
+
+Forwarding down a chain is explicit. A downstream `proxy` receives only its own `with:` plus the immutable caller overrides — omitting `with:` on the second hop installs an *empty* overlay rather than inheriting the first hop's:
+
+```yaml
+- action: proxy
+  target: "@prompts/final.md"
+  with:
+      spec: "{{ spec }}"      # forwarded because it is named here
+```
+
+Cycle detection and the hop limit are keyed on resolved document paths; an overlay does not create a distinct document identity.
+
+#### `with:` versus `set_frontmatter`
+
+Both put a value in front of a document. They are not interchangeable:
+
+| | `proxy.with` | `set_frontmatter` / `merge_frontmatter` |
+|---|---|---|
+| Persistence | In-memory for one target activation | Writes the file on disk |
+| Scope | The immediate proxy target only | Whatever file the action names |
+| Lifetime | Discarded at the next hop | Permanent until something rewrites it |
+| Visible to | That target's composition, lifecycle, schema, and body | Any later reader of that file |
+
+Reach for `with:` to parameterize the document you are handing to. Reach for `set_frontmatter` when the value must outlive the run.
+
+#### Trust model: prefer schema-declared data properties
+
+For ordinary parameter passing, declare the properties in the target's `$schema` and pass them as data. The schema is what makes the contract visible, validated, and completable:
+
+```yaml
+# prompts/next.md
+$schema:
+  attempt: 'number(required)'
+  label: string
+```
+
+`with:` may nevertheless set **any** top-level key, including control-plane keys — `agent`, `model`, `loop`, `$schema`, `timeout`, MCP, or a lifecycle event block. This is an **advanced, trusted-prompt capability**, and it is deliberate rather than an authority escalation: a source prompt that can `proxy` at all could already select those behaviors itself or run the equivalent lifecycle actions. It is still executable configuration, not inert data — so treat a `with:` that writes control-plane keys the way you would treat handing someone your config file.
+
+The safety properties that hold regardless:
+
+- the target **reparses and revalidates** every structural value the overlay installs — a malformed control-plane overlay fails as the target's own parse error, pre-launch;
+- an invalid overlay fails the target's schema **before any provider launches**;
+- a shell command installed by an overlay is discovered and approved by the *target's* pre-flight, subject to normal target-side policy — approved bytes equal executed bytes; and
+- status output may report that a handoff carries an overlay, and tracing may record property names and counts, but neither prints overlay values.
 
 ### Shell Actions
 
@@ -274,7 +412,9 @@ Stack expressions have access to three lifecycle-only globals in addition to fro
 
 ### `err` Fields
 
-Match handlers on these **faceted** fields — a stable, versioned contract (see the [error catalog](../../features/2026-06-28-real-errors/error-catalog.md)). Matching on these instead of human prose is what makes a lifecycle handler portable across providers and codes.
+Match handlers on these **faceted** fields — a stable, versioned contract (see the [error catalog](../../features/_completed/2026-06-28-real-errors/error-catalog.md), and [error-architecture.md](error-architecture.md) for how a failure's facets are selected). Matching on these instead of human prose is what makes a lifecycle handler portable across providers and codes.
+
+Every field below describes the **effective diagnostic** — the one error in the failure's cause chain selected to speak for it. The terminal block you see, the `err.*` you match on, and the serialized machine output are all projected from that same selection, so what you match can never be a different error than what was rendered.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -284,6 +424,19 @@ Match handlers on these **faceted** fields — a stable, versioned contract (see
 | `err.origin` | string | Who remediates: `provider`, `author`, `caller`, `environment`, or `internal`. |
 | `err.severity` | string | Operator-facing severity: `info`, `warning`, or `error`. Defaulted from `disposition` (`transient`/`throttled`/`needs_input` → `warning`, `correctable`/`unrecoverable` → `error`) and overridable per code. |
 | `err.detail.*` | typed | Per-instance payload — the fields that vary per occurrence (`err.detail.reference`, `err.detail.property`, `err.detail.reset_at`, …). Shape depends on `code`; an absent field reads as `null`. |
+| `err.msg` | string | Concise, notification-safe rendering of the selected error — see [below](#errmsg). |
+| `err.cause.*` | typed | The next registered diagnostic below the selected one — see [below](#errcause). |
+
+#### A registered code always carries a detail object
+
+If `err.code` names a code in the catalog, `err.detail` is **always an object**, with **every field that code declares present as a key**. A value the run could not determine reads as `null`.
+
+This matters for two things that look alike but are not:
+
+- `err.detail.reset_at == null` — the catalog says `cap.rate_limit` has a `reset_at`, and this occurrence did not carry one. Honest, and matchable.
+- `err.detail.reset_at` against a *scalar* `err.detail` — a bug. It cannot happen: a code with no per-instance data available still projects the full all-`null` object rather than a bare `null`.
+
+So `err.detail.<field>` is always a safe read for a registered code, and the value — not the shape — is what tells you whether the field was known. Only bare `when: "err.detail"` sees a difference, and it is a truthiness test on a container that no handler should be making.
 
 Promoted conveniences (sugar over the canonical fields, present only when the error is classifiable):
 
@@ -300,6 +453,41 @@ failure:
       action: { notify: "Shell command was denied" }
 ```
 
+#### `err.msg`
+
+The selected diagnostic's **concise** message: single-line, escape-free, and length-clamped (~240 characters), so a TTS route, a webhook, or a desktop notification can use it verbatim.
+
+It is deliberately **not** the multi-line rendered block — that block is for a terminal, and pushing it through a speech synthesizer or a Slack message is what the clamp exists to prevent. It is also not a classifier input: match on `err.code`, never on this text.
+
+```yaml
+failure:
+  stack:
+    - action: { say: "{{ err.msg }}" }          # safe: one clean line
+    - action: { notify: "{{ err.code }}: {{ err.msg }}" }
+```
+
+For a provider attempt failure, `err.msg` keeps the established `harness::failure_message` precedence (its headline, timeout, and stderr fallbacks, plus the `(attempt N)` suffix) rather than being replaced by a typed error's `Display`. Both producers pass through the same hygiene stage, so a typed error and a provider failure cannot reach a notification under different rules.
+
+#### `err.cause`
+
+The **next registered diagnostic** below the selected one, when the chain has one. Unregistered prose causes are walked through, so `err.cause` is the next thing with facets — not merely the next `source()`.
+
+| Field | Type |
+|-------|------|
+| `err.cause.code` / `err.cause.category` / `err.cause.disposition` / `err.cause.origin` / `err.cause.severity` | string |
+| `err.cause.detail.*` | typed |
+| `err.cause.msg` | string |
+
+It is a strict **one-level** projection. **`err.cause.cause` is not exposed in v1** — it is unrepresentable in the underlying type rather than merely undocumented, so it cannot quietly start working. `err.cause` is `null` when the selected error has no registered cause, and always `null` for a facet-less failure.
+
+```yaml
+failure:
+  stack:
+    # the write failed; the cause says why
+    - when: "err.code == 'io.write_failed' && err.cause.code == 'io.permission_denied'"
+      action: { notify: "Cannot write {{ err.detail.path }} — check permissions" }
+```
+
 #### Deprecated aliases
 
 The original `err` fields remain available for backward compatibility but are **deprecated** — new documents should match the faceted fields above.
@@ -310,7 +498,6 @@ The original `err` fields remain available for backward compatibility but are **
 |------------------|------|-------------|
 | `err.kind` | string | Deprecated alias of `err.category`. Mirrors the category for a classifiable error; falls back to the internal Rust error *type* name (`ClaudineError`, `HarnessError`, `CompositionError`) only for a facet-less action failure. |
 | `err.variant` | string | Deprecated alias of `err.code`. Mirrors the code for a classifiable error; falls back to the internal Rust enum *arm* name (`Io`, `ShellCommandDenied`, `SchemaLoad`) only for a facet-less action failure. |
-| `err.msg` | string | The human-readable `Display` rendering of the error. Prose; matching on it is discouraged. |
 
 ### `doc.err` Escape Hatch
 
@@ -498,7 +685,7 @@ failure:
 
 `err.category == 'timeout'` matches both kinds; to distinguish them, match `err.code == 'timeout.wall_clock'` or `err.code == 'timeout.step_silence'`.
 
-`resume` is valid only in `failure` and defaults to a single attempt (`max_attempts: 1`). Its string argument binds to the required `message:` parameter.
+`failure` is the natural home for this recovery, but it is not the only legal one: `resume` is valid in **every** event, and needs only a live provider session (pre-launch it surfaces `ResumeWithoutSession`). A `success` stack can resume the agent just as well when the run finished cleanly but left something undone. `resume` defaults to a single attempt (`max_attempts: 1`), and its string argument binds to the required `message:` parameter.
 
 ## Sound Effects
 
@@ -582,7 +769,7 @@ start:
 
 ### `LifecycleInterpolationLeak`
 
-Because lifecycle strings are interpolated at event-time (see [When Lifecycle Properties Interpolate](#when-lifecycle-properties-interpolate)), their authored `{{{ … }}}` spans are **not** prepare-time leaks — they are deferred by design. This guard runs **after** the event-time resolution, immediately before dispatch: a side-effect string that still contains a `{{{ … }}}` span at that point (e.g. a frontmatter value that is itself raw template text) is a typed error and the side effect is not sent. For non-lifecycle surfaces the guard still runs at prepare time.
+Because lifecycle strings are interpolated at event-time (see [When Lifecycle Properties Interpolate](#when-lifecycle-properties-interpolate)), their authored `{{{ … }}}` spans are **not** prepare-time leaks — they are deferred by design. This guard (`reject_surviving_spans`) runs **after** the event-time resolution, immediately before dispatch: a side-effect string that still contains a `{{{ … }}}` span at that point (e.g. a frontmatter value that is itself raw template text) is a typed error and the side effect is not sent. For non-lifecycle surfaces the unchanged prepare-time guard `validate_no_interpolation_leaks` still runs.
 
 ### `LifecycleUndefinedVariable`
 
@@ -595,7 +782,7 @@ success:
 
 ### `LifecycleErrNotAvailable`
 
-`err` is referenced in an event that never carries an error (`initialize`, `start`, `success`, `loop`). The scan walks the `{{{ … }}}` spans inside communication/action strings **and** the whole `when:` expression, and rejects at parse time. `timing`/`current` are allowed everywhere; `doc.err` remains the escape hatch.
+`err` is referenced in an event that never carries an error (`initialize`, `start`, `success`, `loop`). The scan walks the `{{{ … }}}` spans inside communication/action strings **and** the whole `when:` expression, and rejects at parse time (`validate_no_err_in_no_error_events`, using `literal_spans_reference_err` for the interpolation spans). `timing`/`current` are allowed everywhere — via the shared `LATE_BINDING_ROOTS` known-root authority, also consulted by `resolves_outside_frontmatter`; `doc.err` remains the escape hatch.
 
 ```yaml
 start:

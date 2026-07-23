@@ -379,13 +379,13 @@ Both commands flow through the same unified pipeline: `execute_composition_reque
 
 ## Harness System
 
-The harness wraps non-interactive prompts with timeout enforcement, shell-audit pre-flight, runtime attempt classification, and lifecycle recovery infrastructure. Gating, verification, and recovery are expressed through the prompt's [lifecycle stack](lifecycle.md) — `when:` guards plus the `Error` / `Skip` / `Proxy` / `Retry` / `Resume` / `Requeue` lifecycle actions — not a separate validation/handler DSL.
+The harness wraps non-interactive prompts with timeout enforcement, shell-audit pre-flight, runtime attempt classification, and lifecycle recovery infrastructure. Gating, verification, and recovery are expressed through the prompt's [lifecycle stack](lifecycle.md) — `when:` guards plus the `error` / `skip` / `proxy` / `retry` / `resume` / `defer` lifecycle actions — not a separate validation/handler DSL.
 
 ### Gating, Verification, and Recovery
 
 - **Gating** (does this run even start?) lives in the `initialize`/`start` stacks: guard with `when:` and `Skip`, `Proxy`, or `Error` out before the agent is invoked.
 - **Verification** (did the run do what it claimed?) lives in the `success`/`finalize` stacks: raise an `Error` lifecycle action when a `when:` contract is unmet.
-- **Recovery** (what to do on failure) lives in the `failure`/`blocked` stacks via `Retry`, `Resume`, `Requeue`, or `Proxy`.
+- **Recovery** (what to do on failure) lives in the `failure`/`blocked` stacks via `retry`, `resume`, or `proxy` — and, because flow control is universal, in any other event's stack too.
 
 The retired `pre_checks` / `post_checks` / `handle_*` / `handle` / `deviate` frontmatter keys now reject with a typed `RemovedValidationKey` diagnostic; see [Composition — Migrating from the Retired Harness DSL](composition.md#migrating-from-the-retired-harness-dsl).
 

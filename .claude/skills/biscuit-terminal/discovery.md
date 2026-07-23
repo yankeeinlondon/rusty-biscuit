@@ -132,6 +132,19 @@ if is_tty() {
 }
 ```
 
+## Horizontal-Tab Interval
+
+```rust
+use biscuit_terminal::discovery::detection::tab_width;
+
+let width = tab_width();
+```
+
+Detection uses terminfo's `init_tabs` capability and falls back to the standard
+eight-column interval. Normal rendering should read the cached
+`Terminal::tab_width` field; call this low-level helper when constructing a
+terminal capability context.
+
 ## Multiplexing
 
 ```rust

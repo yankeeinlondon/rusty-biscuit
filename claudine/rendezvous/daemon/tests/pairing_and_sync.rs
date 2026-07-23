@@ -6,16 +6,17 @@
 //! of entries for the shared session.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::path::Path;
 use std::time::{Duration, Instant};
 
-use rendezvous_client::connect_uds;
+use rendezvous_client::connect;
 use rendezvous_core::{
     AppendEntryRequest, ApprovePeerRequest, ConnectToPeerRequest, CreateInvitationRequest,
-    ListChunkEntriesRequest, ListPairingsRequest, ListSessionChunksRequest,
+    ListChunkEntriesRequest, ListPairingsRequest, ListPeersRequest, ListSessionChunksRequest,
     PeerConnectionState, RendezvousClient, RevokePeerRequest, SyncWithPeerRequest,
 };
-use rendezvous_daemon::server::{DaemonConfig, NetworkConfig, ServerHandle, spawn_uds_server};
+use rendezvous_core::local_endpoint::{LocalEndpoint, test_support::private_endpoint};
+use rendezvous_daemon::local_transport::spawn_local_server;
+use rendezvous_daemon::server::{DaemonConfig, NetworkConfig, ServerHandle};
 use tempfile::TempDir;
 use tokio::time::sleep;
 use tonic::transport::Channel;
@@ -36,22 +37,11 @@ fn daemon_config(tmp: &TempDir, name: &str) -> DaemonConfig {
 async fn boot_daemon(
     tmp: &TempDir,
     name: &str,
-) -> (ServerHandle, std::path::PathBuf) {
-    let socket = tmp.path().join(format!("{name}.sock"));
+) -> (ServerHandle, LocalEndpoint) {
+    let socket = private_endpoint(tmp.path(), name);
     let handle =
-        spawn_uds_server(socket.clone(), daemon_config(tmp, name)).expect("spawn daemon");
-    wait_until_bound(&socket).await;
+        spawn_local_server(socket.clone(), daemon_config(tmp, name)).expect("spawn daemon");
     (handle, socket)
-}
-
-async fn wait_until_bound(path: &Path) {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !path.exists() {
-        if Instant::now() >= deadline {
-            panic!("socket {} never appeared", path.display());
-        }
-        sleep(Duration::from_millis(10)).await;
-    }
 }
 
 #[tokio::test]
@@ -63,8 +53,8 @@ async fn paired_daemons_converge_after_direct_sync() {
     let alice_node = alice.node_id();
     let bob_node = bob.node_id();
 
-    let mut alice_client = connect_uds(alice_sock.clone()).await.expect("alice connect");
-    let mut bob_client = connect_uds(bob_sock.clone()).await.expect("bob connect");
+    let mut alice_client = connect(&alice_sock).await.expect("alice connect");
+    let mut bob_client = connect(&bob_sock).await.expect("bob connect");
 
     // Pre-approve each other so the initial sync attempt that fires
     // automatically when QUIC connects can succeed.
@@ -140,6 +130,23 @@ async fn paired_daemons_converge_after_direct_sync() {
         .into_inner();
     assert_eq!(sync.node_id, bob_node);
 
+    // A successful sync stamps the freshness clock the dashboard reads
+    // — distinct from mDNS-driven `last_seen`. Bob's peer row on Alice
+    // must now carry a positive `last_synced_unix_ms`.
+    let bob_peer = alice_client
+        .list_peers(ListPeersRequest {})
+        .await
+        .expect("alice list_peers")
+        .into_inner()
+        .peers
+        .into_iter()
+        .find(|p| p.node_id == bob_node)
+        .expect("bob present in alice's peer registry");
+    assert!(
+        bob_peer.last_synced_unix_ms > 0,
+        "successful sync must stamp last_synced_unix_ms: {bob_peer:?}",
+    );
+
     // After sync, each side should see their own and the other's data.
     let alice_node = alice_node.clone();
     let bob_node = bob_node.clone();
@@ -158,8 +165,8 @@ async fn sync_is_rejected_when_pairing_is_missing() {
     let (alice, alice_sock) = boot_daemon(&tmp, "alice").await;
     let (bob, bob_sock) = boot_daemon(&tmp, "bob").await;
 
-    let mut alice_client = connect_uds(alice_sock.clone()).await.expect("alice connect");
-    let mut bob_client = connect_uds(bob_sock.clone()).await.expect("bob connect");
+    let mut alice_client = connect(&alice_sock).await.expect("alice connect");
+    let mut bob_client = connect(&bob_sock).await.expect("bob connect");
 
     // Connect QUIC via manual invitation. This auto-pairs Alice with
     // Bob (initiator side), but Bob has not approved Alice.
@@ -199,7 +206,7 @@ async fn sync_is_rejected_when_pairing_is_missing() {
 async fn pairings_can_be_listed_and_revoked() {
     let tmp = TempDir::new().expect("tempdir");
     let (alice, alice_sock) = boot_daemon(&tmp, "alice").await;
-    let mut client = connect_uds(alice_sock.clone()).await.expect("connect");
+    let mut client = connect(&alice_sock).await.expect("connect");
 
     let node_id =
         "1111111111111111111111111111111111111111111111111111111111111111".to_string();

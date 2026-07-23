@@ -2562,3 +2562,288 @@ mod unauth_fallback_tests {
         }
     }
 }
+
+// =============================================================================
+// Shared-snapshot request bounds (R11)
+// =============================================================================
+//
+// One `fetch_report` used to resolve the same evidence up to three times:
+// `get_repo_metadata`, `list_documents`, and `detect_cicd` each fetched their own
+// metadata (for the default branch) and then their own identical recursive tree.
+// These tests pin the bound with wiremock `expect(..)`, which is verified when the
+// `MockServer` drops.
+
+mod snapshot_reuse_tests {
+    use super::*;
+
+    // The per-provider modules keep their fixtures private; these mirror the
+    // minimum shape each provider's snapshot reads.
+
+    fn gitea_repo_fixture() -> serde_json::Value {
+        serde_json::json!({
+            "id": 54321,
+            "name": "test-repo",
+            "full_name": "test-owner/test-repo",
+            "private": false,
+            "html_url": "https://gitea.example.com/test-owner/test-repo",
+            "default_branch": "main",
+            "archived": false
+        })
+    }
+
+    fn gitea_tree_fixture() -> serde_json::Value {
+        serde_json::json!({
+            "sha": "abc123def456",
+            "tree": [
+                {"path": "README.md", "type": "blob", "mode": "100644", "sha": "aaa111", "size": 512},
+                {"path": ".gitea/workflows/ci.yml", "type": "blob", "mode": "100644", "sha": "eee555", "size": 256}
+            ],
+            "truncated": false
+        })
+    }
+
+    fn gitlab_tree_fixture() -> serde_json::Value {
+        serde_json::json!([
+            {"id": "aaa111", "name": "README.md", "type": "blob", "path": "README.md", "mode": "100644"},
+            {"id": "ccc333", "name": ".gitlab-ci.yml", "type": "blob", "path": ".gitlab-ci.yml", "mode": "100644"}
+        ])
+    }
+
+    /// GitHub: one metadata call and one root-tree call per report.
+    ///
+    /// The report also asks for workflow runs; when those come back non-empty the
+    /// CI/CD ladder short-circuits before `detect_cicd_with`, but that must not
+    /// change the *evidence* count — the snapshot is resolved either way.
+    #[tokio::test]
+    async fn github_fetch_report_resolves_metadata_and_tree_once() {
+        let server = MockServer::start().await;
+        unsafe { std::env::set_var("GITHUB_TOKEN", "test-token-12345") };
+        let provider = GitHubRemote::with_base_url(&server.uri()).unwrap();
+
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/test-repo"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(github_repo_fixture()))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path_regex(r"/repos/test-owner/test-repo/git/trees/.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(github_tree_fixture()))
+            .expect(1)
+            .mount(&server)
+            .await;
+        // Everything else the report fans out to; unbounded, not under test here.
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        let report = provider.fetch_report("test-owner", "test-repo").await.unwrap();
+
+        // The projections still see the shared evidence.
+        assert!(report.documents.iter().any(|d| d.path == "README.md"));
+        assert!(report.documents.iter().any(|d| d.category == DocumentCategory::DocsFolder));
+        assert!(
+            report.ci_cd.iter().any(|c| c.provider == "GitHub Actions"),
+            "the .github/workflows blob in the shared tree must still be detected"
+        );
+
+        drop(server);
+    }
+
+    /// Gitea: the ladder always falls through to `detect_cicd` (no workflow-run
+    /// override), which is exactly the case that used to pay 3 metadata + 2 tree.
+    #[tokio::test]
+    async fn gitea_fetch_report_resolves_metadata_and_tree_once() {
+        let server = MockServer::start().await;
+        unsafe { std::env::set_var("GITEA_TOKEN", "test-token-12345") };
+        let provider = GiteaRemote::with_base_url(&server.uri()).unwrap();
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/repos/test-owner/test-repo"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(gitea_repo_fixture()))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path_regex(r"/api/v1/repos/test-owner/test-repo/git/trees/.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(gitea_tree_fixture()))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        let report = provider.fetch_report("test-owner", "test-repo").await.unwrap();
+        assert!(report.documents.iter().any(|d| d.path == "README.md"));
+
+        drop(server);
+    }
+
+    /// GitLab: absent `GetProject`, its metadata call *is* a tree fetch. Keeping
+    /// that result collapses three identical tree requests into one.
+    #[tokio::test]
+    async fn gitlab_fetch_report_fetches_the_tree_once() {
+        let server = MockServer::start().await;
+        unsafe { std::env::set_var("GITLAB_TOKEN", "test-token-12345") };
+        let provider = GitLabRemote::with_base_url(&server.uri()).unwrap();
+
+        Mock::given(method("GET"))
+            .and(path_regex(r"/api/v4/projects/.*/repository/tree.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(gitlab_tree_fixture()))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        let report = provider.fetch_report("test-owner", "test-repo").await.unwrap();
+        assert_eq!(report.metadata.full_name, "test-owner/test-repo");
+
+        drop(server);
+    }
+
+    /// A failed tree must not sink a report whose required metadata succeeded:
+    /// metadata survives, documents degrade to empty, CI/CD to `None` (R11.6).
+    #[tokio::test]
+    async fn a_failed_tree_preserves_metadata_and_degrades_optional_sections() {
+        let server = MockServer::start().await;
+        unsafe { std::env::set_var("GITHUB_TOKEN", "test-token-12345") };
+        let provider = GitHubRemote::with_base_url(&server.uri()).unwrap();
+
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/test-repo"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(github_repo_fixture()))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path_regex(r"/repos/test-owner/test-repo/git/trees/.*"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        let report = provider
+            .fetch_report("test-owner", "test-repo")
+            .await
+            .expect("metadata succeeded, so the report must not fail");
+
+        assert_eq!(report.metadata.name, "test-repo");
+        assert!(report.documents.is_empty());
+        assert!(report.ci_cd.is_empty());
+    }
+
+    /// A provider-reported truncated tree is not complete: bounded subtree
+    /// continuations recover the document/CI prefixes the projections read (R11.5).
+    #[tokio::test]
+    async fn a_truncated_github_tree_continues_for_document_and_ci_prefixes() {
+        let server = MockServer::start().await;
+        unsafe { std::env::set_var("GITHUB_TOKEN", "test-token-12345") };
+        let provider = GitHubRemote::with_base_url(&server.uri()).unwrap();
+
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/test-repo"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(github_repo_fixture()))
+            .mount(&server)
+            .await;
+
+        // The root tree truncated before reaching docs/ or .github/workflows/.
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/test-repo/git/trees/main"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "sha": "root",
+                "url": "https://api.github.com/x",
+                "tree": [
+                    {"path": "README.md", "type": "blob", "mode": "100644", "sha": "a", "size": 1}
+                ],
+                "truncated": true
+            })))
+            .mount(&server)
+            .await;
+
+        // `branch:path` subtree continuations. Paths are subtree-relative.
+        // The client percent-encodes the whole `branch:prefix` tree_sha into one
+        // path segment, so the subtree address arrives as `main%3Adocs`.
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/test-repo/git/trees/main%3Adocs"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "sha": "d", "url": "https://api.github.com/x",
+                "tree": [
+                    {"path": "guide.md", "type": "blob", "mode": "100644", "sha": "b", "size": 2}
+                ],
+                "truncated": false
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/test-repo/git/trees/main%3A.github"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "sha": "w", "url": "https://api.github.com/x",
+                "tree": [
+                    {"path": "workflows/ci.yml", "type": "blob", "mode": "100644", "sha": "c", "size": 3}
+                ],
+                "truncated": false
+            })))
+            .mount(&server)
+            .await;
+        // Prefixes this repo does not have 404, and must be skipped, not fatal.
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        let documents = provider.list_documents("test-owner", "test-repo").await.unwrap();
+        assert!(
+            documents.iter().any(|d| d.path == "docs/guide.md"),
+            "a continued subtree entry must be re-prefixed to a repo-root path"
+        );
+        assert!(documents.iter().any(|d| d.path == "README.md"));
+
+        let cicd = provider.detect_cicd("test-owner", "test-repo").await.unwrap();
+        assert!(
+            cicd.is_some(),
+            "workflows recovered by continuation must still detect CI"
+        );
+    }
+
+    /// Without continuation a truncated tree reports "no docs, no CI" with full
+    /// confidence — the defect R11.5 names. This pins that the flag is read at all.
+    #[tokio::test]
+    async fn a_truncated_tree_with_no_recoverable_prefixes_still_returns_root_entries() {
+        let server = MockServer::start().await;
+        unsafe { std::env::set_var("GITHUB_TOKEN", "test-token-12345") };
+        let provider = GitHubRemote::with_base_url(&server.uri()).unwrap();
+
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/test-repo"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(github_repo_fixture()))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/test-repo/git/trees/main"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "sha": "root", "url": "https://api.github.com/x",
+                "tree": [
+                    {"path": "README.md", "type": "blob", "mode": "100644", "sha": "a", "size": 1}
+                ],
+                "truncated": true
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        let documents = provider.list_documents("test-owner", "test-repo").await.unwrap();
+        assert_eq!(documents.len(), 1, "a failed continuation must not discard the root entries");
+        assert_eq!(documents[0].path, "README.md");
+    }
+}

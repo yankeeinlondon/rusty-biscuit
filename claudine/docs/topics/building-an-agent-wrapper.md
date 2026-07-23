@@ -144,7 +144,7 @@ Per-provider model lists are sourced through [`claudine/lib/src/model_catalog/pr
 
 The seam between user input and the wrapper is the argv pre-parser in [`claudine/cli/src/argv.rs`](../../cli/src/argv.rs) (`argv::normalize`). Per-provider concerns:
 
-- **Provider booleans** (`--claude`, `--codex`, `--gemini`, `--goose`, `--kimi`, `--opencode`, `--qwen`) are rewritten to `--provider <slug>` on composition subcommands. Adding a new provider means extending the rewrite table here.
+- **Provider booleans** are derived from the compiled provider catalog and rewritten to `--provider <slug>` on composition subcommands. Adding a catalog provider makes its shorthand available without a hand-maintained rewrite table.
 - **`COMPOSITION_FLAGS_WITH_VALUE`** must be kept in sync with the value-bearing clap surface of `ComposeArgs` and `SequenceArgs`. The drift-detection test `composition_flags_with_value_matches_clap_surface` enforces this.
 
 ### ACP support

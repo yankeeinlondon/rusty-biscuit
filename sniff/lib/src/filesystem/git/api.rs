@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 use gix::bstr::ByteSlice;
 
 use super::discovery::{
-    DeltaKind, get_commit_by_sha_fallible, get_commit_files_fallible,
-    get_commits_for_branch_fallible, get_commits_for_path_fallible,
+    DeltaKind, PathHistoryOptions, PathHistoryResult, get_commit_by_sha_fallible,
+    get_commit_files_fallible, get_commits_for_branch_fallible, get_commits_for_path_fallible,
 };
 use super::open;
 use super::merge_conflicts::merge_conflicts_between;
@@ -85,6 +85,24 @@ pub fn commit_files_at(path: &Path, sha: &str) -> Result<Vec<(PathBuf, DeltaKind
 
 /// Recent commits touching `path_prefix`, newest first.
 ///
+/// The walk is bounded by `options`; the returned
+/// [`PathHistoryResult`](crate::filesystem::git::PathHistoryResult) reports
+/// whether it exhausted history or stopped at its scan limit, so a short result
+/// is never mistaken for a complete one.
+///
+/// ## Examples
+///
+/// ```no_run
+/// use sniff::filesystem::git::{commits_for_path_at, PathHistoryOptions};
+/// use std::path::Path;
+///
+/// let history = commits_for_path_at(Path::new("."), "src/", PathHistoryOptions::new(10))?;
+/// if history.limit_reached {
+///     eprintln!("scanned {} commits without exhausting history", history.commits_scanned);
+/// }
+/// # Ok::<(), sniff::SniffError>(())
+/// ```
+///
 /// ## Errors
 ///
 /// Trust/ownership, permission, I/O, and corruption failures surface as
@@ -92,12 +110,12 @@ pub fn commit_files_at(path: &Path, sha: &str) -> Result<Vec<(PathBuf, DeltaKind
 pub fn commits_for_path_at(
     path: &Path,
     path_prefix: &str,
-    count: usize,
-) -> Result<Vec<CommitInfo>> {
+    options: PathHistoryOptions,
+) -> Result<PathHistoryResult> {
     let Some(repo) = open_gix(path)? else {
-        return Ok(Vec::new());
+        return Ok(PathHistoryResult::default());
     };
-    get_commits_for_path_fallible(&repo, path_prefix, count, None)
+    get_commits_for_path_fallible(&repo, path_prefix, options, None)
 }
 
 /// Recent commits on `branch`, newest first.
@@ -229,6 +247,19 @@ pub fn branches_at(path: &Path, refresh_remotes: bool) -> Result<Option<Vec<Bran
 pub fn preferred_remote_url(path: &Path) -> Result<Option<String>> {
     Ok(super::remote_resolver::resolve_remote_at(path, None)?
         .map(|remote| remote.fetch_url))
+}
+
+/// [`preferred_remote_url`] against an already-discovered repository.
+///
+/// Resolves through the same preferred-remote authority as the path-based form,
+/// so the two cannot drift apart on which remote counts as preferred.
+pub(crate) fn preferred_remote_url_with_repo(repo: &super::GitRepo) -> Option<String> {
+    repo.with_cached_gix(|repo| {
+        super::remote_resolver::resolve_remote(repo, None)
+            .ok()
+            .flatten()
+            .map(|remote| remote.fetch_url)
+    })
 }
 
 /// URL of the named remote, or `None` if the remote is absent or has no URL.

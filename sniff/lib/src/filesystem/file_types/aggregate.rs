@@ -35,6 +35,8 @@ pub fn summarize_file_inventory(
         by_association: summarize_associations(inventory),
         by_language: lang_summary.languages.clone(),
         by_framework: lang_summary.frameworks.clone(),
+        truncated: inventory.truncated,
+        limit: inventory.limit,
     };
     (breakdown, lang_summary)
 }
@@ -48,6 +50,7 @@ pub fn summarize_languages(inventory: &FileInventory) -> LanguageSummary {
     }
 
     build_language_summary(language_map, framework_map, inventory.total_files_scanned)
+        .with_completeness_of(inventory)
 }
 
 /// Accumulate a single classification into language and framework maps.
@@ -166,6 +169,10 @@ pub(crate) fn build_language_summary(
             .then_with(|| left.framework.as_str().cmp(right.framework.as_str()))
     });
 
+    // Completeness belongs to the inventory a summary was projected from, and
+    // this builder is also called with maps accumulated outside any inventory
+    // (per-package summaries in `repo::detection`). Callers that do have an
+    // inventory stamp the pair via `LanguageSummary::with_completeness_of`.
     LanguageSummary {
         primary,
         secondary,
@@ -173,6 +180,8 @@ pub(crate) fn build_language_summary(
         total_language_files,
         languages,
         frameworks,
+        truncated: false,
+        limit: None,
     }
 }
 

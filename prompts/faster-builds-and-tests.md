@@ -5,7 +5,7 @@ process: "test-and-build-optimization"
 ---
 ## Context
 
-::file _senior-reviewer.md
+::file ./_senior-reviewer.md
 
 Your responsibility is to perform a review on the "{{area}}" package area and:
 

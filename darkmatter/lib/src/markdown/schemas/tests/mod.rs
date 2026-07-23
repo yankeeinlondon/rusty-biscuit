@@ -300,14 +300,12 @@ impl Drop for CwdGuard {
     }
 }
 
-/// A `file`-typed schema property value resolves via the captured
-/// fallback even when the process CWD is an unrelated directory
-/// (verification goal #7 precursor). The format validator closure
-/// captures the fallback dir and resolves via `FileReference::resolve_from`
-/// instead of the ambient-CWD `resolve()`.
+/// A `file`-typed schema property value is not resolved via the captured
+/// launch-area fallback. The launch area is diagnostic context, not a
+/// resolution input for a reference authored inside the document.
 #[test]
 #[serial_test::serial(darkmatter_file_cwd)]
-fn file_format_resolves_via_fallback_when_cwd_unrelated() {
+fn file_format_does_not_resolve_via_launch_area_fallback() {
     let launch_dir = tempfile::tempdir().expect("tempdir");
     std::fs::write(launch_dir.path().join("spec.md"), "# Spec\n").expect("write spec");
     let unrelated_dir = tempfile::tempdir().expect("tempdir");
@@ -320,8 +318,8 @@ fn file_format_resolves_via_fallback_when_cwd_unrelated() {
     let report = api.validate(&md).expect("validate");
 
     assert!(
-        report.valid,
-        "expected file-format validation to resolve via fallback: {:?}",
+        !report.valid,
+        "the launch-area fallback must not resolve a document-authored file reference: {:?}",
         report.problems,
     );
 }
@@ -491,12 +489,11 @@ fn file_property_present_only_in_prompt_dir_validates() {
     );
 }
 
-/// A `file` value that exists ONLY under the launch-area fallback (not the
-/// prompt directory) still validates via the fallback rung. Independent of
-/// the ambient CWD.
+/// A `file` value that exists only under the launch-area fallback does not
+/// validate. Resolution remains document-local and independent of ambient CWD.
 #[test]
 #[serial_test::serial(darkmatter_file_cwd)]
-fn file_property_present_only_in_fallback_validates() {
+fn file_property_present_only_in_fallback_does_not_validate() {
     let prompt_dir = tempfile::tempdir().expect("tempdir");
     let fallback_dir = tempfile::tempdir().expect("tempdir");
     let unrelated = tempfile::tempdir().expect("tempdir");
@@ -509,8 +506,8 @@ fn file_property_present_only_in_fallback_validates() {
     let _cwd = CwdGuard::enter(unrelated.path());
     let report = api.validate(&md).expect("validate");
     assert!(
-        report.valid,
-        "a file value under the launch-area fallback must validate: {:?}",
+        !report.valid,
+        "a file value present only under the launch-area fallback must not validate: {:?}",
         report.problems,
     );
 }

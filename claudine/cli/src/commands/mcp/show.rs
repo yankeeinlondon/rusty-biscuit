@@ -1,7 +1,7 @@
 use claudine::mcp::catalog::McpCatalogStore;
 use claudine::mcp::state::McpProviderStateStore;
 use claudine::provider::PROVIDERS_DISPLAY_ORDER;
-use color_eyre::eyre::{Result, eyre};
+use color_eyre::eyre::Result;
 use serde_json::{Value, json};
 
 use crate::log;
@@ -15,7 +15,7 @@ pub(super) fn run_config(query: Option<&str>, json_output: bool) -> Result<()> {
         Some(query) => query.to_string(),
         None => prompt_for_server_query(&catalog, "Select an MCP server to inspect:")?,
     };
-    let server = catalog.resolve(&query).map_err(|e| eyre!("{e}"))?;
+    let server = catalog.resolve(&query)?;
     let provenance = collect_provenance(&state, &server.id);
 
     if json_output {

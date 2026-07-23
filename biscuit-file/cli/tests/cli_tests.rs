@@ -487,13 +487,16 @@ fn reference_add_vault_searches_vault() {
 
 #[test]
 fn reference_implicit_relative_bare_filename() {
-    // Bare filename (no `./` prefix) is ImplicitRelative and must resolve
-    // against the CLI crate's CWD end-to-end through the binary.
+    // Bare filename (no `./` prefix) is ImplicitRelative. Phase 4 resolves it
+    // repository-root first: `Cargo.toml` exists both in the CLI crate and at
+    // the workspace root, so the workspace-root copy wins over the source-local
+    // one, end-to-end through the binary.
     bf().arg("reference")
         .arg("Cargo.toml")
         .assert()
         .success()
-        .stdout(predicate::str::contains("biscuit-file/cli/Cargo.toml"))
+        .stdout(predicate::str::contains("biscuit-file/cli/Cargo.toml").not())
+        .stdout(predicate::str::ends_with("/Cargo.toml\n"))
         .stdout(predicate::str::starts_with("/"));
 }
 

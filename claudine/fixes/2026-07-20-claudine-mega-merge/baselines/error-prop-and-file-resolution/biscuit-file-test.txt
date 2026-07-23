@@ -1,0 +1,799 @@
+Revision: 43c23c6535cf6e52a35dbb06ea6f4ccce0c88e97
+Detached worktree: /tmp/claudine-mega-foundation.L8eU1A/tree
+Working directory: biscuit-file
+Command: just test
+Timeout policy: SIGINT at 60s; SIGKILL 5s later
+Exit status: 0
+Classification: passed
+Elapsed seconds: 27.954549292
+
+Warning: truncated output (original token count: 15551)
+Total output lines: 933
+
+[[STDOUT]]
+
+Testing [1mbiscuit-file[0m package
+
+ℹ️ using [32mcargo nextest run[0m
+
+✅ [32m all tests passing in [1mbiscuit-file[0m[32m package[0m
+
+
+Testing [1mbiscuit-file-cli[0m package
+
+ℹ️ using [32mcargo nextest run[0m
+
+✅ [32m all tests passing in [1mbiscuit-file-cli[0m[32m package[0m
+
+[[STDERR]]
+    Blocking waiting for file lock on package cache
+    Updating crates.io index
+    Blocking waiting for file lock on package cache
+     Locking 1444 packages to latest compatible versions
+      Adding alsa v0.11.0 (available: v0.12.0)
+      Adding axum-test v16.4.1 (available: v21.0.0)
+      Adding axum-test v18.7.0 (available: v21.0.0)
+      Adding bech32 v0.11.1 (available: v0.12.0)
+      Adding cargo_metadata v0.19.2 (available: v0.23.1)
+      Adding chromiumoxide v0.7.0 (available: v0.9.1)
+      Adding comfy-table v7.1.4 (available: v7.2.2)
+      Adding criterion v0.5.1 (available: v0.8.2)
+      Adding ed25519-dalek v2.2.0 (available: v3.0.0)
+      Adding expectrl v0.8.0 (available: v0.9.0)
+      Adding fancy-regex v0.17.0 (available: v0.18.0)
+      Adding flume v0.11.1 (available: v0.12.0)
+      Adding fs4 v0.13.1 (available: v1.1.0)
+      Adding generic-array v0.14.7 (available: v0.14.9)
+      Adding geo v0.29.3 (available: v0.33.1)
+      Adding git2 v0.20.4 (available: v0.21.0)
+      Adding gix v0.84.0 (available: v0.85.0)
+      Adding i_float v1.6.0 (available: v1.16.0)
+      Adding i_overlay v1.9.4 (available: v1.10.0)
+      Adding i_shape v1.6.0 (available: v1.18.0)
+      Adding infer v0.19.0 (available: v0.22.0)
+      Adding jsonschema v0.42.2 (available: v0.48.2)
+      Adding jsonwebtoken v9.3.1 (available: v10.4.0)
+      Adding lopdf v0.39.0 (available: v0.44.0)
+      Adding lsp-server v0.8.0 (available: v0.10.0)
+      Adding matchit v0.8.4 (available: v0.8.6)
+      Adding maxminddb v0.27.3 (available: v0.30.0)
+      Adding mdns-sd v0.12.0 (available: v0.20.2)
+      Adding mermaid-rs-renderer v0.2.2 (available: v0.3.1)
+      Adding pdf-extract v0.10.0 (available: v0.12.0)
+      Adding pdfium-render v0.8.37 (available: v0.9.3)
+      Adding petname v2.0.2 (available: v3.1.0)
+      Adding prettyplease v0.2.37 (available: v0.3.0)
+      Adding proc-macro-crate v2.0.0 (available: v2.0.2)
+      Adding quick-xml v0.39.4 (available: v0.41.0)
+      Adding rand v0.8.7 (available: v0.10.2)
+      Adding rand v0.9.5 (available: v0.10.2)
+      Adding rand_core v0.6.4 (available: v0.10.1)
+      Adding rcgen v0.13.2 (available: v0.14.8)
+      Adding redb v2.6.3 (available: v4.1.0)
+      Adding reqwest v0.12.28 (available: v0.13.4)
+      Adding resvg v0.45.1 (available: v0.47.0)
+      Adding rig-core v0.31.0 (available: v0.40.0)
+      Adding rstest v0.25.0 (available: v0.26.1)
+      Adding rusqlite v0.31.0 (available: v0.40.1)
+      Adding scraper v0.25.0 (available: v0.27.0)
+      Adding sha2 v0.10.9 (available: v0.11.0)
+      Adding similar v2.7.0 (available: v3.1.1)
+      Adding sqlx v0.8.0 (available: v0.8.6)
+      Adding sqlx-core v0.8.0 (available: v0.8.6)
+      Adding sqlx-macros v0.8.0 (available: v0.8.6)
+      Adding sqlx-macros-core v0.8.0 (available: v0.8.6)
+      Adding sqlx-mysql v0.8.0 (available: v0.8.6)
+      Adding sqlx-postgres v0.8.0 (available: v0.8.6)
+      Adding sqlx-sqlite v0.8.0 (available: v0.8.6)
+      Adding symphonia v0.5.5 (available: v0.6.0)
+      Adding syn v2.0.119 (available: v3.0.3)
+      Adding sysinfo v0.38.4 (available: v0.39.6)
+      Adding tokio-tungstenite v0.28.0 (available: v0.30.0)
+      Adding toml v0.8.23 (available: v1.1.3+spec-1.1.0)
+      Adding tower-http v0.6.11 (available: v0.7.0)
+      Adding tree-sitter-scala v0.24.1 (available: v0.26.0)
+      Adding tree-sitter-zsh v0.56.0 (available: v0.63.4)
+      Adding which v7.0.3 (available: v8.0.5)
+      Adding winreg v0.55.0 (available: v0.56.0)
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.24
+   Compiling quote v1.0.47
+   Compiling libc v0.2.189
+   Compiling memchr v2.8.3
+   Compiling cfg-if v1.0.4
+   Compiling regex-syntax v0.8.11
+   Compiling version_check v0.9.5
+   Compiling stable_deref_trait v1.2.1
+   Compiling thiserror v2.0.19
+   Compiling smallvec v1.15.2
+   Compiling typenum v1.20.1
+   Compiling tinyvec_macros v0.1.1
+   Compiling once_cell v1.21.4
+   Compiling itoa v1.0.18
+   Compiling getrandom v0.4.3
+   Compiling tinyvec v1.12.0
+   Compiling crc32fast v1.5.0
+   Compiling gix-trace v0.1.20
+   Compiling parking_lot_core v0.9.12
+   Compiling scopeguard v1.2.0
+   Compiling generic-array v0.14.7
+   Compiling fastrand v2.5.0
+   Compiling lock_api v0.4.14
+   Compiling same-file v1.0.6
+   Compiling byteorder v1.5.0
+   Compiling walkdir v2.5.0
+   Compiling hashbrown v0.17.1
+   Compiling zlib-rs v0.6.6
+   Compiling heapless v0.8.0
+   Compiling aho-corasick v1.1.4
+   Compiling hash32 v0.3.1
+   Compiling bitflags v2.13.1
+   Compiling serde_core v1.0.229
+   Compiling jiff-core v0.1.0
+   Compiling equivalent v1.0.2
+   Compiling pin-project-lite v0.2.17
+   Compiling unicode-normalization v0.1.25
+   Compiling zerocopy v0.8.55
+   Compiling rustix v1.1.4
+   Compiling serde v1.0.229
+   Compiling futures-core v0.3.33
+   Compiling futures-sink v0.3.33
+   Compiling bytes v1.12.1
+   Compiling autocfg v1.5.1
+   Compiling indexmap v2.14.0
+   Compiling litemap v0.8.2
+   Compiling writeable v0.6.3
+   Compiling crossbeam-utils v0.8.22
+   Compiling faster-hex v0.10.0
+   Compiling nonempty v0.12.0
+   Compiling num-traits v0.2.19
+   Compiling getrandom v0.3.4
+   Compiling zmij v1.0.23
+   Compiling percent-encoding v2.3.2
+   Compiling syn v2.0.119
+   Compiling syn v3.0.3
+   Compiling crypto-common v0.1.7
+   Compiling block-buffer v0.10.4
+   Compiling block-padding v0.3.3
+   Compiling digest v0.10.7
+   Compiling cpufeatures v0.2.17
+   Compiling memmap2 v0.9.11
+   Compiling errno v0.3.14
+   Compiling sha1 v0.10.7
+   Compiling gix-utils v0.3.4
+   Compiling inout v0.1.4
+   Compiling parking_lot v0.12.5
+   Compiling sha1-checked v0.10.0
+   Compiling utf8_iter v1.0.4
+   Compiling serde_json v1.0.151
+   Compiling prodash v31.0.0
+   Compiling slab v0.4.12
+   Compiling icu_normalizer_data v2.2.0
+   Compiling icu_properties_data v2.2.0
+   Compiling crossbeam-epoch v0.9.20
+   Compiling cipher v0.4.4
+   Compiling mio v1.2.2
+   Compiling socket2 v0.6.5
+   Compiling futures-channel v0.3.33
+   Compiling jiff v0.2.34
+   Compiling fnv v1.0.7
+   Compiling crossbeam-deque v0.8.7
+   Compiling rand_core v0.9.5
+   Compiling gix-sec v0.14.1
+   Compiling http v1.4.2
+   Compiling tracing-core v0.1.36
+   Compiling rustversion v1.0.23
+   Compiling allocator-api2 v0.2.21
+   Compiling adler2 v2.0.1
+   Compiling simd-adler32 v0.3.10
+   Compiling either v1.16.0
+   Compiling foldhash v0.2.0
+   Compiling rayon-core v1.13.0
+   Compiling log v0.4.33
+   Compiling regex-automata v0.4.16
+   Compiling hashbrown v0.16.1
+   Compiling miniz_oxide v0.8.9
+   Compiling nom v8.0.0
+   Compiling bytecount v0.6.9
+   Compiling unicode-properties v0.1.4
+   Compiling unicode-bidi v0.3.18
+   Compiling shell-words v1.1.1
+   Compiling futures-io v0.3.33
+   Compiling httparse v1.10.1
+   Compiling futures-task v0.3.33
+   Compiling tempfile v3.27.0
+   Compiling http-body v1.1.0
+   Compiling stringprep v0.1.5
+   Compiling clru v0.6.3
+   Compiling flate2 v1.1.9
+   Compiling ecb v0.1.2
+   Compiling cbc v0.1.2
+   Compiling aes v0.8.4
+   Compiling sha2 v0.10.9
+   Compiling md-5 v0.10.6
+   Compiling encoding_rs v0.8.35
+   Compiling unicode-general-category v1.1.0
+   Compiling try-lock v0.2.5
+   Compiling core-foundation-sys v0.8.7
+   Compiling weezl v0.1.12
+   Compiling camino v1.2.4
+   Compiling pom v1.1.0
+   Compiling atomic-waker v1.1.2
+   Compiling ttf-parser v0.25.1
+   Compiling rangemap v1.7.1
+   Compiling iana-time-zone v0.1.65
+   Compiling want v0.3.1
+   Compiling arc-swap v1.9.2
+   Compiling rayon v1.12.0
+   Compiling form_urlencoded v1.2.2
+   Compiling deranged v0.5.8
+   Compiling httpdate v1.0.3
+   Compiling plotters-backend v0.3.7
+   Compiling option-ext v0.2.0
+   Compiling ciborium-io v0.2.2
+   Compiling num-conv v0.2.2
+   Compiling clap_lex v1.1.0
+   Compiling anstyle v1.0.14
+   Compiling powerfmt v0.2.0
+   Compiling time-core v0.1.9
+   Compiling winnow v1.0.4
+   Compiling unicode-bom v2.0.3
+   Compiling uuid v1.24.0
+   Compiling clap_builder v4.6.2
+   Compiling dirs-sys v0.5.0
+   Compiling cfb v0.7.3
+   Compiling plotters-svg v0.3.7
+   Compiling toml_parser v1.1.2+spec-1.1.0
+   Compiling thiserror-impl v2.0.19
+   Compiling serde_derive v1.0.229
+   Compiling time v0.3.54
+   Compiling serde_spanned v1.1.1
+   Compiling semver v1.0.28
+   Compiling toml_datetime v1.1.1+spec-1.1.0
+   Compiling chrono v0.4.45
+   Compiling type1-encoding-parser v0.1.1
+   Compiling adobe-cmap-parser v0.4.1
+   Compiling itertools v0.10.5
+   Compiling euclid v0.20.14
+   Compiling num_cpus v1.17.0
+   Compiling cff-parser v0.1.0
+   Compiling ryu v1.0.23
+   Compiling lazy_static v1.5.0
+   Compiling cast v0.3.0
+   Compiling unsafe-libyaml v0.2.11
+   Compiling postscript v0.14.1
+   Compiling bstr v1.13.0
+   Compiling synstructure v0.13.2
+   Compiling regex v1.13.1
+   Compiling deadpool-runtime v0.1.4
+   Compiling nom_locate v5.0.0
+   Compiling toml_writer v1.1.2+spec-1.1.0
+   Compiling clap v4.6.4
+   Compiling criterion-plot v0.5.0
+   Compiling infer v0.19.0
+   Compiling toml v1.1.3+spec-1.1.0
+   Compiling plotters v0.3.7
+   Compiling dirs v6.0.0
+   Compiling http-body-util v0.1.4
+   Compiling gix-validate v0.11.2
+   Compiling gix-error v0.2.5
+   Compiling gix-packetline v0.21.5
+   Compiling is-terminal v0.4.17
+   Compiling anes v0.1.6
+   Compiling oorandom v11.1.5
+   Compiling gix-path v0.12.2
+   Compiling gix-date v0.15.6
+   Compiling gix-chunk v0.7.2
+   Compiling gix-quote v0.7.2
+   Compiling base64 v0.22.1
+   Compiling zerofrom-derive v0.1.7
+   Compiling yoke-derive v0.8.2
+   Compiling gix-actor v0.41.1
+   Compiling zerovec-derive v0.11.3
+   Compiling displaydoc v0.2.6
+   Compiling zerocopy-derive v0.8.55
+   Compiling tokio-macros v2.7.1
+   Compiling tracing-attributes v0.1.31
+   Compiling futures-macro v0.3.33
+   Compiling gix-command v0.9.1
+   Compiling gix-url v0.36.2
+   Compiling gix-config-value v0.18.1
+   Compiling maybe-async v0.2.11
+   Compiling tokio v1.53.1
+   Compiling serial_test_derive v3.5.0
+   Compiling gix-features v0.48.1
+   Compiling zerofrom v0.1.8
+   Compiling futures-util v0.3.33
+   Compiling yoke v0.8.3
+   Compiling zerovec v0.11.6
+   Compiling zerotrie v0.2.4
+   Compiling tracing v0.1.44
+   Compiling gix-hash v0.25.1
+   Compiling gix-fs v0.21.2
+   Compiling gix-glob v0.26.1
+   Compiling gix-transport v0.57.2
+   Compiling gix-hashtable v0.15.2
+   Compiling gix-commitgraph v0.37.1
+   Compiling gix-tempfile v23.0.2
+   Compiling gix-object v0.61.0
+   Compiling gix-lock v23.0.1
+   Compiling cargo-platform v0.1.9
+   Compiling json-five v0.3.1
+   Compiling tinytemplate v1.2.1
+   Compiling assert-json-diff v2.0.2
+   Compiling serde_yaml_ng v0.10.0
+   Compiling gix-shallow v0.12.1
+   Compiling cargo_metadata v0.19.2
+   Compiling tinystr v0.8.3
+   Compiling potential_utf v0.1.5
+   Compiling icu_collections v2.2.0
+   Compiling icu_locale_core v2.2.0
+   Compiling gix-ref v0.64.0
+   Compiling gix-revwalk v0.32.0
+   Compiling gix-pack v0.71.0
+   Compiling gix-diff v0.64.0
+   Compiling gix-revision v0.46.0
+   Compiling gix-traverse v0.58.0
+   Compiling gix-refspec v0.42.0
+   Compiling icu_provider v2.2.0
+   Compiling icu_normalizer v2.2.0
+   Compiling icu_properties v2.2.0
+   Compiling gix-protocol v0.62.0
+   Compiling gix-config v0.57.0
+   Compiling gix-discover v0.52.0
+   Compiling gix-odb v0.81.0
+   Compiling idna_adapter v1.2.2
+   Compiling idna v1.1.0
+   Compiling url v2.5.8
+   Compiling futures-executor v0.3.33
+   Compiling futures v0.3.33
+   Compiling serial_test v3.5.0
+   Compiling gix v0.84.0
+   Compiling tokio-util v0.7.19
+   Compiling deadpool v0.12.3
+   Compiling ppv-lite86 v0.2.21
+   Compiling half v2.7.1
+   Compiling rand_chacha v0.9.0
+   Compiling h2 v0.4.15
+   Compiling ciborium-ll v0.2.2
+   Compiling rand v0.9.5
+   Compiling ciborium v0.2.2
+   Compiling criterion v0.5.1
+   Compiling lopdf v0.38.0
+   Compiling lopdf v0.39.0
+   Compiling hyper v1.11.0
+   Compiling pdf-extract v0.10.0
+   Compiling hyper-util v0.1.20
+   Compiling wiremock v0.6.5
+   Compiling biscuit-file v0.1.0 (/private/tmp/claudine-mega-foundation.L8eU1A/tree/biscuit-file/lib)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 15.08s
+────────────
+ Nextest run ID 9e501d32-6f5d-4869-9454-80cd6466349d with nextest profile: default
+    Starting 383 tests across 8 binaries (4 tests skipped)
+        PASS [   0.013s] (  1/383) biscuit-file file_reference::context::tests::from_ambient_succeeds
+        PASS [   0.014s] (  2/383) biscuit-file detect::tests::all_known_variants_have_data_format
+        PASS [   0.014s] (  3/383) biscuit-file detect::tests::test_pdf_magic_bytes
+        PASS [   0.015s] (  4/383) biscuit-file file_reference::context::tests::find_git_root_outside_repo
+        PASS [   0.015s] (  5/383) biscuit-file detect::tests::test_detect_file_type_from_filesystem
+        PASS [   0.016s] (  6/383) biscuit-file file_reference::context::tests::from_base_absolute_path_is_preserved
+        PASS [   0.017s] (  7/383) biscuit-file detect::tests::test_unknown_from_text
+        PASS [   0.015s] (  8/383) biscuit-file detect::tests::test_extension_detection
+        PASS [   0.017s] (  9/383) biscuit-file detect::tests::test_detect_file_type_no_extension
+        PASS [   0.016s] ( 10/383) biscuit-file detect::tests::all_known_variants_have_mime_type
+        PASS [   0.022s] ( 11/383) biscuit-file file_reference::context::tests::find_git_root_inside_repo
+        PASS [   0.023s] ( 12/383) biscuit-file detect::tests::test_file_type_mime
+        PASS [   0.023s] ( 13/383) biscuit-file detect::tests::test_file_type_extension
+        PASS [   0.024s] ( 14/383) biscuit-file detect::tests::all_known_variants_have_extension
+        PASS [   0.010s] ( 15/383) biscuit-file file_reference::parse::tests::empty_string_rejected
+        PASS [   0.026s] ( 16/383) biscuit-file file_reference::context::tests::from_base_relative_path_is_joined_to_ambient_cwd
+        PASS [   0.012s] ( 17/383) biscuit-file file_reference::parse::tests::explicit_dot_slash_is_relative
+        PASS [   0.013s] ( 18/383) biscuit-file file_reference::parse::tests::bare_filename_is_implicit_relative
+        PASS [   0.013s] ( 19/383) biscuit-file file_reference::parse::tests::bare_subdir_path_is_implicit_relative
+        PASS [   0.014s] ( 20/383) biscuit-file file_reference::parse::tests::backslash_explicit_relative
+        PASS [   0.016s] ( 21/383) biscuit-file file_reference::parse::tests::absolute_path
+        PASS [   0.014s] ( 22/383) biscuit-file file_reference::parse::tests::https_url_detected_as_url_kind
+        PASS [   0.030s] ( 23/383) biscuit-file detect::tests::test_detect_pdf_by_magic_bytes_wrong_extension
+        PASS [   0.010s] ( 24/383) biscuit-file file_reference::parse::tests::interpolation_invalid_name_rejected
+        PASS [   0.023s] ( 25/383) biscuit-file file_reference::parse::tests::explicit_dotdot_slash_is_relative
+        PASS [   0.015s] ( 26/383) biscuit-file file_reference::parse::tests::lone_recursive_prefix_rejected
+        PASS [   0.012s] ( 27/383) biscuit-file file_reference::parse::tests::magic_root_separator_is_part_of_the_shared_grammar
+        PASS [   0.012s] ( 28/383) biscuit-file file_reference::parse::tests::relative_path
+        PASS [   0.013s] ( 29/383) biscuit-file file_reference::parse::tests::recursive_vault_with_interpolation
+        PASS [   0.017s] ( 30/383) biscuit-file file_reference::parse::tests::magic_recursive
+        PASS [   0.027s] ( 31/383) biscuit-file file_reference::parse::tests::http_url_detected_as_url_kind
+        PASS [   0.017s] ( 32/383) biscuit-file file_reference::parse::tests::recursive_home_reference
+        PASS [   0.026s] ( 33/383) biscuit-file file_reference::parse::tests::interpolation_empty_var_rejected
+        PASS [   0.022s] ( 34/383) biscuit-file file_reference::parse::tests::interpolation_single_var
+        PASS [   0.022s] ( 35/383) biscuit-file file_reference::parse::tests::magic_path
+        PASS [   0.013s] ( 36/383) biscuit-file file_reference::parse::tests::tilde_backslash_is_home
+        PASS [   0.010s] ( 37/383) biscuit-file file_reference::parse::tests::tilde_user_bare_is_rejected_typed
+        PASS [   0.014s] ( 38/383) biscuit-file file_reference::parse::tests::tilde_slash_is_home_and_strips_sigil
+        PASS [   0.024s] ( 39/383) biscuit-file file_reference::parse::tests::relative_recursive
+        PASS [   0.015s] ( 40/383) biscuit-file file_reference::parse::tests::url_scheme_is_ascii_case_insensitive
+        PASS [   0.029s] ( 41/383) biscuit-file file_reference::parse::tests::package_path
+        PASS [   0.017s] ( 42/383) biscuit-file file_reference::parse::tests::tilde_bare_is_home_with_empty_path
+        PASS [   0.015s] ( 43/383) biscuit-file file_reference::parse::tests::vault_double_colon
+        PASS [   0.015s] ( 44/383) biscuit-file file_reference::parse::tests::windows_drive_absolute_forward_slash
+        PASS [   0.020s] ( 45/383) biscuit-file file_reference::parse::tests::tilde_user_is_rejected_typed
+        PASS [   0.014s] ( 46/383) biscuit-file file_reference::parse::tests::windows_unc_is_absolute
+        PASS [   0.039s] ( 47/383) biscuit-file file_reference::parse::tests::interpolation_multiple_vars
+        PASS [   0.019s] ( 48/383) biscuit-file file_reference::parse::tests::url_with_path_segments
+        PASS [   0.015s] ( 49/383) biscuit-file file_reference::parse::tests::windows_drive_relative_is_not_absolute
+        PASS [   0.032s] ( 50/383) biscuit-file file_reference::parse::tests::rooted_magic_payloads_are_rejected_portably
+        PASS [   0.010s] ( 51/383) biscuit-file file_reference::resolve::tests::classify_token_empty_string_is_implicit_relative
+        PASS [   0.021s] ( 52/383) biscuit-file file_reference::parse::tests::windows_drive_absolute_backslash
+        PASS [   0.024s] ( 53/383) biscuit-file file_reference::parse::tests::vault_single_colon
+        PASS [   0.016s] ( 54/383) biscuit-file file_reference::resolve::tests::classify_token_bare_subdir_is_implicit_relative
+        PASS [   0.019s] ( 55/383) biscuit-file file_reference::resolve::tests::caller_supplied_repository_root_is_tried_before_base
+        PASS [   0.024s] ( 56/383) biscuit-file file_reference::resolve::tests::append_scope_trims_trailing_slash
+        PASS [   0.017s] ( 57/383) biscuit-file file_reference::resolve::tests::classify_token_magic_empty_tail
+        PASS [   0.013s] ( 58/383) biscuit-file file_reference::resolve::tests::diff_paths_parent
+        PASS [   0.014s] ( 59/383) biscuit-file file_reference::resolve::tests::complete_partial_rejects_unsupported_forms
+        PASS [   0.022s] ( 60/383) biscuit-file file_reference::resolve::tests::classify_token_magic_optional_separator_matches_parser
+        PASS [   0.015s] ( 61/383) biscuit-file file_reference::resolve::tests::classify_token_rejects_unsupported_forms
+        PASS [   0.021s] ( 62/383) biscuit-file file_reference::resolve::tests::complete_partial_magic_bare_sigil_outside_repo
+        PASS [   0.025s] ( 63/383) biscuit-file file_reference::resolve::tests::classify_token_magic_with_partial_name
+        PASS [   0.019s] ( 64/383) biscuit-file file_reference::resolve::tests::diff_paths_same_dir
+        PASS [   0.016s] ( 65/383) biscuit-file file_reference::resolve::tests::diff_paths_sibling_dir
+        PASS [   0.025s] ( 66/383) biscuit-file file_reference::resolve::tests::classify_token_magic_with_scope_and_partial
+        PASS [   0.013s] ( 67/383) biscuit-file file_reference::resolve::tests::home_kind_without_home_is_typed_missing_context
+        PASS [   0.024s] ( 68/383) biscuit-file file_reference::resolve::tests::complete_partial_implicit_relative_outside_repo
+        PASS [   0.012s] ( 69/383) biscuit-file file_reference::resolve::tests::normalize_absolute_relative_path
+        PASS [   0.014s] ( 70/383) biscuit-file file_reference::resolve::tests::normalize_absolute_already_absolute
+        PASS [   0.020s] ( 71/383) biscuit-file file_reference::resolve::tests::implicit_relative_without_repo_is_base_only
+        PASS [   0.021s] ( 72/383) biscuit-file file_reference::resolve::tests::interpolate_literal_only
+        PASS [   0.033s] ( 73/383) biscuit-file file_reference::resolve::tests::classify_token_rejects_recursive
+        PASS [   0.018s] ( 74/383) biscuit-file file_reference::resolve::tests::interpolate_with_env_var
+        PASS [   0.015s] ( 75/383) biscuit-file file_reference::resolve::tests::normalize_dotdot
+        PASS [   0.020s] ( 76/383) biscuit-file file_reference::resolve::tests::interpolate_missing_env_var
+        PASS [   0.011s] ( 77/383) biscuit-file format::tests::structured_formats
+        PASS [   0.029s] ( 78/383) biscuit-file file_reference::resolve::tests::home_kind_uses_context_home_dir
+        PASS [   0.016s] ( 79/383) biscuit-file format::tests::display_impl
+        PASS [   0.018s] ( 80/383) biscuit-file file_reference::resolve::tests::split_scope_and_active_no_separator
+        PASS [   0.020s] ( 81/383) biscuit-file format::tests::extension_covers_all_variants
+        PASS [   0.023s] ( 82/383) biscuit-file file_reference::resolve::tests::split_scope_and_active_with_separator
+        PASS [   0.017s] ( 83/383) biscuit-file format::tests::utf8_formats
+        PASS [   0.014s] ( 84/383) biscuit-file json5::format::tests::compact_nested
+        PASS [   0.023s] ( 85/383) biscuit-file format::tests::mime_type_covers_all_variants
+        PASS [   0.019s] ( 86/383) biscuit-file json5::format::tests::compact_empty_containers
+        PASS [   0.013s] ( 87/383) biscuit-file json5::format::tests::deeply_nested_structure
+        PASS [   0.015s] ( 88/383) biscuit-file json5::format::tests::compact_special_keys_quoted
+        PASS [   0.012s] ( 89/383) biscuit-file json5::format::tests::empty_object
+        PASS [   0.021s] ( 90/383) biscuit-file json5::format::tests::compact_simple_object
+        PASS [   0.014s] ( 91/383) biscuit-file json5::format::tests::empty_string_value
+        PASS [   0.053s] ( 92/383) biscuit-file file_reference::resolve::tests::diff_paths_same_path
+        PASS [   0.013s] ( 93/383) biscuit-file json5::format::tests::nested_object
+        PASS [   0.012s] ( 94/383) biscuit-file json5::format::tests::null_and_bool
+        PASS [   0.014s] ( 95/383) biscuit-file json5::format::tests::identifier_validation
+        PASS [   0.015s] ( 96/383) biscuit-file json5::format::tests::numeric_key_gets_quoted
+        PASS [   0.023s] ( 97/383) biscuit-file json5::format::tests::empty_array
+        PASS [   0.026s] ( 98/383) biscuit-file json5::format::tests::compact_single_line
+        PASS [   0.031s] ( 99/383) biscuit-file json5::format::tests::array_values
+        PASS [   0.031s] (100/383) biscuit-file json5::format::tests::compact_array
+        PASS [   0.012s] (101/383) biscuit-file json5::format::tests::simple_object
+        PASS [   0.016s] (102/383) biscuit-file json5::format::tests::special_key_needs_quoting
+        PASS [   0.017s] (103/383) biscuit-file json5::format::tests::string_with_null_byte
+        PASS [   0.014s] (104/383) biscuit-file json5::format::tests::underscore_and_dollar_keys
+        PASS [   0.019s] (105/383) biscuit-file json5::format::tests::single_quote_in_string_escaped
+        PASS [   0.013s] (106/383) biscuit-file json5::format::tests::very_small_float
+        PASS [   0.015s] (107/383) biscuit-file json5::types::tests::as_json_value_ref
+        PASS [   0.019s] (108/383) biscuit-file json5::format::tests::very_large_number
+        PASS [   0.015s] (109/383) biscuit-file json5::types::tests::as_toml_with_n…3551 tokens truncated…t_empty_sequence
+        PASS [   0.008s] (256/383) biscuit-file yaml::types::tests::test_from_serde_value
+        PASS [   0.011s] (257/383) biscuit-file yaml::types::tests::test_conversion_output
+        PASS [   0.010s] (258/383) biscuit-file yaml::types::tests::test_hetero_array_policy_error
+        PASS [   0.012s] (259/383) biscuit-file yaml::types::tests::test_empty_array_toml
+        PASS [   0.012s] (260/383) biscuit-file yaml::types::tests::test_empty_mapping
+        PASS [   0.008s] (261/383) biscuit-file yaml::types::tests::test_is_valid_accepts_valid_yaml
+        PASS [   0.011s] (262/383) biscuit-file yaml::types::tests::test_hetero_array_policy_stringify
+        PASS [   0.010s] (263/383) biscuit-file yaml::types::tests::test_homogeneous_array_passes
+        PASS [   0.009s] (264/383) biscuit-file yaml::types::tests::test_is_valid_rejects_invalid_yaml
+        PASS [   0.010s] (265/383) biscuit-file yaml::types::tests::test_invalid_yaml_error
+        PASS [   0.010s] (266/383) biscuit-file yaml::types::tests::test_json_conversion_options_default
+        PASS [   0.009s] (267/383) biscuit-file yaml::types::tests::test_max_depth_exceeded_toml
+        PASS [   0.012s] (268/383) biscuit-file yaml::types::tests::test_max_depth_exceeded_json
+        PASS [   0.009s] (269/383) biscuit-file yaml::types::tests::test_multiple_warnings_collected
+        PASS [   0.013s] (270/383) biscuit-file yaml::types::tests::test_max_depth_none_allows_deep_nesting
+        PASS [   0.008s] (271/383) biscuit-file yaml::types::tests::test_non_finite_float_policy_error_nan
+        PASS [   0.010s] (272/383) biscuit-file yaml::types::tests::test_non_finite_float_policy_error_infinity
+        PASS [   0.011s] (273/383) biscuit-file yaml::types::tests::test_nested_arrays_json
+        PASS [   0.012s] (274/383) biscuit-file yaml::types::tests::test_multiple_null_warnings
+        PASS [   0.010s] (275/383) biscuit-file yaml::types::tests::test_non_finite_float_policy_negative_infinity
+        PASS [   0.013s] (276/383) biscuit-file yaml::types::tests::test_max_depth_within_limit
+        PASS [   0.009s] (277/383) biscuit-file yaml::types::tests::test_non_string_key_policy_drop
+        PASS [   0.008s] (278/383) biscuit-file yaml::types::tests::test_non_string_key_policy_stringify
+        PASS [   0.011s] (279/383) biscuit-file yaml::types::tests::test_non_finite_float_policy_null_nan
+        PASS [   0.009s] (280/383) biscuit-file yaml::types::tests::test_non_string_key_policy_error
+        PASS [   0.011s] (281/383) biscuit-file yaml::types::tests::test_non_finite_float_policy_stringify_infinity
+        PASS [   0.011s] (282/383) biscuit-file yaml::types::tests::test_non_finite_float_policy_stringify_nan
+        PASS [   0.009s] (283/383) biscuit-file yaml::types::tests::test_null_policy_drop
+        PASS [   0.009s] (284/383) biscuit-file yaml::types::tests::test_null_policy_error
+        PASS [   0.008s] (285/383) biscuit-file yaml::types::tests::test_source_from_bytes
+        PASS [   0.008s] (286/383) biscuit-file yaml::types::tests::test_tagged_value_json
+        PASS [   0.010s] (287/383) biscuit-file yaml::types::tests::test_parse_simple_yaml
+        PASS [   0.012s] (288/383) biscuit-file yaml::types::tests::test_null_policy_stringify
+        PASS [   0.008s] (289/383) biscuit-file yaml::types::tests::test_toml_conversion_options_default
+        PASS [   0.010s] (290/383) biscuit-file yaml::types::tests::test_source_from_value
+        PASS [   0.008s] (291/383) biscuit-file yaml::types::tests::test_try_from_bytes
+        PASS [   0.010s] (292/383) biscuit-file yaml::types::tests::test_source_from_str
+        PASS [   0.009s] (293/383) biscuit-file yaml::types::tests::test_try_from_path_not_found
+        PASS [   0.009s] (294/383) biscuit-file yaml::types::tests::test_try_from_pathbuf
+        PASS [   0.009s] (295/383) biscuit-file yaml::types::tests::test_validate_returns_ok
+        PASS [   0.010s] (296/383) biscuit-file yaml::types::tests::test_yaml_boolean_variants
+        PASS [   0.011s] (297/383) biscuit-file yaml::types::tests::test_yaml_number_formats
+        PASS [   0.011s] (298/383) biscuit-file::completion_round_trip completion_rejects_rooted_magic_payloads_before_enumerating_roots
+        PASS [   0.013s] (299/383) biscuit-file yaml::types::tests::test_try_from_path_ref
+        PASS [   0.011s] (300/383) biscuit-file::completion_round_trip context_without_repository_root_stays_base_only
+        PASS [   0.010s] (301/383) biscuit-file::completion_round_trip implicit_relative_completion_roots_are_repository_first
+        PASS [   0.009s] (302/383) biscuit-file::detailed_resolution direct_symlink_to_regular_file_is_selected
+        PASS [   0.009s] (303/383) biscuit-file::detailed_resolution explicit_implicit_reference_does_not_discover_repository_root
+        PASS [   0.014s] (304/383) biscuit-file::detailed_resolution explicit_package_reference_without_anchor_is_missing_context
+        PASS [   0.019s] (305/383) biscuit-file::detailed_resolution invalid_context_is_a_typed_missing_context_failure
+        PASS [   0.016s] (306/383) biscuit-file::detailed_resolution rooted_magic_payloads_never_reach_planning_or_resolution
+        PASS [   0.019s] (307/383) biscuit-file::detailed_resolution io_probe_failure_stops_with_typed_error_identifying_candidate
+        PASS [   0.038s] (308/383) biscuit-file::detailed_resolution detailed_no_match_retains_candidates_and_repository_root
+        PASS [   0.038s] (309/383) biscuit-file::completion_round_trip implicit_relative_completion_value_resolves_to_the_displayed_file
+        PASS [   0.039s] (310/383) biscuit-file::completion_round_trip magic_completion_value_resolves_through_a_shared_configured_root
+        PASS [   0.045s] (311/383) biscuit-file::detailed_resolution detailed_success_retains_ordered_candidates_and_provenance
+        PASS [   0.058s] (312/383) biscuit-file::detailed_resolution candidate_plan_matches_the_probed_order
+        PASS [   0.024s] (313/383) biscuit-file::implicit_relative partial_completion::implicit_relative_without_repo_only_returns_base
+        PASS [   0.074s] (314/383) biscuit-file::detailed_resolution explicit_package_reference_consumes_supplied_package_area
+        PASS [   0.073s] (315/383) biscuit-file::detailed_resolution explicit_relative_plan_is_exactly_one_source_candidate
+        PASS [   0.076s] (316/383) biscuit-file::detailed_resolution legacy_projection_agrees_with_detailed_outcome
+        PASS [   0.029s] (317/383) biscuit-file::implicit_relative partial_completion::magic_without_repo_only_returns_home_root
+        PASS [   0.086s] (318/383) biscuit-file::detailed_resolution non_file_candidate_advances_the_search
+        PASS [   0.019s] (319/383) biscuit-file::implicit_relative partial_completion::unsupported_forms_return_none
+        PASS [   0.027s] (320/383) biscuit-file::implicit_relative partial_completion::separator_reset_empties_active_segment
+        PASS [   0.096s] (321/383) biscuit-file::detailed_resolution recursive_reference_records_search_roots_with_provenance
+        PASS [   0.094s] (322/383) biscuit-file::detailed_resolution supplied_repository_root_anchors_and_suppresses_ancestor_discovery
+        PASS [   0.094s] (323/383) biscuit-file::implicit_relative ambient_cwd::env_var_interpolation_resolves_via_implicit_relative
+        PASS [   0.087s] (324/383) biscuit-file::implicit_relative partial_completion::implicit_relative_base_is_git_root_dedupes_to_one_root
+        PASS [   0.092s] (325/383) biscuit-file::implicit_relative ambient_cwd::resolve_relative_with_implicit_relative
+        PASS [   0.097s] (326/383) biscuit-file::implicit_relative explicit_relative_does_not_fall_back_to_git_root
+        PASS [   0.019s] (327/383) biscuit-file::implicit_relative resolves_outside_any_git_repo
+        PASS [   0.085s] (328/383) biscuit-file::implicit_relative partial_completion::implicit_relative_with_scope_inside_repo
+        PASS [   0.088s] (329/383) biscuit-file::implicit_relative partial_completion::magic_bare_sigil_includes_repo_and_home_roots
+        PASS [   0.119s] (330/383) biscuit-file::detailed_resolution workspace_error_carries_a_chainable_source
+        PASS [   0.083s] (331/383) biscuit-file::implicit_relative partial_completion::magic_with_scope_appends_scope_to_each_root
+        PASS [   0.023s] (332/383) biscuit-file::precedence_flip explicit_relative_yields_one_base_candidate_and_never_falls_back
+        PASS [   0.021s] (333/383) biscuit-file::precedence_flip implicit_both_exist_repository_candidate_wins
+        PASS [   0.079s] (334/383) biscuit-file::implicit_relative partial_completion::magic_without_home_env_still_discovers_native_home
+        PASS [   0.020s] (335/383) biscuit-file::precedence_flip implicit_only_source_exists_falls_back_to_base
+        PASS [   0.020s] (336/383) biscuit-file::precedence_flip implicit_without_git_root_uses_base_only
+        PASS [   0.021s] (337/383) biscuit-file::precedence_flip implicit_when_base_is_repository_root_dedupes_to_one_candidate
+        PASS [   0.017s] (338/383) biscuit-file::precedence_flip interpolation_injecting_a_sigil_is_rejected
+        PASS [   0.021s] (339/383) biscuit-file::precedence_flip interpolation_to_absolute_reclassifies_anchoring
+        PASS [   0.026s] (340/383) biscuit-file::precedence_flip interpolation_staying_implicit_keeps_both_kinds_implicit
+        PASS [   0.073s] (341/383) biscuit-file::implicit_relative prefers_git_root_over_cwd_on_name_collision
+        PASS [   0.022s] (342/383) biscuit-file::precedence_flip recursive_interpolation_injecting_a_sigil_is_rejected_before_root_planning
+        PASS [   0.063s] (343/383) biscuit-file::implicit_relative resolves_file_in_git_root_when_absent_from_cwd
+        PASS [   0.022s] (344/383) biscuit-file::precedence_flip special_kinds_are_unchanged_by_the_flip
+        PASS [   0.057s] (345/383) biscuit-file::implicit_relative resolves_when_cwd_is_git_root
+        PASS [   0.058s] (346/383) biscuit-file::implicit_relative returns_none_when_neither_cwd_nor_git_root_has_file
+        PASS [   0.018s] (347/383) biscuit-file::reference_grammar home_kind_is_observable
+        PASS [   0.020s] (348/383) biscuit-file::reference_grammar explicit_vs_implicit_relative_are_distinguished_without_fs
+        PASS [   0.026s] (349/383) biscuit-file::precedence_flip recursive_interpolation_reclassifies_and_resolves_local_paths
+        PASS [   0.071s] (350/383) biscuit-file::implicit_relative recursive_implicit_relative_with_subdir_filter
+        PASS [   0.072s] (351/383) biscuit-file::implicit_relative recursive_implicit_relative_finds_file_under_git_root
+        PASS [   0.019s] (352/383) biscuit-file::reference_grammar magic_payload_must_remain_relative_after_the_documented_sigil
+        PASS [   0.052s] (353/383) biscuit-file::implicit_relative subdir_path_resolves_against_git_root
+        PASS [   0.014s] (354/383) biscuit-file::reference_grammar special_kinds_classify
+        PASS [   0.020s] (355/383) biscuit-file::reference_grammar recursive_is_a_modifier_over_a_kind
+        PASS [   0.009s] (356/383) biscuit-file::reference_grammar url_scheme_recognition_is_case_insensitive_and_beats_drive_classifier
+        PASS [   0.010s] (357/383) biscuit-file::reference_grammar windows_backslash_explicit_relative
+        PASS [   0.009s] (358/383) biscuit-file::reference_grammar windows_drive_relative_is_not_absolute
+        PASS [   0.014s] (359/383) biscuit-file::reference_grammar tilde_user_is_rejected_at_construction
+        PASS [   0.010s] (360/383) biscuit-file::resolution_context containment_is_component_aware_and_lexically_normalized
+        PASS [   0.010s] (361/383) biscuit-file::resolution_context explicit_context_can_clear_the_ambient_home_snapshot
+        PASS [   0.009s] (362/383) biscuit-file::resolution_context implicit_falls_back_to_caller_supplied_repo_root
+        PASS [   0.010s] (363/383) biscuit-file::resolution_context home_reference_resolves_against_context_home
+        PASS [   0.017s] (364/383) biscuit-file::reference_grammar windows_absolute_and_unc_classify_absolute_on_any_host
+        PASS [   0.010s] (365/383) biscuit-file::resolution_context home_reference_resolves_from_home_env_on_posix
+        PASS [   0.012s] (366/383) biscuit-file::resolution_context context_accessors_reflect_builders
+        PASS [   0.011s] (367/383) biscuit-file::resolution_context implicit_is_repository_first_with_caller_supplied_repo_root
+        PASS [   0.015s] (368/383) biscuit-file::resolution_context explicit_relative_never_falls_back_to_repo_root
+        PASS [   0.012s] (369/383) biscuit-file::resolution_context invalid_request_root_cannot_be_laundered_via_for_source
+        PASS [   0.013s] (370/383) biscuit-file::resolution_context invalid_request_root_cannot_be_laundered_via_for_base_or_trusted_external_derivation
+        PASS [   0.016s] (371/383) biscuit-file::resolution_context derived_source_preserves_request_snapshot_after_ambient_mutation
+        PASS [   0.015s] (372/383) biscuit-file::resolution_context external_source_requires_explicit_trust
+        PASS [   0.011s] (373/383) biscuit-file::resolution_context magic_roots_come_from_the_context
+        PASS [   0.010s] (374/383) biscuit-file::resolution_context repository_root_containing_base_validates
+        PASS [   0.009s] (375/383) biscuit-file::resolution_context repository_root_not_containing_base_is_a_typed_error
+        PASS [   0.012s] (376/383) biscuit-file::resolution_context normal_derivation_reenables_containment_after_trusted_external_derivation
+        PASS [   0.008s] (377/383) biscuit-file::round_trip toml_json_round_trip_basic
+        PASS [   0.009s] (378/383) biscuit-file::round_trip json5_json_round_trip
+        PASS [   0.009s] (379/383) biscuit-file::round_trip json_yaml_json_round_trip
+        PASS [   0.009s] (380/383) biscuit-file::round_trip toml_json_round_trip_nested
+        PASS [   0.009s] (381/383) biscuit-file::round_trip toml_json_round_trip_numbers
+        PASS [   0.010s] (382/383) biscuit-file::resolution_context valid_request_supports_in_repo_and_explicit_trusted_external_derivations
+        PASS [   0.008s] (383/383) biscuit-file::round_trip yaml_json_round_trip
+────────────
+     Summary [   0.455s] 383 tests run: 383 passed, 4 skipped
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling memchr v2.8.3
+   Compiling smallvec v1.15.2
+   Compiling syn v3.0.3
+   Compiling rustix v1.1.4
+   Compiling log v0.4.33
+   Compiling num-traits v0.2.19
+   Compiling zerocopy v0.8.55
+   Compiling parking_lot_core v0.9.12
+   Compiling tracing-core v0.1.36
+   Compiling serde v1.0.229
+   Compiling parking_lot v0.12.5
+   Compiling sharded-slab v0.1.7
+   Compiling icu_normalizer v2.2.0
+   Compiling thread_local v1.1.10
+   Compiling nu-ansi-term v0.50.3
+   Compiling object v0.37.3
+   Compiling aho-corasick v1.1.4
+   Compiling nom v8.0.0
+   Compiling utf8parse v0.2.2
+   Compiling owo-colors v4.3.0
+   Compiling anstyle-parse v1.0.0
+   Compiling prodash v31.0.0
+   Compiling tracing v0.1.44
+   Compiling tracing-log v0.2.0
+   Compiling colorchoice v1.0.5
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling anstyle-query v1.1.5
+   Compiling eyre v0.6.12
+   Compiling gimli v0.32.3
+   Compiling color-spantrace v0.3.0
+   Compiling either v1.16.0
+   Compiling anstream v1.0.0
+   Compiling rayon v1.12.0
+   Compiling serde_json v1.0.151
+   Compiling idna_adapter v1.2.2
+   Compiling predicates-core v1.0.10
+   Compiling idna v1.1.0
+   Compiling strsim v0.11.1
+   Compiling indenter v0.3.4
+   Compiling rustc-demangle v0.1.28
+   Compiling heck v0.5.0
+   Compiling url v2.5.8
+   Compiling assert_cmd v2.2.2
+   Compiling euclid v0.20.14
+   Compiling chrono v0.4.45
+   Compiling float-cmp v0.10.0
+   Compiling termtree v0.5.1
+   Compiling normalize-line-endings v0.3.0
+   Compiling difflib v0.4.0
+   Compiling predicates-tree v1.0.13
+   Compiling wait-timeout v0.2.1
+   Compiling regex-automata v0.4.16
+   Compiling tempfile v3.27.0
+   Compiling terminal_size v0.4.4
+   Compiling clap_builder v4.6.2
+   Compiling addr2line v0.25.1
+   Compiling thiserror-impl v2.0.19
+   Compiling serde_derive v1.0.229
+   Compiling clap_derive v4.6.4
+   Compiling nom_locate v5.0.0
+   Compiling backtrace v0.3.76
+   Compiling ppv-lite86 v0.2.21
+   Compiling thiserror v2.0.19
+   Compiling rand_chacha v0.9.0
+   Compiling rand v0.9.5
+   Compiling clap v4.6.4
+   Compiling bstr v1.13.0
+   Compiling matchers v0.2.0
+   Compiling regex v1.13.1
+   Compiling tracing-subscriber v0.3.23
+   Compiling lopdf v0.38.0
+   Compiling lopdf v0.39.0
+   Compiling predicates v3.1.4
+   Compiling gix-validate v0.11.2
+   Compiling gix-error v0.2.5
+   Compiling gix-packetline v0.21.5
+   Compiling gix-date v0.15.6
+   Compiling gix-chunk v0.7.2
+   Compiling gix-path v0.12.2
+   Compiling gix-quote v0.7.2
+   Compiling gix-features v0.48.1
+   Compiling gix-command v0.9.1
+   Compiling gix-url v0.36.2
+   Compiling gix-config-value v0.18.1
+   Compiling gix-hash v0.25.1
+   Compiling gix-fs v0.21.2
+   Compiling gix-glob v0.26.1
+   Compiling gix-actor v0.41.1
+   Compiling gix-hashtable v0.15.2
+   Compiling gix-commitgraph v0.37.1
+   Compiling gix-object v0.61.0
+   Compiling gix-tempfile v23.0.2
+   Compiling gix-transport v0.57.2
+   Compiling gix-lock v23.0.1
+   Compiling gix-shallow v0.12.1
+   Compiling gix-revwalk v0.32.0
+   Compiling gix-ref v0.64.0
+   Compiling gix-pack v0.71.0
+   Compiling gix-diff v0.64.0
+   Compiling tracing-error v0.2.1
+   Compiling cargo-platform v0.1.9
+   Compiling serde_yaml_ng v0.10.0
+   Compiling json-five v0.3.1
+   Compiling gix-revision v0.46.0
+   Compiling gix-traverse v0.58.0
+   Compiling cargo_metadata v0.19.2
+   Compiling color-eyre v0.6.5
+   Compiling gix-refspec v0.42.0
+   Compiling gix-discover v0.52.0
+   Compiling gix-protocol v0.62.0
+   Compiling gix-config v0.57.0
+   Compiling gix-odb v0.81.0
+   Compiling gix v0.84.0
+   Compiling pdf-extract v0.10.0
+   Compiling biscuit-file v0.1.0 (/private/tmp/claudine-mega-foundation.L8eU1A/tree/biscuit-file/lib)
+   Compiling biscuit-file-cli v0.1.0 (/private/tmp/claudine-mega-foundation.L8eU1A/tree/biscuit-file/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.08s
+────────────
+ Nextest run ID 840184af-ebcb-4ea8-ab57-da9b426ba2f1 with nextest profile: default
+    Starting 61 tests across 2 binaries
+        PASS [   0.031s] ( 1/61) biscuit-file-cli::cli_tests json5_compact_unquoted_keys
+        PASS [   0.031s] ( 2/61) biscuit-file-cli::cli_tests json5_to_json5
+        PASS [   0.031s] ( 3/61) biscuit-file-cli::cli_tests json_to_json5
+        PASS [   0.031s] ( 4/61) biscuit-file-cli::cli_tests json5_input_compact_json5_output
+        PASS [   0.031s] ( 5/61) biscuit-file-cli::cli_tests input_format_override
+        PASS [   0.031s] ( 6/61) biscuit-file-cli::cli_tests json5_to_json_default
+        PASS [   0.031s] ( 7/61) biscuit-file-cli::cli_tests json_compact_single_line
+        PASS [   0.031s] ( 8/61) biscuit-file-cli::cli_tests json_to_yaml
+        PASS [   0.031s] ( 9/61) biscuit-file-cli::cli_tests markdown_no_frontmatter_errors
+        PASS [   0.031s] (10/61) biscuit-file-cli::cli_tests json_default_pretty_prints
+        PASS [   0.031s] (11/61) biscuit-file-cli::cli_tests json5_to_yaml
+        PASS [   0.031s] (12/61) biscuit-file-cli::cli_tests json5_input_compact_json_output
+        PASS [   0.031s] (13/61) biscuit-file-cli::cli_tests default_json_is_pretty_not_compact
+        PASS [   0.031s] (14/61) biscuit-file-cli::cli_tests json_to_toml
+        PASS [   0.031s] (15/61) biscuit-file-cli::cli_tests json5_to_toml
+        PASS [   0.031s] (16/61) biscuit-file-cli::cli_tests debug_flag_produces_stderr_output
+        PASS [   0.012s] (17/61) biscuit-file-cli::cli_tests mutually_exclusive_output_flags
+        PASS [   0.013s] (18/61) biscuit-file-cli::cli_tests markdown_yaml_frontmatter_default_is_json
+        PASS [   0.013s] (19/61) biscuit-file-cli::cli_tests markdown_text_output_rejected
+        PASS [   0.013s] (20/61) biscuit-file-cli::cli_tests reference_invalid_syntax_exits_2
+        PASS [   0.013s] (21/61) biscuit-file-cli::cli_tests markdown_yaml_frontmatter_to_yaml
+        PASS [   0.014s] (22/61) biscuit-file-cli::cli_tests markdown_toml_frontmatter_to_toml
+        PASS [   0.014s] (23/61) biscuit-file-cli::cli_tests reference_alias_ref_works
+        PASS [   0.014s] (24/61) biscuit-file-cli::cli_tests reference_nonexistent_exits_1
+        PASS [   0.014s] (25/61) biscuit-file-cli::cli_tests markdown_yaml_frontmatter_to_json
+        PASS [   0.014s] (26/61) biscuit-file-cli::cli_tests markdown_yaml_frontmatter_to_toml
+        PASS [   0.014s] (27/61) biscuit-file-cli::cli_tests markdown_toml_frontmatter_to_json
+        PASS [   0.015s] (28/61) biscuit-file-cli::cli_tests markdown_toml_frontmatter_to_yaml
+        PASS [   0.014s] (29/61) biscuit-file-cli::cli_tests reference_relative_cwd
+        PASS [   0.018s] (30/61) biscuit-file-cli::cli_tests reference_implicit_relative_falls_back_to_git_root
+        PASS [   0.018s] (31/61) biscuit-file-cli::cli_tests reference_implicit_relative_bare_filename
+        PASS [   0.019s] (32/61) biscuit-file-cli::cli_tests reference_add_vault_searches_vault
+        PASS [   0.012s] (33/61) biscuit-file-cli::cli_tests stdin_dash_missing_input_format_errors
+        PASS [   0.012s] (34/61) biscuit-file-cli::cli_tests reference_vault_no_roots_exits_2
+        PASS [   0.012s] (35/61) biscuit-file-cli::cli_tests stdin_missing_input_format_errors
+        PASS [   0.013s] (36/61) biscuit-file-cli::cli_tests stdin_dash_is_equivalent
+        PASS [   0.013s] (37/61) biscuit-file-cli::cli_tests stdin_json5_to_json
+        PASS [   0.012s] (38/61) biscuit-file-cli::cli_tests stdin_toml_to_json
+        PASS [   0.013s] (39/61) biscuit-file-cli::cli_tests toml_to_json_compact
+        PASS [   0.013s] (40/61) biscuit-file-cli::cli_tests toml_to_json5
+        PASS [   0.015s] (41/61) biscuit-file-cli::cli_tests reference_resolves_relative_path_to_absolute
+        PASS [   0.013s] (42/61) biscuit-file-cli::cli_tests stdin_markdown_to_json
+        PASS [   0.014s] (43/61) biscuit-file-cli::cli_tests stdin_yaml_to_json
+        PASS [   0.013s] (44/61) biscuit-file-cli::cli_tests toml_to_json_default
+        PASS [   0.014s] (45/61) biscuit-file-cli::cli_tests stdin_json_to_yaml
+        PASS [   0.014s] (46/61) biscuit-file-cli::cli_tests toml_to_yaml
+        PASS [   0.014s] (47/61) biscuit-file-cli::cli_tests yaml_to_json
+        PASS [   0.017s] (48/61) biscuit-file-cli::cli_tests unknown_extension_errors
+        PASS [   0.009s] (49/61) biscuit-file-cli::bin/bf tests::extract_empty_frontmatter
+        PASS [   0.010s] (50/61) biscuit-file-cli::bin/bf tests::extract_frontmatter_leading_whitespace
+        PASS [   0.009s] (51/61) biscuit-file-cli::bin/bf tests::extract_frontmatter_triple_dash_in_body
+        PASS [   0.011s] (52/61) biscuit-file-cli::bin/bf tests::extract_frontmatter_no_frontmatter
+        PASS [   0.009s] (53/61) biscuit-file-cli::bin/bf tests::extract_yaml_frontmatter
+        PASS [   0.009s] (54/61) biscuit-file-cli::bin/bf tests::extract_frontmatter_unclosed
+        PASS [   0.009s] (55/61) biscuit-file-cli::bin/bf tests::format_json_compact_output
+        PASS [   0.009s] (56/61) biscuit-file-cli::bin/bf tests::format_json_pretty_output
+        PASS [   0.010s] (57/61) biscuit-file-cli::bin/bf tests::extract_toml_frontmatter
+        PASS [   0.010s] (58/61) biscuit-file-cli::bin/bf tests::extract_frontmatter_with_blank_lines
+        PASS [   0.013s] (59/61) biscuit-file-cli::cli_tests yaml_to_json5
+        PASS [   0.013s] (60/61) biscuit-file-cli::cli_tests yaml_to_toml
+        PASS [   0.014s] (61/61) biscuit-file-cli::cli_tests yaml_to_json5_compact
+────────────
+     Summary [   0.070s] 61 tests run: 61 passed, 0 skipped

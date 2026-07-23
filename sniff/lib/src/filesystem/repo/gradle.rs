@@ -3,54 +3,58 @@
 use std::path::Path;
 
 use crate::Result;
+use crate::performance;
+use crate::performance::counters;
 
-use super::detection::{DetectorOutcome, create_package, dedupe_packages, resolve_internal_deps};
+use super::detection::{
+    DetectorOutcome, probe_exists,
+};
+use super::seed::{PackageSeed, merge_seeds};
 use super::standard::{MonorepoStandard, PackageProvenance};
 
 pub(super) fn detect_gradle_workspace(root: &Path) -> Result<Option<DetectorOutcome>> {
     let settings = root.join("settings.gradle");
     let settings_kts = root.join("settings.gradle.kts");
-    let settings_path = if settings.exists() {
+    let settings_path = if probe_exists(&settings) {
         settings
-    } else if settings_kts.exists() {
+    } else if probe_exists(&settings_kts) {
         settings_kts
     } else {
         return Ok(None);
     };
 
+    performance::increment_counter(counters::FS_FILE_OPENS, 1);
     let content = std::fs::read_to_string(&settings_path)?;
+    performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
+    performance::increment_counter(counters::REPO_MANIFEST_PARSES, 1);
     let includes = parse_gradle_includes(&content);
     if includes.is_empty() {
         return Ok(None);
     }
 
-    let lock_versions = None;
-    let mut packages = Vec::new();
+    let mut seeds = Vec::new();
     for member in includes {
         let member_path = root.join(&member);
-        if !member_path.exists() {
+        if !probe_exists(&member_path) {
             continue;
         }
-        packages.push(create_package(
+        seeds.push(PackageSeed::new(
             &member_path,
             root,
             MonorepoStandard::GradleMultiProject,
             PackageProvenance::Explicit,
-            &lock_versions,
         ));
     }
 
-    if packages.is_empty() {
+    if seeds.is_empty() {
         return Ok(None);
     }
 
-    packages = dedupe_packages(packages);
-    resolve_internal_deps(&mut packages);
 
     Ok(Some(DetectorOutcome {
         standard: MonorepoStandard::GradleMultiProject,
         root: root.to_path_buf(),
-        packages,
+        seeds: merge_seeds(seeds),
     }))
 }
 

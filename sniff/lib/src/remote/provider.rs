@@ -6,6 +6,7 @@
 
 use async_trait::async_trait;
 
+use super::snapshot::RemoteRepoSnapshot;
 use super::types::{
     at_or_after, at_or_before, CanonicalPullRequestState, CiCdInfo, CiCdJob, CiCdJobPage,
     CiCdJobQuery, CiCdJobReference, DocumentRef, GitProvider, IssueInfo, KeyUrls, OrgInfo,
@@ -199,6 +200,45 @@ pub trait RemoteRepoProvider: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// Resolve the shared per-report evidence: metadata, default branch, and tree.
+    ///
+    /// The default implementation resolves metadata only and reports the tree as
+    /// unavailable, so a provider that has not adopted this hook keeps working —
+    /// its `list_documents`/`detect_cicd` are still called through the defaults
+    /// below (R11.4).
+    ///
+    /// ## Errors
+    ///
+    /// Metadata is required; propagate its failure. A *tree* failure must not be
+    /// an error here — degrade to [`super::RemoteTree::unavailable`] so the report still
+    /// carries metadata (R11.6).
+    async fn snapshot(&self, owner: &str, repo: &str) -> Result<RemoteRepoSnapshot, SniffError> {
+        let metadata = self.get_repo_metadata(owner, repo).await?;
+        Ok(RemoteRepoSnapshot::metadata_only(owner, repo, metadata))
+    }
+
+    /// List documents from already-resolved evidence.
+    ///
+    /// The default re-enters [`RemoteRepoProvider::list_documents`], which is why
+    /// a provider adopting this hook must override **both** — and must not
+    /// implement `list_documents` by calling this method unless it does.
+    async fn list_documents_with(
+        &self,
+        snapshot: &RemoteRepoSnapshot,
+    ) -> Result<Vec<DocumentRef>, SniffError> {
+        self.list_documents(&snapshot.owner, &snapshot.repo).await
+    }
+
+    /// Detect CI/CD from already-resolved evidence.
+    ///
+    /// See [`RemoteRepoProvider::list_documents_with`] for the override contract.
+    async fn detect_cicd_with(
+        &self,
+        snapshot: &RemoteRepoSnapshot,
+    ) -> Result<Option<CiCdInfo>, SniffError> {
+        self.detect_cicd(&snapshot.owner, &snapshot.repo).await
+    }
+
     /// Gets one CI/CD job by exact provider identity.
     async fn get_cicd_job(
         &self,
@@ -253,8 +293,12 @@ pub trait RemoteRepoProvider: Send + Sync {
     /// - **Required**: `get_repo_metadata` - if this fails, the entire report fails
     /// - **Optional**: All other methods - failures result in empty/None values
     async fn fetch_report(&self, owner: &str, repo: &str) -> Result<RemoteReport, SniffError> {
-        // The metadata call is required - if it fails, the whole report fails
-        let metadata = self.get_repo_metadata(owner, repo).await?;
+        // Resolve metadata, default branch, and tree exactly once for the whole
+        // report. The document and CI/CD projections below read this instead of
+        // re-fetching their own copies, which is what made a single report cost up
+        // to three metadata calls and three identical tree calls.
+        let snapshot = self.snapshot(owner, repo).await?;
+        let metadata = snapshot.metadata.clone();
 
         // All other calls are optional and independent, so run them concurrently
         // to collapse a chain of API round-trips into a single parallel batch.
@@ -263,7 +307,7 @@ pub trait RemoteRepoProvider: Send + Sync {
         // not short-circuit the others.
         let (org_info, documents, pull_requests, issues, tags_and_releases, cicd, org_repos) = tokio::join!(
             async { self.get_org_info(owner).await.ok() },
-            async { self.list_documents(owner, repo).await.unwrap_or_default() },
+            async { self.list_documents_with(&snapshot).await.unwrap_or_default() },
             async {
                 self.list_pull_requests(owner, repo, PullRequestState::Open)
                     .await
@@ -280,7 +324,7 @@ pub trait RemoteRepoProvider: Send + Sync {
                 match self.list_workflow_runs(owner, repo, 5).await {
                     Ok(runs) if !runs.is_empty() => runs,
                     _ => self
-                        .detect_cicd(owner, repo)
+                        .detect_cicd_with(&snapshot)
                         .await
                         .unwrap_or(None)
                         .into_iter()

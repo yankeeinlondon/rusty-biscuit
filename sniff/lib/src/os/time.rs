@@ -3,9 +3,8 @@
 //! This module provides functionality for detecting system timezone,
 //! UTC offset, daylight saving time status, and NTP synchronization state.
 
+use crate::process::{self, timeouts};
 use serde::{Deserialize, Serialize};
-use std::process::Command;
-use std::time::Duration;
 
 // ============================================================================
 // NTP and Timezone Detection
@@ -56,59 +55,6 @@ pub struct TimeInfo {
     pub monotonic_available: bool,
 }
 
-/// Default timeout for NTP detection commands (3 seconds).
-const NTP_TIMEOUT_SECS: u64 = 3;
-
-/// Runs a command with a timeout, returning stdout as a string if successful.
-///
-/// ## Arguments
-///
-/// * `cmd` - The command to execute
-/// * `args` - Arguments to pass to the command
-/// * `timeout_secs` - Maximum time to wait for the command (in seconds)
-///
-/// ## Returns
-///
-/// `Some(String)` containing stdout if the command succeeds, `None` otherwise.
-/// Returns `None` for permission errors, timeouts, or any execution failure.
-pub(crate) fn run_command_with_timeout(
-    cmd: &str,
-    args: &[&str],
-    timeout_secs: u64,
-) -> Option<String> {
-    let mut child = Command::new(cmd)
-        .args(args)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .ok()?;
-
-    // Wait with timeout using a simple polling approach
-    let timeout = Duration::from_secs(timeout_secs);
-    let start = std::time::Instant::now();
-
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                if status.success() {
-                    let output = child.wait_with_output().ok()?;
-                    return String::from_utf8(output.stdout).ok();
-                }
-                return None;
-            }
-            Ok(None) => {
-                if start.elapsed() >= timeout {
-                    // Timeout exceeded, kill the process
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return None;
-                }
-                std::thread::sleep(Duration::from_millis(10));
-            }
-            Err(_) => return None,
-        }
-    }
-}
 
 /// Maps an IANA timezone name to its common abbreviation.
 ///
@@ -281,18 +227,23 @@ fn detect_timezone_name() -> Option<String> {
 
 #[cfg(target_os = "windows")]
 fn detect_timezone_name() -> Option<String> {
-    let raw_output = Command::new("tzutil")
-        .arg("/g")
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
+    let (program, args) = windows_timezone_command();
+    detect_windows_timezone_name_with_timeout(program, &args, timeouts::WINDOWS_TIMEZONE)
+}
 
-    if !raw_output.status.success() {
-        return None;
-    }
+#[cfg(any(target_os = "windows", test))]
+fn windows_timezone_command() -> (&'static str, [&'static str; 1]) {
+    ("tzutil", ["/g"])
+}
 
-    let windows_id = parse_windows_timezone_id_output(&raw_output.stdout)?;
+#[cfg(target_os = "windows")]
+fn detect_windows_timezone_name_with_timeout(
+    program: &str,
+    args: &[&str],
+    timeout: std::time::Duration,
+) -> Option<String> {
+    let raw_output = process::run_for_stdout(program, args, timeout)?;
+    let windows_id = parse_windows_timezone_id_output(raw_output.as_bytes())?;
     Some(
         crate::os::windows_timezone_map::map_windows_timezone_to_iana(&windows_id)
             .map(|s| s.to_string())
@@ -321,11 +272,19 @@ fn detect_timezone_name() -> Option<String> {
 
 /// Detects NTP synchronization status.
 ///
+/// Every platform bounds its probe with `process::timeouts::NTP` (3 seconds).
+///
 /// ## Platform Behavior
 ///
-/// - **Linux**: Queries `timedatectl` with a 5-second timeout
-/// - **macOS**: Queries `sntp` with the server from `/etc/ntp.conf` (5-second timeout)
-/// - **Windows**: Queries `w32tm /query /status` with a 5-second timeout
+/// - **Linux**: Queries `timedatectl`, which reports the local daemon's state
+///   and does not itself contact a time server.
+/// - **macOS**: Queries `sntp` with the server from `/etc/ntp.conf` (falling
+///   back to `time.apple.com`). This one *does* make a network round trip.
+/// - **Windows**: Queries `w32tm /query /status`, which reports local service
+///   state.
+///
+/// Because the macOS path can reach the network, this probe is disabled in
+/// `DetectionPlan::default()`; explicit `OsRequest::full()` retains it.
 ///
 /// ## Returns
 ///
@@ -335,10 +294,10 @@ fn detect_timezone_name() -> Option<String> {
 pub fn detect_ntp_status() -> NtpStatus {
     // Use a single timedatectl call to check both NTP synchronized and NTP active status.
     // This halves the command overhead compared to two separate invocations.
-    let output = run_command_with_timeout(
+    let output = process::run_for_stdout(
         "timedatectl",
         &["show", "--property=NTPSynchronized,NTP", "--value"],
-        NTP_TIMEOUT_SECS,
+        timeouts::NTP,
     );
 
     let lines: Vec<&str> = output
@@ -377,7 +336,7 @@ pub fn detect_ntp_status() -> NtpStatus {
         .unwrap_or_else(|| "time.apple.com".to_string());
 
     // sntp ships with macOS and works without admin privileges
-    let output = run_command_with_timeout("sntp", &[&server], NTP_TIMEOUT_SECS);
+    let output = process::run_for_stdout("sntp", &[&server], timeouts::NTP);
     match output {
         // A successful response contains the offset, e.g. "+0.001527 +/- 0.004895 time.apple.com"
         Some(text) if text.contains("+/-") => NtpStatus::Synchronized,
@@ -387,7 +346,7 @@ pub fn detect_ntp_status() -> NtpStatus {
 
 #[cfg(target_os = "windows")]
 pub fn detect_ntp_status() -> NtpStatus {
-    let output = run_command_with_timeout("w32tm", &["/query", "/status"], NTP_TIMEOUT_SECS);
+    let output = process::run_for_stdout("w32tm", &["/query", "/status"], timeouts::NTP);
     match output {
         Some(text) if text.contains("Leap Indicator: 0") => NtpStatus::Synchronized,
         Some(text) if text.contains("Leap Indicator:") => NtpStatus::Unsynchronized,
@@ -428,7 +387,8 @@ fn run_ntp_probe() -> NtpStatus {
 /// When `probe_ntp` is `false`, the `ntp_status` field is set to
 /// [`NtpStatus::Unknown`] without invoking any external commands, keeping
 /// this function fast and purely local.  When `probe_ntp` is `true`,
-/// [`detect_ntp_status`] is called, which can take up to 10 seconds on Linux.
+/// [`detect_ntp_status`] is called, which spawns one subprocess bounded at 3
+/// seconds and, on macOS only, contacts a time server.
 ///
 /// ## Examples
 ///
@@ -734,25 +694,57 @@ mod tests {
         assert_eq!(map_windows_timezone_to_iana(""), None);
     }
 
+    #[test]
+    fn test_windows_timezone_command_and_deadline_policy() {
+        assert_eq!(windows_timezone_command(), ("tzutil", ["/g"]));
+        assert_eq!(
+            timeouts::WINDOWS_TIMEZONE,
+            std::time::Duration::from_secs(3)
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_timezone_probe_drains_large_output() {
+        let command = "[Console]::Out.Write(('x' * 1048576 -join ''))";
+        let timezone = detect_windows_timezone_name_with_timeout(
+            "powershell",
+            &["-NoProfile", "-NonInteractive", "-Command", command],
+            std::time::Duration::from_secs(30),
+        )
+        .expect("verbose timezone probe should complete");
+
+        assert_eq!(timezone.len(), 1_048_576);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_timezone_probe_honors_injected_deadline() {
+        let started = std::time::Instant::now();
+        let timezone = detect_windows_timezone_name_with_timeout(
+            "powershell",
+            &[
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Start-Sleep -Seconds 30",
+            ],
+            std::time::Duration::from_millis(100),
+        );
+
+        assert!(timezone.is_none());
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    }
+
     // ============================================================================
     // NTP timeout tests (issue #19)
     // ============================================================================
 
+    /// The NTP deadline is policy, not an incidental constant (R12.10). It was
+    /// reduced from 5s to 3s in issue #19; Phase 6 moved it to `process::timeouts`
+    /// without changing the value.
     #[test]
     fn test_ntp_timeout_is_three_seconds() {
-        // The timeout was reduced from 5s to 3s as part of issue #19.
-        assert_eq!(NTP_TIMEOUT_SECS, 3);
-    }
-
-    #[test]
-    fn test_run_command_with_timeout_respects_timeout() {
-        // Use a command that sleeps longer than the timeout
-        let start = std::time::Instant::now();
-        let result = run_command_with_timeout("sleep", &["10"], 1);
-        let elapsed = start.elapsed();
-
-        // Should return None (timeout) and take less than 5 seconds
-        assert!(result.is_none());
-        assert!(elapsed < std::time::Duration::from_secs(5));
+        assert_eq!(timeouts::NTP, std::time::Duration::from_secs(3));
     }
 }

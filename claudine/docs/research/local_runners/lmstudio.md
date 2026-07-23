@@ -291,6 +291,74 @@ detection:
       The desktop app uses macOS login items. The install script and headless docs show
       how to run `llmster` at boot via launchd or systemd.
 
+identity_probes:
+  - rank: 1
+    request: GET /api/v0/models
+    match_in: json_field
+    field: data[].compatibility_type
+    marker: '"compatibility_type":"gguf|mlx" with "state":"loaded|not-loaded"'
+    uniqueness: unique
+    zero_model_ok: true
+    auth_gated: true
+    confidence: observed
+    notes: No other runner exposes /api/v0/* (mistral.rs, which shares port 1234, has only /v1/*); auth is off by default, so the probe is normally ungated. Verified live on this host.
+  - rank: 2
+    request: GET /api/v1/models
+    match_in: json_field
+    field: models
+    marker: top-level "models" root key (not OpenAI "data")
+    uniqueness: unique
+    zero_model_ok: true
+    auth_gated: true
+    confidence: observed
+    notes: Newer v1 REST API; the response shape (key, display_name, loaded_instances, quantization.bits_per_weight) matches nothing else.
+  - rank: 3
+    request: GET /v1/models
+    match_in: json_field
+    field: data[].owned_by
+    marker: '"owned_by":"organization_owner"'
+    uniqueness: strong
+    zero_model_ok: true
+    auth_gated: true
+    confidence: observed
+    notes: Literal string is an LM Studio fingerprint; vLLM uses "vllm", oMLX uses "omlx", llama.cpp uses "llamacpp". Generic path, unique value.
+  - rank: 4
+    request: ANY /
+    match_in: header
+    field: X-Powered-By
+    marker: Express
+    uniqueness: weak
+    zero_model_ok: true
+    auth_gated: false
+    confidence: observed
+    notes: "Every LM Studio response carries `X-Powered-By: Express`; the other fleet runners are Go/Rust/Python (uvicorn). Corroborating only — Express is not exclusive to LM Studio."
+
+version_probe:
+  - os: macos
+    method: bundle
+    command: "defaults read \"/Applications/LM Studio.app/Contents/Info.plist\" CFBundleShortVersionString"
+    pattern: "(\\S+)"
+    confidence: observed
+    notes: Observed `0.4.12+1` on this host. This is the authoritative LM Studio version — the lms CLI cannot report it.
+  - os: all
+    method: cli
+    command: lms --version
+    pattern: "CLI commit: ([0-9a-f]+)"
+    confidence: observed
+    notes: "TRAP: prints the CLI's git commit hash (observed `CLI commit: 0b2a176`), NOT the LM Studio app version — `lms version` prints the same hash under a banner. The lms CLI and the app version on independent tracks; use the app bundle (macOS) or the app's About dialog elsewhere. There is no running-server version endpoint."
+  - os: linux
+    method: cli
+    command: lms --version
+    pattern: "CLI commit: ([0-9a-f]+)"
+    confidence: documented
+    notes: Same commit-hash caveat; headless daemon is llmster. No documented package/bundle channel reporting the app version.
+  - os: windows
+    method: cli
+    command: lms --version
+    pattern: "CLI commit: ([0-9a-f]+)"
+    confidence: documented
+    notes: Same commit-hash caveat. The installed app version is visible in Windows Apps & Features / the installer, not via the CLI.
+
 config_mechanism: mixed
 
 config_files:
@@ -586,6 +654,23 @@ A detector should look in this order:
 
 Port `1234` is the LM Studio default; the response shape is the strongest
 identity marker because the port can be changed by the user.
+
+### Port identity
+
+Port 1234 collides with mistral.rs, so the ranked `identity_probes`
+frontmatter block is the canonical strategy for answering "which runner is
+listening on this port?":
+
+1. `GET /api/v0/models` — the `/api/v0/*` namespace is LM-Studio-only, and
+   entries carry `compatibility_type` (`gguf`/`mlx`) and `state`; works with
+   zero models loaded (auth is off by default).
+2. `GET /api/v1/models` — the newer v1 REST API answers with a top-level
+   `models` root key rather than OpenAI's `data`.
+3. `GET /v1/models` — generic path, but every entry's
+   `"owned_by":"organization_owner"` is an LM Studio fingerprint (vLLM says
+   `vllm`, oMLX says `omlx`, llama.cpp says `llamacpp`).
+4. Header check — `X-Powered-By: Express` on every response; corroborating
+   only, since Express is not exclusive to LM Studio.
 
 ## Configuration
 

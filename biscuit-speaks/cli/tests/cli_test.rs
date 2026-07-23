@@ -273,7 +273,15 @@ fn test_cli_voice_option() {
         .output()
         .expect("Failed to execute");
 
-    assert!(output.status.success(), "CLI should accept --voice option");
+    // "Samantha" is a macOS-only voice; on platforms whose providers do not
+    // offer it, every provider fails and the CLI exits non-zero. We only verify
+    // the flag is accepted (parsed without a usage error), not that playback of
+    // an OS-specific voice succeeds.
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("unexpected argument") && !stderr.contains("Usage:"),
+        "CLI should accept --voice option without a parse error"
+    );
 }
 
 #[test]

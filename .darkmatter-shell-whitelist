@@ -7,3 +7,4 @@ prefix just
 prefix dirname
 exact pwd
 prefix hug
+exact git add .

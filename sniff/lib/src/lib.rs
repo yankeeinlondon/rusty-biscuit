@@ -12,6 +12,7 @@ pub mod network;
 pub mod os;
 pub mod package;
 pub mod performance;
+pub(crate) mod process;
 pub mod programs;
 #[cfg(feature = "remote")]
 pub mod remote;
@@ -258,6 +259,13 @@ pub fn detect_with_config(config: SniffConfig) -> Result<SniffResult> {
 ///
 /// let result = detect_with_plan(plan).unwrap();
 /// ```
+///
+/// ## Notes
+///
+/// Performance-enabled plans reuse a collector already installed on the
+/// calling thread. This lets a composed request include work performed before
+/// or after detection in one report while preserving the standalone result
+/// snapshot.
 #[instrument(skip(plan), fields(
     os = plan.os.is_some(),
     hw = plan.hardware.is_some(),
@@ -271,9 +279,10 @@ pub fn detect_with_plan(plan: DetectionPlan) -> Result<SniffResult> {
         .base_dir
         .clone()
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    let collector = plan
-        .include_performance
-        .then(performance::PerformanceCollector::new_shared);
+    let collector = plan.include_performance.then(|| {
+        performance::current_collector()
+            .unwrap_or_else(performance::PerformanceCollector::new_shared)
+    });
 
     let mut result = performance::with_current_collector(collector.clone(), || {
         // Run all four domains concurrently using scoped threads.

@@ -2,6 +2,23 @@
 
 Deep technical documentation for Claudine's event model, provider adapters, dispatch pipeline, stream parsing, composition, and configuration system.
 
+## Contents
+
+- [Library module structure](#library-module-structure)
+- [Event support matrix](#event-support-matrix)
+- [Key types](#key-types)
+- [Provider adapters](#provider-adapters)
+- [Dispatch pipeline](#dispatch-pipeline)
+- [Stream parsing](#stream-parsing)
+- [Composition](#composition)
+- [Configuration schema](#configuration-schema)
+- [Skill linking](#skill-linking)
+- [Rendezvous package-area family](#rendezvous-package-area-family)
+
+Use the heading search if a subsection name has changed; the sections above are
+the stable subsystem routes rather than an exhaustive list of every nested
+heading.
+
 ## Library Module Structure
 
 ```
@@ -9,33 +26,45 @@ claudine/lib/src/
 ├── actions/      → Hook action types and response model
 ├── badges/       → Styled terminal badge constants (YOLO, Non-Interactive, Interactive, etc.)
 ├── composition/  → Markdown frontmatter composition (inline and chained prompt pipelines)
-│   ├── lifecycle/ → Lifecycle config/types, parsing, validation, actions, context, control, execution, and provider-neutral runtime routing
+│   ├── coordinator/ → Active-document ownership: the typed DocumentTransition, the two-stage proxy handoff, and the four state layers (coordinator/{transition,handoff,commit,invocation,document,active}.rs)
+│   ├── lifecycle/ → Lifecycle config/types, parsing, validation, actions, context, control, execution, and the pure transition core shared by composition preflight and the harness loop
 │   ├── looping/   → Loop configuration, action DSL, condition evaluation, and execution orchestration (looping/{engine,types,seed,config,dsl,actions,expression}.rs — engine holds only execution/routing/gate logic; types holds the option/context/output/result value types; seed holds loop-seed construction)
+│   ├── prepare/   → The canonical preparation service (prepare/service.rs) and the entry-reason stage matrix as data (prepare/entry.rs); prepare.rs holds the two sanctioned composers prepare_direct/prepare_inline
 │   └── schema/    → Schema-aware preparation, error translation, problem classification, and status reporting
 ├── config/       → Agent detection, hook registration, atomic writes, backups
+├── diagnostics/  → Typed facets, discovery, effective selection, and snapshots
 ├── dispatch/     → Event processing pipeline
 │   ├── logging.rs        → Event metadata preparation and JSONL logging
 │   ├── protect_bridge.rs → Protect observations mapped into hook responses
 │   └── wrapper_flags.rs  → Wrapper environment flags and repository root extraction
 ├── events/       → Normalized event model and types (16 events, 10 providers)
+├── harness/      → Shell audit, timeouts, attempt classification, and recovery infrastructure
 ├── hook_adapters/ → Native hook request/response adapters (ProviderAdapter trait) — parse provider hook payloads; distinct from stream/providers (stdout NDJSON parsers)
+├── interrupt.rs  → Process-scoped user-interrupt state
 ├── linking/      → Cross-provider skill synchronization (4 resource types) with portability classification
 ├── mcp/          → MCP catalog, defaults, import/export, session, and injection
+├── messaging/    → Outbound messaging route resolution and delivery
+├── model_catalog/ → Expected model offerings, aliases, validation, and drift
+├── opencode_config.rs → OpenCode configuration parsing and projection
 ├── permissions/  → Provider-agnostic PolicyEngine for permission queries and mutation planning
 │   └── providers/common.rs → Format-agnostic helpers shared across provider backends (first_source_id, one_shot_plan constructor)
+├── protect/      → Regex deny catalog for commands, paths, and MCP responses
+├── provider/     → Generated metadata registry plus hand-written provider behavior
 ├── render/       → Functional render components (FinalMessage, AgentPrompt/SystemPrompt, EventRenderer + DISPATCH table, MetricsReport, StreamRenderable/AssistantStream); consume data + policy (DisplayPolicy), never `match provider`
 ├── reporting/    → JSONL-to-SQLite reporting index, sync, and typed queries
-├── services/     → Cross-provider runtime policy services (ProtectService)
-├── stream/       → Structured stream parsing for 8 providers (Kilo reuses OpenCode's) + summary/reporting
+├── runaway/      → Content-guard detection and configuration
+├── signals/      → Generated and bespoke normalized signal catalog and hub
+├── stream/       → Eight structured-stream parser implementations serving nine provider identities (Kilo reuses OpenCode's; Goose has no native parser) + summary/reporting
 │   ├── logs/opencode/bridge/   → Stderr bridge: ingest dispatch, session tracking, stall guard, signals, formatting
 │   ├── logs/opencode/classify/ → Error classification: asset, LLM, session, text utilities
 │   └── logs/opencode/state.rs  → Shared stderr state and summary merge
+├── system_prompt/ → Launch-context discovery and system-prompt resolution
 └── error.rs      → ClaudineError enum
 ```
 
 The per-provider modules under `lib/src/provider/<slug>/` split into two halves: `data.rs` is **generated** by `claudine-gen` (crate `claudine/gen`, sharing vocab enums with the leaf `claudine/catalog-types` crate) from roster + facts + research + overrides (regenerate with `claudine providers generate`; drift-checked in CI by the gen crate's drift test / `claudine-gen check`, which also verify the committed `docs/providers/catalog.json` superset), while `behavior.rs` is hand-written. Never edit a `data.rs` by hand — change the owning input file and regenerate.
 
-**Dispatch drift guard (Phase I).** Decentralized `match Provider` / `matches!` / `==` / `!=` dispatch is prevented from regrowing by one site-level guard in `claudine-cli/tests/dispatch_inventory.rs`, covering **both** `lib/src` and `cli/src` (it retired the lib crate's earlier regex `no_unauthorized_match_provider_in_lib` guard). Every conditional, non-exempt dispatch site must be grandfathered in `GUARD_ALLOWLIST` with a tag + reason (all 18 current sites are `keep` — genuinely behavioral wire/shadow-HOME/stderr-bridge quirks and Claude's canonical linking role); a new one fails until migrated to a `ProviderInfo` field/trait or consciously listed. The committed census is `docs/providers/dispatch-inventory.json`.
+**Dispatch drift guard (Phase I).** Decentralized `match Provider` / `matches!` / `==` / `!=` dispatch is prevented from regrowing by one site-level guard in `claudine-cli/tests/dispatch_inventory.rs`, covering **both** `lib/src` and `cli/src` (it retired the lib crate's earlier regex `no_unauthorized_match_provider_in_lib` guard). Every conditional, non-exempt dispatch site must be grandfathered in `GUARD_ALLOWLIST` with a tag + reason (the current sites are all `keep` — genuinely behavioral wire/shadow-HOME/stderr-bridge quirks and Claude's canonical linking role); a new one fails until migrated to a `ProviderInfo` field/trait or consciously listed. The live count is the allowlist length printed by the guard; the committed census is `docs/providers/dispatch-inventory.json`.
 
 ## Event Support Matrix
 
@@ -82,7 +111,7 @@ pub enum AgenticEvent {
 
 ### Provider Enum
 
-7-variant enum (Claude, Codex, Gemini, Goose, KimiCode, OpenCode, QwenCode) with slug, docs URL, event support queries, and native event name mappings:
+10-variant enum (Claude, Codex, Gemini, Goose, KimiCode, OpenCode, QwenCode, Kilo, Pi, Antigravity) with slug, docs URL, event support queries, and native event name mappings:
 
 - `EventSupportLevel` — `Hook` | `NonHook` | `NotSupported` per provider-event pair
 
@@ -132,7 +161,7 @@ Composition commands resolve whether a session runs interactive via `SharedCompo
 
 ## Provider Adapters
 
-Each provider has its own adapter implementing the `ProviderAdapter` trait. The `adapter_for(provider)` factory returns the appropriate adapter. Each adapter normalizes the provider's native JSON payload into `(AgenticEvent, EventMeta)` and can format `HookResponse` back into provider-native response payloads.
+Each provider exposes adapter behavior through its catalog entry. The `adapter_for(provider)` factory returns the appropriate `ProviderAdapter`; Kilo deliberately shares OpenCode's wire-compatible implementation. Each adapter normalizes the provider's native JSON payload into `(AgenticEvent, EventMeta)` and can format `HookResponse` back into provider-native response payloads.
 
 | Adapter | Parses | Status |
 |---------|--------|--------|
@@ -143,6 +172,9 @@ Each provider has its own adapter implementing the `ProviderAdapter` trait. The 
 | `goose` | Stream-json + env var (type/event field) | Implemented (non-blocking) |
 | `kimicode` | Wire mode JSON-RPC (event_name/method field) | Implemented (blocking: tool, permission) |
 | `qwen` | Stream-json output (event_name/type field) | Implemented (blocking: permission) |
+| `kilo` | OpenCode-shaped events through the shared OpenCode adapter | Implemented |
+| `pi` | Pi extension hook payloads | Implemented |
+| `antigravity` | Camel-case agy hook payloads with event inference from fields | Implemented |
 
 ### Claude Code
 
@@ -382,7 +414,7 @@ The prose-bearing sections (System Prompt, **Agent Prompt**, Thinking Prose) ren
 
 So when rendered prompt output shows wrong wrapping, spurious newlines, lines bleeding past the width, or mis-styled inline spans, the defect is in **darkmatter / biscuit-terminal**, not claudine. Reproduce at that layer (`md.as_terminal` with a fixed `max_width`) rather than through the claudine CLI. Known gotcha: a CommonMark *tight* list item carries its content as a flat run of inline siblings (`[Text, InlineCode, Text]`) with no wrapping `Paragraph`, and the terminal renderer must coalesce that run before wrapping — the wrap is per-list-item, not per-inline-node.
 
-### Provider Parsers (6)
+### Provider Parsers (8 implementations, 9 provider identities)
 
 | Parser | Format | Summary source |
 |--------|--------|----------------|
@@ -390,12 +422,17 @@ So when rendered prompt output shows wrong wrapping, spurious newlines, lines bl
 | `codex` | JSONL (`exec --json`) | `turn.completed` usage + `--output-last-message` file for text |
 | `gemini` | stream-json | `result.stats` with token counts |
 | `kimi` | stream-json | Latest `StatusUpdate` snapshot (no aggregate result) |
-| `opencode` | NDJSON (`json`) | Accumulated per-step usage/cost |
+| `opencode` / `kilo` | NDJSON (`json`) | Accumulated per-step usage/cost; one implementation stamps the selected provider identity and vocabulary |
 | `qwen` | stream-json | Final result/usage event |
+| `pi` | NDJSON (`--mode json`) | `message_end` usage/cost accumulated through the terminal `agent_end` event |
+| `antigravity` | One buffered JSON envelope (`--output-format json`) | `usage`, duration, turn count, response, and conversation id from the terminal envelope |
+
+Goose exposes no native structured stream protocol, so it is the only compiled
+provider identity without a dedicated parser path.
 
 ### Infrastructure
 
-- `providers/common` — shared parser skeleton the per-provider parsers delegate to: `base_extra`/`base_extra_parts` payload bases, `emit_provider_extension` + `emit_malformed_warning` fallbacks, `finish_summary` (stamps `provider` + derived badges onto a `..Default::default()`-built summary), and the `ErrorKeywords` ordered-bucket tables + `classify_error_by_keywords` cascade (bucket order is the per-provider behavior contract — do not sort the tables). Provider files keep thin delegating methods plus their genuinely provider-specific typed dispatch.
+- `providers/common` — shared parser skeleton the per-provider parsers delegate to: `base_extra`/`base_extra_parts` payload bases, `emit_provider_extension` + `emit_malformed_warning` fallbacks, `finish_summary` (stamps `provider` + derived badges onto a `..Default::default()`-built summary), and the `ErrorKeywords` classifier shape + `classify_error_by_keywords` cascade. The ordered tables live in generated `providers/vocabulary.rs`, projected from the schema-validated `docs/research/agent-errors/<slug>.md` frontmatter; evidence stays in research while bucket/item order survives as the runtime precedence contract. Immutable `docs/research/agent-errors/_seeds/<slug>.yaml` baselines preserve pre-graduation row identity for deterministic removal/re-kind/reorder checks. `providers/vocabulary_tests.rs` locks accepted research additions, precedence, exact numeric codes, and representative near misses. Provider files keep thin delegating methods plus their genuinely provider-specific typed dispatch.
 - `parser` — `StreamParser` trait and `StreamEventSink` callback interface for coarse event handling (session start, turn lifecycle, tool events)
 - `summary` — `StreamExecutionSummary` struct: provider-agnostic metadata (session ID, model, tokens, cost, duration, tool calls, rate limits, context usage)
 - `token_usage` — `NormalizedTokenUsage` with input/output/total/cache_read fields
@@ -414,8 +451,15 @@ Markdown frontmatter-based composition pipelines for delivering prompts to provi
 - **Inline composition** (`--frontmatter-prompt`): reads frontmatter `prompt` field as input, replaces document body with provider output
 - **Chained composition** (`--compose`): composes full document as prompt without file mutation
 
-The CLI executor under `cli/src/commands/wrap/composition/` keeps the entry and
-setup pipeline in `mod.rs`, with incidental concerns split by responsibility:
+The CLI executor under `cli/src/commands/wrap/composition/` keeps stable entry
+points and public re-exports in `mod.rs`. `pipeline.rs` owns one
+`CompositionAttempt` across ordered selection/launch, environment/MCP,
+argv/system-prompt, lifecycle-runtime, initialize-routing, and provider-handoff
+phases. Each phase returns `CompositionPhaseResult`, so completed dry runs,
+blocked lifecycle routing, preparation failures, and normal progression stay
+explicit without flattening attempt state into the entry module.
+
+Other concerns remain split by responsibility:
 
 - `selection.rs` — favorite-provider and model-override configuration loading
 - `launch.rs` — launch-workspace selection and `--repo` detection enforcement
@@ -428,9 +472,212 @@ setup pipeline in `mod.rs`, with incidental concerns split by responsibility:
 Composition execution headers are shared output helpers in
 `cli/src/output/mod.rs`; they do not live in the executor pipeline.
 
+### Sequences
+
+`lib/src/composition/sequence/` owns the normalized plan; `cli/src/commands/wrap/sequence/`
+owns orchestration. The split follows the two execution phases:
+
+- `sequence/{model,normalize,reserved,source,grammar,data,expr}.rs` — typed step
+  state, id/`sequence_id` generation, the reserved-key catalog, and the
+  `<file-ref> [-> offset] [::op(args)]` source grammar. Data files load through
+  `biscuit_file` and resolve through `FileReference::resolve_in_context` using
+  the request-scoped `FileResolutionContext` derived for the authoring source;
+  string sources classify through `biscuit_file::ListFormat`.
+- `sequence/preflight/` — the recursive task-graph loader. Walks inline tasks,
+  `kind: task` / `kind: group` / `kind: group-catalog` files, and every `prompt:`
+  document, keeping a canonical-path ancestry stack so a cycle reports its whole
+  chain. Resolves shell bytes under an early-binding-only lookup so
+  approved == executed.
+- `sequence/task/` — `TaskExecution::run` → `TaskOutcome`. `run()` never returns
+  `Err`: continuation is the scheduler's `fail_fast` decision, not an error
+  escaping one task. `group.rs` adds serial and (via `std::thread::scope` plus a
+  shared cursor) parallel groups.
+- `composition/runtime_state.rs` — `RuntimeState`, the invocation-local cell
+  holding accumulated `set` mutations and the `outputs` accumulator.
+  `layered_set_overrides` is the single place the four-layer precedence
+  (live frontmatter < user setters < mutations < reserved overlay) is encoded.
+- `wrap/sequence/{jit,iterate,phase1c,task_run,task_frames}.rs` — just-in-time
+  composition at each step's turn. `phase1c`'s validation compose and execution
+  both route through `jit::compose_step`, so "validated == executed" holds
+  without a second prepare implementation.
+
+Two seams are worth knowing before editing:
+
+- **YAML sources load through `composition::load_yaml_document`.** A `.yaml`
+  sequence file is one document whose *root mapping is its frontmatter*. Both the
+  initial resolution and the just-in-time re-read
+  (`reload_composition_source`) must use that conversion; parsing a YAML source
+  as plain Markdown yields an empty frontmatter that is indistinguishable
+  downstream from a document declaring nothing.
+- **`PrepareOptions::allow_empty_body`** is set only by a step that declares an
+  executable. Such a step runs its task instead of the body, and a directly
+  invoked `kind: sequence` YAML file has no body at all.
+### Active-Document Coordinator and Canonical Preparation
+
+A run has one **active document**. `lib/src/composition/coordinator/` owns the
+provider-neutral vocabulary for changing it; the CLI driver owns the process,
+terminal, filesystem, and provider-adapter effects (nothing under
+`coordinator/` performs I/O or resolves a file reference — a resolved `PathBuf`
+arrives as a value).
+
+- `transition.rs` — `DocumentTransition` (`Continue`, `Retry`, `Resume`,
+  `Proxy`, `Complete`, `Abort`). Every proxy producer returns it; every
+  coordinator outcome consumes or explicitly rejects it. There is **no** second
+  optional `Option<PathBuf>` proxy channel — `LoopExecutionResult::init_proxy_target`
+  and `route_initialize::init_proxy_target` are both gone, and
+  `composition_seams::no_new_optional_proxy_target_channel` holds that baseline
+  at zero.
+- `handoff.rs` — the two-stage handoff. Lifecycle evaluation can build only an
+  `EvaluatedProxyRequest { target, overlay, provenance }`; a `ProxyHandoff`
+  additionally requires the opaque `ResolvedProxyTarget` and a `HopApproval`, so
+  the type system makes an unresolved or unvalidated handoff unconstructable.
+- `commit.rs` — `commit_proxy`, the single site that may change document
+  identity. The harness *requests* `Proxy`; it no longer swaps its own source.
+- `invocation.rs` / `active.rs` / `document.rs` — the four ownership layers:
+  immutable `InvocationInputs`, the coordinator-only `RunLedger` (proxy chain,
+  hop accounting, approval cache, timing anchors — extended, never reset),
+  `PreparedDocument`, and `ActiveDocumentState` (discarded by a proxy). Retry
+  and resume replace only the `ProviderAttempt` slice and retain their labeled
+  `ControlBudget`s.
+
+`lib/src/composition/prepare/` is the one canonical preparation service.
+`entry.rs` holds the spec's stage matrix as **data** — one `PreparationStages`
+row per `DocumentEntryReason` (`Direct`, `ProxyTarget`, `Retry`, `Resume`,
+`LoopIteration`), with no fall-through — and `service.rs::prepare_document`
+runs it around the two sanctioned composers (`prepare_direct` / `prepare_inline`
+in `prepare.rs`). A prepared document stores the **exact** `ComposeContext` it
+composed against; ambient `ComposeContext::capture()` is not a runtime fallback
+on any prepared path (the wrapper moves process CWD to the repo root, so a
+recapture reads the wrong anchor).
+
+File-valued input keeps its provenance through that service. A reference
+authored in a document resolves from the document's source context; an eager
+`file` value supplied by the caller (`--set` or an immediate `proxy.with`
+overlay) resolves through the captured launch-area `FileResolutionContext` and
+is stored as the resolved absolute path. Ordinary strings are never probed as
+files. Overlay null-removal still applies to the authored layer because an
+override object cannot represent an absent key; non-null overlay values also
+travel through the caller layer so this resolution distinction is preserved.
+
+Two `cli/tests/composition_seams.rs` guards hold these lines mechanically: the
+`compose_with` allowlist (four sanctioned composer sites) and the ambient-capture
+ban. The ambient `ComposeContext::capture()` baseline is empty; sequence
+template preflight now captures one anchored context and reuses it through
+validation and execution.
+
+**Retired carriers.** `RematerializeInputs` → `CallerInputLayers` (the four
+invocation-scoped caller layers, an input of the canonical service — a
+source-specific value belongs to the prepared document instead). The
+second/third composers in `harness_orch/prompt.rs` (`materialize_harness_prompt`'s
+hand-rolled `compose_with` calls and `preflight_proxy_target`'s option builder)
+now route through the canonical service.
+
+**Launch identity is rebuilt per active document.** Launch inputs (provider,
+model, MCP, argv, child env/CWD, system prompt, interactivity) and document-loop
+recognition are computed for whichever document is active, not frozen from the
+originally-invoked one. `materialize_attempt_prompt_phase`
+(`harness_orch/loop_control.rs`) re-materializes the active document at each
+fresh-read boundary and `target_launch::rebuild_launch_identity` derives the
+whole launch bundle from that read, so a proxied target selects its authored
+`model:`, acquires its own `loop:`, and launches under the same rebuild a direct
+invocation performs (R6/R7).
+
+The boundary is **ownership**. A surfaced composition command — `compose`,
+`inline-compose`, and each contained `sequence` step — re-enters the
+command-owned preparation and launch pipeline through its coordinator, which
+re-prepares the resolved target canonically. A direct provider wrapper
+(`claudine claude`, `claudine goose`, …) prepares no active document, so
+`surface_or_adopt_terminal_proxy` refuses an otherwise unowned handoff with a
+typed diagnostic rather than adopting it under the invocation's own bundle.
+
+`LifecycleCatchProtocol` in `lib/src/composition/lifecycle/runtime.rs` is the
+single provider-neutral owner of setup catch routing, terminal-slot
+redesignation, finalize eligibility, active-error threading, and evaluation
+error precedence. Every initialize/start/blocked catch and every
+success/failure/loop terminal-evaluation path must consume the protocol's
+requested steps and result. CLI adapters may build event contexts, execute
+effects, and render the selected error; they must not independently reproduce
+failure/finalize ordering or precedence.
+
+## Harness Attempt Loop
+
+`cli/src/commands/wrap/harness_orch/loop_control.rs` keeps one
+`HarnessLoopState` across all retry, resume, and proxy iterations. It owns the
+immutable run context alongside the attempt counter, prompt/session overrides,
+retry/resume budgets, proxy chain, cached shell approvals, lifecycle guard,
+run-level timing anchor, and accumulated performance data.
+
+The exact-command approval **cache** is invocation-wide, but the interactive
+approval **window** is scoped to the active document. `CachedHarnessLoopContext`
+(`harness_orch/shell_options.rs`) freezes the window once the current document's
+commands are approved — new uncached commands are then denied without prompting,
+which is what keeps approvals resolved before the provider workflow begins.
+`refresh` reopens it on a document change only, so a proxy target gets the same
+approval opportunity as a direct invocation while retry/resume of the same
+document stay frozen behind a live agent. An exact command approved anywhere in
+the invocation is never re-prompted.
+
+`run_harness_loop_inner` is an ordered coordinator over three typed phases:
+prompt materialization/preflight (including lifecycle `start`), provider
+attempt execution, and result classification/recovery. Re-entry and terminal
+outcomes cross phase boundaries as `LoopStep` values. Provider command and
+process details remain in `harness_orch/{launch,attempt}.rs`; lifecycle event
+execution remains in `loop_control/lifecycle_events.rs`; and
+`drive_terminal_recovery` in `loop_control/control_dispatch.rs` remains the
+single terminal-tail executor for retry, resume, proxy, and finalize recovery.
+Attempt preparation exposes separate prompt-preparation,
+lifecycle-execution, and retry/proxy-control contracts so each transition can
+mutate only the state family it owns.
+
+## Error Handling — the audit before you commit
+
+Full model in [error-architecture.md](error-architecture.md). The rules a change
+to any error path must satisfy, and the guards that check them (`just test`,
+`just lint-transport`):
+
+1. **Retain the typed cause.** Concrete typed error, `#[from]`, a `#[source]`
+   field, or `wrap_err` where the concrete source stays in the chain. Never
+   `format!("…{e}")`, `map_err(|e| e.to_string())`, or a prose
+   `reason`/`message` field that drops the value. `no_unallowlisted_typed_error_collapses`
+   is provenance- and retention-aware, so `Foo { message: e.to_string(), source: e }`
+   is *not* a defect — the chain is intact.
+2. **Register a new `Diagnostic` impl** in `as_diagnostic`
+   (`lib/src/diagnostics/discovery.rs`). `registry_lists_every_diagnostic_impl`
+   re-derives the truth from the sources and fails in both directions. An
+   unregistered impl is the motivating incident and is never allowlistable.
+3. **Do not box a registered diagnostic you need to reach.** `Box<E>` on a chain
+   publishes `Box<E>`; the walk skips `E` at every depth. Box the *context*
+   instead, or unbox at the boundary (`Report::from(*error)`).
+   `no_registered_diagnostic_is_reachable_only_through_a_box` covers both
+   `#[source] Box<T>` fields and `Result<_, Box<T>>` returns.
+4. **Set `role()` from what the variant forwards**, never from what it wraps. A
+   wrapper over a typed Darkmatter cause is `Semantic` (a Darkmatter cause has no
+   facets) — and must delegate `status_block` to that cause, or it replaces a
+   rich block with one line of `Display`.
+5. **Seed `detail()` from `null_detail_for(code)`.** Every declared key present;
+   unavailable optionals `null`; never a top-level `null` for a registered code;
+   never a key the catalog does not declare.
+6. **Never invent a field.** A value the resolver cannot supply is `null` — not
+   parsed from `Display`, not back-derived from a neighbouring facet.
+7. **Extend the catalog additively.** New code or new detail field: non-breaking.
+   Rename or removal: breaking — it silently kills author `when:` clauses.
+   `code → disposition` stays 1:1; if two failures need different dispositions
+   they are different codes.
+
+**Adding an exception.** Both allowlists (`cli/tests/error_guards/*.toml`) key on
+an enclosing **symbol** and require a `tag` and a substantive `reason`.
+`retained` is permanent; any other tag is burn-down debt a follow-up spec closes.
+A stale entry fails its own guard.
+
+**Changing an error's behavior** means a pass over its rustdoc in the same
+change, per the repo's authoring discipline — the rendering and propagation
+claims in these doc comments are exactly the kind that drift.
+
 ## Test Placement
 
 **Inline tests** (`#[cfg(test)] mod tests { … }`) are the default for small files. Once a file exceeds **~800 production lines** or its test module exceeds **~300 lines**, move tests to a sibling file declared via `#[cfg(test)] mod tests;` at the bottom of the parent. This pattern is already established in `lib/src/provider/`, `cli/…/wrap/composition/`, and `cli/…/wrap/exec/wiring/`.
+
+`claudine-cli/tests/test_placement.rs` enforces this convention as a Level 1 package-area structural test. It scans every source tree in the Claudine family, counts production and inline-test modules written as `#[cfg(...test...)] mod ... { ... }` separately with a Rust-aware lexer, excludes generated sources only through explicit path/header rules, and rejects stale path-specific exceptions. Private modules and the supported Rust visibility forms (`pub`, `pub(crate)`, and `pub(super)`) are all recognized and governed by the same thresholds. Exceptions must be file-specific and explain why co-location materially clarifies a private invariant; stale or rationale-free entries fail the gate. The analyzer does not currently enforce a separate numeric ceiling for exceptions.
 
 ## Skill Linking
 
@@ -488,8 +735,47 @@ Note: OpenCode also reads `.claude/skills/` directly
 ## Key Lessons
 
 - **Hook handlers must respond fast**: `claudine handle` enforces a hard **5-second execution deadline** (overridable via `CLAUDINE_HANDLE_DEADLINE_SECONDS`) to prevent blocking the parent agent session. When exceeded, the handler aborts and exits 124. Bash and messenger actions also have tighter 3s timeouts when running inside a hook handler. Phase-level tracing spans ensure any hang is diagnostic.
-- **All 7 adapters are implemented**: each provider adapter has full event mapping, metadata extraction, and tests. Claude, Gemini, OpenCode, and Codex use config-based hooks; Goose, KimiCode, and Qwen parse stream-json or wire-mode payloads directly. KimiCode and Qwen support blocking responses; Goose is observation-only.
+- **All 10 provider identities have adapter behavior**: nine adapter implementations are registered and tested, with Kilo deliberately reusing OpenCode's wire-compatible adapter. Hook delivery mechanisms and blocking capabilities are catalog data; the event-support matrix above is the authoritative summary.
 - **Sound effects are fire-and-forget**: TTS and sound playback spawn tokio tasks to avoid blocking the event pipeline. Log and report actions run inline because they're fast.
 - **Atomic writes prevent config corruption**: all config file mutations go through `config::atomic` to handle concurrent hook firings safely.
 - **Runtime config precompiles regexes**: matcher patterns and Call action mapper regexes are compiled once at config load time, failing fast on invalid patterns with contextual error messages.
 - **Legacy single-brace templates are deprecated**: `{placeholder}` is automatically rewritten to `{{placeholder}}` with a tracing warning. New configs should use Handlebars-style double braces.
+
+## Rendezvous Package-Area Family
+
+`claudine/rendezvous/` is a first-class package-area family of **three crates** that back `claudine dashboard` and the (unwired) lifecycle `defer` scheduler. It follows a `core → {daemon, client}` dependency shape — both leaf crates depend on `rendezvous-core`, neither depends on the other.
+
+| Crate | Path | Depends on | Public role |
+|-------|------|-----------|-------------|
+| `rendezvous-core` | `rendezvous/core` | *(leaf)* + `sniff` | Shared protobuf/gRPC stubs, `NodeIdentity`, `SignedEnvelope`/`EnvelopeSealer`/`EnvelopeInbox`, `DocumentId`/`ChunkId`, invitations, the sync wire framing (`rendezvous_core::sync`), and the typed `LocalEndpoint` contract (`local_endpoint`). Models and resolves the endpoint; performs **no** filesystem mutation and contains no listener. |
+| `rendezvous-daemon` | `rendezvous/daemon` | `rendezvous-core`, `sniff` | The long-running service: the `RendezvousService` gRPC impl over the platform's local endpoint, the `redb → Loro → DuckDB` session-log pipeline, the register store, peer discovery/QUIC, and the direct-sync engine. Owns endpoint/data-root authorization, listener setup, and cleanup. Binary `main`; the gRPC and persistence layers live in library modules so integration tests exercise them without spawning a child. |
+| `rendezvous-client` | `rendezvous/client` | `rendezvous-core` | Thin tonic gRPC client. Exposes the portable `connect(&LocalEndpoint)` every Claudine CLI call site uses, plus the `rendezvous-test-client` binary. |
+
+Test commands run from the `claudine/rendezvous/` area justfile: `just check`, `just build`, `just test`, `just lint` each iterate all three crates (`test-l2` is a no-op — real-terminal tests do not apply). The root `cargo check --workspace --all-targets` includes all three. Native runtime coverage on macOS/Linux/Windows is gated by `.github/workflows/rendezvous-tests.yml` (no `continue-on-error` on any leg — cross-compilation is explicitly **not** accepted as Windows evidence).
+
+### Local IPC — the typed endpoint
+
+Authoritative doc: `claudine/docs/rendezvous/local-ipc.md`. Read it before touching endpoint, daemon-boot, or connector code.
+
+The load-bearing rules:
+
+- **`LocalEndpoint::{UnixSocket(PathBuf), WindowsNamedPipe(OsString)}`** carries its own transport. There is deliberately no common `path()` accessor — a Windows pipe name is not a filesystem path. Use `as_unix_path()` / `as_windows_pipe_name()`; `Display` is lossy and human-facing only.
+- **Per stable OS user.** `sniff::os::current_user_id()` supplies the effective UID (Unix/WSL) or process-token account SID (Windows). Never `$USER`/`%USERNAME%`. Resolution: `RENDEZVOUS_ENDPOINT` → `$XDG_RUNTIME_DIR/claudine/rendezvous/daemon.sock` (when the runtime dir passes inspection) → `<tempdir>/claudine-rendezvous-uid-<uid>/daemon.sock`; Windows: `\\.\pipe\claudine-rendezvous-sid-<sid>`. Failure is typed — **no username, `default`, or random fallback.**
+- **One portable entry point.** `spawn_local_server(LocalEndpoint, DaemonConfig)`. `prepare_daemon` builds storage/projection/batcher/identity/registers/QUIC/discovery/workers/service exactly once, transport-neutral; `local_transport/{unix,windows}.rs` own *only* listener, accept, permission, and cleanup. A new transport must not grow a parallel boot path. `spawn_uds_server` survives only as a Unix test seam.
+- **Data root** defaults to `<local-data-dir>/claudine/rendezvous` (`node.key`, `session.redb`, `projection.duckdb`), validated by the same `private_dir` contract as the Unix runtime directory. The legacy `<tempdir>/rendezvous-data` is never read or imported — a shared temp dir is not an ownership boundary, so an identity found there could be planted.
+- **Overrides change location, not policy.** `--endpoint`/`RENDEZVOUS_ENDPOINT`, `--data-dir`/`RENDEZVOUS_DATA_DIR`. Tests use private temp parents or the core `test-support` feature; never weaken production checks for a fixture.
+- **No production `cfg` branches at call sites.** Dashboard, requeue, hook forwarding, session reporting, and health probes all go through `rendezvous_client::connect`.
+- The legacy vocabulary (`RENDEZVOUS_SOCKET`, `--socket`, `default_socket_path`, `ServerHandle::socket_path()`, the `socket` module) is **gone with no aliases**. `ServerHandle::local_endpoint()` replaces the last.
+
+**Known open defect** (recorded in the fix's plan, deferred not forgotten): every `unix::serve` endpoint refusal runs *after* `prepare_daemon` has opened redb/DuckDB and spawned workers, and `PreparedDaemon` has no `Drop` — so a transport failure leaks those workers with storage handles open. Trips nextest's `leak-timeout` under parallel load (masked today by `retries = 3`) and risks the `DatabaseAlreadyOpen` trap in production. The fix is to bind before preparing.
+
+### Session-log module boundary
+
+`SessionLogManager` (`rendezvous/daemon/src/session_log/`) is the single public facade over the in-memory chunk map plus the redb source-of-truth and the DuckDB projection batcher. Its behavior is split across private sibling modules, each owning one responsibility, while the shared session state (`ChunkState`, `ManagerInner`, `SessionCursor`) and its Loro/redb-facing invariants stay private to the module tree:
+
+- `append` — local append/rotation and the in-memory/on-disk read surfaces.
+- `staging` — snapshot signing, version-vector advertising, delta export, and the two-phase stage→commit that validates a remote update/replace before it touches durable state.
+- `rehydrate` — startup rehydration from redb, accepted-envelope replay (crash recovery), and DuckDB projection rebuild.
+- `validate` — remote-document invariants: metadata identity, entry schema/monotonicity, and the append-only prefix guard (read-only over a staged doc; nothing persists).
+
+Persistence ordering is invariant: an append persists the redb snapshot before mutating live in-memory state; the sync receive path persists the accepted envelope before committing the snapshot, so a crash window recovers on the next startup replay. The daemon's `sync` and `service` inline-test suites are divided by behavior into sibling `tests/` trees (sync: `envelope_validation`, `schema_validation`, `snapshot_replace`; service: `rpc`, `session_register`, `validation`).

@@ -290,57 +290,57 @@ fn compose_silent_does_not_suppress_agent_resolution_report() {
 // extraction → delivery → output pipeline ran without error.
 // ---------------------------------------------------------------------------
 
-/// End-to-end: for every wrapped provider, verify that
-/// `claudine <provider> --dry-run "hello"` produces a successful
-/// dry-run (exit 0) and that the dry-run output section is printed.
-///
-/// Providers that deliver the prompt via argv (Gemini, Qwen, OpenCode,
-/// Goose) also have "hello" visible in the Command: line; providers that
-/// seed stdin (Claude, Codex, Kimi) do not, but the pipeline still
-/// completes and emits the DRY RUN header, which is sufficient to prove
-/// that the prompt was accepted and processed. Runs for all 7 wrapped
-/// providers with stub binaries on PATH.
 #[cfg(unix)]
-#[test]
-fn direct_wrap_dry_run_delivers_prompt_for_every_provider() {
-    for provider_slug in [
-        "claude", "codex", "gemini", "kimi", "opencode", "qwen", "goose",
-    ] {
-        let workspace = tempdir().unwrap();
-        let path_dir = workspace.path().join("bin");
-        fs::create_dir_all(&path_dir).unwrap();
-        seed_minimal_config(workspace.path());
+fn assert_direct_wrap_dry_run_delivers_prompt(provider_slug: &str) {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
-        // Stub binary so PATH resolution succeeds in dry-run mode.
-        // Dry-run never actually spawns the child, so the stub body
-        // doesn't matter — the stub only needs to exist and be
-        // executable for claudine's binary-resolution step.
-        write_executable(&path_dir.join(provider_slug), "#!/bin/sh\nexit 0\n");
+    // Dry-run resolves the provider binary but does not spawn it.
+    write_executable(&path_dir.join(provider_slug), "#!/bin/sh\nexit 0\n");
 
-        let output = cargo_bin_cmd!("claudine")
-            .env("NO_COLOR", "1")
-            .env("HOME", workspace.path())
-            .env("OPENCODE_MODEL", "test-model")
-            .env("PATH", &path_dir)
-            .args([provider_slug, "--dry-run", "hello"])
-            .output()
-            .unwrap();
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("OPENCODE_MODEL", "test-model")
+        .env("PATH", &path_dir)
+        .args([provider_slug, "--dry-run", "hello"])
+        .output()
+        .unwrap();
 
-        assert!(
-            output.status.success(),
-            "`claudine {provider_slug} --dry-run hello` failed: stderr={}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+    assert!(
+        output.status.success(),
+        "`claudine {provider_slug} --dry-run hello` failed: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
-        let combined = format!(
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let normalized = strip_ansi(&combined);
-        assert!(
-            normalized.contains("DRY RUN"),
-            "`claudine {provider_slug} --dry-run hello` did not emit a DRY RUN section:\n{normalized}"
-        );
-    }
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let normalized = strip_ansi(&combined);
+    assert!(
+        normalized.contains("DRY RUN"),
+        "`claudine {provider_slug} --dry-run hello` did not emit a DRY RUN section:\n{normalized}"
+    );
 }
+
+macro_rules! direct_wrap_dry_run_test {
+    ($name:ident, $provider:literal) => {
+        #[cfg(unix)]
+        #[test]
+        fn $name() {
+            assert_direct_wrap_dry_run_delivers_prompt($provider);
+        }
+    };
+}
+
+direct_wrap_dry_run_test!(direct_wrap_dry_run_delivers_prompt_for_claude, "claude");
+direct_wrap_dry_run_test!(direct_wrap_dry_run_delivers_prompt_for_codex, "codex");
+direct_wrap_dry_run_test!(direct_wrap_dry_run_delivers_prompt_for_gemini, "gemini");
+direct_wrap_dry_run_test!(direct_wrap_dry_run_delivers_prompt_for_kimi, "kimi");
+direct_wrap_dry_run_test!(direct_wrap_dry_run_delivers_prompt_for_opencode, "opencode");
+direct_wrap_dry_run_test!(direct_wrap_dry_run_delivers_prompt_for_qwen, "qwen");
+direct_wrap_dry_run_test!(direct_wrap_dry_run_delivers_prompt_for_goose, "goose");

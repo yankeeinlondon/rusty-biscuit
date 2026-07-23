@@ -1,4 +1,5 @@
-//! Auto-select state classification and unsupported-property lookup helpers.
+//! Auto-select state classification, unsupported-property lookup helpers, and
+//! the shared interrupted-run predicate.
 
 use super::*;
 use claudine::composition::{InteractiveShape, TextFormat};
@@ -123,4 +124,35 @@ fn find_first_unsupported_falls_back_to_unknown_label() {
     )];
     let (_, _, shape) = find_first_unsupported(&failures).unwrap();
     assert_eq!(shape, "(unknown)");
+}
+
+#[test]
+fn exit_code_130_alone_marks_a_run_interrupted() {
+    let flag = AtomicBool::new(false);
+    assert!(run_was_interrupted(SEQUENCE_INTERRUPT_EXIT_CODE, &flag));
+}
+
+#[test]
+fn an_ordinary_failure_without_the_flag_is_not_interrupted() {
+    let flag = AtomicBool::new(false);
+    for exit_code in [1, 2, 127] {
+        assert!(
+            !run_was_interrupted(exit_code, &flag),
+            "exit {exit_code} with no interrupt observed is a plain failure"
+        );
+    }
+}
+
+#[test]
+fn the_interrupt_flag_covers_exits_no_host_reports_as_130() {
+    let flag = AtomicBool::new(true);
+    // 0xC000013A: the NTSTATUS a console app terminating on CTRL_BREAK_EVENT
+    // exits with. 1: TerminateJobObject's force rung. 137: the Unix second
+    // press (128 + SIGKILL). 0: a provider that traps SIGINT and exits clean.
+    for exit_code in [0xC000_013A_u32 as i32, 1, 137, 0] {
+        assert!(
+            run_was_interrupted(exit_code, &flag),
+            "exit {exit_code} with the interrupt flag set is an interruption"
+        );
+    }
 }

@@ -251,6 +251,73 @@ detection:
     confidence: documented
     notes: Optional local-only/cloud-disable file; absent on this host.
 
+identity_probes:
+  - rank: 1
+    request: GET /
+    match_in: body
+    field: ""
+    marker: "Ollama is running"
+    uniqueness: unique
+    zero_model_ok: true
+    auth_gated: false
+    confidence: observed
+    notes: Plain-text banner observed live on this host (Ollama 0.32.1); no other runner emits it. Works with zero models pulled or loaded.
+  - rank: 2
+    request: GET /api/version
+    match_in: json_field
+    field: version
+    marker: '{"version":"..."}'
+    uniqueness: unique
+    zero_model_ok: true
+    auth_gated: false
+    confidence: observed
+    notes: The /api/version path itself is Ollama-only (llama.cpp, LM Studio, vLLM, oMLX, LocalAI do not mount it); observed live returning the exact server version.
+  - rank: 3
+    request: GET /api/tags
+    match_in: json_field
+    field: models[].digest
+    marker: non-empty sha256 digests with real modified_at values
+    uniqueness: strong
+    zero_model_ok: false
+    confidence: observed
+    notes: llama.cpp mimics /api/tags but returns empty digest/modified_at/size fields — real digests confirm Ollama, empty digests are a reverse-tell for llama.cpp.
+  - rank: 4
+    request: ANY /
+    match_in: header
+    field: Server
+    marker: header absent
+    uniqueness: weak
+    zero_model_ok: true
+    auth_gated: false
+    confidence: observed
+    notes: Ollama (Go net/http) sends no Server header; corroborating only — absence of Server plus the banner is the combined signal.
+
+version_probe:
+  - os: all
+    method: cli
+    command: ollama --version
+    pattern: "ollama version is (\\S+)"
+    confidence: observed
+    notes: Observed `ollama version is 0.32.1` on this host. The CLI and the running server can drift (the server is a long-lived daemon); for the running server's version use `GET /api/version` (identity_probes rank 2).
+  - os: macos
+    method: bundle
+    command: "defaults read /Applications/Ollama.app/Contents/Info.plist CFBundleShortVersionString"
+    pattern: "(\\S+)"
+    confidence: observed
+    notes: Observed 0.32.1; matches the CLI version on this host. The app bundles the CLI at Contents/Resources/ollama.
+  - os: linux
+    method: cli
+    command: ollama --version
+    pattern: "ollama version is (\\S+)"
+    confidence: documented
+    notes: Same output shape on Linux; install script places the binary in /usr/local/bin or /usr/bin.
+  - os: windows
+    method: cli
+    command: ollama.exe --version
+    pattern: "ollama version is (\\S+)"
+    confidence: documented
+    notes: Installer puts binaries under %LOCALAPPDATA%\\Programs\\Ollama on the user PATH.
+
 config_mechanism: mixed
 config_files:
   - os: macos
@@ -589,6 +656,21 @@ Recommended ordered probes:
 
 Port 11434 is only a weak signal. The root HTTP marker is the fastest
 Ollama-specific discriminator.
+
+### Port identity
+
+Because other servers can occupy 11434 (KoboldCpp is sometimes run there
+deliberately), the ranked `identity_probes` frontmatter block is the canonical
+strategy for answering "which runner is listening on this port?":
+
+1. `GET /` — the exact plain-text body `Ollama is running` is unique to
+   Ollama and needs no loaded model.
+2. `GET /api/version` — the path itself is Ollama-only; the body carries the
+   exact server version.
+3. `GET /api/tags` — real sha256 `digest`/`modified_at` values confirm
+   Ollama; llama.cpp mimics this path but returns empty dummy values (a
+   reverse-tell).
+4. Header check — Ollama (Go) sends no `Server` header; corroborating only.
 
 ## Configuration
 

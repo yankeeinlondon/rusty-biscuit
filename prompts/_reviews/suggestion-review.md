@@ -31,7 +31,7 @@ The subset of the suggestions which are relevant to this review are:
 
 ## Baseline Review
 
-::file {{review}}
+::file @{{review}}
 
 ## Task
 
@@ -82,10 +82,10 @@ The subset of the suggestions which are relevant to this review are:
         - `$schema` as "suggestion-review.yaml"
         - `created` as "{{ctx.now}}"
         - `agent` as "{{ctx.agent/ctx.model}}"
-        - `description` as "reviewed the _implementation success_ of addressing the concerns raised in the '{{parent(review)}}/{{basename(review)}}' review"
+        - `description` as "reviewed the _implementation success_ of addressing the concerns raised in the '{{parent_dir(review)}}/{{basename(review)}}' review"
         - `parent_scope` as "{{ parent_dir(dirname(review)) }}"
         - `scope` as "{{ parent_dir(review) }}"
-        - `baseline` as "{{parent(review)}}/{{basename(review)}}"
+        - `baseline` as "{{parent_dir(review)}}/{{basename(review)}}"
     - on the baseline review file -- {{review}} -- you will set the following:
         - `implemented` as `true`
         - `follow_up_review` as "{{ basename(output) }}"

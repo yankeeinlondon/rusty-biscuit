@@ -11,6 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::Result;
+use crate::performance::{self, counters};
 
 use super::types::*;
 
@@ -70,6 +71,69 @@ pub(crate) struct LineStats {
     pub(crate) removed: usize,
 }
 
+/// One file side's observation: statistics always, patch text only when asked.
+///
+/// Both fields are derived from a single load of each buffer, and — for a
+/// modification — from a single diff of them. Splitting stats and patch across
+/// two independent functions is what made every dirty side load its blobs twice
+/// and diff them twice.
+#[derive(Debug, Default)]
+struct SideDiff {
+    stats: LineStats,
+    patch: String,
+}
+
+/// Inputs a status call resolves once and every dirty file side then borrows.
+///
+/// The HEAD tree and index snapshot were previously re-resolved per file *per
+/// side*, making index snapshots O(dirty files) where one per status walk is
+/// sufficient. `head_tree`/`index` are `None` only when the repository has no
+/// HEAD tree or no readable index; every side treats that as "no evidence" and
+/// degrades to empty stats, matching the prior per-call error fallbacks.
+struct StatusContext<'repo> {
+    repo: &'repo gix::Repository,
+    head_tree: Option<gix::Tree<'repo>>,
+    index: Option<gix::worktree::Index>,
+    workdir: Option<PathBuf>,
+}
+
+impl<'repo> StatusContext<'repo> {
+    fn new(repo: &'repo gix::Repository) -> Self {
+        let head_tree = repo
+            .head_tree_id_or_empty()
+            .ok()
+            .and_then(|id| repo.find_tree(id).ok());
+        let index = repo.index_or_empty().ok();
+        Self {
+            repo,
+            head_tree,
+            index,
+            workdir: repo.workdir().map(Path::to_path_buf),
+        }
+    }
+
+    /// Index entry for `path` at the unconflicted stage.
+    fn index_entry(&self, path: &gix::bstr::BStr) -> Option<&gix::index::Entry> {
+        self.index
+            .as_ref()?
+            .entry_by_path_and_stage(path, gix::index::entry::Stage::Unconflicted)
+    }
+
+    /// HEAD-tree entry for `path`.
+    fn head_entry(&self, path: &gix::bstr::BStr) -> Option<gix::object::tree::EntryRef<'_, '_>> {
+        self.head_tree
+            .as_ref()?
+            .find_entry(gix::bstr::BString::from(path.to_vec()))
+    }
+
+    /// Read the worktree side of `path`, counting the load.
+    fn read_worktree(&self, path: &gix::bstr::BStr) -> Option<Vec<u8>> {
+        let workdir = self.workdir.as_deref()?;
+        performance::increment_counter(counters::GIT_BLOB_LOADS, 1);
+        std::fs::read(workdir.join(bstr_to_path(path))).ok()
+    }
+}
+
 impl std::ops::Add for LineStats {
     type Output = Self;
     fn add(self, rhs: Self) -> Self::Output {
@@ -110,6 +174,7 @@ pub(crate) fn get_repo_status_with_changes(
 ) -> Result<(RepoStatus, Vec<FileChange>)> {
     #[cfg(test)]
     walk_probe::record(repo);
+    performance::increment_counter(counters::GIT_STATUS_WALKS, 1);
     use gix::bstr::{BString, ByteSlice};
     let workdir = repo.workdir().map(Path::to_path_buf);
 
@@ -212,35 +277,30 @@ pub(crate) fn get_repo_status_with_changes(
         unstaged_patches.reserve(dirty_paths.len());
     }
 
+    // The HEAD tree, index snapshot, and workdir are resolved once here rather
+    // than per file per side, which is what made index snapshots scale with the
+    // number of dirty files.
+    let ctx = StatusContext::new(repo);
+
     for path in &dirty_paths {
         if let Some(kind) = staged.get(path) {
-            let stats = staged_diff_stats(repo, path.as_bstr(), *kind);
-            let patch = if include_diffs {
-                staged_diff_patch(repo, path.as_bstr(), *kind)
-            } else {
-                String::new()
-            };
+            let side = staged_side(&ctx, path.as_bstr(), *kind, include_diffs);
             diff_stats
                 .entry(path.clone())
-                .and_modify(|s| *s = *s + stats)
-                .or_insert(stats);
-            if !patch.is_empty() {
-                staged_patches.insert(path.clone(), patch);
+                .and_modify(|s| *s = *s + side.stats)
+                .or_insert(side.stats);
+            if !side.patch.is_empty() {
+                staged_patches.insert(path.clone(), side.patch);
             }
         }
         if let Some(kind) = unstaged.get(path) {
-            let stats = unstaged_diff_stats(repo, path.as_bstr(), *kind, workdir.as_deref());
-            let patch = if include_diffs {
-                unstaged_diff_patch(repo, path.as_bstr(), *kind, workdir.as_deref())
-            } else {
-                String::new()
-            };
+            let side = unstaged_side(&ctx, path.as_bstr(), *kind, include_diffs);
             diff_stats
                 .entry(path.clone())
-                .and_modify(|s| *s = *s + stats)
-                .or_insert(stats);
-            if !patch.is_empty() {
-                unstaged_patches.insert(path.clone(), patch);
+                .and_modify(|s| *s = *s + side.stats)
+                .or_insert(side.stats);
+            if !side.patch.is_empty() {
+                unstaged_patches.insert(path.clone(), side.patch);
             }
         }
     }
@@ -358,211 +418,182 @@ fn lossy_path(bytes: &gix::bstr::BStr) -> PathBuf {
     PathBuf::from(String::from_utf8_lossy(bytes.as_ref()).as_ref())
 }
 
-/// Compute line stats for a staged change (HEAD tree vs index).
-fn staged_diff_stats(
-    repo: &gix::Repository,
+/// Observe one staged side (HEAD tree vs index): load each blob once, diff once.
+///
+/// `want_patch` adds the unified patch without re-loading or re-diffing: for a
+/// modification the hunks are rendered from the very diff the statistics were
+/// counted from.
+fn staged_side(
+    ctx: &StatusContext<'_>,
     path: &gix::bstr::BStr,
     kind: StagedKind,
-) -> LineStats {
-    let Ok(head_tree_id) = repo.head_tree_id_or_empty() else {
-        return LineStats::default();
-    };
-    let head_tree = match repo.find_tree(head_tree_id) {
-        Ok(t) => t,
-        Err(_) => return LineStats::default(),
-    };
-    let index = match repo.index_or_empty() {
-        Ok(idx) => idx,
-        Err(_) => return LineStats::default(),
-    };
-
+    want_patch: bool,
+) -> SideDiff {
     match kind {
         StagedKind::Added => {
-            let entry = match index_entry_by_path(&index, path) {
-                Some(e) => e,
-                None => return LineStats::default(),
+            let Some(entry) = ctx.index_entry(path) else {
+                return SideDiff::default();
             };
-            LineStats {
-                added: line_count_of_blob_content(repo, entry.id),
-                removed: 0,
-            }
-        }
-        StagedKind::Deleted => {
-            let entry = match head_tree.find_entry(gix::bstr::BString::from(path.to_vec())) {
-                Some(e) => e,
-                None => return LineStats::default(),
-            };
-            LineStats {
-                added: 0,
-                removed: line_count_of_blob_content(repo, entry.id().into()),
-            }
-        }
-        StagedKind::Modified => {
-            let head_entry = head_tree.find_entry(gix::bstr::BString::from(path.to_vec()));
-            let index_entry = index_entry_by_path(&index, path);
-            match (head_entry, index_entry) {
-                (Some(h), Some(i)) => diff_blobs(repo, h.id().into(), i.id),
-                _ => LineStats::default(),
-            }
-        }
-    }
-}
-
-/// Compute line stats for an unstaged change (index vs worktree).
-fn unstaged_diff_stats(
-    repo: &gix::Repository,
-    path: &gix::bstr::BStr,
-    kind: UnstagedKind,
-    workdir: Option<&Path>,
-) -> LineStats {
-    let index = match repo.index_or_empty() {
-        Ok(idx) => idx,
-        Err(_) => return LineStats::default(),
-    };
-    let index_entry = index_entry_by_path(&index, path);
-
-    match kind {
-        UnstagedKind::Deleted => {
-            let Some(entry) = index_entry else {
-                return LineStats::default();
-            };
-            LineStats {
-                added: 0,
-                removed: line_count_of_blob_content(repo, entry.id),
-            }
-        }
-        UnstagedKind::Modified => {
-            let Some(entry) = index_entry else {
-                return LineStats::default();
-            };
-            let Some(workdir) = workdir else {
-                return LineStats::default();
-            };
-            let worktree_content = match std::fs::read(workdir.join(bstr_to_path(path))) {
-                Ok(c) => c,
-                Err(_) => return LineStats::default(),
-            };
-            diff_blob_against_bytes(repo, entry.id, &worktree_content)
-        }
-    }
-}
-
-/// Build a unified patch for a staged change.
-fn staged_diff_patch(repo: &gix::Repository, path: &gix::bstr::BStr, kind: StagedKind) -> String {
-    let Ok(head_tree_id) = repo.head_tree_id_or_empty() else {
-        return String::new();
-    };
-    let head_tree = match repo.find_tree(head_tree_id) {
-        Ok(t) => t,
-        Err(_) => return String::new(),
-    };
-    let index = match repo.index_or_empty() {
-        Ok(idx) => idx,
-        Err(_) => return String::new(),
-    };
-
-    match kind {
-        StagedKind::Added => {
-            let Some(entry) = index_entry_by_path(&index, path) else {
-                return String::new();
-            };
-            let new = read_blob_or_empty(repo, entry.id);
-            git_patch(
-                path,
-                PatchOp::Added,
-                None,
-                Some(entry.id),
-                &index_mode(entry),
-                &[],
+            let (id, mode) = (entry.id, index_mode(entry));
+            let new = read_blob_or_empty(ctx.repo, id);
+            added_side(
+                PatchHeader {
+                    path,
+                    op: PatchOp::Added,
+                    old_id: None,
+                    new_id: Some(id),
+                    mode: &mode,
+                },
                 &new,
+                want_patch,
             )
         }
         StagedKind::Deleted => {
-            let Some(entry) = head_tree.find_entry(gix::bstr::BString::from(path.to_vec())) else {
-                return String::new();
+            let Some(entry) = ctx.head_entry(path) else {
+                return SideDiff::default();
             };
-            let old = read_blob_or_empty(repo, entry.id());
+            let old = read_blob_or_empty(ctx.repo, entry.id());
             let mut buf = [0u8; 6];
             let mode = String::from_utf8_lossy(entry.mode().as_bytes(&mut buf)).into_owned();
-            git_patch(
-                path,
-                PatchOp::Deleted,
-                Some(entry.id().into()),
-                None,
-                &mode,
+            deleted_side(
+                PatchHeader {
+                    path,
+                    op: PatchOp::Deleted,
+                    old_id: Some(entry.id().into()),
+                    new_id: None,
+                    mode: &mode,
+                },
                 &old,
-                &[],
+                want_patch,
             )
         }
         StagedKind::Modified => {
-            let Some(head_entry) = head_tree.find_entry(gix::bstr::BString::from(path.to_vec()))
-            else {
-                return String::new();
+            let Some(head_entry) = ctx.head_entry(path) else {
+                return SideDiff::default();
             };
-            let Some(index_entry) = index_entry_by_path(&index, path) else {
-                return String::new();
+            let head_id: gix::ObjectId = head_entry.id().into();
+            let Some(index_entry) = ctx.index_entry(path) else {
+                return SideDiff::default();
             };
-            let old = read_blob_or_empty(repo, head_entry.id());
-            let new = read_blob_or_empty(repo, index_entry.id);
-            git_patch(
-                path,
-                PatchOp::Modified,
-                Some(head_entry.id().into()),
-                Some(index_entry.id),
-                &index_mode(index_entry),
+            let (index_id, mode) = (index_entry.id, index_mode(index_entry));
+            let old = read_blob_or_empty(ctx.repo, head_id);
+            let new = read_blob_or_empty(ctx.repo, index_id);
+            modified_side(
+                PatchHeader {
+                    path,
+                    op: PatchOp::Modified,
+                    old_id: Some(head_id),
+                    new_id: Some(index_id),
+                    mode: &mode,
+                },
                 &old,
                 &new,
+                want_patch,
             )
         }
     }
 }
 
-/// Build a unified patch for an unstaged change.
-fn unstaged_diff_patch(
-    repo: &gix::Repository,
+/// Observe one unstaged side (index vs worktree): load each side once, diff once.
+fn unstaged_side(
+    ctx: &StatusContext<'_>,
     path: &gix::bstr::BStr,
     kind: UnstagedKind,
-    workdir: Option<&Path>,
-) -> String {
-    let index = match repo.index_or_empty() {
-        Ok(idx) => idx,
-        Err(_) => return String::new(),
+    want_patch: bool,
+) -> SideDiff {
+    let Some(entry) = ctx.index_entry(path) else {
+        return SideDiff::default();
     };
-    let Some(index_entry) = index_entry_by_path(&index, path) else {
-        return String::new();
-    };
+    let (index_id, mode) = (entry.id, index_mode(entry));
 
     match kind {
         UnstagedKind::Deleted => {
-            let old = read_blob_or_empty(repo, index_entry.id);
-            git_patch(
-                path,
-                PatchOp::Deleted,
-                Some(index_entry.id),
-                None,
-                &index_mode(index_entry),
+            let old = read_blob_or_empty(ctx.repo, index_id);
+            deleted_side(
+                PatchHeader {
+                    path,
+                    op: PatchOp::Deleted,
+                    old_id: Some(index_id),
+                    new_id: None,
+                    mode: &mode,
+                },
                 &old,
-                &[],
+                want_patch,
             )
         }
         UnstagedKind::Modified => {
-            let Some(workdir) = workdir else {
-                return String::new();
+            let Some(new) = ctx.read_worktree(path) else {
+                return SideDiff::default();
             };
-            let new = std::fs::read(workdir.join(bstr_to_path(path))).unwrap_or_default();
-            let old = read_blob_or_empty(repo, index_entry.id);
-            let new_id = blob_oid(repo, &new);
-            git_patch(
-                path,
-                PatchOp::Modified,
-                Some(index_entry.id),
-                new_id,
-                &index_mode(index_entry),
+            let old = read_blob_or_empty(ctx.repo, index_id);
+            let new_id = blob_oid(ctx.repo, &new);
+            modified_side(
+                PatchHeader {
+                    path,
+                    op: PatchOp::Modified,
+                    old_id: Some(index_id),
+                    new_id,
+                    mode: &mode,
+                },
                 &old,
                 &new,
+                want_patch,
             )
         }
     }
+}
+
+/// A wholly-added side: every line of `new` is an addition.
+///
+/// Stats are a line count rather than a diff against emptiness — the same
+/// cheaper-and-exact accounting this path always used. A diff runs only to
+/// render the patch, so a stats-only request costs no diff at all.
+fn added_side(header: PatchHeader<'_>, new: &[u8], want_patch: bool) -> SideDiff {
+    SideDiff {
+        stats: LineStats {
+            added: countable_lines(new),
+            removed: 0,
+        },
+        patch: build_patch(header, &[], new, want_patch),
+    }
+}
+
+/// A wholly-deleted side: every line of `old` is a removal.
+fn deleted_side(header: PatchHeader<'_>, old: &[u8], want_patch: bool) -> SideDiff {
+    SideDiff {
+        stats: LineStats {
+            added: 0,
+            removed: countable_lines(old),
+        },
+        patch: build_patch(header, old, &[], want_patch),
+    }
+}
+
+/// A modified side: one diff supplies both the statistics and the hunks.
+fn modified_side(
+    header: PatchHeader<'_>,
+    old: &[u8],
+    new: &[u8],
+    want_patch: bool,
+) -> SideDiff {
+    let (stats, hunks) = diff_once(old, new, want_patch);
+    SideDiff {
+        stats,
+        patch: if want_patch {
+            git_patch(header, old, new, &hunks)
+        } else {
+            String::new()
+        },
+    }
+}
+
+/// Render a patch for a whole-file add/delete, diffing only when one is wanted.
+fn build_patch(header: PatchHeader<'_>, old: &[u8], new: &[u8], want_patch: bool) -> String {
+    if !want_patch {
+        return String::new();
+    }
+    let (_, hunks) = diff_once(old, new, true);
+    git_patch(header, old, new, &hunks)
 }
 
 /// Exact filesystem path from repo-relative git bytes.
@@ -581,31 +612,25 @@ fn bstr_to_path(bytes: &gix::bstr::BStr) -> PathBuf {
     }
 }
 
-/// Look up an index entry by its repository-relative byte path.
-fn index_entry_by_path<'a>(
-    index: &'a gix::worktree::Index,
-    path: &gix::bstr::BStr,
-) -> Option<&'a gix::index::Entry> {
-    index.entry_by_path_and_stage(path, gix::index::entry::Stage::Unconflicted)
-}
-
 /// Read a blob's content, returning an empty vec on failure.
 fn read_blob_or_empty(repo: &gix::Repository, id: impl Into<gix::ObjectId>) -> Vec<u8> {
+    // Sole chokepoint for object-side loads: every blob-reading helper routes
+    // here, so counting deeper would double-count the same load.
+    performance::increment_counter(counters::GIT_BLOB_LOADS, 1);
     repo.find_blob(id.into())
         .map(|mut b| b.take_data())
         .unwrap_or_default()
 }
 
-/// Count lines in a blob content, returning just the line count.
+/// Lines of `content` that count toward add/delete stats.
 ///
 /// Returns zero for binary content so add/delete line stats stay consistent
 /// with Git's "binary files differ" behavior.
-fn line_count_of_blob_content(repo: &gix::Repository, id: gix::ObjectId) -> usize {
-    let content = read_blob_or_empty(repo, id);
-    if is_binary(&content) {
+fn countable_lines(content: &[u8]) -> usize {
+    if is_binary(content) {
         0
     } else {
-        byte_lines(&content)
+        byte_lines(content)
     }
 }
 
@@ -624,35 +649,42 @@ fn byte_lines(content: &[u8]) -> usize {
     }
 }
 
-/// Diff two blobs and return line stats.
-fn diff_blobs(repo: &gix::Repository, old_id: gix::ObjectId, new_id: gix::ObjectId) -> LineStats {
-    let old = read_blob_or_empty(repo, old_id);
-    let new = read_blob_or_empty(repo, new_id);
-    diff_bytes(&old, &new)
-}
-
-/// Diff an index blob against worktree bytes.
-fn diff_blob_against_bytes(repo: &gix::Repository, old_id: gix::ObjectId, new: &[u8]) -> LineStats {
-    let old = read_blob_or_empty(repo, old_id);
-    diff_bytes(&old, new)
-}
-
-/// Compute line stats by diffing two byte buffers.
+/// Diff two byte buffers **once**, returning line stats and, when `want_hunks`,
+/// the unified hunks rendered from that same diff.
+///
+/// The single diff site for a file side. Previously the stats pass and the
+/// patch pass each built their own `InternedInput` and ran their own
+/// `diff_with_slider_heuristics` over identical bytes; only the stats pass
+/// incremented [`counters::GIT_FILE_DIFFS`], so the patch-side diff was real
+/// work that no baseline ever saw.
 ///
 /// Returns zero counts if either buffer appears to be binary (contains a null
 /// byte in the first 8 KB), matching Git's heuristic and the prior git2-based
 /// behavior.
-fn diff_bytes(old: &[u8], new: &[u8]) -> LineStats {
+fn diff_once(old: &[u8], new: &[u8], want_hunks: bool) -> (LineStats, String) {
+    performance::increment_counter(counters::GIT_FILE_DIFFS, 1);
     if is_binary(old) || is_binary(new) {
-        return LineStats::default();
+        // Binary sides carry no stats and no hunks; `git_patch` renders the
+        // "Binary files … differ" line from the buffers instead.
+        return (LineStats::default(), String::new());
     }
+    if old == new {
+        return (LineStats::default(), String::new());
+    }
+
     let input = gix::diff::blob::InternedInput::new(old, new);
     let diff =
         gix::diff::blob::diff_with_slider_heuristics(gix::diff::blob::Algorithm::Histogram, &input);
-    LineStats {
+    let stats = LineStats {
         added: diff.count_additions() as usize,
         removed: diff.count_removals() as usize,
-    }
+    };
+    let hunks = if want_hunks {
+        render_hunks(&diff, &input)
+    } else {
+        String::new()
+    };
+    (stats, hunks)
 }
 
 /// Git's binary heuristic: a buffer is binary if it contains a null byte in
@@ -670,6 +702,17 @@ enum PatchOp {
     Modified,
 }
 
+/// The file-level facts a patch header needs, independent of its content.
+#[derive(Clone, Copy)]
+struct PatchHeader<'a> {
+    path: &'a gix::bstr::BStr,
+    op: PatchOp,
+    old_id: Option<gix::ObjectId>,
+    new_id: Option<gix::ObjectId>,
+    /// 6-digit octal blob mode, e.g. `100644`.
+    mode: &'a str,
+}
+
 /// 7-hex-character object abbreviation matching libgit2's default `index`-line
 /// width, or the all-zero abbreviation for an absent side.
 fn abbrev7(id: Option<gix::ObjectId>) -> String {
@@ -681,20 +724,21 @@ fn abbrev7(id: Option<gix::ObjectId>) -> String {
 
 /// Build a full git-format patch (file header + hunks) byte-compatible with
 /// `git2`'s `DiffFormat::Patch` output: the `diff --git`, mode, `index`, and
-/// `---`/`+++` markers a `git diff` produces, followed by the unified hunks.
+/// `---`/`+++` markers a `git diff` produces, followed by `hunks`.
 ///
-/// Binary content yields the `Binary files … differ` line instead of hunks,
-/// matching libgit2. `mode` is the 6-digit octal blob mode (e.g. `100644`).
-fn git_patch(
-    path: &gix::bstr::BStr,
-    op: PatchOp,
-    old_id: Option<gix::ObjectId>,
-    new_id: Option<gix::ObjectId>,
-    mode: &str,
-    old: &[u8],
-    new: &[u8],
-) -> String {
+/// `hunks` is rendered by the caller from the one diff it already ran, so this
+/// function never diffs. Binary content yields the `Binary files … differ` line
+/// instead of hunks, matching libgit2 — the `old`/`new` buffers are still
+/// needed for that heuristic.
+fn git_patch(header: PatchHeader<'_>, old: &[u8], new: &[u8], hunks: &str) -> String {
     use std::fmt::Write;
+    let PatchHeader {
+        path,
+        op,
+        old_id,
+        new_id,
+        mode,
+    } = header;
     // Path appears only in display-oriented header text; lossy is acceptable
     // here (git quotes non-UTF-8 paths — an extreme edge we do not replicate).
     let p = String::from_utf8_lossy(path);
@@ -746,7 +790,7 @@ fn git_patch(
             let _ = write!(s, "--- a/{p}\n+++ b/{p}\n");
         }
     }
-    s.push_str(&text_hunks(old, new));
+    s.push_str(hunks);
     s
 }
 
@@ -761,16 +805,12 @@ fn index_mode(entry: &gix::index::Entry) -> String {
     format!("{:o}", entry.mode.bits())
 }
 
-/// Render only the unified hunks (`@@` headers + content lines) of a diff
-/// between two byte buffers, without the file-level header.
-fn text_hunks(old: &[u8], new: &[u8]) -> String {
-    if old == new {
-        return String::new();
-    }
-    let input = gix::diff::blob::InternedInput::new(old, new);
-    let diff =
-        gix::diff::blob::diff_with_slider_heuristics(gix::diff::blob::Algorithm::Histogram, &input);
-
+/// Render only the unified hunks (`@@` headers + content lines) of an
+/// already-computed diff, without the file-level header.
+fn render_hunks(
+    diff: &gix::diff::blob::Diff,
+    input: &gix::diff::blob::InternedInput<&[u8]>,
+) -> String {
     struct PatchCollector(String);
     impl gix::diff::blob::unified_diff::ConsumeHunk for PatchCollector {
         type Out = String;
@@ -818,8 +858,8 @@ fn text_hunks(old: &[u8], new: &[u8]) -> String {
 
     let collector = PatchCollector(String::new());
     gix::diff::blob::UnifiedDiff::new(
-        &diff,
-        &input,
+        diff,
+        input,
         collector,
         gix::diff::blob::unified_diff::ContextSize::default(),
     )
@@ -917,6 +957,7 @@ pub(crate) fn get_repo_status_counts(repo: &gix::Repository) -> crate::Result<(b
 pub(crate) fn is_repo_dirty(repo: &gix::Repository) -> Result<bool> {
     #[cfg(test)]
     walk_probe::record(repo);
+    performance::increment_counter(counters::GIT_STATUS_WALKS, 1);
     let platform = repo
         .status(gix::progress::Discard)
         .map_err(|e| crate::SniffError::git("status", e))?
@@ -958,6 +999,7 @@ pub(crate) fn get_repo_status_counts_detailed(
 ) -> Result<(bool, usize, usize, usize)> {
     #[cfg(test)]
     walk_probe::record(repo);
+    performance::increment_counter(counters::GIT_STATUS_WALKS, 1);
     let mut staged = 0usize;
     let mut unstaged = 0usize;
     let mut untracked = 0usize;
@@ -1101,6 +1143,84 @@ mod tests {
             .iter()
             .find(|c| c.path == Path::new(path))
             .unwrap_or_else(|| panic!("expected change for {}", path))
+    }
+
+    /// Counters recorded while `f` runs.
+    fn work_counts<T>(f: impl FnOnce() -> T) -> std::collections::BTreeMap<String, u64> {
+        let collector = performance::PerformanceCollector::new_shared();
+        performance::with_current_collector(Some(collector.clone()), f);
+        collector
+            .snapshot(std::time::Duration::from_secs(0))
+            .counters
+    }
+
+    fn count_of(counts: &std::collections::BTreeMap<String, u64>, name: &str) -> u64 {
+        counts.get(name).copied().unwrap_or(0)
+    }
+
+    /// R8.3/R8.4: one blob/worktree load and one diff per dirty file side.
+    ///
+    /// A file that is both staged and modified has two sides, so the bound is
+    /// two loads per side (old + new) and one diff per side. Before Phase 5 the
+    /// stats pass and the patch pass each loaded and diffed independently, so
+    /// this cost twice as much — and half the diffs were never counted.
+    #[test]
+    fn each_dirty_side_loads_and_diffs_once() {
+        let (dir, repo) = setup_repo();
+
+        // Stage a modification, then modify again in the worktree: one path,
+        // two sides (HEAD→index and index→worktree).
+        std::fs::write(dir.path().join("test.txt"), "staged content\n").unwrap();
+        stage_path(dir.path(), "test.txt");
+        std::fs::write(dir.path().join("test.txt"), "worktree content\n").unwrap();
+
+        let counts = work_counts(|| get_repo_status_with_changes(&repo, true).unwrap());
+
+        assert_eq!(
+            count_of(&counts, counters::GIT_FILE_DIFFS),
+            2,
+            "two sides must produce exactly two diffs, not four: {counts:?}"
+        );
+        assert_eq!(
+            count_of(&counts, counters::GIT_BLOB_LOADS),
+            4,
+            "each side loads its old and new buffer exactly once: {counts:?}"
+        );
+    }
+
+    /// R8.6: shallow requests must not pay for blobs or diffs.
+    #[test]
+    fn counts_only_status_loads_no_blobs_and_runs_no_diffs() {
+        let (dir, repo) = setup_repo();
+        std::fs::write(dir.path().join("test.txt"), "modified\n").unwrap();
+
+        let counts = work_counts(|| get_repo_status_counts_detailed(&repo).unwrap());
+
+        assert_eq!(count_of(&counts, counters::GIT_BLOB_LOADS), 0);
+        assert_eq!(count_of(&counts, counters::GIT_FILE_DIFFS), 0);
+
+        let dirty_counts = work_counts(|| is_repo_dirty(&repo).unwrap());
+        assert_eq!(count_of(&dirty_counts, counters::GIT_BLOB_LOADS), 0);
+        assert_eq!(count_of(&dirty_counts, counters::GIT_FILE_DIFFS), 0);
+    }
+
+    /// A stats-only request on a wholly-added file needs no diff at all: the
+    /// additions are a line count of the new blob.
+    #[test]
+    fn added_file_stats_without_diffs_runs_no_diff() {
+        let (dir, repo) = setup_repo();
+        std::fs::write(dir.path().join("added.txt"), "a\nb\nc\n").unwrap();
+        stage_path(dir.path(), "added.txt");
+
+        let counts = work_counts(|| get_repo_status_with_changes(&repo, false).unwrap());
+        assert_eq!(
+            count_of(&counts, counters::GIT_FILE_DIFFS),
+            0,
+            "a whole-file addition is counted, not diffed: {counts:?}"
+        );
+
+        let (_, changes) = get_repo_status_with_changes(&repo, false).unwrap();
+        assert_eq!(find_change(&changes, "added.txt").lines_added, 3);
     }
 
     #[test]

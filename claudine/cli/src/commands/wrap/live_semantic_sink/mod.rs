@@ -235,6 +235,15 @@ pub(crate) struct LiveSemanticSink {
     /// trip is terminal) and suppresses further output rendering so the
     /// tail of a runaway is not echoed to the terminal (spec Part 1).
     content_tripped: bool,
+    /// Best-effort mid-session status reporter to the rendezvous
+    /// dashboard's `sessions-active` register (trigger 1). Inert unless
+    /// a session was bracketed against a live daemon.
+    status_reporter: super::session_report::StatusReporter,
+    /// Whether the last observed transition left the session waiting on
+    /// the user (a `PermissionRequest` not yet followed by progress).
+    /// Debounces the `waiting_on_user` → `active` status reports so only
+    /// real edges hit the daemon.
+    awaiting_user: bool,
 }
 
 impl LiveSemanticSink {
@@ -265,7 +274,7 @@ impl LiveSemanticSink {
             emit_output_text: None,
             emit_event_log: None,
             live_metrics: progress::new_live_metrics(),
-            stream_output: StreamOutput::new(),
+            stream_output: StreamOutput::shared(),
             thinking_stream: ThinkingStream::new(terminal.clone()),
             terminal,
             section_tracker: Arc::new(Mutex::new(SectionTracker::new())),
@@ -277,7 +286,18 @@ impl LiveSemanticSink {
             detector_scope_model: None,
             trip_sender: None,
             content_tripped: false,
+            status_reporter: super::session_report::StatusReporter::inert(),
+            awaiting_user: false,
         }
+    }
+
+    /// Wire the dashboard status reporter (trigger 1). Defaults to inert.
+    pub(crate) fn with_status_reporter(
+        mut self,
+        reporter: super::session_report::StatusReporter,
+    ) -> Self {
+        self.status_reporter = reporter;
+        self
     }
 
     /// Convenience constructor for the wrapped-provider call sites
@@ -285,12 +305,18 @@ impl LiveSemanticSink {
     /// dispatch closure, an emit_stderr closure backed by
     /// [`StreamOutput::emit_stderr_line`], and a best-effort JSONL logger
     /// pointing at [`claudine::stream::reporting::write_summary_event`].
+    ///
+    /// `task_gutter` is a sequence task's rendered bar. When present every
+    /// status and reasoning line this sink emits carries it, because the sink's
+    /// coordinator — and therefore the section stream, the watchdog tickers, and
+    /// the timing monitor that are handed it — is the decorated handle.
     pub(crate) fn with_default_wiring(
         provider: Provider,
         env: EnvironmentContext,
         cwd: &Path,
         verbosity: Verbosity,
         summary_details: Arc<Mutex<StructuredSummaryDetails>>,
+        task_gutter: Option<String>,
     ) -> Self {
         let handle = tokio::runtime::Handle::try_current().ok();
         let runtime_context = match claudine::dispatch::DispatchRuntimeContext::load_for_env(&env) {
@@ -300,7 +326,10 @@ impl LiveSemanticSink {
                 claudine::dispatch::DispatchRuntimeContext::default()
             }
         };
-        let stream_output = StreamOutput::new();
+        let stream_output = match task_gutter {
+            Some(gutter) => StreamOutput::shared().decorated(gutter),
+            None => StreamOutput::shared(),
+        };
 
         let dispatch: SemanticDispatchFn = {
             let runtime_context = runtime_context;
@@ -363,6 +392,8 @@ impl LiveSemanticSink {
             detector_scope_model: None,
             trip_sender: None,
             content_tripped: false,
+            status_reporter: super::session_report::StatusReporter::inert(),
+            awaiting_user: false,
         }
     }
 

@@ -84,6 +84,16 @@ impl InstallInterviewDelegate for CliInstallUi {
                 self.emit(&line);
             }
 
+            InstallInterviewEvent::TimeoutWarning { prose } => {
+                let rendered = Prose::new(prose.clone()).render(&self.terminal);
+                let line = if rendered.ends_with('\n') {
+                    rendered
+                } else {
+                    format!("{rendered}\n")
+                };
+                self.emit(&line);
+            }
+
             InstallInterviewEvent::CapturedOutput {
                 stream: InstallOutputStream::Stdout,
                 body,
@@ -257,6 +267,23 @@ mod tests {
         .unwrap();
         let text = String::from_utf8(ui.buffer).unwrap();
         assert!(text.contains("installed"));
+    }
+
+    #[test]
+    fn timeout_warning_is_rendered_as_prose() {
+        let mut ui = ui_capture();
+        ui.on_event(&InstallInterviewEvent::TimeoutWarning {
+            prose: "<yellow>Warning:</yellow> installing <b>rg</b> did not finish within <b>5s</b> \
+                    and was terminated. An installer process may still be running."
+                .into(),
+        })
+        .unwrap();
+        let text = String::from_utf8(ui.buffer).unwrap();
+        assert!(text.contains("did not finish"), "text: {text}");
+        assert!(
+            text.contains("may still be running"),
+            "the detached-descendant hazard must reach the terminal: {text}"
+        );
     }
 
     #[test]

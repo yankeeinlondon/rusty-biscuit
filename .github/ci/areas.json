@@ -1,0 +1,85 @@
+[
+  {
+    "area": "biscuit-hash",
+    "check_args": "-p biscuit-hash -p biscuit-hash-cli"
+  },
+  {
+    "area": "biscuit-location",
+    "check_args": "-p biscuit-location -p biscuit-location-cli"
+  },
+  {
+    "area": "biscuit-speaks",
+    "check_args": "-p biscuit-speaks -p biscuit-speaks-cli"
+  },
+  {
+    "area": "biscuit-terminal",
+    "check_args": "-p biscuit-terminal -p biscuit-terminal-cli",
+    "l2": true,
+    "browser": true
+  },
+  {
+    "area": "biscuit-tui",
+    "check_args": "-p biscuit-tui -p biscuit-tui-cli"
+  },
+  {
+    "area": "schematic",
+    "check_args": "-p schematic-define -p schematic-definitions -p schematic-gen -p schematic-oauth"
+  },
+  {
+    "area": "biscuit-file",
+    "check_args": "-p biscuit-file -p biscuit-file-cli",
+    "soft_os": []
+  },
+  {
+    "area": "unchained-ai",
+    "check_args": "-p unchained-ai -p unchained-ai-contract -p unchained-ai-cli -p unchained-ai-gen -p model_id"
+  },
+  {
+    "area": "playa",
+    "check_args": "-p playa -p playa-cli"
+  },
+  {
+    "area": "tree-hugger",
+    "check_args": "-p tree-hugger -p tree-hugger-cli"
+  },
+  {
+    "area": "darkmatter",
+    "check_args": "-p darkmatter -p darkmatter-cli -p dmls",
+    "shards": ["1/4", "2/4", "3/4", "4/4"],
+    "soft_os": [],
+    "l2": true,
+    "browser": true
+  },
+  {
+    "area": "sniff",
+    "check_args": "-p sniff -p sniff-cli --features sniff/remote",
+    "full_os": ["ubuntu-latest", "windows-latest", "macos-latest"]
+  },
+  {
+    "area": "model-citizen",
+    "check_args": "-p model-citizen -p model-citizen-cli"
+  },
+  {
+    "area": "claudine",
+    "check_args": "-p claudine-catalog-types -p claudine -p claudine-contract -p claudine-cli -p claudine-gen",
+    "soft_os": [],
+    "l2": true,
+    "ai_provider_stubs": true
+  },
+  {
+    "area": "research",
+    "check_args": "-p research -p research-cli"
+  },
+  {
+    "area": "queue",
+    "check_args": "-p queue -p queue-cli"
+  },
+  {
+    "area": "homelab",
+    "check_args": "-p homelab -p homelab-cli -p homelab-server -p unfolded-integration-helper -p arcam-amp-integration -p eversolo-integration -p sony-receiver-integration"
+  },
+  {
+    "area": "biscuit-contract",
+    "check_args": "-p biscuit-contract"
+  }
+]

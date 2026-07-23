@@ -17,6 +17,7 @@ use std::path::Path;
 
 use crate::Result;
 use crate::filesystem::repo::cargo::cargo_package_version_with_source;
+use crate::filesystem::repo::detection::probe_exists;
 use crate::filesystem::repo::identity::{read_json, read_toml};
 use crate::filesystem::repo::npm::npm_package_version;
 use crate::filesystem::repo::python::pyproject_package_version;
@@ -376,7 +377,7 @@ pub fn aggregate_versions(
 /// repository root for npm) carries a version string.
 fn resolve_version_source(pkg: &Package, root: &Path) -> Option<(String, VersionSource)> {
     let cargo_toml = pkg.path.join("Cargo.toml");
-    if cargo_toml.exists()
+    if probe_exists(&cargo_toml)
         && let Some(parsed) = read_toml(&cargo_toml)
         && let Some((version, rel_path, inherited)) =
             cargo_package_version_with_source(&parsed, &cargo_toml, root)
@@ -392,7 +393,7 @@ fn resolve_version_source(pkg: &Package, root: &Path) -> Option<(String, Version
     }
 
     let package_json = pkg.path.join("package.json");
-    if package_json.exists() {
+    if probe_exists(&package_json) {
         if let Some(parsed) = read_json(&package_json)
             && let Some(version) = npm_package_version(&parsed)
         {
@@ -407,7 +408,7 @@ fn resolve_version_source(pkg: &Package, root: &Path) -> Option<(String, Version
         }
         if pkg.path != root {
             let root_package_json = root.join("package.json");
-            if root_package_json.exists()
+            if probe_exists(&root_package_json)
                 && let Some(parsed) = read_json(&root_package_json)
                 && let Some(version) = npm_package_version(&parsed)
             {
@@ -424,7 +425,7 @@ fn resolve_version_source(pkg: &Package, root: &Path) -> Option<(String, Version
     }
 
     let pyproject_toml = pkg.path.join("pyproject.toml");
-    if pyproject_toml.exists()
+    if probe_exists(&pyproject_toml)
         && let Some(parsed) = read_toml(&pyproject_toml)
         && let Some(version) = pyproject_package_version(&parsed)
     {
@@ -454,7 +455,7 @@ fn resolve_version_source(pkg: &Package, root: &Path) -> Option<(String, Version
 #[must_use]
 pub fn resolve_directory_version(root: &Path) -> Option<VersionAttribution> {
     let cargo_toml = root.join("Cargo.toml");
-    if cargo_toml.exists()
+    if probe_exists(&cargo_toml)
         && let Some(parsed) = read_toml(&cargo_toml)
         && let Some((version, rel_path, inherited)) =
             cargo_package_version_with_source(&parsed, &cargo_toml, root)
@@ -476,7 +477,7 @@ pub fn resolve_directory_version(root: &Path) -> Option<VersionAttribution> {
     // Workspace-only root (`[workspace]` with `[workspace.package].version` but
     // no `[package]`) is a common shape — pin the directory to the shared
     // version so a single-member workspace reports its own declared version.
-    if cargo_toml.exists()
+    if probe_exists(&cargo_toml)
         && let Some(parsed) = read_toml(&cargo_toml)
         && let Some(version) = parsed
             .get("workspace")
@@ -499,7 +500,7 @@ pub fn resolve_directory_version(root: &Path) -> Option<VersionAttribution> {
     }
 
     let package_json = root.join("package.json");
-    if package_json.exists()
+    if probe_exists(&package_json)
         && let Some(parsed) = read_json(&package_json)
         && let Some(version) = npm_package_version(&parsed)
     {
@@ -518,7 +519,7 @@ pub fn resolve_directory_version(root: &Path) -> Option<VersionAttribution> {
     }
 
     let pyproject_toml = root.join("pyproject.toml");
-    if pyproject_toml.exists()
+    if probe_exists(&pyproject_toml)
         && let Some(parsed) = read_toml(&pyproject_toml)
         && let Some(version) = pyproject_package_version(&parsed)
     {
@@ -755,6 +756,67 @@ fn collect_repo_root_dependency_family(
             dependency: dependency.clone(),
         });
     }
+}
+
+/// Packages and package areas that own a set of changed paths.
+///
+/// Both lists are `BTreeSet`-sorted and deduplicated.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PathAttribution {
+    pub packages: Vec<String>,
+    pub package_areas: Vec<String>,
+}
+
+/// Attribute repository-relative `paths` to the packages that contain them.
+///
+/// A path is attributed to *every* package whose `relative` prefix contains it,
+/// so a path under a nested package is reported against both the nested package
+/// and any ancestor package that also matches.
+///
+/// ## Notes
+///
+/// The `O(paths × packages)` lossy-string scan and the shallowest-match
+/// semantics are the pre-existing CLI behavior, moved here verbatim so that
+/// **Phase 4** has a single site at which to swap in the shared deepest-prefix
+/// index (umbrella spec R6.4/R6.5). Do not tune the internals here: the
+/// deepest-prefix change alters attribution results for nested packages and
+/// must land as its own reviewed change.
+pub fn attribute_paths(packages: &[Package], paths: &[std::path::PathBuf]) -> PathAttribution {
+    let mut package_names = std::collections::BTreeSet::new();
+    let mut package_areas = std::collections::BTreeSet::new();
+
+    for path in paths {
+        // Preserved lossiness: Phase 4 replaces this with a component-aware
+        // `Path` comparison per umbrella spec R6.6.
+        let path = path.to_string_lossy();
+        for pkg in packages {
+            if package_contains_path(pkg, &path, packages) {
+                package_names.insert(pkg.name.clone());
+                package_areas.insert(pkg.package_area.clone());
+            }
+        }
+    }
+
+    PathAttribution {
+        packages: package_names.into_iter().collect(),
+        package_areas: package_areas.into_iter().collect(),
+    }
+}
+
+/// Whether `pkg` contains the repository-relative `path`.
+///
+/// A root package (`relative == ""`) has no prefix to match on, so it claims
+/// only the paths that no *other*, non-root package claims — otherwise it would
+/// claim the entire repository.
+fn package_contains_path(pkg: &Package, path: &str, packages: &[Package]) -> bool {
+    let prefix = pkg.relative.trim_start_matches("./");
+    if prefix.is_empty() {
+        return !packages.iter().any(|other| {
+            let other_prefix = other.relative.trim_start_matches("./");
+            !other_prefix.is_empty() && path.starts_with(other_prefix)
+        });
+    }
+    path == prefix || path.starts_with(&format!("{prefix}/"))
 }
 
 #[cfg(test)]

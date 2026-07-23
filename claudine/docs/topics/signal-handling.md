@@ -30,7 +30,7 @@ wrapper code can consult to short-circuit blocking work.
 
 Exit code `130` is the single source of truth for "user pressed Ctrl+C
 during compose." The constant [`USER_INTERRUPT_EXIT_CODE`] in
-[`claudine/cli/src/commands/compose.rs`](../../cli/src/commands/compose.rs)
+[`claudine/cli/src/commands/compose/interrupt.rs`](../../cli/src/commands/compose/interrupt.rs)
 matches the standard `128 + SIGINT(2)` shell convention.
 
 ### Termination labels
@@ -68,7 +68,7 @@ run, Claudine must:
 
 ### The compose-scoped guard
 
-[`install_user_interrupt_guard`](../../cli/src/commands/compose.rs) is
+[`install_user_interrupt_guard`](../../cli/src/commands/compose/interrupt.rs) is
 called once at the top of `run_compose_inner` and `run_inline_compose_inner`.
 It returns an RAII [`UserInterruptGuard`] whose `Drop` removes the
 registered handler so the next subcommand starts with a clean slate.
@@ -137,10 +137,10 @@ spend appreciable time on work the user obviously wants stopped:
 
 | Site | What it skips when set |
 |---|---|
-| [`compose.rs`](../../cli/src/commands/compose.rs) post-prep checkpoint (`run_compose_inner`, `run_inline_compose_inner`) | Returns `USER_INTERRUPT_EXIT_CODE` before launching the agent |
-| [`compose.rs`](../../cli/src/commands/compose.rs) loop guard | Aborts loop iteration setup, returns `USER_INTERRUPT_EXIT_CODE` |
-| [`composition::lifecycle::emit_signal`](../../lib/src/composition/lifecycle.rs) | Emits the cheap stderr line then returns; skips messenger send, desktop notification, TTS speech, sound effect |
-| [`live_semantic_sink::errors::render_error_block`](../../cli/src/commands/wrap/live_semantic_sink/errors.rs) | Relabels the agent's dying-breath error from "Agent Error" to a yellow "User Action" block so operators see the real cause |
+| [`compose/mod.rs`](../../cli/src/commands/compose/mod.rs) post-prep checkpoint (`run_compose_inner`, `run_inline_compose_inner`) | Returns `USER_INTERRUPT_EXIT_CODE` before launching the agent |
+| [`compose/loop_run.rs`](../../cli/src/commands/compose/loop_run.rs) loop guard | Aborts loop iteration setup, returns `USER_INTERRUPT_EXIT_CODE` |
+| [`composition::lifecycle::emit_signal`](../../lib/src/composition/lifecycle/mod.rs) | Emits the cheap stderr line then returns; skips messenger send, desktop notification, TTS speech, sound effect |
+| [`EventRenderer::render_error_block`](../../lib/src/render/event_renderer/error_block.rs) | Relabels the agent's dying-breath error from "Agent Error" to a yellow "User Action" block so operators see the real cause |
 
 Unobserved (`false`): all the above sites run their full body. There is
 no functional change to the happy path — every messenger destination,
@@ -169,7 +169,7 @@ in):
 1. **Bounded blocking lifecycle side effects.** The genuinely blocking
    lifecycle emitters — TTS (`say` / `say_first`) and sound `effect` — run
    on a detached worker thread bounded by `run_blocking_with_timeout`
-   ([`lib/src/composition/lifecycle.rs`](../../lib/src/composition/lifecycle.rs):
+   ([`lib/src/composition/lifecycle/mod.rs`](../../lib/src/composition/lifecycle/mod.rs):
    `TTS_PLAYBACK_TIMEOUT` = 30 s, `EFFECT_PLAYBACK_TIMEOUT` = 15 s). A wedged
    audio device or network voice can no longer freeze a run between phases;
    the wait is abandoned and a warning logged. (`message` and `notify` are
@@ -180,7 +180,7 @@ in):
 ### Lifecycle short-circuit details
 
 The lifecycle short-circuit lives in
-[`LifecycleRunGuard::emit_signal`](../../lib/src/composition/lifecycle.rs)
+[`LifecycleRunGuard::emit_signal`](../../lib/src/composition/lifecycle/mod.rs)
 and is the single most user-visible payoff of the interrupt flag. The
 `emit_signal` body runs in this order:
 
@@ -211,10 +211,10 @@ sound effect.
 
 Two regression tests pin this contract:
 
-- [`emit_signal_skips_blocking_side_effects_when_interrupted`](../../lib/src/composition/lifecycle.rs)
+- [`emit_signal_skips_blocking_side_effects_when_interrupted`](../../lib/src/composition/lifecycle/tests/audio_emission.rs)
   asserts that with the flag set, `emit_terminal(LifecycleSignal::Failure)`
   produces only the stderr line.
-- [`emit_signal_runs_all_side_effects_when_not_interrupted`](../../lib/src/composition/lifecycle.rs)
+- [`emit_signal_runs_all_side_effects_when_not_interrupted`](../../lib/src/composition/lifecycle/tests/audio_emission.rs)
   asserts the happy path still emits every configured side effect.
 
 ### Error-block relabeling
@@ -224,7 +224,7 @@ pressing Ctrl+C, the parser sees a non-zero exit / generic agent error
 and would normally render a red "Agent Error" status block. That mislead
 the operator about cause.
 
-[`render_error_block`](../../cli/src/commands/wrap/live_semantic_sink/errors.rs)
+[`render_error_block`](../../lib/src/render/event_renderer/error_block.rs)
 checks `user_interrupt_observed()` and, when set, replaces the block
 content with a yellow "User Action" block whose body reads
 `User pressed CTRL+C to stop the session`. The classification machinery
@@ -240,7 +240,7 @@ relevant primitives live in
 ### The unified wait loop
 
 Every spawn path now routes through one signal-aware wait loop,
-[`wait_with_signal_and_early_termination`](../../cli/src/commands/wrap/exec/termination.rs):
+[`wait_with_signal_and_early_termination`](../../cli/src/commands/wrap/exec/termination/mod.rs):
 the structured-streaming path (`run_child_stream_semantic`), the direct
 path (`run_child`), and the capture path (`run_child_capture`). The
 legacy `wait_with_timeout` helper — which installed **no** SIGINT
@@ -295,7 +295,7 @@ the child has been reaped.
 ### Watchdog-driven SIGTERM
 
 The unified timeout ticker (see [timeouts.md](timeouts.md)) sends
-[`WatchdogTermination`](../../cli/src/commands/wrap/exec/termination.rs)
+[`WatchdogTermination`](../../cli/src/commands/wrap/exec/termination/reasons.rs)
 requests through a channel when `timeout` (wall-clock) or `step_timeout`
 (stream silence) is breached. The wait loop receives the request,
 sends `SIGTERM` to the child's process group, waits a configurable
@@ -465,7 +465,7 @@ Unix cells are covered by real-process tests
 (`run_child_wall_clock_timeout_reaps_child`,
 `run_child_capture_wall_clock_timeout_reaps_child`, and the
 `escalation_signal` ladder tests in
-[`exec/termination.rs`](../../cli/src/commands/wrap/exec/termination.rs)).
+[`exec/termination/mod.rs`](../../cli/src/commands/wrap/exec/termination/mod.rs)).
 The Windows cells share the same `windows_wait_loop` and inherit its
 runtime-verification gap above.
 
@@ -520,12 +520,12 @@ pattern the user-interrupt guard uses.
 | `USER_INTERRUPTED` flag (CLI) | [`cli/src/output/mod.rs`](../../cli/src/output/mod.rs) |
 | `wait_loop_active` flag + `WaitLoopActiveGuard` | [`cli/src/output/mod.rs`](../../cli/src/output/mod.rs) |
 | Second-press force-exit (`_exit(130)`) | [`cli/src/commands/compose/interrupt.rs`](../../cli/src/commands/compose/interrupt.rs) |
-| Bounded lifecycle side effects (`run_blocking_with_timeout`) | [`lib/src/composition/lifecycle.rs`](../../lib/src/composition/lifecycle.rs) |
+| Bounded lifecycle side effects (`run_blocking_with_timeout`) | [`lib/src/composition/lifecycle/mod.rs`](../../lib/src/composition/lifecycle/mod.rs) |
 | Lib-side mirror flag | [`lib/src/interrupt.rs`](../../lib/src/interrupt.rs) |
-| `install_user_interrupt_guard` + `UserInterruptGuard` | [`cli/src/commands/compose.rs`](../../cli/src/commands/compose.rs) |
-| `USER_INTERRUPT_EXIT_CODE` constant | [`cli/src/commands/compose.rs`](../../cli/src/commands/compose.rs) |
-| Lifecycle short-circuit (`emit_signal`) | [`lib/src/composition/lifecycle.rs`](../../lib/src/composition/lifecycle.rs) |
-| Error-block relabeling | [`cli/src/commands/wrap/live_semantic_sink/errors.rs`](../../cli/src/commands/wrap/live_semantic_sink/errors.rs) |
-| Per-child SIGINT escalation | [`cli/src/commands/wrap/exec/termination.rs`](../../cli/src/commands/wrap/exec/termination.rs), [`spawn.rs`](../../cli/src/commands/wrap/exec/spawn.rs) |
-| Watchdog-driven SIGTERM | [`cli/src/commands/wrap/exec/watchdog.rs`](../../cli/src/commands/wrap/exec/watchdog.rs) |
+| `install_user_interrupt_guard` + `UserInterruptGuard` | [`cli/src/commands/compose/interrupt.rs`](../../cli/src/commands/compose/interrupt.rs) |
+| `USER_INTERRUPT_EXIT_CODE` constant | [`cli/src/commands/compose/interrupt.rs`](../../cli/src/commands/compose/interrupt.rs) |
+| Lifecycle short-circuit (`emit_signal`) | [`lib/src/composition/lifecycle/mod.rs`](../../lib/src/composition/lifecycle/mod.rs) |
+| Error-block relabeling | [`lib/src/render/event_renderer/error_block.rs`](../../lib/src/render/event_renderer/error_block.rs) |
+| Per-child SIGINT escalation | [`cli/src/commands/wrap/exec/termination/mod.rs`](../../cli/src/commands/wrap/exec/termination/mod.rs), [`spawn/mod.rs`](../../cli/src/commands/wrap/exec/spawn/mod.rs) |
+| Watchdog-driven SIGTERM | [`cli/src/commands/wrap/exec/watchdog/mod.rs`](../../cli/src/commands/wrap/exec/watchdog/mod.rs) |
 | Hook handler deadline | [`cli/src/commands/handle.rs`](../../cli/src/commands/handle.rs) |

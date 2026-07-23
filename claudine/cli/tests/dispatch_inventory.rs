@@ -780,6 +780,9 @@ fn exempt_candidate(rel_path: &str) -> bool {
             | "claudine/lib/src/provider/identity.rs"
             | "claudine/lib/src/provider/methods.rs"
             | "claudine/lib/src/stream/providers/mod.rs"
+            // Generated (`claudine-gen`), exhaustive-by-construction error-vocabulary
+            // accessor — the analog of the stream-parser factory in mod.rs.
+            | "claudine/lib/src/stream/providers/vocabulary.rs"
     ) {
         return true;
     }
@@ -1032,7 +1035,7 @@ const GUARD_ALLOWLIST: &[GuardEntry] = &[
     // --- CLI: Codex/Gemini shadow-HOME MCP injection need (dup pair; kept per
     //     Checkpoint I — consolidating reopens Phase-D catalog-data discipline).
     GuardEntry {
-        path: "claudine/cli/src/commands/wrap/composition/mod.rs",
+        path: "claudine/cli/src/commands/wrap/composition/pipeline.rs",
         form: FORM_MATCHES,
         providers: &["Codex", "Gemini"],
         tag: KEEP,
@@ -1146,6 +1149,16 @@ const GUARD_ALLOWLIST: &[GuardEntry] = &[
         providers: &["Claude"],
         tag: KEEP,
         reason: "Claude is the canonical native home for linked agents.",
+    },
+    // --- Lib: the OpenCode NDJSON parser backs both OpenCode and its Kilo fork
+    //     and no other provider; this identity guard rejects any misuse before
+    //     vocabulary selection.
+    GuardEntry {
+        path: "claudine/lib/src/stream/providers/opencode.rs",
+        form: FORM_MATCH,
+        providers: &["Kilo", "OpenCode"],
+        tag: KEEP,
+        reason: "OpenCode wire parser speaks only for OpenCode and its Kilo fork; identity guard rejects misuse.",
     },
 ];
 

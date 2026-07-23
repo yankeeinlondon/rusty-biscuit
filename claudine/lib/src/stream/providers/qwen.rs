@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use serde_json::{Map, Value};
 
-use super::parser::{SemanticStreamParser, StreamParseError};
+use super::parser::SemanticStreamParser;
 use super::protocol::qwen::{
     QwenErrorEvent, QwenEvent, QwenInit, QwenMessage, QwenResult, QwenTool,
 };
@@ -219,11 +219,11 @@ impl<S: SemanticEventSink> QwenSemanticStreamParser<S> {
 }
 
 impl<S: SemanticEventSink> SemanticStreamParser for QwenSemanticStreamParser<S> {
-    fn feed_line(&mut self, line: &str) -> Result<(), StreamParseError> {
+    fn feed_line(&mut self, line: &str) {
         self.line_num += 1;
         let line = line.trim();
         if line.is_empty() {
-            return Ok(());
+            return;
         }
 
         // Try typed deserialization first to avoid `serde_json::Value` DOM
@@ -282,7 +282,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for QwenSemanticStreamParser<S> 
                             &e.to_string(),
                         );
                         self.emit_malformed_warning(&e.to_string());
-                        return Ok(());
+                        return;
                     }
                 };
                 let raw_kind = raw
@@ -294,7 +294,6 @@ impl<S: SemanticEventSink> SemanticStreamParser for QwenSemanticStreamParser<S> 
                 self.emit_provider_extension(&raw_kind, Value::Object(raw));
             }
         }
-        Ok(())
     }
 
     fn finish(self: Box<Self>, exit_code: i32) -> StreamExecutionSummary {
@@ -322,22 +321,13 @@ impl<S: SemanticEventSink> SemanticStreamParser for QwenSemanticStreamParser<S> 
 }
 
 /// Map a Qwen Code error envelope onto a typed [`SemanticErrorKind`].
-const ERROR_KEYWORDS: super::common::ErrorKeywords = super::common::ErrorKeywords {
-    kind_buckets: &[
-        (SemanticErrorKind::ApiRemote, &["rate", "quota", "billing"]),
-        (SemanticErrorKind::Configuration, &["auth", "config", "permission"]),
-        (SemanticErrorKind::Interrupted, &["interrupt", "cancel", "abort"]),
-        (SemanticErrorKind::ApiRemote, &["api", "upstream", "server"]),
-    ],
-    msg_buckets: &[
-        (SemanticErrorKind::ApiRemote, &["rate limit", "quota", "billing", "api error"]),
-        (SemanticErrorKind::Configuration, &["api key", "authentication", "not authorized", "permission denied"]),
-        (SemanticErrorKind::Interrupted, &["interrupt", "cancel", "aborted"]),
-    ],
-};
-
 fn classify_error(error_kind: Option<&str>, message: Option<&str>) -> SemanticErrorKind {
-    super::common::classify_error_by_keywords(&ERROR_KEYWORDS, error_kind, message)
+    super::common::classify_error_by_keywords(
+        super::vocabulary::error_keywords(Provider::QwenCode),
+        None,
+        error_kind,
+        message,
+    )
 }
 
 #[cfg(test)]
@@ -375,8 +365,7 @@ mod tests {
     fn init_emits_session_start() {
         let (events, mut parser) = new_parser();
         parser
-            .feed_line(r#"{"type":"init","session_id":"q1","model":"qwen-coder"}"#)
-            .unwrap();
+            .feed_line(r#"{"type":"init","session_id":"q1","model":"qwen-coder"}"#);
         assert!(matches!(
             events.lock().unwrap()[0],
             SemanticEvent::SessionStart { .. }
@@ -389,8 +378,7 @@ mod tests {
         parser
             .feed_line(
                 r#"{"type":"message","role":"assistant","content":[{"text":"Hello from Qwen"}]}"#,
-            )
-            .unwrap();
+            );
         assert!(matches!(
             events.lock().unwrap()[0],
             SemanticEvent::OutputText { ref text, .. } if text == "Hello from Qwen\n"
@@ -403,13 +391,11 @@ mod tests {
         parser
             .feed_line(
                 r#"{"type":"tool_call","id":"q1","name":"bash","input":{"command":"git status"}}"#,
-            )
-            .unwrap();
+            );
         parser
             .feed_line(
                 r#"{"type":"tool_response","tool_use_id":"q1","status":"success","content":"clean"}"#,
-            )
-            .unwrap();
+            );
         assert_eq!(
             kinds(&events.lock().unwrap()),
             vec!["tool_call", "tool_result"]
@@ -422,8 +408,7 @@ mod tests {
         parser
             .feed_line(
                 r#"{"type":"summary","duration_ms":3000,"token_usage":{"input_tokens":100,"output_tokens":50}}"#,
-            )
-            .unwrap();
+            );
         match &events.lock().unwrap()[0] {
             SemanticEvent::TurnComplete {
                 duration_ms,
@@ -443,8 +428,7 @@ mod tests {
         parser
             .feed_line(
                 r#"{"type":"system","subtype":"session_start","session_id":"q2","model":"qwen3-coder"}"#,
-            )
-            .unwrap();
+            );
         assert!(matches!(
             events.lock().unwrap()[0],
             SemanticEvent::SessionStart { .. }
@@ -461,7 +445,7 @@ mod tests {
             "../../../../docs/research/signals/fixtures/qwen/system-init-model-version.jsonl"
         );
         let (events, mut parser) = new_parser();
-        parser.feed_line(QWEN_SYSTEM_INIT.trim()).unwrap();
+        parser.feed_line(QWEN_SYSTEM_INIT.trim());
         assert!(matches!(
             events.lock().unwrap()[0],
             SemanticEvent::SessionStart { .. }
@@ -475,8 +459,7 @@ mod tests {
     fn system_unknown_subtype_stays_provider_extension() {
         let (events, mut parser) = new_parser();
         parser
-            .feed_line(r#"{"type":"system","subtype":"telemetry","session_id":"qx"}"#)
-            .unwrap();
+            .feed_line(r#"{"type":"system","subtype":"telemetry","session_id":"qx"}"#);
         assert!(matches!(
             events.lock().unwrap()[0],
             SemanticEvent::ProviderExtension { .. }
@@ -487,8 +470,7 @@ mod tests {
     fn error_event_emits_terminal_error() {
         let (events, mut parser) = new_parser();
         parser
-            .feed_line(r#"{"type":"error","error":{"type":"rate_limit","message":"slow down"}}"#)
-            .unwrap();
+            .feed_line(r#"{"type":"error","error":{"type":"rate_limit","message":"slow down"}}"#);
         assert!(matches!(
             events.lock().unwrap()[0],
             SemanticEvent::Error { terminal: true, .. }
@@ -498,7 +480,7 @@ mod tests {
     #[test]
     fn unknown_event_becomes_provider_extension() {
         let (events, mut parser) = new_parser();
-        parser.feed_line(r#"{"type":"something.new"}"#).unwrap();
+        parser.feed_line(r#"{"type":"something.new"}"#);
         assert!(matches!(
             events.lock().unwrap()[0],
             SemanticEvent::ProviderExtension { ref kind, .. } if kind == "something.new"
@@ -508,7 +490,7 @@ mod tests {
     #[test]
     fn malformed_json_emits_warning() {
         let (events, mut parser) = new_parser();
-        assert!(parser.feed_line("x").is_ok());
+        parser.feed_line("x");
         assert!(matches!(
             events.lock().unwrap()[0],
             SemanticEvent::Warning { .. }
@@ -519,8 +501,7 @@ mod tests {
     fn tool_input_string_fallback_parses_without_panic() {
         let (events, mut parser) = new_parser();
         parser
-            .feed_line(r#"{"type":"tool_call","id":"t","name":"b","input":"ls -la"}"#)
-            .unwrap();
+            .feed_line(r#"{"type":"tool_call","id":"t","name":"b","input":"ls -la"}"#);
         let collected = events.lock().unwrap().clone();
         assert_eq!(kinds(&collected), vec!["tool_call"]);
         match &collected[0] {
@@ -534,7 +515,7 @@ mod tests {
     #[test]
     fn missing_discriminator_falls_through_to_provider_extension() {
         let (events, mut parser) = new_parser();
-        parser.feed_line(r#"{"payload":{"k":1}}"#).unwrap();
+        parser.feed_line(r#"{"payload":{"k":1}}"#);
         let collected = events.lock().unwrap().clone();
         assert_eq!(collected.len(), 1);
         match &collected[0] {
@@ -562,7 +543,7 @@ mod tests {
             r#"{"type":"summary","duration_ms":1,"usage":{"input_tokens":1,"output_tokens":2}}"#,
             r#"{"type":"future.unknown"}"#,
         ] {
-            parser.feed_line(line).unwrap();
+            parser.feed_line(line);
         }
         for event in events.lock().unwrap().iter() {
             let v = serde_json::to_value(event).unwrap();

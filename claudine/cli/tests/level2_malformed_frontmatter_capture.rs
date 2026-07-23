@@ -17,7 +17,9 @@ use std::time::{Duration, Instant};
 use test_toolkit::{Level, require_level};
 
 mod common;
-use common::{TestWorkspace, augmented_path, write_executable};
+use common::{
+    TestWorkspace, assert_row_is_styled, augmented_path, clear_no_color, write_executable,
+};
 
 const MALFORMED_DOC: &str = "\
 ----
@@ -86,6 +88,10 @@ fn wait_for_pane_marker(
 }
 
 fn capture_command(harness: &mut TmuxHarness, subcommand: &str, staged: &Staged) -> CapturedFrame {
+    // This fixture runs under `FORCE_COLOR=1`, which an ambient `NO_COLOR` would
+    // out-vote — see `common::clear_no_color`.
+    clear_no_color(harness);
+
     let claudine = cargo_bin!("claudine").display().to_string();
     let home = staged.workspace.path().to_string_lossy().into_owned();
     let path = augmented_path(&staged.bin_dir);
@@ -147,10 +153,10 @@ fn assert_malformed_fence_diagnostic(frame: &CapturedFrame, subcommand: &str) {
         "{subcommand} must not render raw YAML as an Agent Prompt.\nplain:\n{}",
         frame.plain
     );
-    assert!(
-        frame.raw.contains('\u{1b}'),
-        "{subcommand} diagnostic should carry styling through tmux.\nraw:\n{}",
-        frame.raw
+    assert_row_is_styled(
+        &frame.raw,
+        "frontmatter fence mismatch",
+        &format!("{subcommand} diagnostic"),
     );
 }
 

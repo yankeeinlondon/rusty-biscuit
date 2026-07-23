@@ -159,13 +159,126 @@ impl RegisterStore {
         DocumentId::capability(self.identity.node_id())
     }
 
+    /// Document id of this host's own checked-out-repos register.
+    #[must_use]
+    pub fn local_repos_id(&self) -> DocumentId {
+        DocumentId::repos(self.identity.node_id())
+    }
+
+    /// Document id of this host's own active-sessions register.
+    #[must_use]
+    pub fn local_sessions_active_id(&self) -> DocumentId {
+        DocumentId::sessions_active(self.identity.node_id())
+    }
+
     /// Write `fields` into a locally-owned register, touching only the
     /// fields whose value differs from what the register already holds.
+    /// Fields absent from `fields` are left alone — right for registers
+    /// whose producers may legitimately omit fields (e.g. a failed
+    /// detection must not erase a previously known capability).
     /// Returns `true` when anything was written (and persisted).
     pub fn upsert_local_fields(
         &self,
         doc_id: &DocumentId,
         fields: &serde_json::Map<String, JsonValue>,
+    ) -> Result<bool, RegisterError> {
+        self.write_local_fields(doc_id, fields, false)
+    }
+
+    /// Like [`Self::upsert_local_fields`] but `fields` is the complete
+    /// current set: keys present in the register but absent from
+    /// `fields` are deleted. Right for registers that mirror a
+    /// disk/world state (e.g. `repos/{node}` — a deleted checkout must
+    /// leave the register).
+    pub fn replace_local_fields(
+        &self,
+        doc_id: &DocumentId,
+        fields: &serde_json::Map<String, JsonValue>,
+    ) -> Result<bool, RegisterError> {
+        self.write_local_fields(doc_id, fields, true)
+    }
+
+    /// Delete `keys` from a locally-owned register; keys not present
+    /// are ignored. Returns `true` when anything was removed. Built on
+    /// the replace path so persistence and compaction behavior are
+    /// identical to every other local write.
+    pub fn remove_local_fields(
+        &self,
+        doc_id: &DocumentId,
+        keys: &[&str],
+    ) -> Result<bool, RegisterError> {
+        let Some(JsonValue::Object(current)) = self.deep_value(doc_id)? else {
+            return Ok(false);
+        };
+        if !keys.iter().any(|k| current.contains_key(*k)) {
+            return Ok(false);
+        }
+        let remaining: serde_json::Map<String, JsonValue> = current
+            .into_iter()
+            .filter(|(k, _)| !keys.contains(&k.as_str()))
+            .collect();
+        self.replace_local_fields(doc_id, &remaining)
+    }
+
+    /// Atomically read-modify-write a locally-owned register under a
+    /// single held lock. `mutate` receives the register's current flat
+    /// field map (already inflated from Loro) and returns the COMPLETE
+    /// desired field set plus an arbitrary result `T`. The store diffs
+    /// `desired` against the live document and persists exactly as
+    /// [`Self::replace_local_fields`] does (delete-missing, write-changed,
+    /// then compaction), all while `inner` is held — so the read the
+    /// closure saw and the write it produces are one indivisible
+    /// operation. No concurrent transition can interleave between them.
+    ///
+    /// The `bool` in the result reports whether anything actually changed
+    /// (drives the write-on-change budget).
+    ///
+    /// The closure runs under the store mutex: it MUST be pure/synchronous
+    /// and MUST NOT call back into `RegisterStore` (parking_lot is not
+    /// reentrant).
+    pub fn mutate_local_fields<F, T>(
+        &self,
+        doc_id: &DocumentId,
+        mutate: F,
+    ) -> Result<(bool, T), RegisterError>
+    where
+        F: FnOnce(
+            &serde_json::Map<String, JsonValue>,
+        ) -> Result<(serde_json::Map<String, JsonValue>, T), RegisterError>,
+    {
+        let local = self.identity.node_id();
+        if doc_id.owner_node_id() != local {
+            return Err(RegisterError::NotOwner {
+                doc: doc_id.as_path(),
+                owner: doc_id.owner_node_id().to_string(),
+            });
+        }
+        let key = doc_id.as_path();
+        let peer = owner_peer_id(&local);
+
+        let mut inner = self.inner.lock();
+        // Read the current field map through the same inflate path
+        // `deep_value` uses, but WITHOUT releasing the lock.
+        let current = match inner.get(&key) {
+            Some(doc) => {
+                let value: LoroValue = doc.get_map(FIELDS_CONTAINER).get_deep_value();
+                match serde_json::to_value(&value).unwrap_or(JsonValue::Null) {
+                    JsonValue::Object(map) => map,
+                    _ => serde_json::Map::new(),
+                }
+            }
+            None => serde_json::Map::new(),
+        };
+        let (desired, result) = mutate(&current)?;
+        let changed = self.write_locked(&mut inner, &key, peer, &desired, true)?;
+        Ok((changed, result))
+    }
+
+    fn write_local_fields(
+        &self,
+        doc_id: &DocumentId,
+        fields: &serde_json::Map<String, JsonValue>,
+        delete_missing: bool,
     ) -> Result<bool, RegisterError> {
         let local = self.identity.node_id();
         if doc_id.owner_node_id() != local {
@@ -178,14 +291,29 @@ impl RegisterStore {
         let peer = owner_peer_id(&local);
 
         let mut inner = self.inner.lock();
-        if !inner.contains_key(&key) {
+        self.write_locked(&mut inner, &key, peer, fields, delete_missing)
+    }
+
+    /// Diff `fields` against the register at `key` and persist the change,
+    /// assuming the `inner` lock is already held by the caller. Shared by
+    /// the public write wrappers and [`Self::mutate_local_fields`] so the
+    /// persistence + compaction path is identical everywhere.
+    fn write_locked(
+        &self,
+        inner: &mut HashMap<String, LoroDoc>,
+        key: &str,
+        peer: u64,
+        fields: &serde_json::Map<String, JsonValue>,
+        delete_missing: bool,
+    ) -> Result<bool, RegisterError> {
+        if !inner.contains_key(key) {
             let doc = LoroDoc::new();
             doc.set_peer_id(peer)?;
-            inner.insert(key.clone(), doc);
+            inner.insert(key.to_string(), doc);
         }
         // Reference clone: shares the underlying doc with the stored
         // handle, so writes below land in the live register.
-        let doc = inner.get(&key).expect("just ensured").clone();
+        let doc = inner.get(key).expect("just ensured").clone();
 
         let map = doc.get_map(FIELDS_CONTAINER);
         let mut changed = false;
@@ -204,6 +332,20 @@ impl RegisterStore {
                 changed = true;
             }
         }
+        if delete_missing {
+            let stale: Vec<String> = match map.get_deep_value() {
+                LoroValue::Map(current) => current
+                    .keys()
+                    .filter(|k| !fields.contains_key(k.as_str()))
+                    .map(|k| k.to_string())
+                    .collect(),
+                _ => Vec::new(),
+            };
+            for field in stale {
+                map.delete(&field)?;
+                changed = true;
+            }
+        }
         if !changed {
             return Ok(false);
         }
@@ -213,10 +355,10 @@ impl RegisterStore {
         if snapshot.len() > COMPACT_MAX_SNAPSHOT_BYTES || doc.len_ops() > COMPACT_MAX_OPS {
             let rebased = self.rebase(&doc, peer)?;
             let rebased_snapshot = rebased.export(ExportMode::Snapshot)?;
-            self.storage.save_register(&key, &rebased_snapshot)?;
-            inner.insert(key, rebased);
+            self.storage.save_register(key, &rebased_snapshot)?;
+            inner.insert(key.to_string(), rebased);
         } else {
-            self.storage.save_register(&key, &snapshot)?;
+            self.storage.save_register(key, &snapshot)?;
         }
         Ok(true)
     }
@@ -416,239 +558,4 @@ fn json_to_loro(value: &JsonValue) -> Option<LoroValue> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-    use tempfile::TempDir;
-
-    struct Harness {
-        store: RegisterStore,
-        storage: Storage,
-        _tmp: TempDir,
-    }
-
-    fn build_harness() -> Harness {
-        let tmp = TempDir::new().expect("tempdir");
-        let storage = Storage::open(tmp.path().join("registers.redb")).expect("storage");
-        let identity = Arc::new(NodeIdentity::from_seed([42u8; 32]));
-        let store = RegisterStore::new(storage.clone(), identity).expect("store");
-        Harness {
-            store,
-            storage,
-            _tmp: tmp,
-        }
-    }
-
-    fn fields(pairs: &[(&str, JsonValue)]) -> serde_json::Map<String, JsonValue> {
-        pairs
-            .iter()
-            .map(|(k, v)| ((*k).to_string(), v.clone()))
-            .collect()
-    }
-
-    #[test]
-    fn upsert_writes_then_skips_unchanged() {
-        let harness = build_harness();
-        let doc_id = harness.store.local_capability_id();
-
-        let first = harness
-            .store
-            .upsert_local_fields(&doc_id, &fields(&[("os", json!("macOS")), ("cpu_cores", json!(16))]))
-            .expect("first write");
-        assert!(first);
-
-        // Identical detection pass: nothing written, register untouched.
-        let second = harness
-            .store
-            .upsert_local_fields(&doc_id, &fields(&[("os", json!("macOS")), ("cpu_cores", json!(16))]))
-            .expect("second write");
-        assert!(!second);
-
-        // A single changed field writes again.
-        let third = harness
-            .store
-            .upsert_local_fields(&doc_id, &fields(&[("cpu_cores", json!(32))]))
-            .expect("third write");
-        assert!(third);
-
-        let value = harness.store.deep_value(&doc_id).expect("read").expect("present");
-        assert_eq!(value["os"], json!("macOS"));
-        assert_eq!(value["cpu_cores"], json!(32));
-        assert_eq!(harness.storage.register_count().expect("count"), 1);
-    }
-
-    #[test]
-    fn upsert_rejects_foreign_owner_and_unsupported_values() {
-        let harness = build_harness();
-        let foreign = DocumentId::capability("someone-else");
-        let result = harness
-            .store
-            .upsert_local_fields(&foreign, &fields(&[("os", json!("Linux"))]));
-        assert!(matches!(result, Err(RegisterError::NotOwner { .. })));
-
-        let local = harness.store.local_capability_id();
-        let result = harness
-            .store
-            .upsert_local_fields(&local, &fields(&[("bad", json!(["array"]))]));
-        assert!(matches!(result, Err(RegisterError::UnsupportedValue { .. })));
-    }
-
-    #[test]
-    fn rehydrates_from_storage() {
-        let tmp = TempDir::new().expect("tempdir");
-        let storage = Storage::open(tmp.path().join("registers.redb")).expect("storage");
-        let identity = Arc::new(NodeIdentity::from_seed([42u8; 32]));
-        let doc_id;
-        {
-            let store =
-                RegisterStore::new(storage.clone(), Arc::clone(&identity)).expect("store");
-            doc_id = store.local_capability_id();
-            store
-                .upsert_local_fields(&doc_id, &fields(&[("memory", json!(65_536))]))
-                .expect("write");
-        }
-        let reopened = RegisterStore::new(storage, identity).expect("reopen");
-        let value = reopened.deep_value(&doc_id).expect("read").expect("present");
-        assert_eq!(value["memory"], json!(65_536));
-    }
-
-    /// Simulates a second node's store so remote-import paths can be
-    /// exercised without a network.
-    fn remote_store(seed: u8) -> (RegisterStore, DocumentId, TempDir) {
-        let tmp = TempDir::new().expect("tempdir");
-        let storage = Storage::open(tmp.path().join("registers.redb")).expect("storage");
-        let identity = Arc::new(NodeIdentity::from_seed([seed; 32]));
-        let store = RegisterStore::new(storage, identity).expect("store");
-        let doc_id = store.local_capability_id();
-        (store, doc_id, tmp)
-    }
-
-    #[test]
-    fn snapshot_then_delta_round_trip_between_stores() {
-        let local = build_harness();
-        let (remote, remote_doc, _tmp) = remote_store(7);
-
-        remote
-            .upsert_local_fields(&remote_doc, &fields(&[("os", json!("Linux"))]))
-            .expect("remote write");
-
-        // Bootstrap: full snapshot for a peer with no copy.
-        let exported = remote
-            .export_updates_since(&remote_doc, None)
-            .expect("export")
-            .expect("doc exists");
-        assert_eq!(exported.kind, PayloadKind::Snapshot);
-        let staged = local
-            .store
-            .stage_remote(&remote_doc, &exported.bytes, exported.kind)
-            .expect("stage");
-        assert!(local.store.commit_staged(&remote_doc, staged).expect("commit"));
-
-        // Incremental: remote changes a field; local follows via delta.
-        remote
-            .upsert_local_fields(&remote_doc, &fields(&[("cpu_cores", json!(8))]))
-            .expect("remote update");
-        let local_vv = local
-            .store
-            .state_vector(&remote_doc)
-            .expect("vv")
-            .expect("replica present");
-        let exported = remote
-            .export_updates_since(&remote_doc, Some(&local_vv))
-            .expect("export")
-            .expect("doc exists");
-        assert_eq!(exported.kind, PayloadKind::Delta);
-        let staged = local
-            .store
-            .stage_remote(&remote_doc, &exported.bytes, exported.kind)
-            .expect("stage");
-        assert!(local.store.commit_staged(&remote_doc, staged).expect("commit"));
-
-        let value = local
-            .store
-            .deep_value(&remote_doc)
-            .expect("read")
-            .expect("present");
-        assert_eq!(value["os"], json!("Linux"));
-        assert_eq!(value["cpu_cores"], json!(8));
-    }
-
-    #[test]
-    fn foreign_peer_ops_are_rejected() {
-        let local = build_harness();
-        let owner = "victim-node";
-        let doc_id = DocumentId::capability(owner);
-
-        // An attacker crafts a register for `victim-node` but writes it
-        // with a peer id NOT derived from that owner.
-        let forged = LoroDoc::new();
-        forged.set_peer_id(owner_peer_id("attacker-node")).unwrap();
-        forged.get_map(FIELDS_CONTAINER).insert("os", "pwned").unwrap();
-        forged.commit();
-        let bytes = forged.export(ExportMode::Snapshot).unwrap();
-
-        let result = local.store.stage_remote(&doc_id, &bytes, PayloadKind::Snapshot);
-        assert!(matches!(result, Err(RegisterError::ForeignWriter { .. })));
-    }
-
-    #[test]
-    fn stale_replica_recovers_via_snapshot_replace() {
-        let local = build_harness();
-        let (remote, remote_doc, _tmp) = remote_store(9);
-
-        remote
-            .upsert_local_fields(&remote_doc, &fields(&[("os", json!("Linux"))]))
-            .expect("w1");
-        let exported = remote
-            .export_updates_since(&remote_doc, None)
-            .expect("export")
-            .expect("doc");
-        let staged = local
-            .store
-            .stage_remote(&remote_doc, &exported.bytes, exported.kind)
-            .expect("stage");
-        local.store.commit_staged(&remote_doc, staged).expect("commit");
-        let stale_vv = local
-            .store
-            .state_vector(&remote_doc)
-            .expect("vv")
-            .expect("present");
-
-        // Remote advances twice, then re-bases: the stale replica's
-        // version now predates the shallow root.
-        remote
-            .upsert_local_fields(&remote_doc, &fields(&[("cpu_cores", json!(8))]))
-            .expect("w2");
-        remote
-            .upsert_local_fields(&remote_doc, &fields(&[("memory", json!(1024))]))
-            .expect("w3");
-        {
-            let mut inner = remote.inner.lock();
-            let doc = inner.get(&remote_doc.as_path()).unwrap().clone();
-            let rebased = remote
-                .rebase(&doc, owner_peer_id(remote_doc.owner_node_id()))
-                .expect("rebase");
-            inner.insert(remote_doc.as_path(), rebased);
-        }
-
-        let exported = remote
-            .export_updates_since(&remote_doc, Some(&stale_vv))
-            .expect("export")
-            .expect("doc");
-        assert_eq!(exported.kind, PayloadKind::SnapshotReplace);
-
-        let staged = local
-            .store
-            .stage_remote(&remote_doc, &exported.bytes, exported.kind)
-            .expect("stage replace");
-        assert!(local.store.commit_staged(&remote_doc, staged).expect("commit replace"));
-        let value = local
-            .store
-            .deep_value(&remote_doc)
-            .expect("read")
-            .expect("present");
-        assert_eq!(value["os"], json!("Linux"));
-        assert_eq!(value["cpu_cores"], json!(8));
-        assert_eq!(value["memory"], json!(1024));
-    }
-}
+mod tests;

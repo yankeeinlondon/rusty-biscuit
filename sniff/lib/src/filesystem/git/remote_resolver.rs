@@ -100,6 +100,13 @@ pub fn resolve_remote_at(path: &Path, requested: Option<&str>) -> Result<Option<
     let Some(repo) = open::trusted_discover(path)? else {
         return Ok(None);
     };
+    resolve_remote(&repo, requested)
+}
+
+pub(crate) fn resolve_remote(
+    repo: &gix::Repository,
+    requested: Option<&str>,
+) -> Result<Option<ResolvedRemote>> {
     let mut names = repo
         .remote_names()
         .into_iter()
@@ -111,19 +118,19 @@ pub fn resolve_remote_at(path: &Path, requested: Option<&str>) -> Result<Option<
         if !names.iter().any(|candidate| candidate == name) {
             return Err(SniffError::RemoteNotConfigured { name: name.to_string() });
         }
-        if configured_url(&repo, name).is_none() {
+        if configured_url(repo, name).is_none() {
             return Err(SniffError::RemoteUrlMissing { name: name.to_string() });
         }
         Some(name.to_string())
     } else {
         let usable = names
             .iter()
-            .filter(|name| configured_url(&repo, name).is_some())
+            .filter(|name| configured_url(repo, name).is_some())
             .map(String::as_str)
             .collect::<Vec<_>>();
         select_preferred_remote(usable).map(str::to_string)
     };
-    selected.map(|name| resolve_named(&repo, name)).transpose()
+    selected.map(|name| resolve_named(repo, name)).transpose()
 }
 
 /// Applies the preferred-remote order to names already known to have URLs.

@@ -52,7 +52,7 @@ pub(crate) fn sanitize_process_env(
         present_keys.insert(key_display.clone());
 
         if is_sensitive_key(&key_display) {
-            if include_set.contains(&key_display) || auto_include.contains(&key_display) {
+            if admits_sensitive_key(&key_display, include_set, auto_include) {
                 included.insert(key_display);
             } else {
                 removed.insert(key_display);
@@ -80,6 +80,33 @@ pub(crate) fn sanitize_process_env(
         included.into_iter().collect(),
         warnings,
     )
+}
+
+/// Whether one sensitive key survives sanitation under a given allow-list.
+///
+/// `auto_include` is a provider profile's `allowed_env_keys()`; `include_set` is
+/// explicit `--include` intent, which admits a key under every provider. Shared
+/// with the launch-plan replay so a rebuilt provider reaches the same verdict
+/// [`sanitize_process_env`] would have reached had that provider opened the
+/// invocation.
+pub(crate) fn admits_sensitive_key(
+    key: &str,
+    include_set: &HashSet<String>,
+    auto_include: &HashSet<String>,
+) -> bool {
+    include_set.contains(key) || auto_include.contains(key)
+}
+
+/// Every sensitive key in the wrapper's own process environment, unsanitized.
+///
+/// Invocation-neutral by construction: no provider allow-list has been consulted
+/// yet. This is the snapshot a per-attempt rebuild re-sanitizes for its own
+/// profile, which is the only way to *readmit* a credential the opening provider
+/// stripped — the sanitized base child environment no longer records it.
+pub(crate) fn ambient_sensitive_env() -> HashMap<OsString, OsString> {
+    std::env::vars_os()
+        .filter(|(key, _)| is_sensitive_key(&key.to_string_lossy()))
+        .collect()
 }
 
 pub(crate) fn is_sensitive_key(key: &str) -> bool {

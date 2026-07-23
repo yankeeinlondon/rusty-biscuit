@@ -18,7 +18,7 @@ use claudine::composition::{
     invalid_agent_message,
 };
 use claudine::provider::Provider;
-use color_eyre::eyre::{Result, eyre};
+use color_eyre::eyre::{Result, WrapErr, eyre};
 use sniff::programs::InstalledAiClients;
 
 use super::super::wrap_terminal;
@@ -343,13 +343,13 @@ pub(crate) fn resolve_live_target_with_tty(
 ) -> Result<ResolvedExecutionTarget> {
     use claudine::composition::ProviderResolutionReason;
 
-    let selected_provider = match state {
-        AgentResolutionState::Selected { provider } => Some(provider),
-        AgentResolutionState::ListOneInstalled { selected, .. } => Some(selected),
-        _ => None,
-    };
+    // The non-TTY gate is the shared authority for both branches: its `Ok` is the
+    // auto-selectable state, and its `Err` is exactly what a no-operator session
+    // aborts with. Deriving both from one call is what keeps the picker-less
+    // rebuild in `target_launch` from drifting away from this route.
+    let selected_provider = provider_for_state_non_tty(&state, snapshot, source_path);
 
-    if let Some(provider) = selected_provider {
+    if let Ok(&provider) = selected_provider.as_ref() {
         let (_, probe_reason) =
             claudine::composition::resolve_model_with_hints(provider, hints, cli_model, None);
         refresh_for_model_validation(catalog, provider, hints, Some(&probe_reason));
@@ -382,12 +382,40 @@ pub(crate) fn resolve_live_target_with_tty(
             model_reason,
         })
     } else {
-        Err(CompositionError::AgentResolutionFailed {
+        Err(selected_provider
+            .expect_err("the Ok arm returned above")
+            .into())
+    }
+}
+
+/// The provider a classified agent state resolves to with no operator present.
+///
+/// Non-TTY selection has no picker to fall through to, so every state that would
+/// have prompted is the route's typed [`CompositionError::AgentResolutionFailed`]
+/// carrying the state itself — `SingleNotInstalled` for an unavailable scalar,
+/// `ZeroInstalledList` for a list with no runnable member.
+///
+/// Shared with the per-attempt launch rebuild
+/// (`harness_orch::loop_control::target_launch`): a retry or resume has no
+/// operator either, so routing its refreshed `agent:` through this same gate is
+/// what makes a refreshed document select — and refuse — exactly as a direct
+/// non-interactive invocation of that document does (review-11 finding 2).
+/// Before it did, the rebuild accepted any scalar and substituted a bare
+/// executable name, so an unavailable provider failed at spawn instead.
+#[allow(clippy::result_large_err)]
+pub(crate) fn provider_for_state_non_tty(
+    state: &AgentResolutionState,
+    snapshot: &claudine::composition::InstalledProviderSnapshot,
+    source_path: &std::path::Path,
+) -> Result<Provider, CompositionError> {
+    match state {
+        AgentResolutionState::Selected { provider } => Ok(*provider),
+        AgentResolutionState::ListOneInstalled { selected, .. } => Ok(*selected),
+        _ => Err(CompositionError::AgentResolutionFailed {
             source_path: source_path.to_path_buf(),
-            state,
+            state: state.clone(),
             installed: snapshot.runnable.clone(),
-        }
-        .into())
+        }),
     }
 }
 
@@ -462,7 +490,7 @@ fn prompt_for_agent_state(
 
     let plan = scoped_picker_plan_for_state(state, hints, snapshot, favorite)?;
     super::super::selection_ui::prompt_one_shot_provider(plan)
-        .map_err(|e| eyre!("provider selection cancelled: {e}"))
+        .wrap_err("provider selection cancelled")
 }
 
 /// Build a picker plan scoped to a subset of installed providers.

@@ -9,7 +9,7 @@ use std::fs;
 use tempfile::tempdir;
 mod common;
 use common::wrap::*;
-use common::{augmented_path, strip_ansi, write_executable};
+use common::{augmented_path, init_git_repo, strip_ansi, write_executable};
 
 /// Non-TTY dry-run gate: an unapproved `::shell` command (no approval
 /// handler, no whitelist) makes `compose --dry-run` exit non-zero with the
@@ -294,5 +294,132 @@ fn compose_preflight_discovers_shell_inside_false_block() {
     assert!(
         !plain.contains("provider-launched"),
         "provider must not launch when preflight fails; stderr was:\n{plain}"
+    );
+}
+
+/// `--dry-run` never traverses a dynamic `proxy` route.
+///
+/// This follows structurally from the seam placement rather than from a
+/// per-route check: the dry-run seam in
+/// `wrap::composition::pipeline::execute_composition_request_inner_with_guard`
+/// returns before the lifecycle runtime is constructed, so `initialize` never
+/// fires and no `proxy` control can be produced. A dry run therefore always
+/// reports the document named on the command line.
+#[cfg(unix)]
+#[test]
+fn compose_dry_run_does_not_traverse_a_proxy_handoff() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let target = workspace.path().join("target.md");
+    fs::write(&target, "---\ntitle: target\n---\nTARGET-BODY\n").unwrap();
+
+    // `--goose` resolves the target eagerly, so the run takes the resolved-target
+    // seam rather than the earlier unresolved-selection one.
+    let router = workspace.path().join("router.md");
+    fs::write(
+        &router,
+        "---\ntitle: router\ninitialize:\n  stack:\n    - action: {proxy: \"target.md\"}\n---\nROUTER-BODY\n",
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\necho 'provider should not run' >&2\nexit 99\n",
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args([
+            "compose",
+            "--goose",
+            "--dry-run",
+            router.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let stdout = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stdout));
+    let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+
+    assert!(
+        stdout.contains("ROUTER-BODY"),
+        "dry-run renders the document it was given; stdout was:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("TARGET-BODY"),
+        "dry-run must not compose the hand-off target; stdout was:\n{stdout}"
+    );
+    assert!(
+        !stderr.contains("provider should not run"),
+        "dry-run must not launch the provider; stderr was:\n{stderr}"
+    );
+}
+
+/// `--dry-run` fires no lifecycle event, so no lifecycle stack can touch the
+/// workspace.
+///
+/// The document below carries an `append_line` side effect on every event a
+/// dry run could plausibly reach — `initialize` (pre-launch), plus the
+/// `blocked`/`finalize` pair a failed composition preflight would route
+/// through. `start`/`success`/`failure` are unreachable without a provider
+/// launch and are omitted. The run must leave `events.log` uncreated.
+///
+/// `append_line` resolves against the effect engine's mutation root (the repo
+/// root, else the launch CWD), so the git init below pins the expected path to
+/// `<workspace>/events.log`.
+#[cfg(unix)]
+#[test]
+fn compose_dry_run_fires_no_lifecycle_side_effects() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+    assert!(init_git_repo(workspace.path()), "git init failed");
+
+    let events_log = workspace.path().join("events.log");
+    let md_file = workspace.path().join("doc.md");
+    let marker = |event: &str| {
+        format!("{event}:\n  stack:\n    - action: {{append_line: [\"events.log\", \"{event}\"]}}\n")
+    };
+    fs::write(
+        &md_file,
+        format!(
+            "---\ntitle: dry-run side effects\n{init}{blocked}{finalize}---\nDRY-BODY\n",
+            init = marker("initialize"),
+            blocked = marker("blocked"),
+            finalize = marker("finalize"),
+        ),
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\necho 'provider should not run' >&2\nexit 99\n",
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
+        .args(["compose", "--goose", "--dry-run", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let stdout = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stdout));
+    assert!(
+        stdout.contains("DRY-BODY"),
+        "dry-run still renders the composed body; stdout was:\n{stdout}"
+    );
+    assert!(
+        !events_log.exists(),
+        "dry-run must fire no lifecycle event, so no stack side effect may \
+         reach the workspace; events.log contained {:?}",
+        fs::read_to_string(&events_log).unwrap_or_default()
     );
 }

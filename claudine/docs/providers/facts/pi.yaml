@@ -312,3 +312,7 @@ supports_interactive_inline_closure: false
 model_required_in_non_tty: false
 platform_kind: agent_aggregator
 unmapped_native_events: []
+# Ordered error-classification vocabulary (Phase A seed, transcribed verbatim
+# from lib/src/stream/providers/pi.rs::ERROR_KEYWORDS). Pi is a message-only
+# classifier (no structured error kind), so `kind_buckets` is omitted. Sequence
+# order IS the cascade order (first substring hit wins).

@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use biscuit_file::serde_yaml_ng;
 use tokio::fs;
 
-use crate::error::{ClaudineError, Result};
+use crate::error::{ClaudineError, PolicyParseCause, Result};
 use crate::permissions::backend::{BackendCapabilities, BackendFidelity, ProviderPolicyBackend};
 use crate::permissions::canonical::{
     CanonicalPolicy, CanonicalRuleProvenance, PathProtectionRule, PolicyMode, PolicyWarning,
@@ -93,6 +93,7 @@ impl ProviderPolicyBackend for GoosePolicyBackend {
                     ClaudineError::PolicyNativeParse {
                         source_id: source.id.clone(),
                         message: error.to_string(),
+                        source: Some(PolicyParseCause::Yaml(error)),
                     }
                 })?;
             let payload = if source.id.contains("permission") {
@@ -120,6 +121,7 @@ impl ProviderPolicyBackend for GoosePolicyBackend {
                     return Err(ClaudineError::PolicyCliParse {
                         provider: Provider::Goose,
                         message: "parsed CLI overrides belong to another provider".to_owned(),
+                        source: None,
                     });
                 }
                 Ok(ProviderCliOverrides::new(
@@ -147,6 +149,7 @@ impl ProviderPolicyBackend for GoosePolicyBackend {
                     ClaudineError::PolicyNativeParse {
                         source_id: layer.source.id.clone(),
                         message: "Goose layer payload type mismatch".to_owned(),
+                        source: None,
                     }
                 })?;
                 Ok((layer.source.clone(), payload))
@@ -176,6 +179,7 @@ impl ProviderPolicyBackend for GoosePolicyBackend {
                 .ok_or_else(|| ClaudineError::PolicyNativeParse {
                     source_id: "goose-effective".to_owned(),
                     message: "Goose effective policy payload type mismatch".to_owned(),
+                    source: None,
                 })?;
         let mut policy = CanonicalPolicy::empty(Provider::Goose, PolicyMode::Configured);
         policy.warnings.push(PolicyWarning {

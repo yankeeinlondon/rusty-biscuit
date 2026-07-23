@@ -326,6 +326,73 @@ fn repo_aggregate_json_is_valid_object() {
 }
 
 #[test]
+fn repo_aggregate_perf_covers_complete_command() {
+    let (_dir, path) = create_cli_monorepo();
+    let output = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "--perf",
+            "--plain",
+            "repo",
+            "--json",
+        ])
+        .output()
+        .expect("run sniff repo --json --perf");
+
+    assert!(
+        output.status.success(),
+        "aggregate command must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: Value = serde_json::from_slice(&output.stdout).expect("valid aggregate JSON");
+    let report = &value["performance"];
+    let counters = report["counters"].as_object().expect("performance counters");
+    let stages = report["stages"].as_object().expect("performance stages");
+
+    for (counter, expected) in [
+        ("git.repository_discoveries", 1),
+        ("git.status_walks", 1),
+        ("git.ref_walks", 1),
+        ("git.worktree_opens", 0),
+    ] {
+        assert_eq!(
+            counters.get(counter).and_then(Value::as_u64).unwrap_or(0),
+            expected,
+            "complete aggregate command counter `{counter}`: {counters:?}"
+        );
+    }
+
+    let aggregate_stage = &stages["cli.repo.aggregate_projection"];
+    assert_eq!(aggregate_stage["calls"], 1);
+    let aggregate_ms = aggregate_stage["total_duration_ms"]
+        .as_f64()
+        .expect("aggregate stage duration");
+    let detect_ms = stages["detect.total"]["total_duration_ms"]
+        .as_f64()
+        .expect("detection stage duration");
+    let total_ms = report["total_duration_ms"]
+        .as_f64()
+        .expect("complete command duration");
+    assert!(
+        total_ms >= detect_ms + aggregate_ms,
+        "complete elapsed time must cover detection plus aggregate projection: \
+         total={total_ms}, detection={detect_ms}, aggregate={aggregate_ms}"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("cli.repo.aggregate_projection"),
+        "stderr report must include post-detection aggregate projection: {stderr}"
+    );
+    assert!(
+        stderr.contains("git.repository_discoveries: 1")
+            && stderr.contains("git.status_walks: 1"),
+        "stderr report must include complete command-wide bounds: {stderr}"
+    );
+}
+
+#[test]
 fn repo_aggregate_json_excludes_network_and_parameterized_keys() {
     let output = repo_aggregate_json_output();
 
@@ -478,6 +545,63 @@ fn repo_json_output_is_valid_json_on_stdout_with_clean_stderr() {
         stderr.trim().is_empty(),
         "repo --json must not emit diagnostics on stderr: {stderr}"
     );
+}
+
+/// `--json` stdout must be exactly one document, not a document followed by
+/// anything else. A trailing render or perf block would still let a lenient
+/// `from_str` succeed on some inputs, so this asserts the stream is fully
+/// consumed by the single value.
+#[test]
+fn repo_json_stdout_is_exactly_one_json_document() {
+    let output = cargo_bin_cmd!("sniff")
+        .args(["repo", "--json"])
+        .output()
+        .expect("run sniff repo --json");
+
+    assert!(output.status.success(), "sniff repo --json must succeed");
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    let mut stream =
+        serde_json::Deserializer::from_str(stdout).into_iter::<serde_json::Value>();
+
+    let first = stream
+        .next()
+        .expect("stdout must carry a JSON document")
+        .expect("that document must be valid JSON");
+    assert!(first.is_object(), "the aggregate must be a JSON object");
+    assert!(
+        stream.next().is_none(),
+        "stdout must carry exactly one JSON document, found trailing content"
+    );
+}
+
+/// Bare `sniff repo` renders text and `--plain` renders plain text; neither
+/// goes through the `--json` aggregate. Pinned so the aggregate rewrite cannot
+/// leak JSON into, or diagnostics out of, the human-facing paths.
+#[test]
+fn repo_default_and_plain_emit_text_with_clean_stderr() {
+    for args in [vec!["repo"], vec!["repo", "--plain"]] {
+        let label = args.join(" ");
+        let output = cargo_bin_cmd!("sniff")
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("run sniff {label}: {e}"));
+
+        assert!(output.status.success(), "sniff {label} must succeed");
+
+        let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+        assert!(!stdout.trim().is_empty(), "sniff {label} must render output");
+        assert!(
+            serde_json::from_str::<serde_json::Value>(stdout).is_err(),
+            "sniff {label} must render text, not JSON"
+        );
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.trim().is_empty(),
+            "sniff {label} must not emit diagnostics on stderr: {stderr}"
+        );
+    }
 }
 
 #[test]

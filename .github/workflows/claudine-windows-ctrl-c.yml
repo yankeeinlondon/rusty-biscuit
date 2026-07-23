@@ -25,6 +25,7 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   CARGO_TERM_COLOR: never
+  RUSTFLAGS: "-D warnings"
 
 concurrency:
   group: claudine-windows-ctrl-c-${{ github.ref }}

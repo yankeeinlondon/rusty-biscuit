@@ -27,7 +27,7 @@ liveness remains advisory and must never trigger `resume`.
 
 ## Phase 1 — Promotion gate and proven contract
 
-- [ ] Confirm that `claudine/features/2026-07-11-provider-errors-as-data/spec.md` increments B1 and B2 are complete and that the Codex pilot artifacts, validation findings, and lifecycle telemetry are present; record their exact paths in this feature's implementation notes.
+- [ ] Confirm that `claudine/features/_completed/2026-07-11-provider-errors-as-data/spec.md` increments B1 and B2 are complete and that the Codex pilot artifacts, validation findings, and lifecycle telemetry are present; record their exact paths in this feature's implementation notes.
 - [ ] Review the B2 checkpoint with the named owner and record an explicit **promote**, **revise and rerun**, or **do not promote** decision, including resume count, correction convergence, `max_attempts` fit, and the exhausted-budget outcome. Do not begin Phase 2 without a **promote** decision.
 - [ ] Reproduce the pilot's contract from a clean checkout: run the checker against a valid document, an intentionally invalid document, and a corrected document; verify respectively empty/absent findings, deterministic findings, and stale-findings removal.
 - [ ] Document the selected contract without redesigning it: checker invocation and arguments, baseline/seed inputs, findings location and schema, atomic replacement behavior, exit-status policy, lifecycle `when:` expression, late-bound resume message, and telemetry fields used to count attempts.

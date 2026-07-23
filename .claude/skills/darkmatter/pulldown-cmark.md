@@ -13,6 +13,17 @@ last_updated: 2026-05-02
 ---
 ## `pulldown-cmark`
 
+## Contents
+
+- What Sets It Apart
+- Common Use Cases
+- Common Gotchas
+- Cargo Feature Flags
+- Runtime Parser Options
+- Sources
+
+Use heading search to jump to the listed topic.
+
 `pulldown-cmark` is a fast, allocation-conscious CommonMark parser for Rust. Its core API is a pull parser: `Parser` implements `Iterator<Item = Event>`, where block and inline structure is represented as a stream of `Event::Start(Tag)`, `Event::End(TagEnd)`, text, code, HTML, links, images, breaks, rules, footnote references, math, and similar events.
 
 Its functional footprint is centered on:

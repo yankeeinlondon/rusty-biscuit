@@ -175,11 +175,11 @@ exclusively.
 ## Platform Coverage (CI)
 
 The tier taxonomy above decides *what* runs; this section decides *where* (which
-OS). The repo mandate is that every package compiles and works on macOS,
-Windows, and Linux, so CI is organized around a single reusable workflow
-(`.github/workflows/_area-ci.yml`, invoked via `workflow_call`) that every
-curated area calls through a thin per-area caller. Platform behavior is uniform
-by construction instead of accreting per-area and per-incident.
+OS). `.github/workflows/ci.yml` calculates changed workspace packages and their
+reverse Cargo dependencies, maps them to the curated policy in
+`.github/ci/areas.json`, and fans the resulting matrix into the reusable
+`.github/workflows/_area-ci.yml`. Platform behavior is uniform without starting
+jobs for unrelated areas.
 
 ### Policy
 
@@ -213,6 +213,20 @@ by construction instead of accreting per-area and per-incident.
   how a platform is lit up before its latent cross-platform backlog is burned
   down. Read Windows *test* results accordingly — they are evidence, not a gate,
   until the leg is deliberately promoted to a required check.
+- **Integration candidates use required native legs**: a caller that supplies
+  `soft-os: '[]'` makes every configured L1 host blocking. Biscuit File,
+  Darkmatter, and Claudine use this strict mode. Darkmatter also enables the
+  reusable Linux L2 and browser jobs; Claudine enables Linux L2 and installs
+  portable inert provider stubs for discovery-dependent tests.
+- **Warnings and lint are gates**: the reusable workflow exports
+  `RUSTFLAGS=-D warnings` for native compilation and tests, and its Linux lint
+  job runs the package area's `just lint` recipe. Area-specific documentation,
+  generated-artifact, and typed-error guards wired into that recipe therefore
+  remain blocking CI checks.
+- **Coverage uses the same dependency scope on PRs**: one `cargo llvm-cov`
+  invocation selects every affected workspace package. A nightly/manual
+  workflow makes one workspace-wide pass; coverage is not repeated after the
+  PR lands on `main`.
 
 ### Feature-gated surfaces
 
@@ -225,33 +239,31 @@ because it never builds the code in question.
 The live case is `sniff`'s `remote` (which implies `network`), gating the
 provider client and its Wiremock test, bench, and example targets:
 
-- `test.yml`'s `sniff-cross-platform` job runs a second
-  `cargo check -p sniff --all-targets --features remote` alongside the
-  default-feature check, and `cd sniff && just test` runs the `sniff` half with
-  `--features remote`, so the provider suites are executed — not merely
-  compiled — on macOS, Linux, and Windows.
+- Sniff's entry in `.github/ci/areas.json` adds `sniff/remote` to the
+  all-target compile check and runs the full L1 suite on macOS, Linux, and
+  Windows. Its `just test` recipe executes the provider suites with `remote`
+  enabled rather than merely compiling them.
 - Downstream areas reach the same surface through their dependency edges rather
   than through a flag: `darkmatter/lib` declares
   `sniff = { features = ["remote"] }`, so the Darkmatter Linux and Windows legs
   already build the provider source. `claudine` reaches it transitively via
-  `darkmatter` and carries a macOS/Windows compile-check leg in
-  `claudine-tests.yml` (compile-only — its CLI tests rely on POSIX PATH stubs
-  and its Windows Ctrl+C handling is a known gap).
+  `darkmatter`; the dependency-aware scope includes those consumers whenever
+  the Sniff surface changes.
 
 ### Retired / folded workflows
 
 The bespoke single-behavior Windows workflows (`playa-windows`,
-`claudine-windows-ctrl-c`, `biscuit-tui-windows-captured-stdout`) fold into their
-areas' reusable-workflow calls as Windows matrix legs / gated tests. `coverage`
-(report-only, Linux), `bench-nightly` and `fuzz-nightly` (nightly), and
-`build-integrations` (on release) remain standalone by design.
+`claudine-windows-ctrl-c`, `biscuit-tui-windows-captured-stdout`) remain
+separate until their tests fold into the shared area contract. `coverage`
+(nightly/manual, report-only), `bench-nightly` and `fuzz-nightly` (nightly),
+and `build-integrations` (on release) remain standalone by design.
 
 ## Why this matters
 
 - Agents can always type `just sanity`, `just test`, `just test-l2` and get the
   same behavior regardless of which area they are in.
-- CI workflows iterate over the curated `areas` list and rely on the canonical
-  recipe names being present.
+- CI validates the curated `areas` list against `.github/ci/areas.json`, then
+  runs only the dependency-derived subset.
 - Drift between packages is detectable: `just _check_canonical` either passes
   or names the missing recipes.
 
@@ -298,7 +310,7 @@ Rust and long wall-clock times.
 
 | Decision | Rationale |
 |----------|-----------|
-| Runtime `require_level!` macro instead of proc-macro attribute | Avoids compile-time overhead and a new proc-macro crate. Skip-vs-fail behaviour is explicit in the test body. |
+| Runtime `require_level!` macro instead of proc-macro attribute | Avoids compile-time overhead and a new proc-macro crate. Skip-vs-fail behavior is explicit in the test body. |
 | `sanity` excludes doctests | Doctest compile cost would blow the ≤15 s per-package budget. |
 | `just all` order: sanity → lint → doctest → test → test-l2 → test-browser | Fast-fail order: cheapest signals surface first. |
 | test-l3, test-real, fuzz, bench excluded from `all` | They require explicit opt-in (devices, OS keyboard focus, nightly toolchain, quiet CPU). |
@@ -306,7 +318,7 @@ Rust and long wall-clock times.
 | Fuzz corpus stored in-repo (seed only) | Avoids Git LFS dependency. Only minimized crash inputs are committed back. |
 | tmux as default L2 backend | Most portable: headless, runs on any CI runner without GUI. |
 | `[package.metadata.benchmarks] required = false` convention | Grep-able opt-out for pure data crates. Enforced by reviewer discretion only. |
-| One reusable `_area-ci.yml` + thin per-area callers | Uniform platform behavior; a CI fix lands everywhere at once instead of per-area drift. |
+| One dependency-aware `ci.yml` caller + reusable `_area-ci.yml` | Uniform platform behavior without starting jobs for unrelated areas. |
 | macOS compile-checked (not full-tested) on PRs | GitHub macOS runners bill ~10× Linux; the `check` job catches macOS compile drift cheaply while full L1 runs on Linux + Windows. |
 | Windows runs full L1 | Windows is the highest-risk platform for silent API/type drift; compile-only would miss runtime-shaped bugs. |
 | `kache` on Linux/macOS legs only | kache does not support Windows (compilation fails there); Windows stays on `Swatinem/rust-cache`. |

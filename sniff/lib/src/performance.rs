@@ -1,9 +1,56 @@
+//! Structured performance collection: stage timings and work counters.
+//!
+//! Work counters are the primary acceptance evidence for Sniff's performance
+//! work: one counter corresponds to one meaningful unit of Sniff-owned work
+//! (a directory entry, a manifest parse, a status walk, a subprocess spawn),
+//! so an optimization is judged by work removed rather than by wall time on a
+//! noisy host. [`counters`] holds the stable names.
+//!
+//! ## Notes
+//!
+//! Recording is gated on [`is_collecting`], a process-wide count of installed
+//! collectors. When nothing is collecting and the `metrics` feature is off,
+//! [`increment_counter`], [`record_stage`], and [`StageTimer`] touch neither
+//! the clock nor thread-local storage, so per-entry instrumentation costs a
+//! single relaxed atomic load on the default path.
+
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::Level;
+
+pub mod counters;
+
+/// Number of collectors currently installed anywhere in the process.
+///
+/// Read on every instrumentation call, so it is deliberately a plain relaxed
+/// counter rather than a lock: a stale `true` costs one wasted thread-local
+/// probe, and a stale `false` can only occur before a collector's own
+/// installation is visible to the recording thread.
+static ACTIVE_COLLECTORS: AtomicUsize = AtomicUsize::new(0);
+
+/// Whether any performance data would be recorded by this call.
+///
+/// Callers that must set up instrumentation state — reading a clock, sampling
+/// a length, formatting a name — should check this first so the default path
+/// pays nothing.
+#[inline]
+pub fn is_collecting() -> bool {
+    cfg!(feature = "metrics") || ACTIVE_COLLECTORS.load(Ordering::Relaxed) > 0
+}
+
+/// Whether the *calling thread* has a collector installed.
+///
+/// Thread-local buffers are only safe to write when a collector on this thread
+/// will later drain them; otherwise the data would leak into whichever
+/// collector next snapshots on this thread.
+#[inline]
+fn collector_installed() -> bool {
+    CURRENT_COLLECTOR.with(|slot| slot.borrow().is_some())
+}
 
 thread_local! {
     static CURRENT_COLLECTOR: RefCell<Option<Arc<PerformanceCollector>>> = const { RefCell::new(None) };
@@ -110,24 +157,6 @@ impl PerformanceCollector {
         });
     }
 
-    fn record_stage(&self, name: &'static str, duration: Duration) {
-        let elapsed_ms = duration_ms(duration);
-        STAGE_BUFFER.with(|buf| {
-            let mut buf = buf.borrow_mut();
-            let stage = buf.entry(name).or_default();
-            stage.calls += 1;
-            stage.total_duration_ms += elapsed_ms;
-            stage.max_duration_ms = stage.max_duration_ms.max(elapsed_ms);
-            stage.last_duration_ms = elapsed_ms;
-        });
-    }
-
-    fn increment_counter(&self, name: &'static str, delta: u64) {
-        COUNTER_BUFFER.with(|buf| {
-            *buf.borrow_mut().entry(name).or_default() += delta;
-        });
-    }
-
     /// Drain the thread-local buffers of the **calling thread** into the
     /// central state.  This is intended to be called by worker threads
     /// (e.g. Rayon tasks) before they exit, so that their data is not lost
@@ -143,6 +172,16 @@ impl PerformanceCollector {
 /// Also drains any stale data from the thread-local buffers before installing
 /// the new collector, so that leftover data from a previous run does not leak
 /// into the current collector's snapshot.
+///
+/// ## Notes
+///
+/// `f`'s recordings are flushed into `collector` before returning. Recording
+/// writes to a thread-local buffer, and the only other things that drain it are
+/// [`PerformanceCollector::snapshot`] — which merges the *snapshotting* thread —
+/// and [`WorkerCollector`]'s drop. A caller that installs a collector on a
+/// scoped thread and lets that thread exit has neither, so without this flush
+/// every counter `f` recorded is silently discarded and the request reports
+/// zero for work it demonstrably performed.
 pub fn with_current_collector<T>(
     collector: Option<Arc<PerformanceCollector>>,
     f: impl FnOnce() -> T,
@@ -151,12 +190,191 @@ pub fn with_current_collector<T>(
     STAGE_BUFFER.with(|buf| buf.borrow_mut().clear());
     COUNTER_BUFFER.with(|buf| buf.borrow_mut().clear());
 
+    // The active count must survive a panic in `f`, or every later request in
+    // the process would keep paying for instrumentation that records nothing.
+    let _active = collector.is_some().then(ActiveGuard::acquire);
+    let installed = collector.clone();
     let previous = CURRENT_COLLECTOR.with(|slot| slot.replace(collector));
     let result = f();
+    if let Some(installed) = installed.as_ref() {
+        installed.flush_thread_local();
+    }
     CURRENT_COLLECTOR.with(|slot| {
         slot.replace(previous);
     });
     result
+}
+
+/// Holds [`ACTIVE_COLLECTORS`] above zero for its lifetime.
+struct ActiveGuard;
+
+impl ActiveGuard {
+    fn acquire() -> Self {
+        ACTIVE_COLLECTORS.fetch_add(1, Ordering::Release);
+        Self
+    }
+}
+
+impl Drop for ActiveGuard {
+    fn drop(&mut self) {
+        ACTIVE_COLLECTORS.fetch_sub(1, Ordering::Release);
+    }
+}
+
+/// Carries the spawning thread's collector into a worker thread.
+///
+/// Parallel walkers (`ignore::build_parallel`) and pool-backed workers build
+/// their per-worker state on the *spawning* thread but run the work on another
+/// thread, so [`current_collector`] is unavailable where the work happens. A
+/// `WorkerCollector` is constructed with [`inherit`](Self::inherit) on the
+/// spawning thread and [`activate`](Self::activate)d from the first callback
+/// that runs on the worker thread.
+///
+/// ## Notes
+///
+/// Dropping the value flushes the worker thread's buffers into the collector.
+/// It must therefore be owned by per-worker state that is dropped on the worker
+/// thread — otherwise the worker's counts are lost when a pooled thread parks
+/// instead of exiting.
+pub struct WorkerCollector {
+    collector: Option<Arc<PerformanceCollector>>,
+    installed: bool,
+}
+
+impl WorkerCollector {
+    /// Captures the calling thread's collector for later use on a worker thread.
+    pub fn inherit() -> Self {
+        Self {
+            collector: current_collector(),
+            installed: false,
+        }
+    }
+
+    /// Installs the inherited collector on the calling thread, once.
+    ///
+    /// Call this from worker code before recording. Repeat calls are a single
+    /// predictable branch.
+    #[inline]
+    pub fn activate(&mut self) {
+        if !self.installed {
+            self.install();
+        }
+    }
+
+    #[cold]
+    fn install(&mut self) {
+        self.installed = true;
+        let Some(collector) = self.collector.as_ref() else {
+            return;
+        };
+        // A pooled thread may still hold buffers from an earlier request.
+        STAGE_BUFFER.with(|buf| buf.borrow_mut().clear());
+        COUNTER_BUFFER.with(|buf| buf.borrow_mut().clear());
+        CURRENT_COLLECTOR.with(|slot| slot.replace(Some(Arc::clone(collector))));
+    }
+}
+
+impl Drop for WorkerCollector {
+    fn drop(&mut self) {
+        if !self.installed {
+            return;
+        }
+        if let Some(collector) = self.collector.as_ref() {
+            collector.flush_thread_local();
+        }
+        CURRENT_COLLECTOR.with(|slot| {
+            slot.replace(None);
+        });
+    }
+}
+
+/// Attributes work done inside a pooled worker to the spawning request.
+///
+/// Rayon threads park between requests rather than exiting, so work recorded
+/// on one has nowhere to flush to and would silently read as zero — which is
+/// worse than no counter, because a later phase could "prove" it removed work
+/// that was merely never counted. `collector` comes from [`current_collector`]
+/// on the spawning thread; hold the returned guard for the body of the
+/// parallel closure.
+///
+/// ## Examples
+///
+/// ```ignore
+/// let collector = performance::current_collector();
+/// items
+///     .par_iter()
+///     .map(|item| {
+///         let _worker = performance::pooled_worker(collector.as_ref());
+///         probe(item)
+///     })
+///     .collect()
+/// ```
+///
+/// ## Notes
+///
+/// The guard flushes on drop, costing one mutex acquisition per closure call,
+/// so it is only worth taking around a body that performs a counted unit of
+/// work — a file open, a subprocess, a repository open — never around a
+/// trivial map. When nothing is collecting, `collector` is `None` and the
+/// guard is inert.
+#[must_use = "the guard must live for the body of the parallel closure"]
+pub fn pooled_worker(collector: Option<&Arc<PerformanceCollector>>) -> PooledWorkerGuard {
+    // Rayon runs some items on the *calling* thread, which already has the
+    // request's collector and its live buffers. Installing over that would
+    // clear buffers the caller has not snapshotted yet, so defer to whoever
+    // installed first — they own the flush.
+    let Some(collector) = collector.filter(|_| !collector_installed()) else {
+        return PooledWorkerGuard(None);
+    };
+    let mut worker = WorkerCollector {
+        collector: Some(Arc::clone(collector)),
+        installed: false,
+    };
+    worker.activate();
+    PooledWorkerGuard(Some(worker))
+}
+
+/// Flushes a pooled worker's buffers into the request's collector on drop.
+///
+/// See [`pooled_worker`].
+// The payload is never read: it exists only so `WorkerCollector::drop` runs at
+// the end of the guarded scope.
+pub struct PooledWorkerGuard(#[allow(dead_code)] Option<WorkerCollector>);
+
+/// A stage timer that reads no clock when nothing is collecting.
+///
+/// ## Examples
+///
+/// ```
+/// use sniff::performance::StageTimer;
+///
+/// let timer = StageTimer::start("example.stage");
+/// // ... work ...
+/// timer.finish();
+/// ```
+#[must_use = "a StageTimer records nothing unless finished"]
+pub struct StageTimer {
+    name: &'static str,
+    started: Option<Instant>,
+}
+
+impl StageTimer {
+    /// Starts timing `name`, or does nothing if no collector is installed.
+    #[inline]
+    pub fn start(name: &'static str) -> Self {
+        Self {
+            name,
+            started: is_collecting().then(Instant::now),
+        }
+    }
+
+    /// Records the elapsed time against the stage.
+    #[inline]
+    pub fn finish(self) {
+        if let Some(started) = self.started {
+            record_stage(self.name, started.elapsed());
+        }
+    }
 }
 
 /// Returns the currently installed collector for this thread, if any.
@@ -164,13 +382,25 @@ pub fn current_collector() -> Option<Arc<PerformanceCollector>> {
     CURRENT_COLLECTOR.with(|slot| slot.borrow().clone())
 }
 
+fn record_stage_buffered(name: &'static str, duration: Duration) {
+    let elapsed_ms = duration_ms(duration);
+    STAGE_BUFFER.with(|buf| {
+        let mut buf = buf.borrow_mut();
+        let stage = buf.entry(name).or_default();
+        stage.calls += 1;
+        stage.total_duration_ms += elapsed_ms;
+        stage.max_duration_ms = stage.max_duration_ms.max(elapsed_ms);
+        stage.last_duration_ms = elapsed_ms;
+    });
+}
+
 /// Record a performance stage with a static name (zero-allocation hot path).
 ///
 /// For known constant stage names, this avoids per-call string allocation
 /// and writes to a thread-local buffer instead of contending on a mutex.
 pub fn record_stage(name: &'static str, duration: Duration) {
-    if let Some(collector) = current_collector() {
-        collector.record_stage(name, duration);
+    if is_collecting() && collector_installed() {
+        record_stage_buffered(name, duration);
     }
 
     #[cfg(feature = "metrics")]
@@ -186,6 +416,9 @@ pub fn record_stage(name: &'static str, duration: Duration) {
 /// Prefer [`record_stage`] with a `&'static str` for known constant names.
 /// This variant is for computed / dynamic stage names only.
 pub fn record_stage_dynamic(name: impl Into<String>, duration: Duration) {
+    if !is_collecting() {
+        return;
+    }
     let name = name.into();
     if let Some(collector) = current_collector() {
         // For dynamic names, fall back to the mutex path via a temporary static
@@ -254,8 +487,10 @@ pub fn record_logged_stage(name: &'static str, duration: Duration, level: Level)
 /// For known constant counter names, this avoids per-call string allocation
 /// and writes to a thread-local buffer instead of contending on a mutex.
 pub fn increment_counter(name: &'static str, delta: u64) {
-    if let Some(collector) = current_collector() {
-        collector.increment_counter(name, delta);
+    if is_collecting() && collector_installed() {
+        COUNTER_BUFFER.with(|buf| {
+            *buf.borrow_mut().entry(name).or_default() += delta;
+        });
     }
 
     #[cfg(feature = "metrics")]
@@ -269,6 +504,9 @@ pub fn increment_counter(name: &'static str, delta: u64) {
 /// Prefer [`increment_counter`] with a `&'static str` for known constant names.
 /// This variant is for computed / dynamic counter names only.
 pub fn increment_counter_dynamic(name: impl Into<String>, delta: u64) {
+    if !is_collecting() {
+        return;
+    }
     let name = name.into();
     if let Some(collector) = current_collector() {
         collector.increment_counter_dynamic(&name, delta);
@@ -282,6 +520,66 @@ pub fn increment_counter_dynamic(name: impl Into<String>, delta: u64) {
 
 pub fn duration_ms(duration: Duration) -> f64 {
     duration.as_secs_f64() * 1000.0
+}
+
+/// Work-count assertions for in-crate tests.
+///
+/// Built on the ordinary scoped-collector API, so no production type carries
+/// test-only state and nothing is cached process-globally: each [`measure`]
+/// call owns a private collector that dies with the call.
+#[cfg(test)]
+pub(crate) mod testing {
+    use super::{Duration, PerformanceCollector, PerformanceReport, with_current_collector};
+
+    /// Runs `f` under a private collector and returns its value with the
+    /// work it performed.
+    ///
+    /// ## Notes
+    ///
+    /// Work performed on threads `f` spawns is included only when those
+    /// threads install the collector and flush before exiting — which is what
+    /// [`super::WorkerCollector`] exists to guarantee. A count that is lower
+    /// than expected therefore indicates either less work or a worker that
+    /// failed to flush; [`WorkCounts::total`] over a serial equivalent
+    /// distinguishes the two.
+    pub(crate) fn measure<T>(f: impl FnOnce() -> T) -> (T, WorkCounts) {
+        let collector = PerformanceCollector::new_shared();
+        let value = with_current_collector(Some(collector.clone()), f);
+        let report = collector.snapshot(Duration::ZERO);
+        (value, WorkCounts { report })
+    }
+
+    /// Counts recorded by one [`measure`] call.
+    pub(crate) struct WorkCounts {
+        report: PerformanceReport,
+    }
+
+    impl WorkCounts {
+        /// Value of `name`, or zero when the counter was never incremented.
+        pub(crate) fn get(&self, name: &str) -> u64 {
+            self.report.counters.get(name).copied().unwrap_or(0)
+        }
+
+        /// Every recorded counter, for diagnosing an unexpected assertion.
+        pub(crate) fn all(&self) -> &std::collections::BTreeMap<String, u64> {
+            &self.report.counters
+        }
+
+        /// Whether any stage timing was recorded.
+        pub(crate) fn recorded_any_stage(&self) -> bool {
+            !self.report.stages.is_empty()
+        }
+
+        /// Whether `name` was observed at least once.
+        pub(crate) fn recorded_stage(&self, name: &str) -> bool {
+            self.report.stages.contains_key(name)
+        }
+
+        /// Every recorded stage name, for diagnosing an unexpected assertion.
+        pub(crate) fn stage_names(&self) -> Vec<&str> {
+            self.report.stages.keys().map(String::as_str).collect()
+        }
+    }
 }
 
 impl PerformanceCollector {
@@ -304,5 +602,89 @@ impl PerformanceCollector {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         *state.counters.entry(name.to_string()).or_default() += delta;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const COUNTER: &str = "test.performance.unit";
+    const STAGE: &str = "test.performance.stage";
+
+    #[test]
+    fn nothing_is_collecting_by_default() {
+        assert!(
+            !is_collecting(),
+            "the default path must not pay for instrumentation"
+        );
+    }
+
+    #[test]
+    fn recording_outside_a_collector_is_dropped_not_buffered() {
+        increment_counter(COUNTER, 9);
+        StageTimer::start(STAGE).finish();
+
+        // If the calls above had buffered into thread-local storage, this
+        // collector would adopt work it never scoped.
+        let ((), counts) = testing::measure(|| {});
+        assert_eq!(counts.get(COUNTER), 0);
+        assert!(!counts.recorded_any_stage());
+    }
+
+    #[test]
+    fn stage_timer_reads_no_clock_when_inactive() {
+        assert!(StageTimer::start(STAGE).started.is_none());
+        testing::measure(|| {
+            assert!(StageTimer::start(STAGE).started.is_some());
+        });
+    }
+
+    #[test]
+    fn measure_scopes_counts_to_its_own_call() {
+        let ((), first) = testing::measure(|| increment_counter(COUNTER, 3));
+        assert_eq!(first.get(COUNTER), 3);
+
+        let ((), second) = testing::measure(|| increment_counter(COUNTER, 1));
+        assert_eq!(second.get(COUNTER), 1, "counts must not accumulate across calls");
+    }
+
+    #[test]
+    fn pooled_worker_attributes_thread_work_to_the_request() {
+        let ((), counts) = testing::measure(|| {
+            let collector = current_collector();
+            let handles: Vec<_> = (0..4)
+                .map(|_| {
+                    let collector = collector.clone();
+                    std::thread::spawn(move || {
+                        let _worker = pooled_worker(collector.as_ref());
+                        increment_counter(COUNTER, 5);
+                    })
+                })
+                .collect();
+            for handle in handles {
+                handle.join().expect("worker");
+            }
+        });
+
+        assert_eq!(
+            counts.get(COUNTER),
+            20,
+            "each of 4 workers must contribute exactly once"
+        );
+    }
+
+    #[test]
+    fn pooled_worker_on_the_calling_thread_does_not_discard_pending_counts() {
+        // Rayon runs some items inline on the caller. Taking a guard there
+        // must not clear the caller's not-yet-snapshotted buffer.
+        let ((), counts) = testing::measure(|| {
+            increment_counter(COUNTER, 2);
+            let collector = current_collector();
+            let _worker = pooled_worker(collector.as_ref());
+            increment_counter(COUNTER, 3);
+        });
+
+        assert_eq!(counts.get(COUNTER), 5);
     }
 }

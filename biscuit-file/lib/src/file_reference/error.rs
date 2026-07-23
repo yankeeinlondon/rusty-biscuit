@@ -12,13 +12,35 @@ pub enum FileReferenceError {
     CurrentDirectory(#[source] std::io::Error),
 
     #[error("could not inspect git repository state: {0}")]
-    Git(String),
+    Git(#[source] Box<gix::discover::Error>),
+
+    #[error("git repository is bare and has no working directory")]
+    BareRepository,
 
     #[error("could not inspect Cargo workspace state: {0}")]
-    Workspace(String),
+    Workspace(#[source] Box<cargo_metadata::Error>),
 
     #[error("vault reference used without any configured vault roots")]
     VaultNotConfigured,
+
+    #[error("`~user` home references are not supported: `{0}`")]
+    UnsupportedUserHome(String),
+
+    #[error("home reference used but no home directory is available in the resolution context")]
+    MissingHomeContext,
+
+    #[error(
+        "package reference used but no package area or repository root is available in the resolution context"
+    )]
+    MissingPackageContext,
+
+    #[error(
+        "repository root `{repository_root}` does not contain the resolution source `{source_path}`"
+    )]
+    RepositoryRootNotContainingSource {
+        repository_root: PathBuf,
+        source_path: PathBuf,
+    },
 
     #[error("could not produce a relative path from `{from}` to `{to}`")]
     RelativePath { from: PathBuf, to: PathBuf },

@@ -57,9 +57,9 @@ sanity:
 test *args="":
     @just _test {{ LIBRARY }} {{args}}
 
-# not applicable: claudine-gen has no real-terminal (Level-2) tests
-test-l2:
-    @echo "test-l2: not applicable for claudine-gen"
+# run real-terminal (Level-2) tests for the generator reports
+test-l2 *args="":
+    @just _test_l2 {{ LIBRARY }} {{args}}
 
 # not applicable: claudine-gen has no OS-keyboard-injection (Level-3) tests
 test-l3:

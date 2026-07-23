@@ -6,8 +6,13 @@ use std::sync::OnceLock;
 use regex::Regex;
 
 use crate::Result;
+use crate::performance;
+use crate::performance::counters;
 
-use super::detection::{DetectorOutcome, create_package, dedupe_packages, resolve_internal_deps};
+use super::detection::{
+    DetectorOutcome, probe_exists,
+};
+use super::seed::{PackageSeed, merge_seeds};
 use super::standard::{MonorepoStandard, PackageProvenance};
 
 /// Project file extensions a solution entry must carry to count as a package.
@@ -22,12 +27,14 @@ pub(super) fn detect_dotnet_solution(root: &Path) -> Result<Option<DetectorOutco
         return Ok(None);
     }
 
-    let lock_versions = None;
-    let mut packages = Vec::new();
+    let mut seeds = Vec::new();
     for solution in &solutions {
+        performance::increment_counter(counters::FS_FILE_OPENS, 1);
         let Ok(content) = std::fs::read_to_string(solution) else {
             continue;
         };
+        performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
+        performance::increment_counter(counters::REPO_MANIFEST_PARSES, 1);
         let project_paths = if has_slnx_extension(solution) {
             parse_slnx_projects(&content)
         } else {
@@ -38,30 +45,27 @@ pub(super) fn detect_dotnet_solution(root: &Path) -> Result<Option<DetectorOutco
                 Some(parent) if !parent.as_os_str().is_empty() => root.join(parent),
                 _ => root.to_path_buf(),
             };
-            if !project_dir.exists() {
+            if !probe_exists(&project_dir) {
                 continue;
             }
-            packages.push(create_package(
+            seeds.push(PackageSeed::new(
                 &project_dir,
                 root,
                 MonorepoStandard::DotNetSolution,
                 PackageProvenance::Explicit,
-                &lock_versions,
             ));
         }
     }
 
-    if packages.is_empty() {
+    if seeds.is_empty() {
         return Ok(None);
     }
 
-    packages = dedupe_packages(packages);
-    resolve_internal_deps(&mut packages);
 
     Ok(Some(DetectorOutcome {
         standard: MonorepoStandard::DotNetSolution,
         root: root.to_path_buf(),
-        packages,
+        seeds: merge_seeds(seeds),
     }))
 }
 
@@ -75,6 +79,7 @@ pub(super) fn root_has_solution_file(root: &Path) -> bool {
 
 /// Collect the `.sln` / `.slnx` files directly under `root` (non-recursive).
 fn find_solution_files(root: &Path) -> Vec<PathBuf> {
+    performance::increment_counter(counters::FS_READ_DIRS, 1);
     let Ok(entries) = std::fs::read_dir(root) else {
         return Vec::new();
     };

@@ -121,6 +121,7 @@ impl Rendezvous for RendezvousService {
             daemon_version: DAEMON_VERSION.to_string(),
             uptime_seconds,
             started_at_unix_ms: self.started_at_unix_ms,
+            node_id: self.identity.node_id(),
         }))
     }
 
@@ -373,6 +374,7 @@ impl Rendezvous for RendezvousService {
             .sync_initiator(&connection, &node_id)
             .await
             .map_err(map_sync_error)?;
+        peers.record_sync_success(&node_id);
         let chunks = outcome
             .chunks
             .iter()
@@ -450,6 +452,284 @@ impl Rendezvous for RendezvousService {
         .map_err(internal)?;
         Ok(Response::new(rendezvous_core::ListHostCapabilitiesResponse { hosts }))
     }
+
+    async fn list_host_repos(
+        &self,
+        _request: Request<rendezvous_core::ListHostReposRequest>,
+    ) -> Result<Response<rendezvous_core::ListHostReposResponse>, Status> {
+        let registers = self.registers.clone();
+        let hosts = tokio::task::spawn_blocking(move || {
+            let docs = registers.list_documents()?;
+            let mut hosts = Vec::with_capacity(docs.len());
+            for doc in docs {
+                if !matches!(doc, rendezvous_core::DocumentId::Repos { .. }) {
+                    continue;
+                }
+                let Some(repos) = registers.deep_value(&doc)? else {
+                    continue;
+                };
+                hosts.push(rendezvous_core::HostRepos {
+                    document_id: doc.as_path(),
+                    owner_node_id: doc.owner_node_id().to_string(),
+                    repos_json: repos.to_string(),
+                });
+            }
+            Ok::<_, crate::register::RegisterError>(hosts)
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?
+        .map_err(internal)?;
+        Ok(Response::new(rendezvous_core::ListHostReposResponse { hosts }))
+    }
+
+    async fn report_session_event(
+        &self,
+        request: Request<rendezvous_core::ReportSessionEventRequest>,
+    ) -> Result<Response<rendezvous_core::ReportSessionEventResponse>, Status> {
+        let body = request.into_inner();
+        if body.session_id.is_empty() {
+            return Err(Status::invalid_argument("session_id must not be empty"));
+        }
+        let kind = rendezvous_core::SessionEventKind::try_from(body.kind)
+            .map_err(|_| Status::invalid_argument("unknown session event kind"))?;
+        if kind == rendezvous_core::SessionEventKind::Unspecified {
+            return Err(Status::invalid_argument("session event kind must be specified"));
+        }
+        let details = match parse_optional_json(&body.details_json) {
+            Ok(Some(serde_json::Value::Object(map))) => map,
+            Ok(Some(_)) => {
+                return Err(Status::invalid_argument("details_json must be a JSON object"));
+            }
+            Ok(None) => serde_json::Map::new(),
+            Err(err) => {
+                return Err(Status::invalid_argument(format!(
+                    "details_json is not valid JSON: {err}"
+                )));
+            }
+        };
+
+        let status = body.status.as_ref().and_then(status_from_proto);
+
+        let registers = self.registers.clone();
+        let session_id = body.session_id;
+        let active_count = tokio::task::spawn_blocking(move || {
+            apply_session_event(&registers, &session_id, kind, details, status)
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?
+        .map_err(internal)?;
+        Ok(Response::new(rendezvous_core::ReportSessionEventResponse { active_count }))
+    }
+
+    async fn list_active_sessions(
+        &self,
+        _request: Request<rendezvous_core::ListActiveSessionsRequest>,
+    ) -> Result<Response<rendezvous_core::ListActiveSessionsResponse>, Status> {
+        let registers = self.registers.clone();
+        let hosts = tokio::task::spawn_blocking(move || {
+            let docs = registers.list_documents()?;
+            let mut hosts = Vec::with_capacity(docs.len());
+            for doc in docs {
+                if !matches!(doc, rendezvous_core::DocumentId::SessionsActive { .. }) {
+                    continue;
+                }
+                let Some(raw) = registers.deep_value(&doc)? else {
+                    continue;
+                };
+                hosts.push(rendezvous_core::HostActiveSessions {
+                    document_id: doc.as_path(),
+                    owner_node_id: doc.owner_node_id().to_string(),
+                    sessions_json: inflate_session_entries(&raw).to_string(),
+                });
+            }
+            Ok::<_, crate::register::RegisterError>(hosts)
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?
+        .map_err(internal)?;
+        Ok(Response::new(rendezvous_core::ListActiveSessionsResponse { hosts }))
+    }
+}
+
+/// Register-entry keys the daemon owns exclusively. Producer
+/// `details_json` payloads that try to set any of them are stripped
+/// before merge — the daemon stamps clocks and the reducer writes the
+/// projected status/slots. Without this, an UPDATED payload could
+/// overwrite `started_at_unix_ms` or forge a `status`.
+const DAEMON_OWNED_KEYS: &[&str] = &[
+    "started_at_unix_ms",
+    "updated_at_unix_ms",
+    "status",
+    "status_basis",
+    "status_producer",
+    "status_slots",
+];
+
+/// Translate a wire [`rendezvous_core::proto::StatusContribution`] into
+/// the typed core model. Returns `None` when the producer is unspecified
+/// (there is no slot to write it to).
+fn status_from_proto(
+    proto: &rendezvous_core::proto::StatusContribution,
+) -> Option<rendezvous_core::session_status::StatusContribution> {
+    use rendezvous_core::session_status::{Basis, ProducerId, SessionState, StatusContribution};
+    use rendezvous_core::{SessionStatusBasis, SessionStatusState, StatusProducer};
+
+    let producer = match StatusProducer::try_from(proto.producer).ok()? {
+        StatusProducer::Lifecycle => ProducerId::Lifecycle,
+        StatusProducer::Sink => ProducerId::Sink,
+        StatusProducer::PermissionHook => ProducerId::PermissionHook,
+        StatusProducer::IdleHook => ProducerId::IdleHook,
+        StatusProducer::ProcessMonitor => ProducerId::ProcessMonitor,
+        StatusProducer::Unspecified => return None,
+    };
+    let state = match SessionStatusState::try_from(proto.state)
+        .unwrap_or(SessionStatusState::Unspecified)
+    {
+        SessionStatusState::Active => SessionState::Active,
+        SessionStatusState::Idle => SessionState::Idle,
+        SessionStatusState::WaitingOnUser => SessionState::WaitingOnUser,
+        SessionStatusState::Unspecified => SessionState::Unknown,
+    };
+    let basis = match SessionStatusBasis::try_from(proto.basis)
+        .unwrap_or(SessionStatusBasis::Unspecified)
+    {
+        SessionStatusBasis::PermissionAsk => Basis::PermissionAsk,
+        SessionStatusBasis::InteractiveTurnComplete => Basis::InteractiveTurnComplete,
+        SessionStatusBasis::ProcessHeuristic => Basis::ProcessHeuristic,
+        SessionStatusBasis::Lifecycle => Basis::Lifecycle,
+        SessionStatusBasis::Unspecified => Basis::Unknown,
+    };
+    Some(StatusContribution {
+        state,
+        producer,
+        basis,
+        revision: proto.revision,
+    })
+}
+
+/// Apply one session transition to the local sessions-active register.
+///
+/// Register fields are flat scalars, so each session's entry is stored
+/// as a JSON-encoded string keyed by session id. STARTED/UPDATED merge
+/// the DESCRIPTIVE `details` over the existing entry (reserved keys
+/// stripped), fold the optional `status` contribution into the entry's
+/// per-producer `status_slots` under a revision guard, and project the
+/// backward-compatible `status` / `status_basis` / `status_producer`
+/// fields via the reducer. ENDED removes the key (all slots). Returns the
+/// post-event active count.
+fn apply_session_event(
+    registers: &crate::register::RegisterStore,
+    session_id: &str,
+    kind: rendezvous_core::SessionEventKind,
+    details: serde_json::Map<String, serde_json::Value>,
+    status: Option<rendezvous_core::session_status::StatusContribution>,
+) -> Result<u64, crate::register::RegisterError> {
+    use rendezvous_core::SessionEventKind as Kind;
+    use rendezvous_core::session_status;
+    let doc = registers.local_sessions_active_id();
+    let now = unix_now_ms();
+
+    // One atomic read-modify-write: the closure sees the authoritative
+    // current session map and returns the complete desired map, so no
+    // concurrent transition can interleave between the read and the write
+    // (UPDATE-after-END resurrection and START/END lost-update both
+    // vanish — the closure's `contains_key` / removal share ONE critical
+    // section with any racing transition).
+    let (_changed, count) = registers.mutate_local_fields(&doc, |current| {
+        let mut next = current.clone();
+        match kind {
+            Kind::Ended => {
+                next.remove(session_id);
+            }
+            Kind::Started | Kind::Updated => {
+                let existing = next
+                    .get(session_id)
+                    .and_then(|e| e.as_str())
+                    .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+                    .and_then(|v| match v {
+                        serde_json::Value::Object(map) => Some(map),
+                        _ => None,
+                    });
+
+                // UPDATED merges over an EXISTING live session and never
+                // creates one: only STARTED brings a session into being.
+                // Because the absence check now lives in the same held
+                // lock as any concurrent END, a late fire-and-forget
+                // status UPDATE cannot resurrect a phantom entry.
+                if kind == Kind::Updated && existing.is_none() {
+                    // Nothing to update; leave the register untouched.
+                } else {
+                    let mut entry = existing.unwrap_or_default();
+                    // Merge DESCRIPTIVE attributes only; a payload that
+                    // tries to set a daemon-owned key is ignored so it
+                    // cannot forge clocks or status.
+                    for (k, v) in &details {
+                        if DAEMON_OWNED_KEYS.contains(&k.as_str()) {
+                            continue;
+                        }
+                        entry.insert(k.clone(), v.clone());
+                    }
+                    // The daemon owns the clocks: producers cannot be
+                    // trusted to agree on wall time, and consumers judge
+                    // staleness from updated_at.
+                    if kind == Kind::Started || !entry.contains_key("started_at_unix_ms") {
+                        entry.insert("started_at_unix_ms".into(), serde_json::json!(now));
+                    }
+                    entry.insert("updated_at_unix_ms".into(), serde_json::json!(now));
+
+                    // Fold this event's optional status opinion into the
+                    // per-producer slots (revision-guarded), then project
+                    // the reducer output as the backward-compatible flat
+                    // status fields the dashboard reads.
+                    let mut slots = entry
+                        .get("status_slots")
+                        .map(session_status::slots_from_json)
+                        .unwrap_or_default();
+                    if let Some(contribution) = status {
+                        session_status::apply_contribution(&mut slots, contribution);
+                    }
+                    let effective = session_status::effective(&slots);
+                    entry.insert("status_slots".into(), session_status::slots_to_json(&slots));
+                    entry.insert("status".into(), serde_json::json!(effective.state.as_wire()));
+                    entry
+                        .insert("status_basis".into(), serde_json::json!(effective.basis.as_wire()));
+                    entry.insert(
+                        "status_producer".into(),
+                        serde_json::json!(effective.producer.as_slug()),
+                    );
+
+                    next.insert(
+                        session_id.to_string(),
+                        serde_json::Value::String(serde_json::Value::Object(entry).to_string()),
+                    );
+                }
+            }
+            Kind::Unspecified => unreachable!("rejected at the RPC boundary"),
+        }
+        let count = next.len() as u64;
+        Ok((next, count))
+    })?;
+    Ok(count)
+}
+
+/// The register stores each session entry as a JSON-encoded string
+/// (register fields are flat scalars); re-inflate them into real
+/// objects so RPC consumers get one clean nested JSON document.
+fn inflate_session_entries(raw: &serde_json::Value) -> serde_json::Value {
+    let serde_json::Value::Object(map) = raw else {
+        return serde_json::Value::Object(serde_json::Map::new());
+    };
+    let inflated: serde_json::Map<String, serde_json::Value> = map
+        .iter()
+        .map(|(session_id, entry)| {
+            let value = entry
+                .as_str()
+                .and_then(|raw| serde_json::from_str(raw).ok())
+                .unwrap_or_else(|| entry.clone());
+            (session_id.clone(), value)
+        })
+        .collect();
+    serde_json::Value::Object(inflated)
 }
 
 fn parse_optional_json(raw: &str) -> Result<Option<serde_json::Value>, serde_json::Error> {
@@ -505,107 +785,4 @@ fn unix_now_ms() -> i64 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::batcher::{BatcherConfig, BatcherWorker, spawn};
-    use crate::projection::Projection;
-    use crate::session_log::SessionLogManager;
-    use crate::storage::Storage;
-    use rendezvous_core::{ChunkConfig, NodeIdentity};
-    use std::sync::Arc;
-    use std::time::Duration;
-    use tempfile::TempDir;
-
-    struct Harness {
-        service: RendezvousService,
-        _worker: BatcherWorker,
-        _tmp: TempDir,
-    }
-
-    fn harness() -> Harness {
-        let tmp = TempDir::new().expect("tempdir");
-        let storage = Storage::open(tmp.path().join("session.redb")).expect("storage");
-        let projection = Projection::in_memory().expect("projection");
-        let worker = spawn(projection.clone(), BatcherConfig {
-            flush_interval: Duration::from_millis(20),
-            flush_size: 16,
-        });
-        let identity = Arc::new(NodeIdentity::from_seed([5u8; 32]));
-        let session_log = SessionLogManager::new(
-            storage.clone(),
-            worker.handle(),
-            projection.clone(),
-            ChunkConfig::default(),
-            Arc::clone(&identity),
-        )
-        .expect("mgr");
-        let registers = crate::register::RegisterStore::new(
-            storage.clone(),
-            Arc::clone(&identity),
-        )
-        .expect("registers");
-        let sync_service = SyncService::new(
-            session_log.clone(),
-            registers.clone(),
-            storage.clone(),
-            Arc::clone(&identity),
-        );
-        let service = RendezvousService::new(
-            session_log,
-            projection,
-            identity,
-            storage,
-            sync_service,
-            registers,
-        );
-        Harness {
-            service,
-            _worker: worker,
-            _tmp: tmp,
-        }
-    }
-
-    #[tokio::test]
-    async fn ping_echoes_nonce_and_reports_version() {
-        let h = harness();
-        let response = h
-            .service
-            .ping(Request::new(PingRequest {
-                nonce: "abc-123".into(),
-            }))
-            .await
-            .expect("ping ok");
-        let body = response.into_inner();
-        assert_eq!(body.nonce, "abc-123");
-        assert_eq!(body.daemon_version, DAEMON_VERSION);
-        assert!(body.timestamp_unix_ms > 0);
-    }
-
-    #[tokio::test]
-    async fn append_then_list_chunk_entries() {
-        let h = harness();
-        let node_id = h.service.identity.node_id();
-        h.service
-            .append_entry(Request::new(AppendEntryRequest {
-                owner_node_id: String::new(),
-                session_id: "s-1".into(),
-                source: "test".into(),
-                level: "info".into(),
-                message: "hello".into(),
-                metadata_json: String::new(),
-            }))
-            .await
-            .expect("append");
-        let chunk_id = format!("session/{node_id}/s-1/part/0");
-        let listed = h
-            .service
-            .list_chunk_entries(Request::new(ListChunkEntriesRequest {
-                chunk_id: chunk_id.clone(),
-            }))
-            .await
-            .expect("list")
-            .into_inner();
-        assert_eq!(listed.entries.len(), 1);
-        assert_eq!(listed.entries[0].message, "hello");
-    }
-}
+mod tests;

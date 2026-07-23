@@ -1,0 +1,759 @@
+## Overview
+
+The `error-prop-and-file-resolution` branch is the implementation-heavy side of the three-way split. It diverged from `claudine` at `8fc8711`, after the earlier `proxy-with` fork at `6cdb8bf`, and then delivered three interdependent workstreams: typed diagnostic transport, unified file-reference semantics, and the Sequence Plus execution model. Error propagation established the lossless diagnostic channel that file resolution needed for candidate/probe provenance; file resolution centralized path interpretation before Sequence Plus expanded the number of document and task references; Sequence Plus then exercised both foundations across serial, parallel, cross-document, and cross-platform orchestration. The branch consequently changes Claudine itself and supporting packages in Darkmatter, Biscuit File, Biscuit Test Harness, and Rendezvous.
+
+### `2026-07-13-error-propogation`
+
+This feature replaces string-flattened failures with typed, end-to-end diagnostics. It began with a missing lifecycle proxy target that originated as a rich `HarnessError::PathResolutionFailed` but was interpolated into an opaque `eyre!` string before reaching the CLI renderer. The broader goal was to eliminate that pattern: concrete Rust errors and their source chains remain intact inside the process, while process, wire, and persistence boundaries receive a versioned `DiagnosticSnapshot`. One discovery registry selects the effective semantic diagnostic for both terminal rendering and lifecycle `err.*` state, preserving structured detail, one registered cause, source excerpts, and corrective hints without changing exit codes or lifecycle routing.
+
+- **Packages and modules changed:**
+  - **`claudine` library:** `diagnostics::{discovery, registry, facets, snapshot, restored}`; the shared `error` type; `composition::error` rendering and lifecycle context/control/execution; `harness::{error, resolve, runtime}`; reporting ingest/error/types; dispatch mappers/loaders; messaging and MCP consumers; and structured-stream parser/provider error paths.
+  - **`claudine-cli`:** `output::error_walker`; compose and wrapper preparation; harness orchestration, loop control, terminal-proxy paths, and session reporting; schema/sequence command boundaries; diagnostic discovery and source-scan guards; and real-terminal L2 error-capture suites.
+  - **Other Claudine crates and repository support:** `claudine-contract::adapter`, `claudine-gen` drift fixtures/tests, lifecycle/error transport guards, and Biscuit Test Harness terminal-reachability helpers used to verify OSC 8 and real-terminal rendering.
+- **Acceptance criteria:** known typed errors must never be flattened at an in-process production boundary; registry/source scans must discover every Claudine diagnostic and reject regressions; rendering, `err.*`, and serialized snapshots must agree on identity, facets, structured detail, concise message, and one registered cause; frontmatter/source enrichment must remain lossless and render exactly once; plain and no-color output must carry the same information without control-sequence leakage; existing exit status, lifecycle ordering, retry/recovery, and emission-count behavior must remain unchanged; and L1 chain/registry/snapshot tests, L2 CLI captures, `just test`, `just test-l2`, and `just lint` must pass.
+
+### `2026-07-13-file-resolution`
+
+This feature makes `biscuit_file::FileReference` the single grammar and resolution authority for document-backed paths. It fixes the motivating implicit-relative bug by defining bare references as repository-root-first and source-directory-second, while explicit `./` and `../` references remain strictly source-relative. Magic, package, vault, home, URL, recursive, interpolation, and native absolute forms retain kind-specific behavior. Resolution inputs are captured in a request-scoped `FileResolutionContext`, nested documents re-anchor from their own provenance, and failures retain an ordered candidate/probe plan rather than a formatted list of attempted paths.
+
+- **Packages and modules changed:**
+  - **`biscuit-file`:** `file_reference::{parse, context, resolve, completion}`, reference-kind/effective-kind classification, candidate planning and probing, cross-platform home and absolute-path handling, CLI completion/round-trip tests, and the later rooted-magic rejection.
+  - **`darkmatter`:** Markdown composition context/options and effective state; expression/context resolution; link normalization/resolution; transclusion engine/resolver; reference graphs and validation; schema detect/format/resolve/rewrite/validate surfaces; and document/source-provenance plumbing.
+  - **`claudine` library:** `harness::resolve`; composition prepare/resolve/preflight, looping, and request adapters; sequence source/preflight loading; lifecycle filesystem lookup; and `system_prompt::resolve`.
+  - **`claudine-cli`:** compose/sequence preparation and orchestration, shared composition completion, source/repository re-anchoring paths, and L1/L2 completion and file-resolution suites.
+- **Acceptance criteria:** every Claudine production reference must be parsed by `FileReference`; candidate order and provenance must be deterministic and observable; the motivating bare router target must resolve without rewriting it to `@` or `./`; direct, proxy, sequence, completion, Darkmatter composition/transclusion, reference-graph, and schema surfaces must agree; nested documents must re-anchor from explicit request context without rereading ambient state; failures must preserve typed kind/candidate/probe detail; Unix and Windows absolute/home behavior must be covered; affected workspace callers must be audited; and the Biscuit File, Darkmatter, and Claudine L1/L2 test and lint gates must pass.
+
+### `2026-07-11-sequence-plus`
+
+Sequence Plus transforms `sequence` from body repetition into a typed step, task, and group execution system. It introduces stable per-step state (`state`, `previous`, `next`, and `sequence_id`), static and dynamic sources, formal task/group references, just-in-time composition, invocation-local `set` mutations, ordered outputs, setup/teardown lifecycle stacks, serial groups, bounded parallel groups, deterministic state merges, and attributed concurrent terminal streams. Steps remain serial, while concurrency exists only inside a group; prompt, shell, side-effect, and external task forms share one execution model and one preflight graph.
+
+- **Packages and modules changed:**
+  - **`claudine` library:** `composition::sequence::{data, expr, formal, grammar, model, normalize, reserved, source, preflight, task::group, task::shell}`; invocation-local runtime state; composition prepare/resolve/types; lifecycle setup/teardown and `set`; looping and closure; `render::task_stream`; shell process-tree ownership; and typed sequence errors.
+  - **`claudine-cli`:** compose preparation; wrapper `sequence` JIT/task/group orchestration; harness and process-termination integration; streaming/performance output; dry-run and preflight reporting; and L1/L2/L3 sequence, source, group, concurrency, and Ctrl+C suites.
+  - **Supporting packages:** `biscuit-file::list_format` for source classification; Darkmatter effects plus Markdown context/interpolation/preflight for state mutation and coercion; Biscuit Test Harness keyboard/terminal helpers for macOS, Linux, and Windows; and a narrow `rendezvous-daemon` Windows named-pipe transport/dev-dependency adjustment needed by cross-platform sequence tests.
+- **Acceptance criteria:** retained scalar/object, inline-compose, fail-fast, missing-property, dry-run, and Ctrl+C behavior must remain covered; invalid executable combinations, reserved writes, malformed/empty sources, unsupported offsets, cycles, nesting, write-back collisions, concurrency caps, and timeouts must be typed errors; all supported list/file forms must cover quoting, CRLF, Unicode, scalar coercion, nulls, and empty dynamic results; JIT tests must prove state/output visibility and exact preflight-to-execution shell bytes; serial/parallel ordering, lifecycle teardown, deterministic merge, output ordering, interruption, and terminal framing must hold across macOS, Windows, and Linux; documentation must match the final grammar; and `just test`, terminal-dependent `just test-l2`, cross-platform gates, and `just lint` must pass.
+
+## Timeline
+
+Git does not record branch-reference creation time, so merge bases are the auditable fork markers. This chronological list includes all 246 commits from the earlier three-way split marker `6cdb8bf` through branch tip `43c23c6`. The history is linear and contains no merge commits.
+
+- **2026-07-16 — `6cdb8bf56`** — docs(claudine): rename fleet-research topic to typed-knowledge pipeline
+  - This is the merge base of `claudine` and `proxy-with`, and therefore the beginning of the full three-branch split interval.
+- **2026-07-16 — `f4180b3c8`** — docs(claudine): add execution plan for unified file-reference resolution
+- **2026-07-16 — `8fc871143`** — docs(claudine): add execution plan for end-to-end typed error propagation
+  - This is the later merge base of `claudine` and `error-prop-and-file-resolution`.
+  - It records the implementation plan for typed transport, diagnostic discovery, rendering parity, source-chain guards, and L2 acceptance.
+- **2026-07-16 — `cc69e5127`** — chore: refresh gitnexus counts
+- **2026-07-16 — `d5b5e76e3`** — test(claudine-cli): add D10 characterization baseline for error propagation
+- **2026-07-16 — `f70080cc5`** — docs(claudine): close Phase 1 of end-to-end typed error propagation
+- **2026-07-16 — `ffbf44e0a`** — docs(claudine): advance error propagation records to phase 2
+- **2026-07-16 — `816ec1065`** — chore: refresh GitNexus counts
+- **2026-07-16 — `72d2afeff`** — feat(claudine): add diagnostic discovery and selection
+  - Introduced the shared diagnostic discovery and effective-selection seam used by both terminal rendering and lifecycle `err.*` projection.
+- **2026-07-16 — `5434be606`** — feat(claudine): add DiagnosticSnapshot type and extend invalid_file_reference
+  - Established the serializable diagnostic boundary and reserved the richer structured shape needed by file-resolution failures.
+- **2026-07-16 — `bd73ab51f`** — docs(claudine): advance error propagation records to phase 3
+- **2026-07-16 — `01d0f6a9e`** — feat(claudine): add one-level cause projection and concise error message
+- **2026-07-16 — `d679fa640`** — chore: refresh GitNexus counts
+- **2026-07-17 — `02a841981`** — docs(claudine): close phase 4 error propagation plan
+- **2026-07-17 — `2ab701bab`** — chore: refresh GitNexus counts
+- **2026-07-17 — `62c6b1e77`** — feat(claudine): type path-resolution failures, add InvalidFileReference
+- **2026-07-17 — `c995c3e4e`** — feat(claudine): propagate typed diagnostic causes
+- **2026-07-17 — `5b76a39bb`** — test(claudine-cli): phase 5 effective-diagnostic renders
+- **2026-07-17 — `7efb6dbcd`** — chore: refresh GitNexus counts
+- **2026-07-17 — `189538581`** — docs(claudine): advance error propagation records to phase 6
+- **2026-07-17 — `caac08e2e`** — feat(claudine-cli): unify typed diagnostic selection
+- **2026-07-17 — `f17543778`** — test(claudine): assert err.msg hygiene, one-level cause, detail shape
+- **2026-07-17 — `5e97cfa18`** — test(claudine-cli): migrate transport guard from grep to syn AST scan
+- **2026-07-17 — `a57bedf27`** — test(claudine-cli): add L2 typed-error render capture suite (Phase 7)
+- **2026-07-17 — `860942358`** — chore: refresh GitNexus counts
+- **2026-07-17 — `b40b4ce62`** — test(claudine-cli): migrate err.kind/variant to typed facets
+- **2026-07-17 — `d60a86cd2`** — fix(claudine-cli): unbox CompositionError before Report conversion (D-13)
+- **2026-07-17 — `366d6aea7`** — docs(claudine): advance error propagation records to phase 7
+- **2026-07-17 — `9bdc38e61`** — feat(claudine-cli): add boxed-diagnostic reachability guard
+- **2026-07-17 — `87ee9dc45`** — chore: refresh GitNexus counts
+- **2026-07-17 — `2a0acc95e`** — feat(claudine): type shell-approval family and add composition.shell_approval
+- **2026-07-17 — `d56591071`** — fix(claudine): lifecycle doc facets guard no longer flags err.msg as deprecated
+- **2026-07-17 — `d35e010b1`** — docs(claudine): close error-propagation phase 8 documentation
+- **2026-07-17 — `5a5fab748`** — docs(claudine): close error-propagation review documentation
+- **2026-07-17 — `af62b3c9c`** — feat(claudine): propagate typed composition error causes
+- **2026-07-17 — `fa97a6308`** — feat(claudine): route lifecycle err through DiagnosticSnapshot
+- **2026-07-17 — `983e7bd34`** — feat(claudine): wire typed error sources in downstream consumers
+- **2026-07-17 — `f678cbe53`** — feat(claudine): wire typed parse sources into provider backends
+- **2026-07-17 — `9f5bf407a`** — feat(claudine-cli): consume typed errors and DiagnosticSnapshot shape
+- **2026-07-17 — `9bc13f9c3`** — test(claudine-cli): close error-propagation-followup burn-down
+- **2026-07-17 — `a99be7bb2`** — chore: refresh GitNexus counts
+- **2026-07-17 — `fab8d2378`** — refactor(claudine-gen): move drift baseline fixture into gen tests/
+- **2026-07-17 — `a7e2dfe89`** — chore: refresh GitNexus counts
+- **2026-07-17 — `0be5e0979`** — docs(claudine): close file-resolution phase 1 plan
+- **2026-07-17 — `fad8e6d51`** — docs(claudine): close error-propagation review iteration 2
+- **2026-07-17 — `fbb0ef10c`** — docs(biscuit-file): document new `dirs` dependency for cross-platform home lookup
+- **2026-07-17 — `fa3885166`** — feat(biscuit-file): add FileReferenceKind, resolution context, and host-independent grammar
+  - Made reference kind and request context explicit data, including host-independent grammar needed for Windows parity.
+- **2026-07-17 — `abca94ebd`** — docs(claudine): advance file-resolution plan from phase 1 to phase 2
+- **2026-07-17 — `004f8a3f3`** — chore: refresh GitNexus counts
+- **2026-07-17 — `69992d508`** — refactor(biscuit-file): chain gix/cargo_metadata errors and split bare-repo variant
+- **2026-07-17 — `8e6e97c1c`** — docs(claudine): advance file-resolution plan from phase 2 to phase 3
+- **2026-07-17 — `c67073c0c`** — chore: refresh GitNexus counts
+- **2026-07-17 — `7d4f60160`** — feat(biscuit-file): detailed resolver with typed probes and provenance
+  - Added observable candidate/probe provenance so resolution failures could remain structured instead of collapsing attempted paths into prose.
+- **2026-07-17 — `8fe903ba6`** — feat(biscuit-file): flip implicit precedence to repository-first and add effective-kind
+  - Performed the central behavior change: implicit references became repository-root-first while explicit relative references retained source-local semantics.
+- **2026-07-17 — `fb4723853`** — docs(claudine): advance file-resolution plan to phase 4
+- **2026-07-17 — `8c8ef2f3c`** — fix(prompts): make source-local fixture explicit under repository-first precedence
+- **2026-07-17 — `77d244cf7`** — docs(biscuit-file): align file-reference docs and skill with repository-first
+- **2026-07-17 — `50d39ca36`** — test(biscuit-file): cover repository-first implicit precedence and effective-kind
+- **2026-07-17 — `2664eefcd`** — chore: refresh GitNexus counts
+- **2026-07-17 — `bdbeb0186`** — docs(claudine): advance file-resolution plan from phase 4 to phase 5
+- **2026-07-17 — `5d52070a3`** — docs(darkmatter): ratify repository-first file-reference resolution in docs
+- **2026-07-17 — `ada7c271c`** — chore: refresh GitNexus counts
+- **2026-07-17 — `d15d71abe`** — feat(darkmatter): adopt repository-first file resolution with shared document context
+- **2026-07-17 — `8d43219d6`** — chore: refresh GitNexus counts
+- **2026-07-17 — `9327ba193`** — feat(claudine): delegate harness file resolution to biscuit_file::FileReference
+  - Moved Claudine harness resolution onto `biscuit_file::FileReference`, removing a private resolution authority.
+- **2026-07-17 — `d788db056`** — fix(claudine): route ProxyHandoff through the existence-checking resolver
+- **2026-07-17 — `607920b06`** — docs(claudine): align proxy hint and advance file-resolution plan to phase 6
+- **2026-07-17 — `cb91b6e86`** — chore: record empty-return-report lesson and refresh GitNexus counts
+- **2026-07-17 — `f2016fdb3`** — docs(claudine): advance file-resolution plan from phase 6 to phase 7
+- **2026-07-17 — `3f583d75a`** — refactor(claudine): extract build_prompt_reference for shared magic roots
+- **2026-07-17 — `ec1995e45`** — refactor(claudine): route system_prompt resolve through FileReference
+- **2026-07-17 — `b070e7784`** — refactor(claudine-cli): unify sequence source via build_prompt_reference
+- **2026-07-17 — `c8c380a52`** — refactor(claudine): route sequence references through FileReference
+- **2026-07-17 — `e4994f7a0`** — refactor(claudine): extract harness::error inline tests to sibling file
+- **2026-07-17 — `27bf7a627`** — test(claudine): align launch-area fallback tests with D2 contract
+- **2026-07-17 — `0fbd175fc`** — docs(claudine): align topic docs with shared FileReference contract
+- **2026-07-17 — `35c43bfb8`** — docs(claudine): advance file-resolution plan from phase 7 to phase 8
+- **2026-07-17 — `b878ab84e`** — chore: refresh GitNexus index counts
+- **2026-07-17 — `b800e35f8`** — test(claudine-cli): close AC5 and cover file-resolution L2 cases
+- **2026-07-17 — `90d682ba9`** — feat(darkmatter): route missing-target resolution through shared candidate plan
+- **2026-07-17 — `906ca2a2d`** — test(biscuit-file): cover completion round trip and home discovery
+- **2026-07-17 — `1acd9f0c2`** — chore: refresh GitNexus index counts
+- **2026-07-17 — `57cf80b61`** — feat(claudine): retain ordered candidate plan in resolution diagnostics
+- **2026-07-17 — `0e16990c5`** — docs(claudine): record file-resolution review 1 and align spec
+- **2026-07-17 — `dad6c8196`** — refactor(claudine): capture package area for sequence references
+- **2026-07-17 — `3447308ec`** — feat(biscuit-file): make context authoritative; cross-platform home
+- **2026-07-17 — `5f29eb7ce`** — chore: refresh GitNexus index counts
+- **2026-07-17 — `51beaeec5`** — docs(claudine): record file-resolution review 2 and link forward
+- **2026-07-17 — `08e78ecc2`** — test(claudine): pin sequence-plus phase 1 baseline
+  - Pinned the retained Sequence behavior before the redesign, providing the regression baseline for the subsequent phases.
+- **2026-07-17 — `5037369c1`** — feat(claudine-cli): render InMemoryState safety in context report
+- **2026-07-17 — `9bc37977d`** — feat(darkmatter): add set(key, value) state verb and last() regression
+- **2026-07-17 — `67349a3f4`** — feat(biscuit-file): add ListFormat enum and classify_list helper
+- **2026-07-17 — `87607304a`** — docs(claudine): advance sequence-plus plan from phase 1 to phase 2
+- **2026-07-17 — `01b9264d2`** — chore: refresh GitNexus index counts
+- **2026-07-17 — `e7373472a`** — chore: refresh GitNexus index counts
+- **2026-07-17 — `57456949d`** — feat(darkmatter): add opt-in name coercion for sequence state objects
+- **2026-07-17 — `ce016015b`** — feat(claudine-cli): opt sequence prep into name coercion
+- **2026-07-17 — `27b6ef943`** — refactor(claudine): split sequence module into focused submodules
+- **2026-07-17 — `e83052703`** — docs(claudine): advance sequence-plus plan from phase 2 to phase 3
+- **2026-07-17 — `4ec6aa554`** — feat(claudine): plumb name coercion keys through PrepareOptions
+- **2026-07-17 — `5944881b3`** — feat(claudine): implement sequence-plus phase 4 sources
+  - Implemented static/dynamic sequence sources and the expanded source grammar on top of the unified file-reference contract.
+- **2026-07-17 — `9a257bcf2`** — feat(claudine-cli): wire sequence-plus sources through the CLI
+- **2026-07-17 — `71054e61f`** — docs(claudine): advance sequence-plus plan from phase 3 to phase 4
+- **2026-07-17 — `0165fa0e9`** — chore: refresh GitNexus index counts
+- **2026-07-17 — `bb22f1a34`** — docs(claudine): advance sequence-plus plan to phase 5 and update dispatch inventory
+- **2026-07-17 — `c5a3d22a5`** — feat(claudine): add sequence/preflight graph (sequence-plus phase 5)
+  - Added the whole-sequence preflight graph used for cycle detection, shell approval, source validation, and collision checks.
+- **2026-07-17 — `4804c6948`** — chore: refresh GitNexus index counts
+- **2026-07-17 — `f72bdebb8`** — feat(claudine-cli): wire preflight graph through sequence execution
+- **2026-07-17 — `9a511f584`** — docs(claudine): advance sequence-plus plan to phase 6 and refresh dispatch inventory
+- **2026-07-17 — `e804773c3`** — feat(claudine-cli): thread runtime_state cell through compose paths
+- **2026-07-17 — `491e2c92e`** — docs: warn that git reflog -1 is racy under concurrent commits
+- **2026-07-17 — `07df5c4d5`** — feat(claudine): add invocation-local runtime state
+- **2026-07-18 — `fab5afcf2`** — chore: refresh GitNexus index counts
+- **2026-07-18 — `17c951db8`** — docs: note staged-blob inspection for conflict-marker checks
+- **2026-07-18 — `6620fc418`** — feat(claudine): implement sequence-plus phase 7 task executor
+  - Introduced the unified task executor for prompt, shell, side-effect, and referenced-task forms.
+- **2026-07-18 — `dfc5456bc`** — docs(claudine): advance sequence-plus plan to phase 7
+- **2026-07-18 — `2402e9c64`** — docs(claudine): advance sequence-plus plan to phase 8 and refresh dispatch inventory
+- **2026-07-18 — `81d0ce2ac`** — feat(claudine): compose sequence steps just in time
+  - Switched steps to just-in-time composition so prior outputs, runtime mutations, and defined live-disk boundaries become observable deterministically.
+- **2026-07-18 — `ff59a616a`** — test(claudine-cli): add E2E coverage for serial group execution
+- **2026-07-18 — `b9bb4a981`** — chore: refresh GitNexus index counts
+- **2026-07-18 — `53a0fc2d8`** — docs(claudine): advance sequence-plus plan to phase 9
+- **2026-07-18 — `737202de3`** — feat(claudine): implement serial group scheduling (sequence-plus phase 9)
+- **2026-07-18 — `bde4f93c4`** — feat(claudine-cli): render group task breakdown in sequence output
+- **2026-07-18 — `f5b38cf69`** — docs(claudine): advance sequence-plus plan to phase 10
+- **2026-07-18 — `b20b539ca`** — feat(claudine): run parallel sequence groups concurrently
+  - Added bounded parallel group execution with snapshot isolation, all-child completion, and deterministic declaration-order merging.
+- **2026-07-18 — `da92468a2`** — chore: refresh GitNexus index counts
+- **2026-07-18 — `483ee21f9`** — chore: refresh GitNexus index counts
+- **2026-07-18 — `fbe9854c4`** — docs(claudine): skill adds task-stream render, plan to phase 11
+- **2026-07-18 — `df08c8742`** — docs: define staged conflict-marker recovery
+- **2026-07-18 — `0c7a9924d`** — feat(claudine): render attributed frames for parallel group tasks
+  - Added attributed task-stream frames so concurrent output remains readable and synchronized without changing stdout/stderr ownership.
+- **2026-07-18 — `d75c5765b`** — feat(claudine): share yaml composition load and gate empty body
+- **2026-07-18 — `b401f99ff`** — chore: refresh GitNexus index counts
+- **2026-07-18 — `0f337e07e`** — refactor(claudine-cli): adopt shared yaml loader and empty-body gate
+- **2026-07-18 — `b55e4dc73`** — docs(claudine): close sequence-plus phase 12 by publishing user contract
+- **2026-07-18 — `af57bc056`** — docs: clarify that git commit --only preserves unrelated staged entries
+- **2026-07-18 — `ada3ef8ec`** — test(claudine-cli): cover sequence sources and errors
+- **2026-07-18 — `c7d8afaed`** — chore: refresh GitNexus index counts
+- **2026-07-18 — `2c19e2570`** — docs(claudine): close sequence-plus phase 13 with validation matrix
+- **2026-07-18 — `b359428ba`** — style(claudine): strip trailing blank line in composition/types.rs
+- **2026-07-18 — `6876c6b09`** — feat(claudine): split TaskStream close into flush + close channels
+- **2026-07-18 — `146f35a90`** — feat(claudine-cli): frame sequence task body under task bar
+- **2026-07-18 — `2cba04867`** — docs(claudine): close sequence-plus phase 14 by recording codex review
+- **2026-07-18 — `f7182d0e1`** — chore: refresh GitNexus index counts
+- **2026-07-18 — `cfc51af82`** — chore: refresh GitNexus index counts
+- **2026-07-18 — `af1d79986`** — feat(claudine-cli): frame task bars on idle flush, fallback, and status
+- **2026-07-18 — `e4d48c2bd`** — test(claudine): migrate task-stream sink ownership to Arc
+- **2026-07-18 — `adc2c16cd`** — test(claudine-cli): cover sequence Ctrl+C fan-out at Level 3
+- **2026-07-18 — `4d841d41b`** — refactor(claudine-cli): rename overlay PTY binary to drop level2 prefix
+- **2026-07-18 — `6affdfca2`** — test(claudine-cli): cover sequence task stream in a real tmux pane
+- **2026-07-18 — `baba0774c`** — refactor(claudine): unify formal sequence normalization
+- **2026-07-18 — `8aa307ca3`** — docs(claudine): close sequence-plus review-2 validation loop
+- **2026-07-18 — `1fbf0d0b1`** — fix(biscuit-test-harness): route modified chords through AppleScript and wait for focus
+- **2026-07-18 — `8c7a5e41f`** — chore(claudine-cli): add shellexpand dev-dependency for #[cfg(test)] reference helpers
+- **2026-07-18 — `7446d3048`** — chore: refresh GitNexus index counts
+- **2026-07-18 — `5be1116e6`** — refactor(claudine): make feed_line infallible across parsers
+- **2026-07-18 — `dff5ebe0d`** — docs(claudine): close sequence-plus loop with review-3 and review-4
+- **2026-07-18 — `ece29696d`** — test(claudine): use a host-aware ExitStatus helper and gate symlink fixtures on Unix
+- **2026-07-18 — `3bc41c7d2`** — test(claudine-cli): keep focus-stealing harness APIs in level3_ files
+- **2026-07-18 — `c7593a325`** — feat(rendezvous-daemon): add tonic Connected adapter for the named-pipe transport
+- **2026-07-18 — `def9a299d`** — feat(claudine-cli): add Windows console-control sequence interrupt
+  - Added native Windows console-control fan-out for sequence interruption, closing a major cross-platform acceptance path.
+- **2026-07-18 — `328aac3cd`** — feat(claudine): add just check-windows for cross-compile verification
+- **2026-07-18 — `63c7b7831`** — feat(claudine-cli): guard test-l3 against unattended desktop takeover
+- **2026-07-18 — `fbd0a952c`** — docs(claudine): infallible feed_line, PipeConnection, refresh inventory
+- **2026-07-18 — `ae1098a95`** — feat(claudine-cli): cover prompt-task attribution and idle flush at L2
+- **2026-07-18 — `ef81702b4`** — feat(claudine-cli): Windows compose interrupt guard (review-4 finding 8)
+- **2026-07-18 — `432fd25ab`** — docs(claudine): close sequence-plus review-4 loop with gate-run record
+- **2026-07-18 — `0348a2f95`** — fix(claudine-cli): gate rendezvous-daemon dev-dep on Windows GNU
+- **2026-07-18 — `be2d100a6`** — test(claudine): cover non-130 interrupted exit codes (sequence task #2)
+- **2026-07-19 — `d1b2d3088`** — test(claudine-cli): add Linux and Windows L3 sequence Ctrl+C tests
+- **2026-07-19 — `3ce2bbaf2`** — test(claudine-cli): assert pre-flight status precedes phase 1c
+- **2026-07-19 — `edffd4d0b`** — docs(claudine): close sequence-plus review-5 loop
+- **2026-07-19 — `8a3ad36a1`** — feat(claudine): own task-shell process trees with per-task runaway cap
+  - Made Claudine own shell-task process trees and apply a per-task runaway cap, preventing interrupted descendants from escaping.
+- **2026-07-19 — `618975fef`** — test(claudine-cli): introduce clear_no_color and assert_row_is_styled helpers
+- **2026-07-19 — `acbf6f4ed`** — feat(claudine-cli): emit pre-flight status before phase 1c
+- **2026-07-19 — `72e6a78a1`** — test(claudine-cli): assert live stream interleaves and survives without color
+- **2026-07-19 — `a7bfdd7a7`** — test(claudine-cli): clear NO_COLOR and anchor styling in level2 capture suites
+- **2026-07-19 — `64f69960c`** — test(claudine-cli): extend L3 sequence Ctrl+C fixture to descendants
+- **2026-07-19 — `b7e3cba1a`** — fix(claudine-cli): re-derive unicode support from locale past force color
+- **2026-07-19 — `52e6aa8e0`** — fix(claudine): harden task-shell process tree isolation
+- **2026-07-19 — `237b86a41`** — docs(claudine): record review 6 and refresh validation matrix
+- **2026-07-19 — `b814bf031`** — fix(claudine): distinguish task-shell wait failures from spawn errors
+- **2026-07-19 — `baba83844`** — docs(claudine): close review-7 loop with Linux gate record
+- **2026-07-19 — `23c05d16e`** — docs(claudine): close sequence-plus review-8 loop with L3 gate runs
+- **2026-07-19 — `b965938e2`** — feat(biscuit-test-harness): add Linux and Windows L3 keyboard injectors
+- **2026-07-19 — `96679f516`** — docs(claudine): close sequence-plus review-9 loop with R3 reproducibility correction
+- **2026-07-19 — `f679adbad`** — docs(claudine): close sequence-plus review-10 loop
+- **2026-07-20 — `b7ee12dee`** — chore: refresh GitNexus index counts
+- **2026-07-20 — `28226f55a`** — feat: add review-to-plan executable prompt and placeholder
+- **2026-07-20 — `e7fcf3498`** — docs: harden concurrent commit verification
+- **2026-07-20 — `7b9ccf735`** — docs(claudine): close sequence-plus review-11 loop
+- **2026-07-20 — `a3f813c93`** — docs(biscuit-test-harness): document cross-platform Level-3 keyboard injectors
+- **2026-07-20 — `d1c9c5fa7`** — docs(claudine): mark error-propagation review-2 implemented and codify D8 category 4
+- **2026-07-20 — `03a21aac3`** — feat(claudine): persist typed ingest failures as SyncFailure snapshots
+- **2026-07-20 — `a684ba93a`** — feat(claudine): carry diagnostic snapshots across erased wiring
+  - Carried diagnostic snapshots through previously erased orchestration wiring instead of reconstructing facets from strings.
+- **2026-07-20 — `562d496d4`** — test(claudine-cli): add snapshot re-erasure arm and Route 6 L2 capture
+- **2026-07-20 — `65fa684fd`** — feat(claudine-cli): propagate DiagnosticSnapshot through orchestration
+- **2026-07-20 — `a1b8db6c8`** — docs(claudine): document erased diagnostic restoration
+- **2026-07-20 — `3df7b74d4`** — feat(claudine): add restored diagnostic projection seams
+  - Added restoration/projection seams so serialized diagnostics retain their public identity and rendering behavior after crossing erased boundaries.
+- **2026-07-20 — `40e32e46f`** — docs(claudine): record file-resolution review 3 blockers
+- **2026-07-20 — `bcbf3def0`** — refactor(claudine-cli): lock terminal-proxy typed failure surface
+- **2026-07-20 — `63803ad95`** — docs(claudine): record error-propagation review 3 blockers
+- **2026-07-20 — `96cf1240a`** — docs(claudine-cli): rewrite stale characterization route comments
+- **2026-07-20 — `011158dfc`** — chore: refresh GitNexus index counts
+- **2026-07-20 — `66a353372`** — docs(claudine): record error-propagation review 4
+- **2026-07-20 — `c7387aff9`** — docs: harden concurrent commit verification
+- **2026-07-20 — `770fb352c`** — feat(biscuit-test-harness): add WezTerm GUI reachability probe
+- **2026-07-20 — `ce12310ce`** — docs(claudine): record error-propagation review 5
+- **2026-07-20 — `a0856c214`** — docs(claudine): describe resolver dual-arm projection semantics
+- **2026-07-20 — `3f4be2f46`** — docs(claudine): record error-propagation review 6
+- **2026-07-20 — `091b092d4`** — fix(claudine-cli): name proxy property as authored stack path
+- **2026-07-20 — `cd40ed477`** — fix(claudine-cli): preserve terminal event in proxy failure context
+- **2026-07-20 — `67c1ea7ef`** — docs(claudine): record review 7 blockers
+- **2026-07-20 — `60a6a966a`** — docs(claudine): mark review 7 implemented and add review 8
+- **2026-07-20 — `ea4845a34`** — test(claudine-cli): generalize L2 capture helpers, add WezTerm OSC 8
+- **2026-07-20 — `313f33305`** — docs(claudine): refresh provider dispatch inventory
+- **2026-07-20 — `8a35e6ca9`** — docs(claudine): record error-propagation review 9, mark review 8 implemented
+- **2026-07-20 — `e707ece59`** — refactor(claudine): plumb request-scoped FileResolutionContext through composition
+  - Introduced request-scoped file-resolution context throughout composition rather than consulting ambient process state at nested call sites.
+- **2026-07-20 — `dc2e1982d`** — feat(claudine-cli): route composition completion through shared FileReference completer
+- **2026-07-21 — `985483d28`** — refactor(claudine): extract harness resolver tests into sibling file
+- **2026-07-21 — `d4c8846cc`** — docs(claudine): record file-resolution review 4, link review 3
+- **2026-07-21 — `3b8773f88`** — test(claudine-cli): pin source-repository re-anchoring tests
+- **2026-07-21 — `e6088dc16`** — refactor(claudine): ratify launch-area as diagnostic metadata only
+- **2026-07-21 — `541097519`** — feat(claudine): re-anchor request context and lexicalize proxy identity
+  - Re-anchored nested requests from source provenance and made proxy identity lexical, resolving review findings around repository and document boundaries.
+- **2026-07-21 — `c7a35cbbf`** — docs: record commit-shape lesson, drop 60s timeout, default iteration
+- **2026-07-21 — `f273bcc0b`** — feat(claudine): thread request snapshot through composition adapters
+- **2026-07-21 — `d6539644f`** — feat(biscuit-file): derive explicit resolution contexts
+- **2026-07-21 — `8f08be189`** — feat(darkmatter): plumb file-resolution context through compose
+  - Completed Darkmatter-side context plumbing so nested composition surfaces share Claudine and Biscuit File semantics.
+- **2026-07-21 — `5db724fc9`** — docs(claudine): refresh dispatch inventory and review statuses
+- **2026-07-21 — `b00823203`** — test(claudine-cli): split per-provider dry-run test into macro-generated cases
+- **2026-07-21 — `8876d1b80`** — refactor(claudine): ratify launch-area as diagnostic in loops
+- **2026-07-21 — `59e0dab60`** — chore: refresh GitNexus index counts
+- **2026-07-21 — `61c4f7ca1`** — test(claudine-cli): document Windows sequence fixture boundary
+- **2026-07-21 — `3ffc90a23`** — docs(claudine): record C11 Windows gate and file-resolution review 6
+- **2026-07-21 — `1ac55f860`** — fix(darkmatter): preserve child source provenance
+- **2026-07-21 — `91d59723d`** — docs(claudine): record sequence-plus review 12
+- **2026-07-21 — `7e74c4e51`** — docs(claudine): mark file-resolution review 6 as implemented
+- **2026-07-21 — `1bda3bf92`** — docs(claudine): refresh auto-complete plan and review history
+- **2026-07-21 — `92beae794`** — refactor(claudine): thread FileResolutionContext through preflight paths
+- **2026-07-21 — `7d303a1b7`** — test(claudine-cli): consolidate auto-complete coverage into L2 with one L3 smoke
+- **2026-07-21 — `7a4510c7a`** — refactor(claudine): drop private @/ rewrites in sequence loading
+  - Removed the final private `@/` rewrite in sequence loading, leaving `FileReference` as the syntax authority.
+- **2026-07-21 — `4603de341`** — docs(claudine): record file-resolution review 7
+- **2026-07-21 — `cd006e03f`** — docs(claudine): record file-resolution review 8
+- **2026-07-21 — `43b55a432`** — feat(biscuit-file): reject rooted magic reference payloads
+  - Closed an ambiguity by rejecting rooted payloads after the magic prefix on every host.
+- **2026-07-21 — `c779df32b`** — feat(darkmatter): route transclusion via parsed FileReference
+  - Routed Darkmatter transclusion through parsed `FileReference`, closing one of the last cross-surface parity gaps.
+- **2026-07-21 — `8043c348c`** — docs(claudine): record file-resolution review 9
+- **2026-07-21 — `43c23c653`** — chore: refresh GitNexus index counts
+  - This is the documented branch tip used for the report and the upcoming merge.
+
+## File Blast Radius
+
+The following 431 distinct paths were mutated at least once by commits in the inclusive split interval. This is a history union, not merely an endpoint diff: it intentionally retains transient paths and both sides of renames.
+
+- **.claude:**
+  - `.claude/skills/biscuit-file/references/file-references.md`
+  - `.claude/skills/biscuit-test-harness/SKILL.md`
+  - `.claude/skills/claudine/SKILL.md`
+  - `.claude/skills/claudine/architecture.md`
+  - `.claude/skills/claudine/cli-reference.md`
+  - `.claude/skills/claudine/error-architecture.md`
+  - `.claude/skills/claudine/timeline.md`
+  - `.claudine/memory/commits.md`
+  - `.claudine/non-interactive.md`
+  - `.config/nextest.toml`
+  - `CLAUDE.md`
+
+- **Biscuit File:**
+  - `biscuit-file/cli/tests/cli_tests.rs`
+  - `biscuit-file/docs/dependencies.md`
+  - `biscuit-file/docs/topics/file-references.md`
+  - `biscuit-file/lib/Cargo.toml`
+  - `biscuit-file/lib/src/file_reference/context.rs`
+  - `biscuit-file/lib/src/file_reference/error.rs`
+  - `biscuit-file/lib/src/file_reference/mod.rs`
+  - `biscuit-file/lib/src/file_reference/parse.rs`
+  - `biscuit-file/lib/src/file_reference/resolve.rs`
+  - `biscuit-file/lib/src/lib.rs`
+  - `biscuit-file/lib/src/list_format.rs`
+  - `biscuit-file/lib/tests/completion_round_trip.rs`
+  - `biscuit-file/lib/tests/detailed_resolution.rs`
+  - `biscuit-file/lib/tests/implicit_relative.rs`
+  - `biscuit-file/lib/tests/precedence_flip.rs`
+  - `biscuit-file/lib/tests/reference_grammar.rs`
+  - `biscuit-file/lib/tests/resolution_context.rs`
+
+- **Biscuit Test Harness:**
+  - `biscuit-test-harness/Cargo.toml`
+  - `biscuit-test-harness/README.md`
+  - `biscuit-test-harness/src/cliclick.rs`
+  - `biscuit-test-harness/src/lib.rs`
+  - `biscuit-test-harness/src/wezterm.rs`
+  - `biscuit-test-harness/src/win_input.rs`
+  - `biscuit-test-harness/src/xdotool.rs`
+
+- **Claudine:**
+  - `claudine/cli/Cargo.toml`
+  - `claudine/cli/src/commands/compose/interrupt.rs`
+  - `claudine/cli/src/commands/compose/loop_run.rs`
+  - `claudine/cli/src/commands/compose/mod.rs`
+  - `claudine/cli/src/commands/compose/prep.rs`
+  - `claudine/cli/src/commands/compose/prep/tests.rs`
+  - `claudine/cli/src/commands/config_tui/app.rs`
+  - `claudine/cli/src/commands/config_tui/tabs/messenger/input.rs`
+  - `claudine/cli/src/commands/context/format.rs`
+  - `claudine/cli/src/commands/dashboard/tests.rs`
+  - `claudine/cli/src/commands/init/prompts.rs`
+  - `claudine/cli/src/commands/mcp/show.rs`
+  - `claudine/cli/src/commands/schema_interactive/mod.rs`
+  - `claudine/cli/src/commands/sequence.rs`
+  - `claudine/cli/src/commands/wrap/composition/launch.rs`
+  - `claudine/cli/src/commands/wrap/composition/mod.rs`
+  - `claudine/cli/src/commands/wrap/composition/pipeline.rs`
+  - `claudine/cli/src/commands/wrap/composition/preflight.rs`
+  - `claudine/cli/src/commands/wrap/composition/prep_context.rs`
+  - `claudine/cli/src/commands/wrap/composition/runner.rs`
+  - `claudine/cli/src/commands/wrap/composition/target.rs`
+  - `claudine/cli/src/commands/wrap/composition/tests.rs`
+  - `claudine/cli/src/commands/wrap/env/mod.rs`
+  - `claudine/cli/src/commands/wrap/exec/mod.rs`
+  - `claudine/cli/src/commands/wrap/exec/spawn/semantic.rs`
+  - `claudine/cli/src/commands/wrap/exec/task_frame_fixtures.rs`
+  - `claudine/cli/src/commands/wrap/exec/termination/coordinator.rs`
+  - `claudine/cli/src/commands/wrap/exec/termination/coordinator/tests.rs`
+  - `claudine/cli/src/commands/wrap/exec/termination/handle.rs`
+  - `claudine/cli/src/commands/wrap/exec/termination/mod.rs`
+  - `claudine/cli/src/commands/wrap/exec/termination/windows.rs`
+  - `claudine/cli/src/commands/wrap/exec/watchdog/spawn.rs`
+  - `claudine/cli/src/commands/wrap/exec/wiring/mod.rs`
+  - `claudine/cli/src/commands/wrap/exec/wiring/session.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/attempt.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/loop_control.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/loop_control/lifecycle_events.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/loop_control/proxy.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/proxy.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_evaluation.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/prompt.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/types.rs`
+  - `claudine/cli/src/commands/wrap/live_semantic_sink/mod.rs`
+  - `claudine/cli/src/commands/wrap/live_semantic_sink/tests/golden_stderr.rs`
+  - `claudine/cli/src/commands/wrap/mod.rs`
+  - `claudine/cli/src/commands/wrap/overlay.rs`
+  - `claudine/cli/src/commands/wrap/runaway_guard.rs`
+  - `claudine/cli/src/commands/wrap/sequence/iterate.rs`
+  - `claudine/cli/src/commands/wrap/sequence/jit.rs`
+  - `claudine/cli/src/commands/wrap/sequence/jit/tests.rs`
+  - `claudine/cli/src/commands/wrap/sequence/mod.rs`
+  - `claudine/cli/src/commands/wrap/sequence/phase1c.rs`
+  - `claudine/cli/src/commands/wrap/sequence/resolve.rs`
+  - `claudine/cli/src/commands/wrap/sequence/task_frames.rs`
+  - `claudine/cli/src/commands/wrap/sequence/task_run.rs`
+  - `claudine/cli/src/commands/wrap/sequence/tests.rs`
+  - `claudine/cli/src/commands/wrap/session_report/tests.rs`
+  - `claudine/cli/src/commands/wrap/stream_io.rs`
+  - `claudine/cli/src/commands/wrap/wrapper_exec.rs`
+  - `claudine/cli/src/commands/wrap/wrapper_mcp.rs`
+  - `claudine/cli/src/commands/wrap/wrapper_stages.rs`
+  - `claudine/cli/src/completion/composition/magic_at.rs`
+  - `claudine/cli/src/completion/composition/mod.rs`
+  - `claudine/cli/src/completion/composition/tests.rs`
+  - `claudine/cli/src/completion/scopes.rs`
+  - `claudine/cli/src/completion/scopes/tests.rs`
+  - `claudine/cli/src/log.rs`
+  - `claudine/cli/src/main.rs`
+  - `claudine/cli/src/output/error_walker.rs`
+  - `claudine/cli/src/output/error_walker/tests.rs`
+  - `claudine/cli/src/perf/mod.rs`
+  - `claudine/cli/src/perf/report.rs`
+  - `claudine/cli/src/perf/tests/perf_tree.rs`
+  - `claudine/cli/src/perf/tests/report.rs`
+  - `claudine/cli/src/perf/tree.rs`
+  - `claudine/cli/tests/characterization_error_routes.rs`
+  - `claudine/cli/tests/common/mod.rs`
+  - `claudine/cli/tests/common/pty.rs`
+  - `claudine/cli/tests/completion_compose.rs`
+  - `claudine/cli/tests/completion_resolution_round_trip.rs`
+  - `claudine/cli/tests/compose_cli.rs`
+  - `claudine/cli/tests/composition_outputs.rs`
+  - `claudine/cli/tests/diagnostic_discovery.rs`
+  - `claudine/cli/tests/effective_diagnostic_render.rs`
+  - `claudine/cli/tests/error_guards.rs`
+  - `claudine/cli/tests/error_guards/boxed-diagnostic-allow.toml`
+  - `claudine/cli/tests/error_guards/source_scan.rs`
+  - `claudine/cli/tests/error_guards/transport-allow.toml`
+  - `claudine/cli/tests/inline_compose_cli.rs`
+  - `claudine/cli/tests/level2_auto_complete_operation_file.rs`
+  - `claudine/cli/tests/level2_context_capture.rs`
+  - `claudine/cli/tests/level2_dry_run_approval_capture.rs`
+  - `claudine/cli/tests/level2_dry_run_metadata_capture.rs`
+  - `claudine/cli/tests/level2_file_resolution_capture.rs`
+  - `claudine/cli/tests/level2_inline_compose_mismatch_capture.rs`
+  - `claudine/cli/tests/level2_interrupt_feedback_capture.rs`
+  - `claudine/cli/tests/level2_invalid_file_reference_capture.rs`
+  - `claudine/cli/tests/level2_lifecycle_control.rs`
+  - `claudine/cli/tests/level2_lifecycle_dispatch.rs`
+  - `claudine/cli/tests/level2_malformed_frontmatter_capture.rs`
+  - `claudine/cli/tests/level2_perf_capture.rs`
+  - `claudine/cli/tests/level2_prompt_reporting_capture.rs`
+  - `claudine/cli/tests/level2_removed_validation_key_capture.rs`
+  - `claudine/cli/tests/level2_schema_parse_capture.rs`
+  - `claudine/cli/tests/level2_schema_prompt_pty.rs`
+  - `claudine/cli/tests/level2_sequence_overlay_pty.rs`
+  - `claudine/cli/tests/level2_sequence_task_stream_capture.rs`
+  - `claudine/cli/tests/level2_stalled_generation_capture.rs`
+  - `claudine/cli/tests/level2_typed_error_render_capture.rs`
+  - `claudine/cli/tests/level2_windows_sequence_ctrl_c.rs`
+  - `claudine/cli/tests/level3_auto_complete_chooser.rs`
+  - `claudine/cli/tests/level3_auto_complete_operation_file.rs`
+  - `claudine/cli/tests/level3_linux_sequence_ctrl_c.rs`
+  - `claudine/cli/tests/level3_sequence_ctrl_c.rs`
+  - `claudine/cli/tests/level3_windows_sequence_ctrl_c.rs`
+  - `claudine/cli/tests/sequence_cli.rs`
+  - `claudine/cli/tests/sequence_errors_cli.rs`
+  - `claudine/cli/tests/sequence_groups.rs`
+  - `claudine/cli/tests/sequence_jit.rs`
+  - `claudine/cli/tests/sequence_overlay_pty.rs`
+  - `claudine/cli/tests/sequence_perf.rs`
+  - `claudine/cli/tests/sequence_sources_cli.rs`
+  - `claudine/cli/tests/test_placement.rs`
+  - `claudine/cli/tests/wrap_basics.rs`
+  - `claudine/cli/tests/wrap_compose_agent.rs`
+  - `claudine/cli/tests/wrap_compose_validation.rs`
+  - `claudine/contract/src/adapter.rs`
+  - `claudine/docs/providers/dispatch-inventory.json`
+  - `claudine/docs/rendezvous/local-ipc.md`
+  - `claudine/docs/topics/agentic-research-as-a-typed-knowledge-pipeline.md`
+  - `claudine/docs/topics/completions/shell-completions.md`
+  - `claudine/docs/topics/composition.md`
+  - `claudine/docs/topics/error-architecture.md`
+  - `claudine/docs/topics/fleet-research-in-claudine.md`
+  - `claudine/docs/topics/flow-control/sequences.md`
+  - `claudine/docs/topics/lifecycle.md`
+  - `claudine/docs/topics/stream-parsing.md`
+  - `claudine/docs/topics/system-prompt.md`
+  - `claudine/features/2026-07-11-sequence-plus/gate-run-2026-07-18.md`
+  - `claudine/features/2026-07-11-sequence-plus/gate-run-2026-07-19-l3-linux.md`
+  - `claudine/features/2026-07-11-sequence-plus/gate-run-2026-07-19-linux.md`
+  - `claudine/features/2026-07-11-sequence-plus/gate-run-2026-07-19-windows.md`
+  - `claudine/features/2026-07-11-sequence-plus/gate-run-2026-07-21-windows.md`
+  - `claudine/features/2026-07-11-sequence-plus/l3-ctrl-c-runbook.md`
+  - `claudine/features/2026-07-11-sequence-plus/phase-1-baseline.md`
+  - `claudine/features/2026-07-11-sequence-plus/plan.md`
+  - `claudine/features/2026-07-11-sequence-plus/review-1.md`
+  - `claudine/features/2026-07-11-sequence-plus/review-10.md`
+  - `claudine/features/2026-07-11-sequence-plus/review-11.md`
+  - `claudine/features/2026-07-11-sequence-plus/review-12.md`
+  - `claudine/features/2026-07-11-sequence-plus/review-2.md`
+  - `claudine/features/2026-07-11-sequence-plus/review-3.md`
+  - `claudine/features/2026-07-11-sequence-plus/review-4.md`
+  - `claudine/features/2026-07-11-sequence-plus/review-5.md`
+  - `claudine/features/2026-07-11-sequence-plus/review-6.md`
+  - `claudine/features/2026-07-11-sequence-plus/review-7.md`
+  - `claudine/features/2026-07-11-sequence-plus/review-8.md`
+  - `claudine/features/2026-07-11-sequence-plus/review-9.md`
+  - `claudine/features/2026-07-11-sequence-plus/spec.md`
+  - `claudine/features/2026-07-11-sequence-plus/validation-matrix.md`
+  - `claudine/features/2026-07-13-error-propogation/burndown-triage.md`
+  - `claudine/features/2026-07-13-error-propogation/decisions.md`
+  - `claudine/features/2026-07-13-error-propogation/inventory.md`
+  - `claudine/features/2026-07-13-error-propogation/plan.md`
+  - `claudine/features/2026-07-13-error-propogation/review-1.md`
+  - `claudine/features/2026-07-13-error-propogation/review-2.md`
+  - `claudine/features/2026-07-13-error-propogation/review-3.md`
+  - `claudine/features/2026-07-13-error-propogation/review-4.md`
+  - `claudine/features/2026-07-13-error-propogation/review-5.md`
+  - `claudine/features/2026-07-13-error-propogation/review-6.md`
+  - `claudine/features/2026-07-13-error-propogation/review-7.md`
+  - `claudine/features/2026-07-13-error-propogation/review-8.md`
+  - `claudine/features/2026-07-13-error-propogation/review-9.md`
+  - `claudine/features/2026-07-13-error-propogation/spec.md`
+  - `claudine/features/2026-07-13-file-resolution/decisions.md`
+  - `claudine/features/2026-07-13-file-resolution/inventory.md`
+  - `claudine/features/2026-07-13-file-resolution/plan.md`
+  - `claudine/features/2026-07-13-file-resolution/review-1.md`
+  - `claudine/features/2026-07-13-file-resolution/review-2.md`
+  - `claudine/features/2026-07-13-file-resolution/review-3.md`
+  - `claudine/features/2026-07-13-file-resolution/review-4.md`
+  - `claudine/features/2026-07-13-file-resolution/review-5.md`
+  - `claudine/features/2026-07-13-file-resolution/review-6.md`
+  - `claudine/features/2026-07-13-file-resolution/review-7.md`
+  - `claudine/features/2026-07-13-file-resolution/review-8.md`
+  - `claudine/features/2026-07-13-file-resolution/review-9.md`
+  - `claudine/features/2026-07-13-file-resolution/spec.md`
+  - `claudine/features/_completed/2026-06-14-auto-complete/plan.md`
+  - `claudine/features/_completed/2026-06-14-auto-complete/review-3.md`
+  - `claudine/features/_completed/2026-06-14-auto-complete/review-5.md`
+  - `claudine/features/_completed/2026-06-14-auto-complete/spec.md`
+  - `claudine/fixes/_unscheduled/1-windows-compose-interrupt-guard/spec.md`
+  - `claudine/gen/tests/drift.rs`
+  - `claudine/gen/tests/fixtures/generated-artifact-baseline.json`
+  - `claudine/justfile`
+  - `claudine/lib/Cargo.toml`
+  - `claudine/lib/benches/runtime_hot_paths.rs`
+  - `claudine/lib/src/actions/bash_executor.rs`
+  - `claudine/lib/src/composition/closure.rs`
+  - `claudine/lib/src/composition/error/mod.rs`
+  - `claudine/lib/src/composition/error/render/lifecycle.rs`
+  - `claudine/lib/src/composition/error/render/mod.rs`
+  - `claudine/lib/src/composition/error/tests.rs`
+  - `claudine/lib/src/composition/interpolation_conformance.rs`
+  - `claudine/lib/src/composition/lifecycle/action_shape.rs`
+  - `claudine/lib/src/composition/lifecycle/context.rs`
+  - `claudine/lib/src/composition/lifecycle/context/tests.rs`
+  - `claudine/lib/src/composition/lifecycle/control.rs`
+  - `claudine/lib/src/composition/lifecycle/control/tests.rs`
+  - `claudine/lib/src/composition/lifecycle/executor.rs`
+  - `claudine/lib/src/composition/lifecycle/executor/tests/action_dispatch.rs`
+  - `claudine/lib/src/composition/lifecycle/executor/tests/conditions_control.rs`
+  - `claudine/lib/src/composition/lifecycle/executor/tests/event_time_interpolation.rs`
+  - `claudine/lib/src/composition/lifecycle/executor/tests/filesystem_lookup.rs`
+  - `claudine/lib/src/composition/lifecycle/executor/tests/mod.rs`
+  - `claudine/lib/src/composition/lifecycle/executor/tests/mutation_visibility.rs`
+  - `claudine/lib/src/composition/lifecycle/executor/tests/runtime_set.rs`
+  - `claudine/lib/src/composition/lifecycle/mod.rs`
+  - `claudine/lib/src/composition/lifecycle/parse.rs`
+  - `claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs`
+  - `claudine/lib/src/composition/lifecycle/tests/guard_runtime.rs`
+  - `claudine/lib/src/composition/looping/actions.rs`
+  - `claudine/lib/src/composition/looping/actions/tests.rs`
+  - `claudine/lib/src/composition/looping/engine.rs`
+  - `claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs`
+  - `claudine/lib/src/composition/looping/expression.rs`
+  - `claudine/lib/src/composition/looping/expression/tests/resolution_context.rs`
+  - `claudine/lib/src/composition/mod.rs`
+  - `claudine/lib/src/composition/preflight.rs`
+  - `claudine/lib/src/composition/preflight/tests.rs`
+  - `claudine/lib/src/composition/prepare.rs`
+  - `claudine/lib/src/composition/prepare/tests.rs`
+  - `claudine/lib/src/composition/resolve.rs`
+  - `claudine/lib/src/composition/resolve/tests.rs`
+  - `claudine/lib/src/composition/runtime_state.rs`
+  - `claudine/lib/src/composition/runtime_state/tests.rs`
+  - `claudine/lib/src/composition/schema/classify.rs`
+  - `claudine/lib/src/composition/schema/tests.rs`
+  - `claudine/lib/src/composition/sequence.rs`
+  - `claudine/lib/src/composition/sequence/data.rs`
+  - `claudine/lib/src/composition/sequence/expr.rs`
+  - `claudine/lib/src/composition/sequence/formal.rs`
+  - `claudine/lib/src/composition/sequence/grammar.rs`
+  - `claudine/lib/src/composition/sequence/mod.rs`
+  - `claudine/lib/src/composition/sequence/model.rs`
+  - `claudine/lib/src/composition/sequence/normalize.rs`
+  - `claudine/lib/src/composition/sequence/preflight/mod.rs`
+  - `claudine/lib/src/composition/sequence/preflight/shape.rs`
+  - `claudine/lib/src/composition/sequence/preflight/tests.rs`
+  - `claudine/lib/src/composition/sequence/reserved.rs`
+  - `claudine/lib/src/composition/sequence/source.rs`
+  - `claudine/lib/src/composition/sequence/task/group.rs`
+  - `claudine/lib/src/composition/sequence/task/mod.rs`
+  - `claudine/lib/src/composition/sequence/task/shell.rs`
+  - `claudine/lib/src/composition/sequence/task/shell/tests.rs`
+  - `claudine/lib/src/composition/sequence/task/tests.rs`
+  - `claudine/lib/src/composition/sequence/tests.rs`
+  - `claudine/lib/src/composition/types.rs`
+  - `claudine/lib/src/composition/types/tests.rs`
+  - `claudine/lib/src/config/atomic.rs`
+  - `claudine/lib/src/diagnostics/discovery.rs`
+  - `claudine/lib/src/diagnostics/discovery/tests.rs`
+  - `claudine/lib/src/diagnostics/facets.rs`
+  - `claudine/lib/src/diagnostics/mod.rs`
+  - `claudine/lib/src/diagnostics/registry.rs`
+  - `claudine/lib/src/diagnostics/restored.rs`
+  - `claudine/lib/src/diagnostics/restored/tests.rs`
+  - `claudine/lib/src/diagnostics/snapshot.rs`
+  - `claudine/lib/src/diagnostics/snapshot/tests.rs`
+  - `claudine/lib/src/dispatch/deps.rs`
+  - `claudine/lib/src/dispatch/loader.rs`
+  - `claudine/lib/src/dispatch/runner/mappers.rs`
+  - `claudine/lib/src/error.rs`
+  - `claudine/lib/src/harness/audit.rs`
+  - `claudine/lib/src/harness/error.rs`
+  - `claudine/lib/src/harness/error/tests.rs`
+  - `claudine/lib/src/harness/mod.rs`
+  - `claudine/lib/src/harness/resolve.rs`
+  - `claudine/lib/src/harness/resolve/tests.rs`
+  - `claudine/lib/src/harness/runtime.rs`
+  - `claudine/lib/src/harness/shell.rs`
+  - `claudine/lib/src/linking/hashing.rs`
+  - `claudine/lib/src/mcp/catalog.rs`
+  - `claudine/lib/src/mcp/defaults.rs`
+  - `claudine/lib/src/mcp/export.rs`
+  - `claudine/lib/src/mcp/import.rs`
+  - `claudine/lib/src/mcp/import/tests.rs`
+  - `claudine/lib/src/mcp/inject.rs`
+  - `claudine/lib/src/mcp/state.rs`
+  - `claudine/lib/src/messaging/mod.rs`
+  - `claudine/lib/src/messaging/send.rs`
+  - `claudine/lib/src/messaging/send/tests.rs`
+  - `claudine/lib/src/permissions/mutation.rs`
+  - `claudine/lib/src/permissions/providers/claude.rs`
+  - `claudine/lib/src/permissions/providers/codex.rs`
+  - `claudine/lib/src/permissions/providers/gemini.rs`
+  - `claudine/lib/src/permissions/providers/goose.rs`
+  - `claudine/lib/src/permissions/providers/kimi.rs`
+  - `claudine/lib/src/permissions/providers/opencode.rs`
+  - `claudine/lib/src/permissions/providers/qwen.rs`
+  - `claudine/lib/src/protect/path.rs`
+  - `claudine/lib/src/protect/service/tests.rs`
+  - `claudine/lib/src/render/mod.rs`
+  - `claudine/lib/src/render/task_stream.rs`
+  - `claudine/lib/src/render/task_stream/tests.rs`
+  - `claudine/lib/src/reporting/error.rs`
+  - `claudine/lib/src/reporting/error/tests.rs`
+  - `claudine/lib/src/reporting/ingest.rs`
+  - `claudine/lib/src/reporting/mod.rs`
+  - `claudine/lib/src/reporting/types.rs`
+  - `claudine/lib/src/runaway/config.rs`
+  - `claudine/lib/src/signals/projection_equivalence_tests.rs`
+  - `claudine/lib/src/stream/mod.rs`
+  - `claudine/lib/src/stream/parser.rs`
+  - `claudine/lib/src/stream/providers/antigravity.rs`
+  - `claudine/lib/src/stream/providers/claude.rs`
+  - `claudine/lib/src/stream/providers/claude/tests.rs`
+  - `claudine/lib/src/stream/providers/codex.rs`
+  - `claudine/lib/src/stream/providers/codex/tests.rs`
+  - `claudine/lib/src/stream/providers/gemini.rs`
+  - `claudine/lib/src/stream/providers/gemini/tests.rs`
+  - `claudine/lib/src/stream/providers/kimi.rs`
+  - `claudine/lib/src/stream/providers/kimi/tests.rs`
+  - `claudine/lib/src/stream/providers/opencode.rs`
+  - `claudine/lib/src/stream/providers/opencode/tests.rs`
+  - `claudine/lib/src/stream/providers/pi.rs`
+  - `claudine/lib/src/stream/providers/pi/tests.rs`
+  - `claudine/lib/src/stream/providers/qwen.rs`
+  - `claudine/lib/src/stream/reporting.rs`
+  - `claudine/lib/src/system_prompt/change_state.rs`
+  - `claudine/lib/src/system_prompt/context.rs`
+  - `claudine/lib/src/system_prompt/resolve.rs`
+  - `claudine/lib/src/system_prompt/resolve/tests.rs`
+  - `claudine/lib/tests/agent_errors_fleet.rs`
+  - `claudine/lib/tests/boundary_lint.rs`
+  - `claudine/lib/tests/diagnostic_detail_conformance.rs`
+  - `claudine/lib/tests/kimi_wire.rs`
+  - `claudine/lib/tests/semantic_fidelity.rs`
+  - `claudine/rendezvous/daemon/src/local_transport/windows.rs`
+  - `claudine/reviews/_completed/2026-07-14-module-assessment/generated-artifact-baseline.json`
+
+- **Darkmatter:**
+  - `darkmatter/docs/inline/fm-interpolation.md`
+  - `darkmatter/docs/inline/schema-validation.md`
+  - `darkmatter/docs/topics/context-variables.md`
+  - `darkmatter/docs/topics/darkmatter-expressions.md`
+  - `darkmatter/docs/topics/magic-paths.md`
+  - `darkmatter/docs/topics/schema-definition.md`
+  - `darkmatter/docs/transclusion/block-transclusion.md`
+  - `darkmatter/docs/transclusion/transclusion-design.md`
+  - `darkmatter/lib/src/effects/catalog.rs`
+  - `darkmatter/lib/src/effects/error.rs`
+  - `darkmatter/lib/src/effects/verbs.rs`
+  - `darkmatter/lib/src/markdown/compose/cache/hashing.rs`
+  - `darkmatter/lib/src/markdown/compose/context/effective_state.rs`
+  - `darkmatter/lib/src/markdown/compose/context/options.rs`
+  - `darkmatter/lib/src/markdown/compose/expression/error.rs`
+  - `darkmatter/lib/src/markdown/compose/expression/functions/mod.rs`
+  - `darkmatter/lib/src/markdown/compose/expression/mod.rs`
+  - `darkmatter/lib/src/markdown/compose/expression/path_projection.rs`
+  - `darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs`
+  - `darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs`
+  - `darkmatter/lib/src/markdown/compose/link_normalization.rs`
+  - `darkmatter/lib/src/markdown/compose/link_resolve.rs`
+  - `darkmatter/lib/src/markdown/compose/mod.rs`
+  - `darkmatter/lib/src/markdown/compose/pipeline/mod.rs`
+  - `darkmatter/lib/src/markdown/compose/preflight/collect.rs`
+  - `darkmatter/lib/src/markdown/compose/remote.rs`
+  - `darkmatter/lib/src/markdown/compose/schema_validation.rs`
+  - `darkmatter/lib/src/markdown/compose/tests/frontmatter.rs`
+  - `darkmatter/lib/src/markdown/compose/tests/rendering.rs`
+  - `darkmatter/lib/src/markdown/compose/tests/schema.rs`
+  - `darkmatter/lib/src/markdown/compose/tests/transclusion.rs`
+  - `darkmatter/lib/src/markdown/compose/transclusion/engine.rs`
+  - `darkmatter/lib/src/markdown/compose/transclusion/mod.rs`
+  - `darkmatter/lib/src/markdown/compose/transclusion/resolver.rs`
+  - `darkmatter/lib/src/markdown/compose/util.rs`
+  - `darkmatter/lib/src/markdown/reference/graph.rs`
+  - `darkmatter/lib/src/markdown/reference/mod.rs`
+  - `darkmatter/lib/src/markdown/reference/validate.rs`
+  - `darkmatter/lib/src/markdown/schemas/detect.rs`
+  - `darkmatter/lib/src/markdown/schemas/format.rs`
+  - `darkmatter/lib/src/markdown/schemas/mod.rs`
+  - `darkmatter/lib/src/markdown/schemas/resolve.rs`
+  - `darkmatter/lib/src/markdown/schemas/rewrite.rs`
+  - `darkmatter/lib/src/markdown/schemas/validate.rs`
+  - `darkmatter/lib/tests/reference_integration.rs`
+
+- **Shared repository support:**
+  - `just/devops.just`
+  - `prompts/_implement/implement-review-findings-plan.md`
+  - `prompts/_implement/implement-suggestions.md`
+  - `prompts/_implement/review-findings-plan.md`
+  - `prompts/faster-builds-and-tests.md`
+  - `scripts/check-error-transport.allow`
+  - `scripts/check-error-transport.sh`
+  - `scripts/check-lifecycle-doc-facets.sh`

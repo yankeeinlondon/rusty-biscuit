@@ -308,13 +308,13 @@ preserved".
 Strictly last. Exercises the full feature across real terminals and
 locks in the non-functional acceptance criteria.
 
-- [x] **5.1 L2/L3 terminal-harness coverage.** Using the
-  `biscuit-test-harness`, add L2 (and L3 where the harness supports OS
-  keyboard injection) tests asserting: the type-driven chooser
-  (`ChooseOne` for `file`/single-file-arg, `ChooseMany` for `file[]`),
-  and the `SplitPane` `SplitDirection::Auto` layout (detail right when
-  wider-than-tall, detail above when taller-than-wide). Covers acceptance
-  "Type-driven chooser + layout".
+- [x] **5.1 Terminal-harness coverage.** Using the
+  `biscuit-test-harness`, add L2 tests asserting the complete interaction
+  matrix and one L3 smoke test for the OS-to-WezTerm Enter path. Assert the
+  type-driven chooser (`ChooseOne` for `file`/single-file-arg, `ChooseMany`
+  for `file[]`), and the `SplitPane` `SplitDirection::Auto` layout (detail
+  right when wider-than-tall, detail above when taller-than-wide). Covers
+  acceptance "Type-driven chooser + layout".
 
 - [x] **5.2 Latency assertion.** Extend/reuse the `completion_perf.rs`
   fixture to add an autocomplete (ENTER-path) latency scenario and assert
@@ -357,7 +357,8 @@ locks in the non-functional acceptance criteria.
 - All three ENTER failure modes observable (no matches / over-cap
   "narrow your query" / non-TTY).
 - Type-driven chooser (`ChooseOne` vs `ChooseMany`) + `SplitPane`
-  `SplitDirection::Auto` verified via L2/L3 harness.
+  `SplitDirection::Auto` and interaction behavior verified via L2; one L3
+  smoke test verifies OS Enter delivery through WezTerm.
 - Bare `file`/`file[]` resolves to the default glob.
 - Two presentations: single match → lightweight `Prose` dialog ending in
   `Use this file? (Y/n)`; multiple matches → two-pane chooser+detail.

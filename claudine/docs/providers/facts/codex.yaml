@@ -314,3 +314,7 @@ supports_interactive_inline_closure: true
 model_required_in_non_tty: false
 platform_kind: vendor_platform
 unmapped_native_events: []
+# Ordered error-classification vocabulary (Phase A seed, transcribed verbatim
+# from lib/src/stream/providers/codex.rs::ERROR_KEYWORDS). Sequence order IS
+# the cascade order (first substring hit wins). The repeated api_remote bucket
+# is the "late ApiRemote" second pass after Interrupted.

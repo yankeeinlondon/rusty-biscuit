@@ -8,7 +8,10 @@
 
 use std::path::Path;
 
-use crate::{Result, SniffError};
+use crate::{
+    Result, SniffError,
+    performance::{self, counters},
+};
 
 /// Trust mapping that refuses to open untrusted repositories at any trust level.
 fn trusted_options() -> gix::sec::trust::Mapping<gix::open::Options> {
@@ -31,6 +34,9 @@ fn trusted_options() -> gix::sec::trust::Mapping<gix::open::Options> {
 /// reported as repository absence.
 pub(crate) fn trusted_discover(path: &Path) -> Result<Option<gix::Repository>> {
     use gix::discover::upwards::Error as Up;
+    // Counts the attempt, not the success: an exhausted upward search still
+    // walked every parent directory, which is the work being measured.
+    performance::increment_counter(counters::GIT_DISCOVERIES, 1);
     match gix::ThreadSafeRepository::discover_opts(path, Default::default(), trusted_options()) {
         Ok(repo) => Ok(Some(repo.to_thread_local())),
         // Upward-search exhaustion is the only "not a repository" outcome.
@@ -66,6 +72,7 @@ pub(crate) fn configure_cache(repo: &mut gix::Repository) {
 /// I/O, and corruption failures.
 #[allow(dead_code)] // Used by worktree/known-path opens ported in later phases.
 pub(crate) fn trusted_open(path: &Path) -> Result<gix::Repository> {
+    performance::increment_counter(counters::GIT_OPENS, 1);
     let opts = gix::open::Options::default().bail_if_untrusted(true);
     gix::open_opts(path, opts).map_err(|e| SniffError::git("open", e))
 }

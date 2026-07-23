@@ -338,7 +338,7 @@ mod tests {
         #[cfg(target_os = "linux")]
         {
             let paths = get_terminal_config_paths(&TerminalApp::Konsole);
-            assert!(paths.len() >= 1, "Konsole should have at least one path");
+            assert!(!paths.is_empty(), "Konsole should have at least one path");
             // Should include the konsole directory
             assert!(
                 paths

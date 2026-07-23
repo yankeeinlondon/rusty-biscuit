@@ -1,5 +1,9 @@
 # Tauri build-time generated schemas/metadata
 /src-tauri/gen/
 
+# The Tauri context embeds this shipped frontend stub at compile time.
+!/dist/
+!/dist/index.html
+
 # Frontend tooling (added when the React/Vite frontend lands)
 node_modules/

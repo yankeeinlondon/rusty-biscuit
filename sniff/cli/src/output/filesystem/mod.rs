@@ -344,13 +344,55 @@ fn format_commit_line(
     }
 }
 
+/// Format the commit header for the `hash` subcommand.
+///
+/// Includes the SHA, conventional commit type/scope, timestamp, and author,
+/// but not the commit description. The SHA is rendered as an OSC8 hyperlink
+/// when `commit_url` is `Some`.
+fn format_commit_hash_header(
+    commit: &sniff::filesystem::git::CommitInfo,
+    commit_url: Option<&str>,
+) -> String {
+    let cc = ConventionalCommit::parse(&commit.message);
+    let (date_str, time_str, use_on) = format_commit_datetime(&commit.timestamp);
+    let short_sha = &commit.sha[0..7];
+    let sha_display = match commit_url {
+        Some(url) => format!("<a href=\"{url}\"><b>{short_sha}</b></a>"),
+        None => format!("<dim><i>{short_sha}</i></dim>"),
+    };
+    let date_prefix = if use_on { "<i>on</i> " } else { "" };
+    let refs_part = format_ref_decorations(&commit.refs);
+    let user_part = format!(
+        " <dim><i>by </i></dim><b><indigo-500>{}</indigo-500></b>",
+        commit.author
+    );
+
+    if let Some(ref op) = cc.operation {
+        let scope_part = cc
+            .scope
+            .as_ref()
+            .map(|s| format!("(<dim>{}</dim>)", s))
+            .unwrap_or_default();
+        format!(
+            "[{}] <b><yellow>{}</yellow></b>{} <i>at</i> <blue><b>{}</b></blue> {}<blue>{}</blue>{}{}",
+            sha_display, op, scope_part, time_str, date_prefix, date_str, refs_part, user_part,
+        )
+    } else {
+        // Non-conventional commit
+        format!(
+            "[{}] <i>at</i> <blue><b>{}</b></blue> {}<blue><b>{}</b></blue>{}{}",
+            sha_display, time_str, date_prefix, date_str, refs_part, user_part,
+        )
+    }
+}
+
 /// Render detailed information for a single commit looked up by `hash` subcommand.
 ///
-/// Shows the commit as a one-liner followed by a list of files changed.
+/// Shows the commit header, description, body bullet points, and files changed.
 pub fn render_hash_section(
     commit: &sniff::filesystem::git::CommitInfo,
     files: &[(std::path::PathBuf, sniff::filesystem::git::DeltaKind)],
-    verbose: u8,
+    _verbose: u8,
     commit_url: Option<&str>,
 ) -> String {
     use sniff::filesystem::git::DeltaKind;
@@ -362,10 +404,29 @@ pub fn render_hash_section(
     let status_title = Prose::new("<b><u>Commit</u></b>");
     writeln!(out, "\n{}\n", status_title.render(&terminal)).unwrap();
 
-    let commit_line = format_commit_line(commit, verbose, commit_url);
-    let rendered = Prose::new(commit_line.as_str()).render(&terminal);
-    let list = UnorderedList::new(vec![rendered]);
-    writeln!(out, "{}", list.render(&terminal)).unwrap();
+    // Header line: [sha] type(scope) at time date by author
+    let header = format_commit_hash_header(commit, commit_url);
+    writeln!(out, "{}", Prose::new(header.as_str()).render(&terminal)).unwrap();
+
+    // First line of the commit message (description)
+    let cc = ConventionalCommit::parse(&commit.message);
+    let description = cc.description.trim();
+    if !description.is_empty() {
+        writeln!(out).unwrap();
+        writeln!(out, "{}", Prose::new(description).render(&terminal)).unwrap();
+    }
+
+    // === Body bullet points (commit message body) ===
+    let (_, bullet_points) = sniff::filesystem::git::parse_commit_message(&commit.message);
+    if !bullet_points.is_empty() {
+        writeln!(out).unwrap();
+        let items: Vec<String> = bullet_points
+            .iter()
+            .map(|bp| Prose::new(bp.as_str()).render(&terminal))
+            .collect();
+        let list = UnorderedList::new(items).with_bullet("  - ");
+        writeln!(out, "{}", list.render(&terminal)).unwrap();
+    }
 
     // === Files Section ===
     if files.is_empty() {
@@ -373,7 +434,7 @@ pub fn render_hash_section(
     }
 
     let files_title = Prose::new("<b><u>Files changed</u></b>");
-    writeln!(out, "{}\n", files_title.render(&terminal)).unwrap();
+    writeln!(out, "\n{}\n", files_title.render(&terminal)).unwrap();
 
     let file_items: Vec<String> = files
         .iter()
@@ -382,13 +443,17 @@ pub fn render_hash_section(
             let (dir, name) = split_path(&path_str);
             let dir_part = if dir.is_empty() { String::new() } else { dir };
             match kind {
-                DeltaKind::Added => format!("<lime>{}: {}<b>{}</b></lime>", kind, dir_part, name),
-                DeltaKind::Modified => {
-                    format!("<yellow>{}: {}<b>{}</b></yellow>", kind, dir_part, name)
+                DeltaKind::Added => {
+                    format!("<lime><i>{}</i></lime> {}<b>{}</b>", kind, dir_part, name)
                 }
-                DeltaKind::Deleted => format!("<red>{}: {}<b>{}</b></red>", kind, dir_part, name),
+                DeltaKind::Modified => {
+                    format!("<yellow><i>{}</i></yellow> {}<b>{}</b>", kind, dir_part, name)
+                }
+                DeltaKind::Deleted => {
+                    format!("<red><i>{}</i></red> {}<b>{}</b>", kind, dir_part, name)
+                }
                 DeltaKind::Renamed | DeltaKind::Copied => {
-                    format!("<cyan>{}: {}<b>{}</b></cyan>", kind, dir_part, name)
+                    format!("<cyan><i>{}</i></cyan> {}<b>{}</b>", kind, dir_part, name)
                 }
             }
         })
@@ -3251,6 +3316,65 @@ mod tests {
                 &[MonorepoStandard::Nx, MonorepoStandard::Lerna],
             );
             assert_eq!(label, "Nx + Lerna (using pnpm workspaces)");
+        }
+    }
+
+    mod hash_section {
+        use super::*;
+
+        fn commit_with_message(message: &str) -> CommitInfo {
+            CommitInfo {
+                sha: "1234567890abcdef".to_string(),
+                message: message.to_string(),
+                author: "Test User".to_string(),
+                timestamp: Utc::now(),
+                remotes: None,
+                refs: vec![],
+            }
+        }
+
+        #[test]
+        fn renders_body_bullet_points() {
+            let msg = "feat: add thing\n\n- first bullet\n- second bullet";
+            let commit = commit_with_message(msg);
+            let out = render_hash_section(&commit, &[], 0, None);
+            assert!(
+                out.contains("first bullet"),
+                "expected first bullet in output:\n{out}"
+            );
+            assert!(
+                out.contains("second bullet"),
+                "expected second bullet in output:\n{out}"
+            );
+        }
+
+        #[test]
+        fn renders_commit_header_with_author() {
+            let msg = "feat: add thing\n\n- first bullet";
+            let commit = commit_with_message(msg);
+            let out = render_hash_section(&commit, &[], 0, None);
+            assert!(
+                out.contains("Test User"),
+                "expected author attribution in output:\n{out}"
+            );
+            assert!(
+                out.contains("add thing"),
+                "expected subject in output:\n{out}"
+            );
+            assert!(
+                out.contains("first bullet"),
+                "expected first bullet in output:\n{out}"
+            );
+        }
+
+        #[test]
+        fn omits_bullet_section_when_no_body() {
+            let commit = commit_with_message("feat: add thing");
+            let out = render_hash_section(&commit, &[], 0, None);
+            assert!(
+                out.contains("add thing"),
+                "expected subject in output:\n{out}"
+            );
         }
     }
 }

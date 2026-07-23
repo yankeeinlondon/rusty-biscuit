@@ -5,8 +5,6 @@ use std::path::Path;
 use tempfile::NamedTempFile;
 use tracing::warn;
 
-use crate::error::Result;
-
 /// Write content to a file atomically using temp file + rename.
 ///
 /// Creates a uniquely-named temp file inside the target's parent directory
@@ -24,12 +22,18 @@ use crate::error::Result;
 ///
 /// ## Errors
 ///
-/// Returns a [`crate::error::ClaudineError`] if the parent directory
-/// cannot be created, the temp file cannot be written or fsync'd, or the
-/// atomic rename fails. No non-atomic fallback is attempted — a failed
-/// rename indicates a cross-device move or filesystem error that a
-/// byte-by-byte copy could leave in an inconsistent state.
-pub fn atomic_write(path: &Path, content: &[u8]) -> Result<()> {
+/// Returns the [`std::io::Error`] raised if the parent directory cannot be
+/// created, the temp file cannot be written or fsync'd, or the atomic rename
+/// fails. No non-atomic fallback is attempted — a failed rename indicates a
+/// cross-device move or filesystem error that a byte-by-byte copy could
+/// leave in an inconsistent state.
+///
+/// The error type is `io::Error` rather than [`crate::error::ClaudineError`]
+/// because every fallible step here *is* an `io::Error`; a wider type would
+/// force every caller wanting the real cause to widen with it. Callers
+/// returning [`crate::error::Result`] convert for free via `?` and
+/// `ClaudineError`'s `#[from] std::io::Error`.
+pub fn atomic_write(path: &Path, content: &[u8]) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)?;
 

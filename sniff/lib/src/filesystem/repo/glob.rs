@@ -8,7 +8,7 @@
 //! Workspace files always use `/` separators, even on Windows. Patterns and
 //! candidate paths are normalized to slash-separated logical paths before
 //! matching, then converted back to native [`PathBuf`]s at the final
-//! `create_package` step.
+//! [`PackageSeed`] step.
 //!
 //! This replaces the former `prefix*`-only expander, which silently missed
 //! deep (`**`), brace (`{a,b}`), and negated (`!`) patterns.
@@ -21,16 +21,17 @@ use ignore::WalkBuilder;
 use tracing::debug;
 
 use crate::filesystem::file_types::should_skip_directory_name;
+use crate::performance;
+use crate::performance::counters;
 
-use super::detection::create_package;
-use super::manifest_index::CargoLockVersions;
+use super::detection::{RepoEvidence, probe_exists, probe_is_dir};
+use super::seed::PackageSeed;
 use super::standard::{GlobDialect, MonorepoStandard, PackageProvenance};
-use super::types::Package;
 
 /// Manifest file names that mark a directory as a package boundary.
 const MANIFEST_FILES: [&str; 4] = ["Cargo.toml", "package.json", "pyproject.toml", "go.mod"];
 
-/// Expand workspace membership `patterns` into [`Package`] values.
+/// Expand workspace membership `patterns` into [`PackageSeed`] values.
 ///
 /// Explicit (glob-free) patterns are resolved by directory existence alone, so
 /// a declared member directory without a manifest is still reported — this
@@ -51,8 +52,8 @@ pub(crate) fn expand_membership_globs(
     dialect: GlobDialect,
     standard: MonorepoStandard,
     provenance: Option<PackageProvenance>,
-    lock_versions: &Option<CargoLockVersions>,
-) -> Vec<Package> {
+    evidence: RepoEvidence<'_>,
+) -> Vec<PackageSeed> {
     let provenance = provenance.unwrap_or_else(|| standard.membership_provenance());
     // BTreeSet dedupes directories matched by overlapping patterns and yields a
     // deterministic order before the (relatively expensive) package build.
@@ -77,7 +78,7 @@ pub(crate) fn expand_membership_globs(
         if !is_glob(&normalized) {
             let native = PathBuf::from(normalized.replace('/', MAIN_SEPARATOR_STR));
             let path = root.join(native);
-            if path.exists() {
+            if probe_exists(&path) {
                 matched.insert(path);
             }
             continue;
@@ -97,7 +98,7 @@ pub(crate) fn expand_membership_globs(
     if !include_globs.is_empty() {
         let include_set = build_globset(&include_globs);
         let exclude_set = build_globset(&exclude_globs);
-        for dir in walk_manifest_dirs(root, &include_globs) {
+        for dir in manifest_dirs(root, &include_globs, evidence) {
             let Ok(relative) = dir.strip_prefix(root) else {
                 continue;
             };
@@ -110,7 +111,7 @@ pub(crate) fn expand_membership_globs(
 
     matched
         .into_iter()
-        .map(|path| create_package(&path, root, standard, provenance, lock_versions))
+        .map(|path| PackageSeed::new(&path, root, standard, provenance))
         .collect()
 }
 
@@ -164,6 +165,32 @@ fn build_globset(patterns: &[String]) -> GlobSet {
     builder.build().unwrap_or_else(|_| GlobSet::empty())
 }
 
+/// Every manifest-bearing directory a glob could match, from observed evidence
+/// when available and from a bounded walk otherwise.
+///
+/// ## Notes
+///
+/// The two sources agree. `walk_manifest_dirs` only enumerates each pattern's
+/// literal-prefix subtree, while the observed set spans the whole observation
+/// root — but a glob always begins with its own literal prefix, so a manifest
+/// directory outside that prefix cannot match it. Filtering by pattern
+/// afterwards is therefore equivalent to bounding the walk beforehand.
+///
+/// The evidence is deliberately the unfiltered `manifest_dirs` rather than the
+/// `ManifestIndex`: the index drops generated and fixture manifests because
+/// they are not discovery boundaries, but membership globs resolve a boundary
+/// by marker presence alone and always have.
+fn manifest_dirs(
+    root: &Path,
+    include_globs: &[String],
+    evidence: RepoEvidence<'_>,
+) -> Vec<PathBuf> {
+    match evidence.manifest_dirs {
+        Some(dirs) => dirs.to_vec(),
+        None => walk_manifest_dirs(root, include_globs),
+    }
+}
+
 /// Walk the bounded subtrees implied by `include_globs` and yield every
 /// manifest-bearing directory.
 ///
@@ -176,9 +203,11 @@ fn walk_manifest_dirs(root: &Path, include_globs: &[String]) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
 
     for walk_root in walk_roots {
-        if !walk_root.is_dir() {
+        if !probe_is_dir(&walk_root) {
             continue;
         }
+        performance::increment_counter(counters::FS_READ_DIRS, 1);
+        performance::increment_counter(counters::REPO_MEMBERSHIP_GLOB_WALKS, 1);
         let walker = WalkBuilder::new(&walk_root)
             .hidden(false)
             .git_ignore(true)
@@ -245,7 +274,9 @@ fn literal_prefix(pattern: &str) -> PathBuf {
 
 /// Whether `dir` contains a recognized package manifest.
 fn dir_has_manifest(dir: &Path) -> bool {
-    MANIFEST_FILES.iter().any(|name| dir.join(name).exists())
+    MANIFEST_FILES
+        .iter()
+        .any(|name| probe_exists(&dir.join(name)))
 }
 
 #[cfg(test)]

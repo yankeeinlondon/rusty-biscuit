@@ -358,3 +358,7 @@ supports_interactive_inline_closure: false
 model_required_in_non_tty: false
 platform_kind: vendor_platform
 unmapped_native_events: []
+# Ordered error-classification vocabulary (Phase A seed, transcribed verbatim
+# from lib/src/stream/providers/claude.rs::ERROR_KEYWORDS). Sequence order IS
+# the cascade order (first substring hit wins). Owned by the dedicated
+# vocabulary loader, not the general mapping registry.

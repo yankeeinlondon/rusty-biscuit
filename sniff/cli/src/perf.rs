@@ -5,17 +5,20 @@
 //! leaf module to break the `commands` → `output` → `commands` cycle.
 
 use sniff::PerformanceReport;
+use sniff::performance::PerformanceCollector;
+use std::sync::Arc;
 
 use crate::output;
 
-/// CLI-level performance timing for commands that bypass the detection pipeline.
+/// Request-scoped CLI performance timing and work collection.
 ///
-/// When `--perf` is active, every command path emits a performance report
-/// before returning. Rich terminal commands emit to stdout; scriptable
-/// text commands (machine-readable output) emit to stderr so stdout stays
-/// clean for shell pipelines.
+/// When `--perf` is active, detection and any later command-specific work can
+/// share one collector and end-to-end clock. Rich terminal commands emit to
+/// stdout; scriptable text commands emit to stderr so stdout stays clean for
+/// shell pipelines.
 pub(crate) struct CliPerf {
     start: Option<std::time::Instant>,
+    collector: Option<Arc<PerformanceCollector>>,
     plain: bool,
 }
 
@@ -23,7 +26,19 @@ impl CliPerf {
     pub fn new(enabled: bool, plain: bool) -> Self {
         Self {
             start: enabled.then(std::time::Instant::now),
+            collector: enabled.then(PerformanceCollector::new_shared),
             plain,
+        }
+    }
+
+    /// Run work inside this command's request-scoped collector.
+    pub fn collect<T>(&self, f: impl FnOnce() -> T) -> T {
+        match self.collector.as_ref() {
+            Some(collector) => sniff::performance::with_current_collector(
+                Some(Arc::clone(collector)),
+                f,
+            ),
+            None => f(),
         }
     }
 
@@ -41,16 +56,17 @@ impl CliPerf {
         self.emit(detailed, true)
     }
 
-    /// Build a [`PerformanceReport`] from the elapsed CLI timing.
+    /// Snapshot the request collector with the elapsed CLI timing.
     ///
     /// Returns `None` when `--perf` was not enabled.
     pub fn build_report(&self) -> Option<PerformanceReport> {
         let start = self.start?;
-        Some(PerformanceReport {
-            total_duration_ms: start.elapsed().as_secs_f64() * 1000.0,
-            stages: Default::default(),
-            counters: Default::default(),
-        })
+        Some(
+            self.collector
+                .as_ref()
+                .expect("enabled CLI timing always has a collector")
+                .snapshot(start.elapsed()),
+        )
     }
 
     fn emit(&self, detailed: Option<&PerformanceReport>, to_stderr: bool) {

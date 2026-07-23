@@ -13,31 +13,39 @@ model: kimi-for-coding/k2p7
 # the frontmatter contract for target documents lives in the schema sidecar
 # (./_schema.yaml) so the contract is single-sourced and machine-validated
 update: "{{file_exists(file) && !markdown_body_empty(file)}}"
-# make interrupted fleet runs resumable: skip runners already researched today
+# a research sweep wants the other runners to complete even when one fails —
+# the freshness gate makes re-runs cheap
+fail_fast: false
+# make interrupted fleet runs resumable: skip runners already researched today;
+# schema-invalidated documents (e.g. after a breaking schema change) always
+# re-enter the research pool
 initialize:
     stack:
-        - when: "!file_exists(file) || !frontmatter(file, 'last_updated') || date_delta(frontmatter(file, 'last_updated'), ctx.today, '14d')"
+        - when: "!file_exists(file) || !validate_schema(file) || !frontmatter(file, 'last_updated') || date_delta(frontmatter(file, 'last_updated'), ctx.today, '14d')"
           action:
               - message: "The provider **{{state.name}}** needs to update its research on **Local Runners**"
-        - when: "file_exists(file) && frontmatter(file, 'last_updated') && !date_delta(frontmatter(file, 'last_updated'), ctx.today, '14d')"
-          action:
+        - action:
               - stderr: "The provider **{{state.name}}** has research for **Local Runners** that is current; skipping updates"
               - skip
 # a provider exiting 0 is not proof the research was written — verify the
-# agent actually stamped today's date before accepting success
+# agent actually stamped today's date AND that the frontmatter validates
+# before accepting success
 success:
     stack:
         - when: "frontmatter(file, 'last_updated') != ctx.today"
           action:
               - stderr: "The step reported success but <b>{{file}}</b> was not updated — <code>last_updated</code> is not {{ctx.today}}."
-              - error: "research file was not updated"
-        - when: "frontmatter(file, 'last_updated') == ctx.today"
+              - error: "NOT_STAMPED: research file was not updated"
+        - when: "!validate_schema(file)"
           action:
+              - stderr: "<b>{{file}}</b> fails <code>md schema validate</code> — the agent's exit-criteria claim was wrong."
+              - error: "SCHEMA_INVALID: research frontmatter fails schema validation"
+        - action:
               - info: "The **Local Runners** research on **{{state.name}}** completed successfully: {{ link(file) }}"
               - message: "🎉  the **Local Runners** research on **{{state.name}}** completed successfully"
 failure:
     message: "💥 the Local Runners research on **{{state.name}}** failed to complete!"
-    warn: "The Local Runners research on **{{state.name}}** failed to complete! (err: {{err.message}})"
+    warn: "The Local Runners research on **{{state.name}}** failed to complete! (err: {{err.code}}: {{err.msg}})"
 ---
 
 ## Skills
@@ -91,6 +99,10 @@ topic; do not research the CLIs here. This document is about the runner itself.
       config file or app-bundle presence
     - Note where a port alone is ambiguous (several runners share defaults)
       and what response marker disambiguates
+    - A `### Port identity` subsection: the ranked probe strategy for
+      answering "which runner is listening on this port?", mirroring the
+      `identity_probes` frontmatter records (ranked list, exact marker per
+      probe, and an explicit statement of which probes are NOT identifying)
 - `## Configuration` Section
     - Config file(s) with per-OS paths and formats; or the env-var / CLI-flag
       mechanism when no file exists
@@ -131,7 +143,8 @@ Follow these steps exactly:
 - Perform research on topic
 ::block when="update"
 - Update the document with your research
-- Add an entry to the `## Changelog` section
+- Add an entry to the `## Changelog` section; the entry's heading must begin
+  with `### {{ctx.today}}`
 ::end-block
 ::block when="!update"
 - Write and save research to `{{file}}`
@@ -212,6 +225,38 @@ Follow these steps exactly:
       name, port number, "GET /path", file path), `expect` (the marker
       confirming identity — essential where default ports collide),
       `confidence` (`source_code`/`observed`/`documented`/`inferred`), `notes`
+    - `identity_probes` - the ranked, machine-consumable answer to "which
+      runner is listening on this port?" — one record per probe, in the order
+      a detector should try them (`rank` 1 first): `request` (e.g.
+      "GET /api/version"; "ANY /path" for header fingerprinting), `match_in`
+      (`body`/`json_field`/`header`/`status`), `field` (the JSON key or
+      header name; empty for `body`/`status`), `marker` (the expected value
+      or substring), `uniqueness` (`unique` = this runner only, `strong` =
+      near-definitive with the port, `weak` = corroborating only),
+      `zero_model_ok` (true when the probe works with no models loaded —
+      detectors must not require one), `auth_gated` (true when server auth
+      refuses the probe — prefer ungated probes), `confidence`, `notes`.
+      Rank at least one `unique` probe first when one exists; always include
+      the tempting-but-NON-identifying probes (`/health` returning
+      `{"status":"ok"}`, a bare `/v1/models`, generic `server: uvicorn`
+      headers) as `weak` records with notes explaining why they fail, and
+      note where another runner's mimicry creates a reverse-tell (e.g.
+      llama.cpp's `/api/tags` with empty digests vs Ollama's real ones).
+    - `version_probe` - how to determine the INSTALLED version without
+      starting the server, one record per probe per OS where the answer
+      differs: `method` (`cli`/`bundle`/`package`/`http`), `command` (the
+      exact invocation, e.g. `ollama --version` or
+      `defaults read /Applications/X.app/Contents/Info.plist
+      CFBundleShortVersionString`), `pattern` (a regex whose first capture
+      group extracts the version), `confidence`, `notes`. Record what the
+      output ACTUALLY is — run the command on this host when the binary
+      exists. Some CLIs do not print a semver: `lms --version` prints a CLI
+      commit hash (not the LM Studio app version — a trap worth flagging),
+      `llama-server --version` prints `version: <build> (<sha>)` and may
+      emit backend-init noise before the version line (match the line, not
+      the first line). When CLI and running-server versions can drift
+      (long-lived daemons), say so and cross-reference the identity_probes
+      record that reports the live version.
     - `config_mechanism` - `config_file`, `env_vars`, `cli_flags`, `gui`, or
       `mixed`
     - `config_files` - one record per config file: `os`, `path` (template
@@ -292,6 +337,18 @@ Follow these steps exactly:
     ::end-block
     - `requires_claudine_update` - set to true/false based on whether you believe there will be required code changes to **Claudine** (or its `sniff` detection surface) based on the changes discovered in your research.
         - If you respond with `true` then you must also set the `reason` frontmatter property to describe why you think that
+    - **Single-pass discipline:** this sequence verifies your frontmatter
+      mechanically (`validate_schema`) after you exit, and a failure burns a
+      whole recovery round. Before saving, walk `_schema.yaml` top to bottom
+      and confirm every property is present with the right shape — including
+      `identity_probes`, `version_probe`, `metadata_endpoints`, `detection`,
+      `platforms` (all three OSes, unsupported ones stated), and
+      `api_standards` (`supported:
+      no` recorded explicitly). Quote any scalar that contains `: ` (colon +
+      space) — unquoted values like `notes: Server: llama.cpp ...` are YAML
+      parse errors, and a parse failure is indistinguishable from missing
+      work. Then run `md schema validate '{{file}}'` yourself and fix
+      everything it reports before finishing.
 
 ## Output
 

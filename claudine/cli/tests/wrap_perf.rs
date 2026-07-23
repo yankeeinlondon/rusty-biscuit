@@ -132,6 +132,83 @@ fn compose_perf_emits_report_to_stderr() {
     );
 }
 
+/// Phase 1 characterization of the composition setup coordinator. The perf
+/// substages are emitted by the real setup path, while lifecycle stdout and
+/// the provider marker pin initialize routing before the body handoff.
+#[cfg(unix)]
+#[test]
+fn composition_setup_and_provider_handoff_order_matches_phase_1_baseline() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("setup-order.md");
+    fs::write(
+        &md_file,
+        "---\nagent: goose\ninitialize:\n  stack:\n    - action: {stdout: \"phase:initialize\"}\n---\n# Setup ordering\n",
+    )
+    .unwrap();
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\nprintf 'phase:provider cwd=%s\\n' \"$PWD\"\n",
+    );
+
+    let output = cargo_bin_cmd!("claudine")
+        .current_dir(workspace.path())
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args(["compose", "--goose", "--perf", md_file.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "composition must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let initialize = stdout
+        .find("phase:initialize")
+        .unwrap_or_else(|| panic!("initialize marker missing: {stdout}"));
+    let provider = stdout
+        .find("phase:provider")
+        .unwrap_or_else(|| panic!("provider marker missing: {stdout}"));
+    assert!(initialize < provider, "initialize must precede provider handoff: {stdout}");
+    let canonical_workspace = workspace.path().canonicalize().unwrap();
+    assert!(
+        stdout.contains(&format!("cwd={}", canonical_workspace.display())),
+        "provider must launch in the selected workspace: {stdout}"
+    );
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    let report_start = stderr
+        .find("Performance")
+        .unwrap_or_else(|| panic!("performance report missing:\n{stderr}"));
+    let report = &stderr[report_start..];
+    let stages = [
+        "target resolution",
+        "header env plan",
+        "child env build",
+        "mcp composition",
+        "argv assembly",
+        "system prompt",
+        "stream + prompt delivery",
+    ];
+    let mut previous = 0;
+    for stage in stages {
+        let position = report
+            .find(stage)
+            .unwrap_or_else(|| panic!("setup stage `{stage}` missing from perf trace:\n{report}"));
+        assert!(
+            position >= previous,
+            "setup stage `{stage}` moved out of order in:\n{report}"
+        );
+        previous = position;
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn compose_perf_stdout_matches_non_perf() {

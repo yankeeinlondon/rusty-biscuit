@@ -13,7 +13,7 @@ The result is an error message that misreports the very paths it is
 complaining about. Observed in the wild:
 
 ```sh
-💻❯ compose prompts/review.md spec='features/2026-07-11-provider-errors-as-data/spec.md' -y --codex
+💻❯ compose prompts/review.md spec='features/_completed/2026-07-11-provider-errors-as-data/spec.md' -y --codex
 
 Error: lifecycle initialize proxy: path resolution failed for "prompts/reviews/review-spec-inline.md":
 proxy target does not exist: /Users/ken/.claudine/worktrees/rusty-biscuit/claudine/prompts/prompts/reviews/review-spec-inline.md

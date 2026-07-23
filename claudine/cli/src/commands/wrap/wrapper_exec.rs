@@ -43,6 +43,7 @@ pub(crate) fn run_structured_stream_session(
     term: &Terminal,
     wrapper_span: &tracing::Span,
     mut perf_collector: Option<&mut crate::perf::CommandPerfCollector>,
+    status_reporter: super::session_report::StatusReporter,
 ) -> Result<(i32, Option<String>)> {
     let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
     let parser_config = claudine::stream::ParserConfig {
@@ -54,8 +55,11 @@ pub(crate) fn run_structured_stream_session(
         child_cwd,
         stream_verbosity,
         summary_details.clone(),
+        // A direct wrapper run is never a sequence task; nothing to attribute.
+        None,
     )
-    .with_context_extra(dispatch_context.clone());
+    .with_context_extra(dispatch_context.clone())
+    .with_status_reporter(status_reporter);
     // Arm the runaway-output content detector (Phase 6). Direct wrappers
     // have no frontmatter layer; the launch-time model comes from `--model`
     // (often absent). Resolve + validate the guard inputs once, compile the
@@ -156,6 +160,8 @@ pub(crate) fn run_structured_stream_session(
             Some(section_stream.tracker()),
             content_early_rx,
             signal_hub,
+            // Direct wrapper path: no sequence task owns this stream.
+            None,
         )?
     };
     let mut summary = stream_result.data;

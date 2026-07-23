@@ -1,0 +1,328 @@
+## Overview
+
+The `proxy-with` branch split from the other two lines at `6cdb8bf` on 2026-07-16 and developed one large Claudine feature, `2026-07-13-proxy-with`. Although the author-facing addition is an optional `with:` mapping on lifecycle `proxy` actions, the work addresses a deeper routing defect: a proxied prompt was previously substituted inside the provider-attempt harness after document-dependent decisions had already been made for the router. The branch therefore recasts proxying as a typed, command-owned document transition. Direct execution, proxy targets, retries, resumes, and loop refreshes converge on canonical preparation; the active target owns its context, lifecycle, schema, loop, launch plan, shell approvals, closure, and output. The branch is linear after the split and contains 123 subsequent commits (124 timeline entries including the fork marker), touching 140 historical paths when both sides of the fork-marker rename are counted.
+
+### `2026-07-13-proxy-with`
+
+The feature aimed to make activating a proxy target observationally equivalent to invoking that target directly under the same immutable CLI inputs. The motivating failure was a router that proxied to a looping implementation prompt: direct invocation recognized and ran the target's loop, while the routed invocation retained the router's single-attempt decision. Similar drift affected `ctx.*` and `env.*`, provider/model selection, MCP, child CWD, system-prompt delivery, lifecycle ordering, schema validation, shell preflight, retries, resumes, closure ownership, and typed errors. The implementation introduces a single active-document coordinator above both the loop engine and provider harness, separates invocation, handoff, prepared-document, and active-execution state, and makes all proxy producers surface one typed transition that the coordinator must consume or reject.
+
+The authoring addition accepts `with:` only on key/value proxy actions. It is a shallow, typed, immediate-target frontmatter overlay evaluated once in the source lifecycle context. Whole-value interpolation preserves booleans, numbers, nulls, arrays, and objects; mixed strings remain strings. Target-authored frontmatter is the lowest-precedence layer, the overlay is next, and caller `key=value`/`--set` overrides remain authoritative. Null removes a target-authored top-level key. The overlay survives retry, resume, and loop refresh of its immediate target, but does not implicitly flow to a downstream proxy. It is never written to either Markdown document, never changes a Darkmatter hash, must not leak values through status or diagnostics, and cannot bypass the target's schema, effect, permission, shell, filesystem, network, messaging, or provider policies.
+
+- **Packages and modules changed:**
+  - **`claudine` library:** `composition::coordinator` ownership, active-document, invocation-ledger, handoff, commit, and transition modules; canonical `composition::prepare` entry/stage/service modules; lifecycle action parsing, validation, event-time overlay evaluation, context, control, and execution; loop transition/state handling; schema staging/translation; preflight and selection support; composition types; and typed lifecycle/schema error variants and `TerminalRenderable` renderers.
+  - **`claudine-cli`:** compose preparation; wrapper composition pipeline, runner, and target handling; environment sanitization; harness orchestration and loop-control coordinator, proxy adoption, error routing, lifecycle ordering, budget scoping, shell approval, and unowned-handoff refusal; target launch rebuilding; session-compatibility keys; launch-plan reconstruction; sequence containment; system-prompt lifetime; and L1/L2 seam, drift, direct/proxy-equivalence, lifecycle, resume, warning, and closure tests.
+  - **`darkmatter`:** Markdown `ComposeOptions` and schema validation gained a deferred-verdict stage that still performs schema coercion, allowing target `initialize` to run before the settled document owns its final schema verdict.
+  - **`claudine-gen` and repository infrastructure:** the generated dispatch drift fixture, nextest L2 timeout profile, dedicated Linux real-terminal CI job, feature-owned corpus/drift guards, dependency documentation, and Claudine skill/topic documentation were updated. `claudine-cli` also adopted `biscuit-hash` xxHash for stable session-compatibility content digests.
+
+- **Acceptance criteria:** the specification defines 30 criteria. Collectively they require one canonical preparation path and one coordinator-owned, atomic handoff; complete direct/proxy equivalence for context, frontmatter, schema, lifecycle, loops, launch identity, child environment, shell bytes, closure, output, and typed diagnostics; explicit retry/resume refresh and budget semantics with a complete session-compatibility key; correct initialize-before-schema staging; and consumed-or-explicitly-rejected transitions for initialize, terminal recovery, target chaining, and library-loop routing. The `with:` surface must parse only in key/value proxy form, preserve typed recursive interpolation, fail atomically, apply target < overlay < caller precedence, retain an immutable pre-schema overlay across immediate-target refreshes, replace it at the next hop, remain file/hash-neutral, redact values, and remain subject to all target-side controls. Cross-platform L1 state/transition tests, real-CLI L2 equivalence matrices and terminal captures, drift guards, `just test`, `just test-l2`, and `just lint` are the completion gates.
+- **Status at branch tip:** review 18 found no new implementation defect and reported focused L1 and structural guards green, but kept the feature not production-ready. The current managed macOS environment denied tmux socket creation before the five newest L2 rows and the 94-row proxy-with matrix reached any feature assertion. That is a test-backend blocker rather than evidence of a product regression, but it leaves required current L2 acceptance evidence outstanding. The review also identifies a stale description of the Linux L2 job in the acceptance map that must be corrected before marking the feature ready.
+
+## Timeline
+
+Git records ancestry rather than branch-reference creation time, so `6cdb8bf` is used as the auditable fork marker: it is the common ancestor of `proxy-with`, `error-prop-and-file-resolution`, and the relevant `claudine` line. The history after it is linear. This chronological list includes that marker and every commit through `e348486`.
+
+- **2026-07-16 — `6cdb8bf` — “docs(claudine): rename fleet-research topic to typed-knowledge pipeline”**
+  - This is the start of the three-branch split interval.
+  - The commit is a 100%-similarity documentation rename; both historical paths appear in the blast radius.
+- **2026-07-16 — `9255804` — “chore(claudine): refresh dispatch inventory after proxy test”**
+- **2026-07-16 — `5204788` — “docs(claudine): update proxy-with spec, plan, baseline notes, and review”**
+  - Established the reviewed equivalence contract, 30 acceptance criteria, phased implementation plan, and baseline evidence that guided the branch.
+- **2026-07-16 — `72e098c` — “test(claudine-cli): add composition-seam drift guard and L2 lifecycle equivalence tests”**
+  - Put direct-versus-proxy behavior and architectural seam ownership under executable regression coverage before the main refactor.
+- **2026-07-16 — `b01c9d5` — “refactor(claudine-cli): route terminal proxy through shared resolver”**
+- **2026-07-16 — `bb0e4f1` — “chore: refresh gitnexus counts”**
+- **2026-07-16 — `d375ff2` — “docs(claudine): advance proxy-with plan to phase 2 and add state-migration note”**
+- **2026-07-16 — `d3e843a` — “feat(claudine): introduce composition::coordinator ownership layers”**
+  - Added the provider-neutral foundation separating invocation state, resolved handoffs, prepared documents, and mutable active-document execution state.
+- **2026-07-16 — `4cc0995` — “chore: refresh gitnexus counts”**
+- **2026-07-16 — `28e9669` — “docs: add credential and signing blockers to commit workflow memory”**
+- **2026-07-16 — `f4002b3` — “docs(claudine): advance proxy-with plan to phase 3”**
+- **2026-07-16 — `79c32bb` — “feat(claudine): add proxy.with error variants and styled renderers”**
+  - Created source-aware, terminal-renderable diagnostics for malformed overlays and transition failures without exposing overlay values.
+- **2026-07-16 — `1544f5f` — “feat(claudine): parse proxy.with authoring surface”**
+  - Added the exact key/value proxy syntax while preserving positional proxy behavior and existing ambiguous-action diagnostics.
+- **2026-07-17 — `35593a0` — “chore: refresh gitnexus counts”**
+- **2026-07-17 — `fcb7a4a` — “feat(claudine): introduce canonical document preparation service with stage matrix”**
+  - Centralized direct, proxy, retry, resume, and loop preparation behind explicit entry reasons and locked their different initialize, schema, fresh-read, and loop-ownership policies.
+- **2026-07-17 — `e437a42` — “docs(claudine): advance proxy-with plan to phase 5 and refresh dispatch inventory”**
+- **2026-07-17 — `d8c6c7c` — “refactor(claudine-cli): wire wrap harness through canonical preparation service”**
+- **2026-07-17 — `8bcc03f` — “feat(claudine): evaluate proxy.with overlay at lifecycle event time”**
+  - Implemented one-time, recursively typed DM2 evaluation against the source's live lifecycle context.
+- **2026-07-17 — `f29c087` — “chore: refresh gitnexus counts and dispatch inventory line numbers”**
+- **2026-07-17 — `e3e211b` — “refactor(claudine): route proxy requests through a typed transition”**
+  - Replaced lower-harness path swapping with a provider-neutral transition that preserves evaluated request and provenance data.
+- **2026-07-17 — `b8be922` — “docs(claudine): advance proxy-with plan to phase 6 and record validation”**
+- **2026-07-17 — `bd6329b` — “test(claudine-cli): assert coordinator owns proxy handoffs”**
+- **2026-07-17 — `f278075` — “refactor(claudine-cli): adopt proxy handoffs through the active-document coordinator”**
+  - Made the command coordinator the only component allowed to resolve, validate, and commit a new active document.
+- **2026-07-17 — `bbb5703` — “docs(claudine): advance proxy-with plan to phase 7 and record validation”**
+- **2026-07-17 — `83dea36` — “chore: refresh gitnexus counts and dispatch inventory line numbers”**
+- **2026-07-17 — `dd8de60` — “feat(claudine): add signal-scoped lifecycle shell approval gate”**
+- **2026-07-17 — `01d0d77` — “refactor(claudine-cli): stage adopted-document bootstrap with narrow gate”**
+  - Enforced the lifecycle contract in which target `initialize` runs safely before the settled target's full schema verdict and shell audit.
+- **2026-07-17 — `17df36b` — “chore: refresh gitnexus counts”**
+- **2026-07-17 — `aefe5eb` — “test(claudine-cli): pin proxy.with overlay layering through the coordinator”**
+- **2026-07-17 — `074c30b` — “docs(claudine): advance proxy-with plan to phase 8 and record validation”**
+- **2026-07-17 — `f6e7ee4` — “refactor(claudine-cli): install proxy.with overlay at handoff adoption”**
+  - Installed the evaluated overlay before target preparation with target < overlay < caller precedence.
+- **2026-07-17 — `69f043e` — “chore: refresh gitnexus counts”**
+- **2026-07-17 — `62f752d` — “docs(claudine): scope shell-approval freeze to active document”**
+- **2026-07-17 — `8efdded` — “refactor(claudine-cli): restore shell approval on document handoff”**
+- **2026-07-17 — `caa0696` — “docs(claudine): record phase 10 blocked attempt and relaunch-seam design”**
+- **2026-07-17 — `f37a96c` — “chore: refresh gitnexus counts”**
+- **2026-07-17 — `e0e6716` — “test(claudine-cli): pin retry/resume budget scoping at the proxy boundary”**
+- **2026-07-17 — `f37fedd` — “chore: refresh gitnexus counts and dispatch inventory”**
+- **2026-07-17 — `b4205f2` — “refactor(claudine-cli): scope retry/resume budgets at the proxy boundary”**
+  - Prevented retries or resumes from resetting their own limits while giving a newly proxied document fresh document-attempt budgets and retaining invocation-wide hop/cycle state.
+- **2026-07-17 — `2886ab6` — “docs(claudine): advance proxy-with plan to phase 11 and record R6 block”**
+- **2026-07-17 — `1a1c546` — “refactor(claudine): redact overlays, unify schema errors across routes”**
+  - Closed both the secret-disclosure requirement and direct/proxy diagnostic-parity requirement for schema failures.
+- **2026-07-17 — `f8f32f8` — “chore: refresh gitnexus counts and dispatch inventory”**
+- **2026-07-17 — `00c41ed` — “docs(claudine): advance proxy-with plan to phase 12 and record partial validation”**
+- **2026-07-17 — `f416423` — “refactor(claudine-cli): route refused hand-offs through source lifecycle”**
+- **2026-07-17 — `4f911d2` — “test(claudine-cli): pin handoff error routing and finalize closure”**
+- **2026-07-17 — `0acfcb0` — “test(claudine-cli): add AC3 and AC8 passive corpus guards”**
+- **2026-07-17 — `90044fe` — “test(claudine-cli): add direct/proxy equivalence matrix harness”**
+  - Created the reusable acceptance harness for comparing prompt, context, lifecycle, launch, loop, closure, and diagnostic outcomes across routes.
+- **2026-07-17 — `c7b03b4` — “chore: refresh gitnexus counts”**
+- **2026-07-17 — `487c22f` — “docs(claudine): advance proxy-with plan to phase 13 and record acceptance map”**
+- **2026-07-17 — `581a5a0` — “docs(claudine): document proxy handoffs and equivalence contract (phase 14)”**
+- **2026-07-17 — `a862701` — “chore: refresh gitnexus counts”**
+- **2026-07-17 — `5db7895` — “chore: refresh nextest, inventory, and drift baseline paths”**
+- **2026-07-17 — `f4a14e1` — “feat(claudine-cli): rebuild target launch on proxy hand-off (R6/R7)”**
+  - Recalculated target-dependent provider, model, interactivity, MCP, workspace, CWD, system-prompt, argv, environment, dispatch, closure, and loop decisions after handoff.
+- **2026-07-17 — `91af8f3` — “docs(claudine): record phase 14 proxy-with review and acceptance map”**
+- **2026-07-17 — `bb510c4` — “feat(claudine): add active document state and session compatibility key”**
+- **2026-07-17 — `555c6ab` — “feat(claudine-cli): project session compatibility key per launch facet”**
+  - Together these commits defined the state retained across retry/resume and the complete launch identity that must remain compatible before a live session can resume.
+- **2026-07-17 — `2651463` — “refactor(claudine-cli): thread active-document state through composition pipeline”**
+- **2026-07-17 — `45683f3` — “test(claudine-cli): rewire harness_orch tests to ActiveDocumentState”**
+- **2026-07-17 — `64729bf` — “test(claudine-cli): add proxy equivalence and lifecycle matrix rows”**
+- **2026-07-17 — `54cd8c2` — “docs(claudine): record phase 15 proxy-with review-4”**
+- **2026-07-17 — `77fbf52` — “chore: refresh gitnexus counts”**
+- **2026-07-17 — `49c9ece` — “feat(claudine): add SurfacedHandoff and shared invocation ledger”**
+- **2026-07-17 — `50126a6` — “refactor(claudine-cli): hoist live initialize proxies to command coordinator”**
+- **2026-07-17 — `2d8d664` — “refactor(claudine): surface proxy handoff via typed channel”**
+- **2026-07-17 — `3089af0` — “feat(claudine): mark adopted proxy handoff on execution requests”**
+- **2026-07-17 — `e643884` — “refactor(claudine-cli): source R8 key from AttemptLaunch and xx_hash”**
+- **2026-07-17 — `2419fdc` — “feat(claudine-cli): surface proxy handoff through command coordinator”**
+  - This cluster removed optional, parallel proxy-return channels: initialize, provider recovery, and loop routes now surface a typed handoff to the command owner, backed by one invocation ledger.
+- **2026-07-17 — `081d5e8` — “docs(claudine): refresh proxy-with review-5 docs”**
+- **2026-07-17 — `cd48046` — “chore: refresh gitnexus counts”**
+- **2026-07-17 — `ede18ad` — “docs(claudine): record phase 16 proxy-with review-5 closure”**
+- **2026-07-17 — `844cb19` — “ci(claudine): add dedicated Level-2 test job”**
+  - Added a Linux tmux-backed, fail-closed real-terminal gate so transition and rendering regressions cannot silently pass as skipped L2 tests.
+- **2026-07-17 — `c53973a` — “test(claudine-cli): guard surfaced handoff call sites”**
+- **2026-07-18 — `12f75df` — “feat(claudine-cli): close review-6 (proxy-with F1, F2, F4)”**
+- **2026-07-18 — `5be08af` — “test(claudine-cli): add review-6 lifecycle and preflight rows”**
+- **2026-07-18 — `966d8de` — “docs(claudine): record phase 16 proxy-with review-6 closure”**
+- **2026-07-18 — `0ec04ea` — “docs(claudine): reconcile proxy-with review-6 docs”**
+- **2026-07-18 — `e077a89` — “chore: refresh gitnexus counts and remove merge markers”**
+- **2026-07-18 — `0529fbf` — “feat(darkmatter): add ComposeOptions::with_deferred_schema_verdict”**
+  - Added the cross-package schema stage needed to coerce early target data while deferring the authoritative verdict until after target `initialize`.
+- **2026-07-18 — `515fa34` — “feat(claudine): route schema verdict through SchemaStage and refuse unowned proxy handoff”**
+- **2026-07-18 — `df86423` — “refactor(claudine-cli): rebuild launch identity; refuse unowned handoff”**
+- **2026-07-18 — `9cb508c` — “feat(claudine-cli): defer schema verdict for initialize and route LaunchRebuildIntent”**
+- **2026-07-18 — `eaa3bcb` — “test(claudine-cli): prove unowned handoff refusal and initialize ordering”**
+- **2026-07-18 — `3366809` — “docs(claudine): record review-7 closure, initialize-deferral topic, refreshed inventory”**
+- **2026-07-18 — `4fabe20` — “chore: refresh gitnexus symbol and relationship counts”**
+- **2026-07-18 — `6a35009` — “feat(claudine-cli): R8 — rebuild the complete launch plan”**
+  - Consolidated launch reconstruction into a complete plan so a target cannot inherit stale launch facets from its router.
+- **2026-07-18 — `7c59ac1` — “feat(claudine-cli): closes R8 finding 1 — the loop branch now threads the selected `SchemaStage` and a document that owns `loop:` is judged at the same lifecycle point as one that does not”**
+- **2026-07-18 — `0261816` — “feat(claudine-cli): closes R8 finding 5 — the direct provider wrapper's `mcp_enabled` rebuild flag now tracks `--mcp` / `--mcp-use` instead of hardcoding `false`”**
+- **2026-07-18 — `b3c210c` — “test(claudine-cli): R8 retry bundle and loop ordering rows”**
+- **2026-07-18 — `e43d748` — “docs(claudine): refresh composition and dispatch inventory for R8”**
+- **2026-07-18 — `9d78778` — “docs(claudine): record review-8 closeout — AC11 and AC15 complete, both review-7 open items closed”**
+- **2026-07-18 — `b505b8a` — “chore: refresh gitnexus symbol counts and record a commit-workflow lesson”**
+- **2026-07-19 — `9aeaa9f` — “chore: refresh gitnexus symbol counts”**
+- **2026-07-19 — `ed43815` — “docs(claudine): record review-9 closeout and settle resume-refusal tail”**
+- **2026-07-19 — `7ac0e5c` — “test(claudine-cli): expand lifecycle re-entry coverage”**
+- **2026-07-19 — `1d73062` — “feat(claudine-cli): R9 — bundle owns adapters, env patch, resume routing”**
+  - Moved provider adapters, environment patching, and resume routing into the rebuilt launch bundle so re-entry uses one coherent prepared target.
+- **2026-07-20 — `6a5f77b` — “chore: refresh GitNexus symbol/relationship counts in CLAUDE.md”**
+- **2026-07-20 — `9e7bfb7` — “feat(claudine-cli): R10 — credential, identity, temp-file lifetime”**
+  - Closed launch-boundary gaps around provider credential admission, identity changes, and keeping generated system-prompt files alive through child spawn.
+- **2026-07-20 — `1d25ca3` — “docs(claudine): record review-10 closeout — four runtime gaps remain”**
+- **2026-07-20 — `f65e8d2` — “test(claudine-cli): R10 — credential, mode, and identity switch coverage”**
+- **2026-07-20 — `315cdf7` — “feat(claudine-cli): R11 — proxy with re-entry boundary closures”**
+  - Closed remaining composition lifetime, refreshed provider-selection, MCP-tag, and capability-warning gaps at direct/retry/resume boundaries.
+- **2026-07-20 — `8ebb49f` — “test(claudine-cli): R11 — direct, retry, resume, and warning coverage”**
+- **2026-07-20 — `e19e2ca` — “docs(claudine): refresh dispatch inventory for R11”**
+- **2026-07-20 — `6438fba` — “docs(claudine): record review-11 closeout — composition lifetime, selection, MCP, warnings”**
+- **2026-07-20 — `b8fb88a` — “chore: refresh GitNexus symbol/relationship counts in CLAUDE.md”**
+- **2026-07-20 — `b2f4d68` — “chore: refresh GitNexus symbol/relationship counts in CLAUDE.md”**
+- **2026-07-20 — `0e7e45b` — “docs(claudine): record review-12 — runtime done, docs still stale”**
+- **2026-07-20 — `7d3b1db` — “test(claudine): verify nested ctx refs share one fallback capture”**
+- **2026-07-20 — `facbe19` — “docs(claudine): record review-13 and correct authoritative architecture skill”**
+- **2026-07-20 — `abf9420` — “perf(claudine): capture proxy.with fallback context once per overlay”**
+  - Removed repeated ambient fallback capture during nested overlay interpolation and pinned one coherent context snapshot per evaluation.
+- **2026-07-20 — `b358c16` — “chore: refresh GitNexus symbol/relationship counts in CLAUDE.md”**
+- **2026-07-20 — `4ab1b5e` — “chore: refresh GitNexus symbol/relationship counts in CLAUDE.md”**
+- **2026-07-20 — `1085262` — “test(claudine-cli): pin OpenCode model facet on provider-gated session-mode tests”**
+- **2026-07-20 — `7199a48` — “test(claudine): pre-capture ComposeContext in interpolation and loop fixtures”**
+- **2026-07-20 — `1a0c651` — “test(claudine): instrument proxy.with fallback capture and strengthen the single-capture regression”**
+- **2026-07-20 — `2a01dab` — “docs(claudine): record review-14 — Level 1 gate red, two timeout fails”**
+- **2026-07-20 — `0cc694b` — “chore: refresh GitNexus symbol/relationship counts in CLAUDE.md”**
+- **2026-07-20 — `c405230` — “docs(claudine): record review-15 — Level 2 blocked by sandbox”**
+- **2026-07-20 — `e4d2155` — “chore: refresh GitNexus symbol/relationship counts in CLAUDE.md”**
+- **2026-07-20 — `5efc85a` — “test(claudine-cli): harden the direct compose lifetime regression against host-PATH and shell-portability leaks”**
+- **2026-07-20 — `5019f6e` — “docs(claudine): record review-16 — Level 2 still blocked, L1 times out”**
+- **2026-07-20 — `4a69288` — “chore: refresh GitNexus symbol/relationship counts in CLAUDE.md”**
+- **2026-07-20 — `fc88cc9` — “docs(claudine): record review-17 — managed host blocks tmux, L2 evidence still missing”**
+- **2026-07-20 — `c5b2088` — “chore: refresh GitNexus symbol/relationship counts in CLAUDE.md”**
+- **2026-07-20 — `e348486` — “docs(claudine): record review-18 — Level 2 evidence remains blocked”**
+  - The tip review found no new source defect and retained green focused L1/structural evidence, but correctly left readiness open because current L2 runs failed at tmux setup before assertions.
+  - It also recorded the acceptance-map correction still required for the Linux L2 workflow description.
+
+## File Blast Radius
+
+These are all files mutated directly from the inclusive fork marker `6cdb8bf` through the `proxy-with` tip. The history is linear and contains no merge-parent expansion. The 100%-similarity topic rename is represented by both its source and destination, producing 140 historical paths.
+
+- Repository configuration, CI, skills, and memory:
+  - `.claude/skills/claudine/SKILL.md`
+  - `.claude/skills/claudine/architecture.md`
+  - `.claudine/memory/commits.md`
+  - `.config/nextest.toml`
+  - `.github/workflows/claudine-tests.yml`
+  - `CLAUDE.md`
+- `claudine-cli` package manifest and production modules:
+  - `claudine/cli/Cargo.toml`
+  - `claudine/cli/src/commands/compose/mod.rs`
+  - `claudine/cli/src/commands/compose/prep.rs`
+  - `claudine/cli/src/commands/wrap/composition/dry_run.rs`
+  - `claudine/cli/src/commands/wrap/composition/mod.rs`
+  - `claudine/cli/src/commands/wrap/composition/pipeline.rs`
+  - `claudine/cli/src/commands/wrap/composition/runner.rs`
+  - `claudine/cli/src/commands/wrap/composition/target.rs`
+  - `claudine/cli/src/commands/wrap/composition/tests.rs`
+  - `claudine/cli/src/commands/wrap/env/mod.rs`
+  - `claudine/cli/src/commands/wrap/env/sanitize.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/attempt.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/launch.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/loop_control.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/loop_control/coordinator.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/loop_control/error_routing.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/loop_control/proxy.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch/tests.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/active_state_wiring.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/budget_scoping.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/coordinator_adoption.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/lifecycle_ordering.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/overlay_layering.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/proxy.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/recovery_identity.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/shell_approval.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_evaluation.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_routing.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/unowned_handoff.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/mod.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/prompt.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/session_key.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/session_key/tests.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/shell_options.rs`
+  - `claudine/cli/src/commands/wrap/harness_orch/types.rs`
+  - `claudine/cli/src/commands/wrap/launch_plan.rs`
+  - `claudine/cli/src/commands/wrap/launch_plan/tests.rs`
+  - `claudine/cli/src/commands/wrap/mod.rs`
+  - `claudine/cli/src/commands/wrap/overlay.rs`
+  - `claudine/cli/src/commands/wrap/policy.rs`
+  - `claudine/cli/src/commands/wrap/sequence/iterate.rs`
+  - `claudine/cli/src/commands/wrap/sequence/mod.rs`
+  - `claudine/cli/src/commands/wrap/sequence/phase1c.rs`
+  - `claudine/cli/src/commands/wrap/wrapper_stages.rs`
+- `claudine-cli` integration tests and fixtures:
+  - `claudine/cli/tests/compose_system_prompt_lifetime.rs`
+  - `claudine/cli/tests/composition_seams.rs`
+  - `claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md`
+  - `claudine/cli/tests/fixtures/shipped_implement_route/shipped-hashes.json`
+  - `claudine/cli/tests/level2_lifecycle_control.rs`
+  - `claudine/cli/tests/level2_lifecycle_dispatch.rs`
+  - `claudine/cli/tests/run_harness_loop_call_sites.rs`
+  - `claudine/cli/tests/shipped_prompt_route_drift.rs`
+  - `claudine/cli/tests/wrap_compose_preflight.rs`
+- Claudine documentation and generated inventory:
+  - `claudine/docs/dependencies.md`
+  - `claudine/docs/providers/dispatch-inventory.json`
+  - `claudine/docs/topics/agentic-research-as-a-typed-knowledge-pipeline.md` (rename destination)
+  - `claudine/docs/topics/composition.md`
+  - `claudine/docs/topics/execution-flow.md`
+  - `claudine/docs/topics/fleet-research-in-claudine.md` (rename source)
+  - `claudine/docs/topics/lifecycle.md`
+  - `claudine/docs/topics/non-interactive-sessions.md`
+- Feature specification, implementation record, and reviews:
+  - `claudine/features/2026-07-13-proxy-with/notes/acceptance-map.md`
+  - `claudine/features/2026-07-13-proxy-with/notes/baseline.md`
+  - `claudine/features/2026-07-13-proxy-with/notes/state-migration.md`
+  - `claudine/features/2026-07-13-proxy-with/plan.md`
+  - `claudine/features/2026-07-13-proxy-with/review-1.md`
+  - `claudine/features/2026-07-13-proxy-with/review-3.md`
+  - `claudine/features/2026-07-13-proxy-with/review-4.md`
+  - `claudine/features/2026-07-13-proxy-with/review-5.md`
+  - `claudine/features/2026-07-13-proxy-with/review-6.md`
+  - `claudine/features/2026-07-13-proxy-with/review-7.md`
+  - `claudine/features/2026-07-13-proxy-with/review-8.md`
+  - `claudine/features/2026-07-13-proxy-with/review-9.md`
+  - `claudine/features/2026-07-13-proxy-with/review-10.md`
+  - `claudine/features/2026-07-13-proxy-with/review-11.md`
+  - `claudine/features/2026-07-13-proxy-with/review-12.md`
+  - `claudine/features/2026-07-13-proxy-with/review-13.md`
+  - `claudine/features/2026-07-13-proxy-with/review-14.md`
+  - `claudine/features/2026-07-13-proxy-with/review-15.md`
+  - `claudine/features/2026-07-13-proxy-with/review-16.md`
+  - `claudine/features/2026-07-13-proxy-with/review-17.md`
+  - `claudine/features/2026-07-13-proxy-with/review-18.md`
+  - `claudine/features/2026-07-13-proxy-with/spec.md`
+- `claudine-gen` drift fixture:
+  - `claudine/gen/tests/drift.rs`
+- `claudine` library coordinator, errors, lifecycle, loop, preparation, and schema modules:
+  - `claudine/lib/src/composition/coordinator/active.rs`
+  - `claudine/lib/src/composition/coordinator/commit.rs`
+  - `claudine/lib/src/composition/coordinator/document.rs`
+  - `claudine/lib/src/composition/coordinator/handoff.rs`
+  - `claudine/lib/src/composition/coordinator/invocation.rs`
+  - `claudine/lib/src/composition/coordinator/mod.rs`
+  - `claudine/lib/src/composition/coordinator/tests.rs`
+  - `claudine/lib/src/composition/coordinator/transition.rs`
+  - `claudine/lib/src/composition/error/mod.rs`
+  - `claudine/lib/src/composition/error/render/lifecycle.rs`
+  - `claudine/lib/src/composition/error/render/mod.rs`
+  - `claudine/lib/src/composition/error/tests.rs`
+  - `claudine/lib/src/composition/interpolation_conformance.rs`
+  - `claudine/lib/src/composition/lifecycle/action_shape.rs`
+  - `claudine/lib/src/composition/lifecycle/actions.rs`
+  - `claudine/lib/src/composition/lifecycle/actions/tests.rs`
+  - `claudine/lib/src/composition/lifecycle/context.rs`
+  - `claudine/lib/src/composition/lifecycle/control.rs`
+  - `claudine/lib/src/composition/lifecycle/control/tests.rs`
+  - `claudine/lib/src/composition/lifecycle/executor.rs`
+  - `claudine/lib/src/composition/lifecycle/executor/tests/mod.rs`
+  - `claudine/lib/src/composition/lifecycle/executor/tests/proxy_with_evaluation.rs`
+  - `claudine/lib/src/composition/lifecycle/mod.rs`
+  - `claudine/lib/src/composition/lifecycle/parse.rs`
+  - `claudine/lib/src/composition/lifecycle/runtime/tests.rs`
+  - `claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs`
+  - `claudine/lib/src/composition/lifecycle/validate.rs`
+  - `claudine/lib/src/composition/looping/engine.rs`
+  - `claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs`
+  - `claudine/lib/src/composition/looping/engine/tests/seed_state.rs`
+  - `claudine/lib/src/composition/looping/types.rs`
+  - `claudine/lib/src/composition/mod.rs`
+  - `claudine/lib/src/composition/preflight.rs`
+  - `claudine/lib/src/composition/preflight/tests.rs`
+  - `claudine/lib/src/composition/prepare.rs`
+  - `claudine/lib/src/composition/prepare/entry.rs`
+  - `claudine/lib/src/composition/prepare/entry/tests.rs`
+  - `claudine/lib/src/composition/prepare/service.rs`
+  - `claudine/lib/src/composition/prepare/service/tests.rs`
+  - `claudine/lib/src/composition/schema/mod.rs`
+  - `claudine/lib/src/composition/schema/translate.rs`
+  - `claudine/lib/src/composition/select/tests.rs`
+  - `claudine/lib/src/composition/types.rs`
+- `darkmatter` library schema-staging support:
+  - `darkmatter/lib/src/markdown/compose/context/options.rs`
+  - `darkmatter/lib/src/markdown/compose/schema_validation.rs`

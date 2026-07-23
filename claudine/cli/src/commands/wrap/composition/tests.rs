@@ -66,13 +66,21 @@ fn enforce_repo_launch_detection_passes_when_no_error() {
     assert!(enforce_repo_launch_detection(true, None).is_ok());
 }
 
+/// The captured prep-time failure, projected exactly as
+/// `CompositionPrepContext` projects it.
+fn captured_launch_detection_failure() -> claudine::diagnostics::DiagnosticSnapshot {
+    claudine::diagnostics::DiagnosticSnapshot::from_diagnostic(
+        &claudine::error::ClaudineError::LaunchContextDetection(Box::new(
+            sniff::SniffError::NotARepository(std::path::PathBuf::from("/no/such/repo")),
+        )),
+    )
+}
+
 #[test]
 fn enforce_repo_launch_detection_passes_when_repo_off() {
     // Sniff failed during prep but `--repo` is not set, so the
     // best-effort default is acceptable and the executor proceeds.
-    assert!(
-        enforce_repo_launch_detection(false, Some("filesystem probe failed: io error")).is_ok()
-    );
+    assert!(enforce_repo_launch_detection(false, Some(&captured_launch_detection_failure())).is_ok());
 }
 
 #[test]
@@ -80,7 +88,8 @@ fn enforce_repo_launch_detection_fails_when_repo_and_sniff_failed() {
     // The legacy contract: `--repo` requires startup repo detection,
     // so a captured prep-time sniff failure must abort the run with
     // a hard error that surfaces the original sniff message.
-    let result = enforce_repo_launch_detection(true, Some("filesystem probe failed: io error"));
+    let captured = captured_launch_detection_failure();
+    let result = enforce_repo_launch_detection(true, Some(&captured));
     let err = result.expect_err("--repo + prep sniff failure must error");
     let message = err.to_string();
     assert!(
@@ -88,8 +97,46 @@ fn enforce_repo_launch_detection_fails_when_repo_and_sniff_failed() {
         "expected --repo guard message, got: {message}"
     );
     assert!(
-        message.contains("filesystem probe failed: io error"),
+        message.contains("/no/such/repo"),
         "expected captured sniff error in message, got: {message}"
+    );
+}
+
+/// The regression this guard-plus-restoration exists for: the abort used to be
+/// an `eyre!` built from `snapshot.message`, so a `when:` clause and the
+/// rendered block saw a bare string. Asserting only on message substrings
+/// cannot tell the two apart — these assertions can.
+#[test]
+fn the_repo_abort_surfaces_the_captured_diagnostic_identity() {
+    let captured = captured_launch_detection_failure();
+    let err = enforce_repo_launch_detection(true, Some(&captured))
+        .expect_err("--repo + prep sniff failure must error");
+
+    let root: &(dyn std::error::Error + 'static) = err.as_ref();
+    let selected = claudine::diagnostics::select_effective_diagnostic(root)
+        .expect("the abort must be a selectable diagnostic, not an opaque report");
+    let diagnostic = selected
+        .diagnostic()
+        .expect("the selection must carry Claudine facets");
+
+    assert_eq!(diagnostic.code(), captured.code);
+    assert_eq!(diagnostic.code(), "internal.bug");
+    assert_eq!(diagnostic.category().as_str(), captured.category);
+    assert_eq!(diagnostic.disposition().as_str(), captured.disposition);
+    assert_eq!(diagnostic.origin().as_str(), captured.origin);
+    assert_eq!(diagnostic.detail(), captured.detail);
+    assert_eq!(
+        diagnostic.detail()["message"],
+        serde_json::json!("Not a git repository: /no/such/repo"),
+        "the catalog-declared detail field must survive the restoration"
+    );
+
+    // Rendering resolves through the same selection, so the block carries the
+    // captured message rather than a generic `Error:` line.
+    let rendered = selected.block_error().report_block_error_optimistic(Some(120));
+    assert!(
+        rendered.contains("/no/such/repo"),
+        "expected the captured sniff text in the rendered block, got: {rendered}"
     );
 }
 
@@ -1799,3 +1846,10 @@ mod projected_rate_limit_bridge {
         assert_eq!(merged.message.as_deref(), Some("raw provider message"));
     }
 }
+
+// The former `proxy_target_declares_loop_follows_the_adopted_target` test was
+// removed with the pipeline peek it exercised: every committed `initialize`
+// proxy on a live run now surfaces up to the composition coordinator regardless
+// of whether the target loops, so there is no pre-commit loop peek to test. Loop
+// ownership is decided from the fully prepared target after re-entry (R7),
+// covered by the harness-orchestration and L2 equivalence suites.

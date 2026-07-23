@@ -16,5 +16,6 @@ pub use resolve::{
     parse_signal_recipient, resolve_effective_route, resolve_image_path, resolve_secret,
 };
 pub use send::{
-    execute_message, execute_notification, execute_resolved_message, test_webhook_connection,
+    MessagingError, execute_message, execute_notification, execute_resolved_message,
+    test_webhook_connection,
 };

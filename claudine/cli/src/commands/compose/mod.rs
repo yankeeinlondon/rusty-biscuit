@@ -4,7 +4,8 @@
 //! - `claudine inline-compose <file>` — inline composition (replaces body)
 //!
 //! Both commands are thin request builders that delegate to
-//! [`execute_composition_request`] for wrapper-grade execution.
+//! [`crate::commands::wrap::composition::execute_composition_request_inner`]
+//! for wrapper-grade execution.
 
 // `CompositionError` carries variants with several `PathBuf` and other
 // owned fields (e.g. `LoopIterationFailed`, `LoopRateLimited`) so the
@@ -24,13 +25,16 @@ use claudine::composition::{
 };
 use claudine::provider::Provider;
 use claudine::system_prompt::SystemPromptArgs;
-use color_eyre::eyre::{Result, eyre};
+use color_eyre::eyre::{Result, WrapErr};
 
 use crate::provider_values::provider_value_parser;
 
-mod interrupt;
+// `pub(crate)` because the Windows console-control handler in
+// `wrap::exec::termination::windows` drives the compose ladder from a thread
+// that owns no part of the compose run.
+pub(crate) mod interrupt;
 mod loop_run;
-mod prep;
+pub(crate) mod prep;
 mod setters;
 
 pub(crate) use setters::{json_type_name, merge_set_overrides, parse_composition_positionals};
@@ -39,13 +43,13 @@ pub(crate) use setters::{json_type_name, merge_set_overrides, parse_composition_
 ///
 /// ## Notes
 ///
-/// The seven provider boolean fields (`claude`, `codex`, `gemini`, `goose`,
-/// `kimicode`, `opencode`, `qwen`) are handled entirely by the
-/// pre-clap argv normalizer in [`crate::argv`]: Rule 1 rewrites each
-/// `--<provider>` token to the canonical `--provider <slug>` pair before
-/// clap ever sees it. The struct fields and clap `#[arg(...)]` declarations
-/// are retained as user-facing help entries only — their parsed boolean
-/// values are never read at runtime (see [`Self::explicit_provider`]).
+/// The provider boolean fields are handled entirely by the pre-clap argv
+/// normalizer in [`crate::argv`]: Rule 1 derives the supported flags from the
+/// provider catalog and rewrites each `--<provider>` token to the canonical
+/// `--provider <slug>` pair before clap ever sees it. The struct fields and
+/// clap `#[arg(...)]` declarations are retained as user-facing help entries
+/// only — their parsed boolean values are never read at runtime (see
+/// [`Self::explicit_provider`]).
 ///
 /// Retiring these fields is tracked in the
 /// `2026-04-17-cli-pre-processing` spec follow-ups.
@@ -211,6 +215,18 @@ pub struct SharedComposeArgs {
     /// `abort` to avoid unbounded sleeps.
     #[arg(long = "on-rate-limit", value_name = "POLICY", value_enum)]
     pub on_rate_limit: Option<OnRateLimitArg>,
+
+    /// Provider-argument tail forwarded to the underlying agent, captured by
+    /// the pre-clap ownership partition ([`crate::argv::partition_composition_tail`]).
+    /// Not parsed by clap — populated in `main` after the parse from the
+    /// partitioned argv, so it is deliberately excluded from the CLI surface.
+    #[arg(skip)]
+    pub provider_args: Vec<String>,
+
+    /// `true` when [`Self::provider_args`] came from an explicit `--` boundary
+    /// (opaque, unclassified) rather than an implicit non-Claudine switch.
+    #[arg(skip)]
+    pub provider_args_explicit: bool,
 }
 
 /// CLI-facing wrapper for [`claudine::composition::OnRateLimit`], exposed
@@ -268,7 +284,7 @@ impl SharedComposeArgs {
             Some(raw) => {
                 let duration =
                     claudine::harness::parse_timeout(raw, std::path::Path::new("<--step-timeout>"))
-                        .map_err(|e| eyre!("invalid --step-timeout value: {e}"))?;
+                        .wrap_err("invalid --step-timeout value")?;
                 Ok(Some(duration.as_secs()))
             }
             None => Ok(None),
@@ -289,7 +305,7 @@ impl SharedComposeArgs {
                     raw,
                     std::path::Path::new("<--stall-timeout>"),
                 )
-                .map_err(|e| eyre!("invalid --stall-timeout value: {e}"))?;
+                .wrap_err("invalid --stall-timeout value")?;
                 Ok(Some(duration.as_secs()))
             }
             None => Ok(None),
@@ -362,23 +378,42 @@ impl CompositionKind {
         }
     }
 
-    /// Schema-aware prepare function for this command.
-    pub(crate) fn prepare_with_schema(
+    /// Prepare through the canonical document service at an explicit schema
+    /// stage.
+    ///
+    /// The only schema-aware prepare on either execution path. A document whose
+    /// own `initialize` may add or repair a schema property must not be judged
+    /// before that event runs (R4), and the canonical service records the
+    /// deferral on the prepared composition so the harness knows a stabilized
+    /// reread is still owed.
+    ///
+    /// ## Errors
+    ///
+    /// Propagates the composer's typed [`CompositionError`]. A deferred stage
+    /// surfaces every non-schema preparation failure and no schema verdict.
+    pub(crate) fn prepare_staged(
         self,
         source: &ResolvedCompositionSource,
         options: PrepareOptions,
+        entry: claudine::composition::DocumentEntryReason,
+        schema: claudine::composition::SchemaStage,
     ) -> Result<PreparedComposition, CompositionError> {
-        match self {
-            Self::Direct => claudine::composition::prepare_direct_with_schema(source, options),
-            Self::Inline => claudine::composition::prepare_inline_with_schema(source, options),
-        }
+        claudine::composition::prepare_document(claudine::composition::DocumentPreparation {
+            entry,
+            mode: self.mode(),
+            source,
+            prompt_source: claudine::composition::PromptSource::ComposedBody,
+            schema,
+            options,
+        })
     }
 
     /// Schema-agnostic prepare function for this command.
     ///
-    /// Used on loop iterations after the first, where the seed pass has
-    /// already validated the frontmatter against `$schema` and we only need
-    /// to re-compose with the current override state.
+    /// Used on loop iterations after the first, where the verdict has already
+    /// been reached — by iteration 1 itself, or by the harness's stabilized
+    /// reread when iteration 1 deferred — and we only need to re-compose with
+    /// the current override state.
     pub(crate) fn prepare_without_schema(
         self,
         source: &ResolvedCompositionSource,

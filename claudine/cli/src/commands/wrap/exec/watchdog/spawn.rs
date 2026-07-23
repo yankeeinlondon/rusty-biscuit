@@ -53,6 +53,7 @@ pub(crate) fn spawn_flush_if_idle_ticker(
     watchdog_state: Option<Arc<std::sync::Mutex<WatchdogState>>>,
     section_tracker: Option<Arc<Mutex<SectionTracker>>>,
     timeout_config: TimeoutConfig,
+    framed_writer: Option<Arc<std::sync::Mutex<claudine::render::TaskFrameWriter>>>,
 ) -> (TickerCancel, thread::JoinHandle<()>) {
     const SILENCE_WINDOW: Duration = Duration::from_secs(30);
     const CADENCE: Duration = Duration::from_secs(30);
@@ -66,13 +67,12 @@ pub(crate) fn spawn_flush_if_idle_ticker(
         while !cancel_flag.is_cancelled() {
             let now = Instant::now();
             if now >= next_tick {
-                if let Ok(mut r) = text_renderer.lock() {
-                    let mut writer = stream_output.stdout_writer();
-                    for frame in r.flush_idle(SILENCE_WINDOW) {
-                        let _ = writer.write_all(frame.as_bytes());
-                    }
-                    let _ = writer.flush();
-                }
+                flush_idle_to_stream(
+                    &text_renderer,
+                    &framed_writer,
+                    &stream_output,
+                    SILENCE_WINDOW,
+                );
 
                 // Emit subagent idle diagnostics only when the unified
                 // step_timeout rule is enabled. If the user disabled the
@@ -110,6 +110,44 @@ pub(crate) fn spawn_flush_if_idle_ticker(
     });
 
     (cancel, handle)
+}
+
+/// Drain one idle flush to whichever stdout path is live.
+///
+/// The framed arm exists because a flush is ordinary task *data* arriving late:
+/// a long-running task that holds a partial Markdown block past the idle window
+/// would otherwise have that block appear with no bar, breaking attribution
+/// mid-stream (spec → *Reporting Concurrency*).
+pub(crate) fn flush_idle_to_stream(
+    text_renderer: &Arc<std::sync::Mutex<AssistantStream>>,
+    framed: &Option<Arc<std::sync::Mutex<claudine::render::TaskFrameWriter>>>,
+    stream_output: &Arc<StreamOutput>,
+    window: Duration,
+) {
+    let Ok(mut renderer) = text_renderer.lock() else {
+        return;
+    };
+    let frames = renderer.flush_idle(window);
+    drop(renderer);
+    match framed {
+        Some(framed) => {
+            if let Ok(mut framed) = framed.lock() {
+                for frame in frames {
+                    framed.write(&frame);
+                }
+                // The stream is not over, but the point of an idle flush is to
+                // surface text now — a fragment still held would defeat it.
+                framed.flush();
+            }
+        }
+        None => {
+            let mut writer = stream_output.stdout_writer();
+            for frame in frames {
+                let _ = writer.write_all(frame.as_bytes());
+            }
+            let _ = writer.flush();
+        }
+    }
 }
 
 /// Spawn the unified timeout watchdog ticker.
@@ -447,6 +485,8 @@ fn maybe_emit_step_timeout_warn(
     );
 }
 
+
+
 /// Translate a monotonic [`Instant`] into a wall-clock `DateTime<Local>`
 /// using the prompt-scoped anchor (`started_at_wall` / `started_at`).
 fn instant_to_local(
@@ -466,5 +506,62 @@ fn instant_to_local(
             Ok(d) => anchor_wall - d,
             Err(_) => anchor_wall,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::wrap::exec::new_assistant_stream_inset;
+    use crate::commands::wrap::exec::task_frame_fixtures::colored_writer;
+
+    /// A long-running task holds a partial Markdown block past the idle window.
+    /// Before the framed arm existed the flush went straight out through
+    /// `stdout_writer`, so the task visibly lost its bar mid-run.
+    #[test]
+    fn idle_flush_carries_the_task_bar() {
+        let (writer, frames, gutter) = colored_writer();
+        let framed = Some(Arc::new(std::sync::Mutex::new(writer)));
+
+        let renderer = Arc::new(std::sync::Mutex::new(new_assistant_stream_inset(2)));
+        // A block with no terminating paragraph boundary: `append` holds it, so
+        // only the idle flush can surface it.
+        let held = renderer.lock().unwrap().append("partial block text\n");
+        assert!(
+            held.is_empty(),
+            "fixture must hold the block, else the flush is not what emits it"
+        );
+
+        flush_idle_to_stream(
+            &renderer,
+            &framed,
+            &StreamOutput::new(),
+            Duration::ZERO,
+        );
+
+        let recorded = frames.lock().unwrap();
+        assert!(
+            !recorded.data.is_empty(),
+            "the held block must reach the data channel on idle flush"
+        );
+        assert!(
+            recorded.data.iter().all(|line| line.starts_with(&gutter)),
+            "every flushed line must carry the task gutter: {:?}",
+            recorded.data
+        );
+        assert!(
+            recorded.status.is_empty(),
+            "flushed body text is data, never status"
+        );
+    }
+
+    /// Without a task the flush must stay on the plain stdout path.
+    #[test]
+    fn idle_flush_without_a_task_emits_nothing_to_a_sink() {
+        let renderer = Arc::new(std::sync::Mutex::new(new_assistant_stream_inset(0)));
+        renderer.lock().unwrap().append("text\n");
+        // Asserting only that the undecorated arm is reachable and total; the
+        // bytes land on the real stdout, which a unit test cannot observe.
+        flush_idle_to_stream(&renderer, &None, &StreamOutput::new(), Duration::ZERO);
     }
 }

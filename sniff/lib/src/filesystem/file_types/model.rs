@@ -312,12 +312,32 @@ pub struct FileScanScope {
 ///
 /// The `classifications` field uses `Arc<Vec<...>>` so that filtering operations
 /// can share the underlying data instead of cloning every classification.
+///
+/// ## Notes
+///
+/// When [`truncated`](Self::truncated) is `true` the *selected subset* is
+/// unspecified and may differ between runs over an unchanged tree: parallel
+/// walker workers race to claim the bounded slots. Ordering is always
+/// deterministic (classifications are sorted by path), and a complete result
+/// — `truncated == false` — is fully deterministic.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FileInventory {
     pub scope: FileScanScope,
+    /// Number of classifications represented in this result.
+    ///
+    /// Not an estimate of the tree's actual file count: when `truncated` is
+    /// `true` the tree holds more files than this, and the count stops at
+    /// `limit`.
     pub total_files_scanned: usize,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub classifications: Arc<Vec<FileClassification>>,
+    /// Whether the accepted-classification cap was reached, leaving files in
+    /// the tree unrepresented.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub truncated: bool,
+    /// The accepted-classification cap in force, present only when `truncated`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -351,6 +371,11 @@ pub struct FrameworkStats {
     pub files: Vec<PathBuf>,
 }
 
+/// ## Notes
+///
+/// `truncated`/`limit` mirror the [`FileInventory`] this summary was projected
+/// from — every public inventory projection reports the same completeness
+/// state, so a consumer never has to guess whether a summary is complete.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LanguageSummary {
     pub primary: Option<ProgrammingLanguage>,
@@ -362,9 +387,27 @@ pub struct LanguageSummary {
     pub languages: Vec<ProgrammingLanguageStats>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub frameworks: Vec<FrameworkStats>,
+    /// See [`FileInventory::truncated`].
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub truncated: bool,
+    /// See [`FileInventory::limit`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<usize>,
 }
 
 impl LanguageSummary {
+    /// Adopt `inventory`'s completeness state.
+    ///
+    /// Every public projection of an inventory must report the same
+    /// `truncated`/`limit` pair as the inventory it came from, so a consumer
+    /// reading only the summary can still tell a complete result from a capped
+    /// one.
+    pub fn with_completeness_of(mut self, inventory: &FileInventory) -> Self {
+        self.truncated = inventory.truncated;
+        self.limit = inventory.limit;
+        self
+    }
+
     pub fn sorted(mut self) -> Self {
         for lang in &mut self.languages {
             lang.direct_files.sort();
@@ -377,6 +420,11 @@ impl LanguageSummary {
     }
 }
 
+/// ## Notes
+///
+/// `truncated`/`limit` mirror the [`FileInventory`] this breakdown was
+/// projected from. `total_files` is the number of classifications represented,
+/// not the tree's file count — see [`FileInventory::total_files_scanned`].
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FileAssociationBreakdown {
     pub total_files: usize,
@@ -386,4 +434,66 @@ pub struct FileAssociationBreakdown {
     pub by_language: Vec<ProgrammingLanguageStats>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub by_framework: Vec<FrameworkStats>,
+    /// See [`FileInventory::truncated`].
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub truncated: bool,
+    /// See [`FileInventory::limit`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<usize>,
+}
+
+#[cfg(test)]
+mod completeness_serialization {
+    use super::*;
+
+    /// A complete inventory must serialize exactly as it did before the
+    /// completeness fields existed.
+    ///
+    /// This is what makes the fields additive rather than a schema break: an
+    /// existing `--json` consumer never sees a new key unless the result is
+    /// actually truncated.
+    #[test]
+    fn complete_inventory_omits_the_completeness_fields() {
+        let json = serde_json::to_value(FileInventory::default()).expect("serializes");
+        assert!(json.get("truncated").is_none(), "got: {json}");
+        assert!(json.get("limit").is_none(), "got: {json}");
+
+        let summary = serde_json::to_value(LanguageSummary::default()).expect("serializes");
+        assert!(summary.get("truncated").is_none(), "got: {summary}");
+        assert!(summary.get("limit").is_none(), "got: {summary}");
+
+        let breakdown =
+            serde_json::to_value(FileAssociationBreakdown::default()).expect("serializes");
+        assert!(breakdown.get("truncated").is_none(), "got: {breakdown}");
+        assert!(breakdown.get("limit").is_none(), "got: {breakdown}");
+    }
+
+    #[test]
+    fn truncated_inventory_reports_the_flag_and_the_accepted_cap() {
+        let inventory = FileInventory {
+            truncated: true,
+            limit: Some(super::super::MAX_FILES),
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&inventory).expect("serializes");
+        assert_eq!(json["truncated"], serde_json::json!(true));
+        assert_eq!(json["limit"], serde_json::json!(super::super::MAX_FILES));
+
+        // Every projection must agree with the inventory it came from, or a
+        // consumer reading only the summary would call a capped result complete.
+        let summary = LanguageSummary::default().with_completeness_of(&inventory);
+        assert!(summary.truncated);
+        assert_eq!(summary.limit, Some(super::super::MAX_FILES));
+    }
+
+    /// Absent fields must deserialize to "complete", so plans and results
+    /// serialized before this phase keep round-tripping.
+    #[test]
+    fn legacy_json_without_the_fields_deserializes_as_complete() {
+        let inventory: FileInventory =
+            serde_json::from_value(serde_json::json!({ "scope": { "root": "/repo" }, "total_files_scanned": 3 }))
+                .expect("legacy inventory JSON must still deserialize");
+        assert!(!inventory.truncated);
+        assert_eq!(inventory.limit, None);
+    }
 }

@@ -82,11 +82,12 @@ is truthy.
 
 ### Interpolation vs. condition mode
 
-The single most important distinction, because `||` and `&&` change meaning:
+The single most important distinction, because `||` changes meaning between the
+two surfaces (`&&` does not — it is logical AND in both):
 
 | Surface | `||` means | `&&` |
 |---------|------------|------|
-| `{{ … }}` (interpolation) | **fallback** — first truthy value wins | rejected at parse time |
+| `{{ … }}` (interpolation) | **fallback** — first truthy value wins | logical AND |
 | `when="…"` (condition) | **logical OR** — returns a boolean | logical AND |
 
 The function forms `and(...)` / `or(...)` are valid in *both* modes.

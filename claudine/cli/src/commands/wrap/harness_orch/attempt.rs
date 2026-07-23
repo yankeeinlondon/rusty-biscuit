@@ -40,6 +40,7 @@ pub(crate) fn execute_harness_attempt(
     term: &Terminal,
     child_spawned: &mut bool,
     prompt_timing: Option<claudine::stream::prompt_timing::PromptTimingContext>,
+    task_frame_writer: Option<claudine::render::TaskFrameWriter>,
 ) -> Result<(
     claudine::harness::AttemptOutcome,
     Option<crate::perf::AgentExecutionPerf>,
@@ -123,6 +124,16 @@ pub(crate) fn execute_harness_attempt(
     );
     let runaway_guards = guard_inputs.compile_for_model(run_model.as_deref())?;
 
+    // Presence bracket: STARTED now, ENDED when this guard drops on any
+    // exit path of the attempt (best-effort; no-op without a daemon).
+    let session_presence = crate::commands::wrap::session_report::SessionPresence::started(
+        provider,
+        run_model.as_deref(),
+        !effective_non_interactive,
+        env_context,
+        &launch.env,
+    );
+
     let (
         exit_code,
         termination,
@@ -147,8 +158,14 @@ pub(crate) fn execute_harness_attempt(
             child_cwd,
             stream_verbosity,
             summary_details.clone(),
+            // Same bytes the data channel is framed with, so a reader matches a
+            // status line to the body above it by gutter, not by ordering.
+            task_frame_writer
+                .as_ref()
+                .map(|writer| writer.gutter().to_string()),
         )
-        .with_context_extra(dispatch_context.clone());
+        .with_context_extra(dispatch_context.clone())
+        .with_status_reporter(session_presence.status_reporter());
         // Arm the content detector (Phase 6) before plumbing so
         // `build_structured_plumbing` can wire the trip channel, and wire
         // the re-scope source so a provider-reported `SessionStart` model
@@ -225,6 +242,7 @@ pub(crate) fn execute_harness_attempt(
                 Some(section_stream.tracker()),
                 content_early_rx,
                 signal_hub,
+                task_frame_writer,
             )?
         };
         let api_duration_ms = stream_result.data.duration_ms;
@@ -402,9 +420,9 @@ pub(crate) fn execute_harness_attempt(
         )?;
         let perf = Some(result.telemetry.into_agent_perf(None));
         let termination = result.termination;
-        // `structured_codex_output` is only prepared for Codex
-        // (exec_prep::prepare_codex_structured_output), so no provider
-        // check is needed here.
+        // `structured_codex_output` rides the rebuilt launch bundle and is
+        // present only when that bundle's plan captures through Codex's
+        // output file, so no provider check is needed here.
         let response = structured_codex_output
             .map(|output| output.take_last_message())
             .unwrap_or_default();

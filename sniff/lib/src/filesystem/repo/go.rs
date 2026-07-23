@@ -4,49 +4,53 @@ use std::path::Path;
 
 use crate::Result;
 use crate::package::{DependencyEntry, DependencyKind};
+use crate::performance;
+use crate::performance::counters;
 
-use super::detection::{DetectorOutcome, create_package, dedupe_packages, resolve_internal_deps};
+use super::detection::{
+    DetectorOutcome, probe_exists,
+};
+use super::seed::{PackageSeed, merge_seeds};
 use super::standard::{MonorepoStandard, PackageProvenance};
 
 pub(super) fn detect_go_workspace(root: &Path) -> Result<Option<DetectorOutcome>> {
     let go_work = root.join("go.work");
-    if !go_work.exists() {
+    if !probe_exists(&go_work) {
         return Ok(None);
     }
 
+    performance::increment_counter(counters::FS_FILE_OPENS, 1);
     let content = std::fs::read_to_string(&go_work)?;
+    performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
+    performance::increment_counter(counters::REPO_MANIFEST_PARSES, 1);
     let uses = parse_go_work_uses(&content);
     if uses.is_empty() {
         return Ok(None);
     }
 
-    let lock_versions = None;
-    let mut packages = Vec::new();
+    let mut seeds = Vec::new();
     for member in uses {
         let member_path = root.join(&member);
-        if !member_path.exists() {
+        if !probe_exists(&member_path) {
             continue;
         }
-        packages.push(create_package(
+        seeds.push(PackageSeed::new(
             &member_path,
             root,
             MonorepoStandard::GoWorkspace,
             PackageProvenance::Explicit,
-            &lock_versions,
         ));
     }
 
-    if packages.is_empty() {
+    if seeds.is_empty() {
         return Ok(None);
     }
 
-    packages = dedupe_packages(packages);
-    resolve_internal_deps(&mut packages);
 
     Ok(Some(DetectorOutcome {
         standard: MonorepoStandard::GoWorkspace,
         root: root.to_path_buf(),
-        packages,
+        seeds: merge_seeds(seeds),
     }))
 }
 

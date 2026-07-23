@@ -24,10 +24,13 @@
 use std::{
     collections::{BTreeSet, HashMap},
     fs,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 
-use biscuit_file::FileReference;
+use biscuit_file::{FileReference, FileReferenceKind, FileResolutionContext};
+use crate::markdown::compose::{
+    document_resolution_context, find_git_root_from, find_package_area_from,
+};
 use indexmap::IndexMap;
 use serde_json::{Map, Value};
 use serde_yaml_ng::Value as YamlValue;
@@ -35,9 +38,6 @@ use serde_yaml_ng::Value as YamlValue;
 use super::{
     SchemaArm, SchemaOrigin, SchemaOriginKind, SchemaShape, SimplifiedSchema,
     errors::SchemaError,
-    reference::{
-        SchemaReferenceKind, classify_schema_reference, is_bare_schema_name,
-    },
     simplified::{
         SchemaDeclaration, parse_standalone_schema_document, parse_yaml_schema, to_json_schema,
         types::{
@@ -116,6 +116,21 @@ pub fn resolve_schema_with_roots(
     resolve_yaml_schema_with_roots(&yaml, base_dir, schema_roots)
 }
 
+/// Resolves a document schema using an immutable host request snapshot.
+///
+/// The compatibility entry points remain ambient-capable. Compose hosts use
+/// this variant so the document base changes without recapturing repository,
+/// package, home, environment, or configured roots.
+pub(crate) fn resolve_schema_with_roots_in_context(
+    value: &Value,
+    base_dir: &Path,
+    schema_roots: &[PathBuf],
+    request_context: Option<&biscuit_file::FileResolutionContext>,
+) -> Result<ResolvedSchema, SchemaError> {
+    let yaml = json_to_yaml(value);
+    resolve_yaml_schema_with_roots_in_context(&yaml, base_dir, schema_roots, request_context)
+}
+
 /// Same as [`resolve_schema`] but takes a YAML value directly. Used by the
 /// resolver itself (referenced YAML files) and by tests.
 pub fn resolve_yaml_schema(
@@ -132,10 +147,25 @@ pub fn resolve_yaml_schema_with_roots(
     base_dir: &Path,
     schema_roots: &[PathBuf],
 ) -> Result<ResolvedSchema, SchemaError> {
+    resolve_yaml_schema_with_roots_in_context(value, base_dir, schema_roots, None)
+}
+
+fn resolve_yaml_schema_with_roots_in_context(
+    value: &YamlValue,
+    base_dir: &Path,
+    schema_roots: &[PathBuf],
+    request_context: Option<&biscuit_file::FileResolutionContext>,
+) -> Result<ResolvedSchema, SchemaError> {
     let mut stack = ReferenceStack::default();
     match value {
         YamlValue::String(reference) => {
-            resolve_reference(reference, base_dir, schema_roots, &mut stack)
+            resolve_reference_in_context(
+                reference,
+                base_dir,
+                schema_roots,
+                request_context,
+                &mut stack,
+            )
         }
         YamlValue::Mapping(_) => {
             let schema = parse_yaml_schema(value)?;
@@ -144,12 +174,12 @@ pub fn resolve_yaml_schema_with_roots(
             // surviving import. This is the top-level document, so `@this`
             // resolves against the inline root (`NamespaceKey::Root`).
             let (schema, imports) =
-                expand_document_imports(schema, base_dir, NamespaceKey::Root, schema_roots)?;
+                expand_document_imports(schema, base_dir, NamespaceKey::Root, schema_roots, request_context)?;
             let mut json = to_json_schema(&schema)?;
             // Inline `$schema` mappings have no on-disk path, so `this` example
             // references have no target here (the acceptance driver references
             // examples from a schema *file*, resolved in `parse_yaml_referenced_file`).
-            let examples = resolve_document_examples(&mut json, base_dir, None, schema_roots)?;
+            let examples = resolve_document_examples(&mut json, base_dir, None, schema_roots, request_context)?;
             Ok(ResolvedSchema {
                 simplified: Some(schema),
                 json_schema: json,
@@ -160,7 +190,7 @@ pub fn resolve_yaml_schema_with_roots(
             })
         }
         YamlValue::Sequence(items) => {
-            resolve_root_union(items, base_dir, schema_roots, &mut stack)
+            resolve_root_union(items, base_dir, schema_roots, request_context, &mut stack)
         }
         other => Err(SchemaError::FrontmatterShape {
             message: format!(
@@ -175,6 +205,7 @@ fn resolve_root_union(
     items: &[YamlValue],
     base_dir: &Path,
     schema_roots: &[PathBuf],
+    request_context: Option<&biscuit_file::FileResolutionContext>,
     stack: &mut ReferenceStack,
 ) -> Result<ResolvedSchema, SchemaError> {
     if items.is_empty() {
@@ -193,7 +224,13 @@ fn resolve_root_union(
                 let arm_schema = parse_yaml_schema(item)?;
                 // Named-type imports are inlined per arm before conversion.
                 let (arm_schema, arm_imports) =
-                    expand_document_imports(arm_schema, base_dir, NamespaceKey::Root, schema_roots)?;
+                    expand_document_imports(
+                        arm_schema,
+                        base_dir,
+                        NamespaceKey::Root,
+                        schema_roots,
+                        request_context,
+                    )?;
                 imports.extend(arm_imports);
                 let mut arm_json = to_json_schema(&arm_schema)?;
                 examples.extend(resolve_document_examples(
@@ -201,6 +238,7 @@ fn resolve_root_union(
                     base_dir,
                     None,
                     schema_roots,
+                    request_context,
                 )?);
                 if let SimplifiedSchema::Single(shape) = &arm_schema
                     && let Some(arms) = all_simplified_arms.as_mut()
@@ -212,7 +250,13 @@ fn resolve_root_union(
                 any_of.push(strip_schema_uri(arm_json));
             }
             YamlValue::String(reference) => {
-                let resolved = resolve_reference(reference, base_dir, schema_roots, stack)?;
+                let resolved = resolve_reference_in_context(
+                    reference,
+                    base_dir,
+                    schema_roots,
+                    request_context,
+                    stack,
+                )?;
                 imports.extend(resolved.imports.iter().cloned());
                 examples.extend(resolved.examples.iter().cloned());
                 referenced_files.extend(resolved.referenced_files.iter().cloned());
@@ -266,23 +310,53 @@ fn resolve_root_union(
 // into a filesystem path; bare-name selection only chooses *which* root to
 // resolve from.
 
+/// Returns `true` when a parsed reference is a non-recursive implicit-relative
+/// name with exactly one portable path component.
+fn is_bare_name(file_ref: &FileReference) -> bool {
+    let class = file_ref.class();
+    let portable = file_ref.raw().replace('\\', "/");
+    let mut components = Path::new(&portable).components();
+    let is_single_component =
+        matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none();
+    class.kind == FileReferenceKind::ImplicitRelative
+        && !class.recursive
+        && is_single_component
+}
+
 /// Tries a bare name against each schema root, nearest first. Returns the
 /// resolved path of the first root that contains a file matching `name`, or
-/// `None` when no root has it. `FileReference::resolve_from` is the authority
-/// that turns the name into a filesystem path within each root.
+/// `None` when no root has it.
+///
+/// Each root gets an explicit context derived from the request snapshot with no
+/// repository or package anchor. The parsed implicit-relative reference
+/// therefore has exactly one candidate per iteration, so the loop's advertised
+/// nearest-first ordering decides the winner without reading ambient state.
 fn try_bare_name_in_roots(
-    name: &str,
+    file_ref: &FileReference,
     schema_roots: &[PathBuf],
+    request_context: Option<&FileResolutionContext>,
 ) -> Result<Option<PathBuf>, SchemaError> {
-    let file_ref = FileReference::new(name).map_err(|source| SchemaError::Unresolved {
-        reference: name.to_string(),
-        source,
-    })?;
+    let captured = request_context.cloned().unwrap_or_else(|| {
+        FileResolutionContext::new(
+            schema_roots
+                .first()
+                .map(PathBuf::as_path)
+                .unwrap_or_else(|| Path::new(".")),
+        )
+    });
     for root in schema_roots {
+        // Omit repository/package anchors so this implicit bare name has one
+        // candidate: the selected schema root. HOME and environment still come
+        // from the immutable request snapshot, with no ambient reads.
+        let root_context = FileResolutionContext::from_snapshot(
+            root,
+            captured.home_dir().map(Path::to_path_buf),
+            captured.env().clone(),
+        );
         if let Some(path) = file_ref
-            .resolve_from(root)
+            .resolve_in_context(&root_context)
             .map_err(|source| SchemaError::Unresolved {
-                reference: name.to_string(),
+                reference: file_ref.raw().to_string(),
                 source,
             })?
         {
@@ -299,26 +373,17 @@ fn try_bare_name_in_roots(
 /// recursion guard.
 const MAX_REFERENCE_DEPTH: usize = 32;
 
-/// Open `$schema` file-reference frames, innermost last.
+/// Canonical paths for the `$schema` files currently being resolved.
 ///
-/// A schema file whose whole payload is a reference (`$schema: ./other.yaml`)
-/// delegates by re-entering [`resolve_reference`], and root-union file arms do
-/// the same. Without this stack a file that references itself — or two files
-/// that reference each other — recurses until the process stack overflows
-/// instead of reporting a structured error. Frames are canonicalized paths, so
-/// the same file reached by two spellings (`./a.yaml` vs `../dir/a.yaml`, or a
-/// case-differing spelling on macOS/Windows) is one frame.
+/// Whole-file delegation and root-union file arms both re-enter reference
+/// resolution. Keeping only open frames permits repeated non-cyclic references
+/// while turning direct and transitive loops into structured errors.
 #[derive(Default)]
 struct ReferenceStack {
     frames: Vec<PathBuf>,
 }
 
 impl ReferenceStack {
-    /// Opens a frame for `canonical`, or reports the offending chain when that
-    /// file is already open ([`SchemaError::ReferenceCycle`]) or the chain has
-    /// reached the depth cap ([`SchemaError::ReferenceDepthExceeded`]). The two
-    /// are separate errors because an over-deep acyclic chain has no loop to
-    /// break — telling its author to find one is a false diagnosis.
     fn enter(&mut self, canonical: &Path) -> Result<(), SchemaError> {
         if self.frames.iter().any(|frame| frame == canonical) {
             return Err(SchemaError::ReferenceCycle {
@@ -339,9 +404,6 @@ impl ReferenceStack {
         self.frames.pop();
     }
 
-    /// Renders the open frames plus the rejected file as an `a -> b -> a`
-    /// chain. Shared by both guards: for a cycle `rejected` is the repeated
-    /// file, for the depth cap it is the hop that would have exceeded it.
     fn describe(&self, rejected: &Path) -> String {
         let mut parts: Vec<String> = self
             .frames
@@ -353,54 +415,57 @@ impl ReferenceStack {
     }
 }
 
-/// Folds this hop's canonical path into the dependency edges the nested
-/// resolution already collected.
-///
-/// Every hop of a delegation chain is a dependency edge: for `document ->
-/// a.yaml -> b.yaml`, editing `b.yaml` must invalidate the cached effective
-/// schema, so replacing the nested list with this one path would silently drop
-/// it. `BTreeSet` keeps the emitted list sorted and deduplicated, which is the
-/// order [`ResolvedSchema::referenced_files`] promises.
+/// Adds this delegation hop without discarding dependency edges collected by
+/// the nested schema resolution.
 fn accumulate_referenced_file(nested: Vec<PathBuf>, canonical: PathBuf) -> Vec<PathBuf> {
     let mut edges: BTreeSet<PathBuf> = nested.into_iter().collect();
     edges.insert(canonical);
     edges.into_iter().collect()
 }
 
-/// Records the file a nested resolution ultimately loaded its schema from.
-///
-/// A delegating file (`a.yaml` whose whole payload is `$schema: ./b.yaml`) has
-/// already reported `b.yaml`, the file that actually authors the schema. Keep
-/// it: `relatedInformation` should land on the declaration, not on the
-/// redirect that has nothing to point at.
+/// Attributes diagnostics to the file that actually authored the schema.
 fn attribute_origin(resolved: &mut ResolvedSchema, path: &Path) {
     if resolved.origin.kind != SchemaOriginKind::ReferencedFile {
         resolved.origin = SchemaOrigin::referenced_file(path.to_path_buf());
     }
 }
 
-fn resolve_reference(
+fn resolve_reference_in_context(
     reference: &str,
     base_dir: &Path,
     schema_roots: &[PathBuf],
+    request_context: Option<&biscuit_file::FileResolutionContext>,
     stack: &mut ReferenceStack,
 ) -> Result<ResolvedSchema, SchemaError> {
-    let classified = classify_schema_reference(reference)?;
-    // Take the canonical string back off the classifier rather than trimming
-    // again here: syntax checking, resolution, and reporting must never see
-    // different strings for the same authored reference.
-    let canonical = classified.file_reference().raw().to_string();
-    let trimmed = canonical.as_str();
+    let trimmed = reference.trim();
+    let file_ref = FileReference::new(trimmed).map_err(|source| SchemaError::Unresolved {
+        reference: reference.to_string(),
+        source,
+    })?;
+    if file_ref.class().kind == FileReferenceKind::Url {
+        return Err(SchemaError::RemoteUnsupported {
+            reference: reference.into(),
+        });
+    }
 
     // Bare-name resolution against schema roots (Phase 3). When schema roots
     // are provided and the reference has no path component, resolve against
     // the roots nearest-first instead of the document directory.
-    if !schema_roots.is_empty() && classified.kind() == SchemaReferenceKind::BareName {
-        if let Some(path) = try_bare_name_in_roots(trimmed, schema_roots)? {
-            let mut resolved = load_guarded(&path, schema_roots, stack)?;
+    if !schema_roots.is_empty() && is_bare_name(&file_ref) {
+        if let Some(path) =
+            try_bare_name_in_roots(&file_ref, schema_roots, request_context)?
+        {
+            let mut resolved = load_guarded_in_context(
+                &path,
+                schema_roots,
+                request_context,
+                stack,
+            )?;
             attribute_origin(&mut resolved, &path);
-            resolved.referenced_files =
-                accumulate_referenced_file(resolved.referenced_files, canonical_path(&path));
+            resolved.referenced_files = accumulate_referenced_file(
+                resolved.referenced_files,
+                canonical_path(&path),
+            );
             return Ok(resolved);
         }
         // Bare name not found in any schema root. Check if a document-sibling
@@ -422,9 +487,11 @@ fn resolve_reference(
         });
     }
 
-    let file_ref = classified.into_file_reference();
-    let path = file_ref
-        .resolve_from(base_dir)
+    // `$schema` references resolve through the shared document-backed context:
+    // explicit `./`/`../` from the document directory only, implicit path
+    // references repository-root first then the document directory — the same
+    // order the `file`-typed value references use. No ambient CWD is read.
+    let path = resolve_file_reference_in_context(&file_ref, base_dir, request_context)
         .map_err(|source| SchemaError::Unresolved {
             reference: trimmed.to_string(),
             source,
@@ -436,7 +503,12 @@ fn resolve_reference(
             )),
         })?;
 
-    let mut resolved = load_guarded(&path, schema_roots, stack)?;
+    let mut resolved = load_guarded_in_context(
+        &path,
+        schema_roots,
+        request_context,
+        stack,
+    )?;
     // The schema was loaded from a file — record the resolved path so
     // diagnostics can point `relatedInformation` at the referenced source.
     attribute_origin(&mut resolved, &path);
@@ -447,24 +519,52 @@ fn resolve_reference(
     Ok(resolved)
 }
 
-/// Loads `path` with a cycle/depth frame open, so a delegating file cannot
-/// re-enter a file already being resolved. The frame is closed on both the
-/// success and failure paths.
-fn load_guarded(
+/// Loads one schema file with a cycle/depth frame open. The request context is
+/// passed through unchanged, and the frame is closed on success or failure.
+fn load_guarded_in_context(
     path: &Path,
     schema_roots: &[PathBuf],
+    request_context: Option<&biscuit_file::FileResolutionContext>,
     stack: &mut ReferenceStack,
 ) -> Result<ResolvedSchema, SchemaError> {
     let canonical = canonical_path(path);
     stack.enter(&canonical)?;
-    let loaded = load_schema_from_path(path, schema_roots, stack);
+    let loaded = load_schema_from_path_in_context(
+        path,
+        schema_roots,
+        request_context,
+        stack,
+    );
     stack.leave();
     loaded
 }
 
-fn load_schema_from_path(
+fn resolve_file_reference_in_context(
+    file_ref: &FileReference,
+    base_dir: &Path,
+    request_context: Option<&biscuit_file::FileResolutionContext>,
+) -> Result<Option<PathBuf>, biscuit_file::FileReferenceError> {
+    match request_context {
+        Some(snapshot) => file_ref.resolve_in_context(&snapshot.for_base(base_dir)),
+        None => {
+            let repo_root = find_git_root_from(base_dir);
+            let package_area = find_package_area_from(base_dir, repo_root.as_deref());
+            let context = document_resolution_context(
+                base_dir,
+                None,
+                &[],
+                repo_root.as_deref(),
+                package_area.as_deref(),
+            );
+            file_ref.resolve_in_context(&context)
+        }
+    }
+}
+
+fn load_schema_from_path_in_context(
     path: &Path,
     schema_roots: &[PathBuf],
+    request_context: Option<&biscuit_file::FileResolutionContext>,
     stack: &mut ReferenceStack,
 ) -> Result<ResolvedSchema, SchemaError> {
     let bytes = fs::read(path).map_err(|source| SchemaError::Io {
@@ -478,7 +578,7 @@ fn load_schema_from_path(
 
     match extension.as_deref() {
         Some("json") => parse_raw_json_schema(path, &bytes),
-        _ => parse_yaml_referenced_file(path, &bytes, schema_roots, stack),
+        _ => parse_yaml_referenced_file(path, &bytes, schema_roots, request_context, stack),
     }
 }
 
@@ -486,6 +586,7 @@ fn parse_yaml_referenced_file(
     path: &Path,
     bytes: &[u8],
     schema_roots: &[PathBuf],
+    request_context: Option<&biscuit_file::FileResolutionContext>,
     stack: &mut ReferenceStack,
 ) -> Result<ResolvedSchema, SchemaError> {
     let text = std::str::from_utf8(bytes).map_err(|_| SchemaError::AmbiguousReferenced {
@@ -494,14 +595,17 @@ fn parse_yaml_referenced_file(
     if let Some(document) = parse_standalone_schema_document(text, path)? {
         return match document.declaration {
             SchemaDeclaration::Schema(schema) => {
-                resolve_standalone_schema(schema, path, schema_roots, stack)
+                resolve_standalone_schema(schema, path, schema_roots, request_context, stack)
             }
-            // A whole-file reference document delegates to another file, so it
-            // resolves through the same path as a root-union `FileRef` arm and
-            // reports the *target* as its origin and dependency edge.
             SchemaDeclaration::Reference(reference) => {
                 let file_dir = path.parent().unwrap_or_else(|| Path::new("."));
-                resolve_reference(reference.file_reference().raw(), file_dir, schema_roots, stack)
+                resolve_reference_in_context(
+                    reference.file_reference().raw(),
+                    file_dir,
+                    schema_roots,
+                    request_context,
+                    stack,
+                )
             }
         };
     }
@@ -530,15 +634,23 @@ fn resolve_standalone_schema(
     schema: SimplifiedSchema,
     path: &Path,
     schema_roots: &[PathBuf],
+    request_context: Option<&biscuit_file::FileResolutionContext>,
     stack: &mut ReferenceStack,
 ) -> Result<ResolvedSchema, SchemaError> {
     let file_dir = path.parent().unwrap_or_else(|| Path::new("."));
     let key = NamespaceKey::File(canonical_path(path));
     match schema {
         SimplifiedSchema::Single(_) => {
-            let (schema, imports) = expand_document_imports(schema, file_dir, key, schema_roots)?;
+            let (schema, imports) =
+                expand_document_imports(schema, file_dir, key, schema_roots, request_context)?;
             let mut json_schema = to_json_schema(&schema)?;
-            let examples = resolve_document_examples(&mut json_schema, file_dir, Some(path), schema_roots)?;
+            let examples = resolve_document_examples(
+                &mut json_schema,
+                file_dir,
+                Some(path),
+                schema_roots,
+                request_context,
+            )?;
             Ok(ResolvedSchema {
                 simplified: Some(schema),
                 json_schema,
@@ -549,7 +661,14 @@ fn resolve_standalone_schema(
             })
         }
         SimplifiedSchema::Union(arms) => {
-            resolve_standalone_root_union(arms, file_dir, path, schema_roots, stack)
+            resolve_standalone_root_union(
+                arms,
+                file_dir,
+                path,
+                schema_roots,
+                request_context,
+                stack,
+            )
         }
     }
 }
@@ -559,6 +678,7 @@ fn resolve_standalone_root_union(
     base_dir: &Path,
     path: &Path,
     schema_roots: &[PathBuf],
+    request_context: Option<&biscuit_file::FileResolutionContext>,
     stack: &mut ReferenceStack,
 ) -> Result<ResolvedSchema, SchemaError> {
     let mut any_of = Vec::with_capacity(arms.len());
@@ -577,6 +697,7 @@ fn resolve_standalone_root_union(
                     base_dir,
                     NamespaceKey::File(canonical_path(path)),
                     schema_roots,
+                    request_context,
                 )?;
                 imports.extend(arm_imports);
                 let SimplifiedSchema::Single(shape) = schema else {
@@ -588,12 +709,19 @@ fn resolve_standalone_root_union(
                     base_dir,
                     Some(path),
                     schema_roots,
+                    request_context,
                 )?);
                 simplified_arms.push(SchemaArm::Inline(shape));
                 any_of.push(strip_schema_uri(arm_json));
             }
             SchemaArm::FileRef(reference) => {
-                let resolved = resolve_reference(&reference, base_dir, schema_roots, stack)?;
+                let resolved = resolve_reference_in_context(
+                    &reference,
+                    base_dir,
+                    schema_roots,
+                    request_context,
+                    stack,
+                )?;
                 imports.extend(resolved.imports.iter().cloned());
                 examples.extend(resolved.examples.iter().cloned());
                 referenced_files.extend(resolved.referenced_files.iter().cloned());
@@ -693,13 +821,12 @@ struct ImportEngine {
     dependencies: BTreeSet<PathBuf>,
     /// Schema-root resolution context for bare-name import targets (Phase 3).
     schema_roots: Vec<PathBuf>,
-    /// Named-type namespaces already loaded this expansion, keyed by canonical
-    /// path, so `A@types.yaml` / `B@types.yaml` / `C@types.yaml` read and parse
-    /// `types.yaml` once instead of once per import site.
+    /// Immutable host request snapshot used by nested import references.
+    file_resolution_context: Option<biscuit_file::FileResolutionContext>,
+    /// Parsed named-type namespaces keyed by canonical file path.
     namespace_cache: HashMap<PathBuf, CachedNamespace>,
 }
 
-/// A parsed named-type file cached on [`ImportEngine`] by canonical path.
 struct CachedNamespace {
     base_dir: PathBuf,
     named_types: IndexMap<String, PropertyDef>,
@@ -718,6 +845,7 @@ fn expand_document_imports(
     base_dir: &Path,
     key: NamespaceKey,
     schema_roots: &[PathBuf],
+    request_context: Option<&biscuit_file::FileResolutionContext>,
 ) -> Result<(SimplifiedSchema, Vec<PathBuf>), SchemaError> {
     if !schema_has_imports(&schema) {
         return Ok((schema, Vec::new()));
@@ -736,6 +864,7 @@ fn expand_document_imports(
         stack: Vec::new(),
         dependencies: BTreeSet::new(),
         schema_roots: schema_roots.to_vec(),
+        file_resolution_context: request_context.cloned(),
         namespace_cache: HashMap::new(),
     };
     let expanded = engine.expand_schema(schema, &current)?;
@@ -933,15 +1062,24 @@ impl ImportEngine {
                 named_types: current.named_types.clone(),
             });
         }
-        if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        let file_ref =
+            FileReference::new(trimmed).map_err(|source| SchemaError::Unresolved {
+                reference: reference.to_string(),
+                source,
+            })?;
+        if file_ref.class().kind == FileReferenceKind::Url {
             return Err(SchemaError::RemoteUnsupported {
                 reference: reference.to_string(),
             });
         }
 
         // Bare-name resolution against schema roots (Phase 3).
-        let path = if !self.schema_roots.is_empty() && is_bare_schema_name(trimmed) {
-            if let Some(p) = try_bare_name_in_roots(trimmed, &self.schema_roots)? {
+        let path = if !self.schema_roots.is_empty() && is_bare_name(&file_ref) {
+            if let Some(p) = try_bare_name_in_roots(
+                &file_ref,
+                &self.schema_roots,
+                self.file_resolution_context.as_ref(),
+            )? {
                 p
             } else {
                 // Check sibling for pointed error.
@@ -960,13 +1098,11 @@ impl ImportEngine {
                 });
             }
         } else {
-            let file_ref =
-                FileReference::new(trimmed).map_err(|source| SchemaError::Unresolved {
-                    reference: trimmed.to_string(),
-                    source,
-                })?;
-            file_ref
-                .resolve_from(&current.base_dir)
+            resolve_file_reference_in_context(
+                &file_ref,
+                &current.base_dir,
+                self.file_resolution_context.as_ref(),
+            )
                 .map_err(|source| SchemaError::Unresolved {
                     reference: trimmed.to_string(),
                     source,
@@ -1270,12 +1406,19 @@ fn resolve_document_examples(
     base_dir: &Path,
     this_file: Option<&Path>,
     schema_roots: &[PathBuf],
+    request_context: Option<&biscuit_file::FileResolutionContext>,
 ) -> Result<Vec<PathBuf>, SchemaError> {
     let mut deps: BTreeSet<PathBuf> = BTreeSet::new();
-    // Per-run read cache: an example file referenced by more than one
-    // `example(...)` site is read from disk once, not once per site (F28).
     let mut reads: HashMap<PathBuf, Vec<u8>> = HashMap::new();
-    resolve_examples_in_json(json, base_dir, this_file, schema_roots, &mut deps, &mut reads)?;
+    resolve_examples_in_json(
+        json,
+        base_dir,
+        this_file,
+        schema_roots,
+        request_context,
+        &mut deps,
+        &mut reads,
+    )?;
     Ok(deps.into_iter().collect())
 }
 
@@ -1284,6 +1427,7 @@ fn resolve_examples_in_json(
     base_dir: &Path,
     this_file: Option<&Path>,
     schema_roots: &[PathBuf],
+    request_context: Option<&biscuit_file::FileResolutionContext>,
     deps: &mut BTreeSet<PathBuf>,
     reads: &mut HashMap<PathBuf, Vec<u8>>,
 ) -> Result<(), SchemaError> {
@@ -1310,6 +1454,7 @@ fn resolve_examples_in_json(
                         this_file,
                         Some(&target),
                         schema_roots,
+                        request_context,
                         deps,
                         reads,
                     )?);
@@ -1323,12 +1468,28 @@ fn resolve_examples_in_json(
                 if key == "x-darkmatter-example" {
                     continue;
                 }
-                resolve_examples_in_json(child, base_dir, this_file, schema_roots, deps, reads)?;
+                resolve_examples_in_json(
+                    child,
+                    base_dir,
+                    this_file,
+                    schema_roots,
+                    request_context,
+                    deps,
+                    reads,
+                )?;
             }
         }
         Value::Array(items) => {
             for item in items.iter_mut() {
-                resolve_examples_in_json(item, base_dir, this_file, schema_roots, deps, reads)?;
+                resolve_examples_in_json(
+                    item,
+                    base_dir,
+                    this_file,
+                    schema_roots,
+                    request_context,
+                    deps,
+                    reads,
+                )?;
             }
         }
         _ => {}
@@ -1344,12 +1505,14 @@ fn resolve_examples_in_json(
 /// against the example-artifact envelope with content-hash caching, then — when
 /// `target` is `Some` — its `returns` value is validated against the annotated
 /// property's target schema as a separate, un-cached gate.
+#[allow(clippy::too_many_arguments)]
 fn resolve_one_example(
     reference: &str,
     base_dir: &Path,
     this_file: Option<&Path>,
     target: Option<&Value>,
     schema_roots: &[PathBuf],
+    request_context: Option<&biscuit_file::FileResolutionContext>,
     deps: &mut BTreeSet<PathBuf>,
     reads: &mut HashMap<PathBuf, Vec<u8>>,
 ) -> Result<Value, SchemaError> {
@@ -1363,14 +1526,21 @@ fn resolve_one_example(
                     .into(),
             })?
     } else {
-        if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        let file_ref =
+            FileReference::new(trimmed).map_err(|source| SchemaError::Unresolved {
+                reference: reference.to_string(),
+                source,
+            })?;
+        if file_ref.class().kind == FileReferenceKind::Url {
             return Err(SchemaError::RemoteUnsupported {
                 reference: reference.to_string(),
             });
         }
         // Bare-name resolution against schema roots (Phase 3).
-        if !schema_roots.is_empty() && is_bare_schema_name(trimmed) {
-            if let Some(p) = try_bare_name_in_roots(trimmed, schema_roots)? {
+        if !schema_roots.is_empty() && is_bare_name(&file_ref) {
+            if let Some(p) =
+                try_bare_name_in_roots(&file_ref, schema_roots, request_context)?
+            {
                 p
             } else {
                 let sibling = base_dir.join(trimmed);
@@ -1388,13 +1558,7 @@ fn resolve_one_example(
                 });
             }
         } else {
-            let file_ref =
-                FileReference::new(trimmed).map_err(|source| SchemaError::Unresolved {
-                    reference: trimmed.to_string(),
-                    source,
-                })?;
-            file_ref
-                .resolve_from(base_dir)
+            resolve_file_reference_in_context(&file_ref, base_dir, request_context)
                 .map_err(|source| SchemaError::Unresolved {
                     reference: trimmed.to_string(),
                     source,
@@ -2480,7 +2644,7 @@ mod schema_plus_phase1 {
                 "demo": { "type": "string", "x-darkmatter-example": ["this"] }
             }
         });
-        let deps = resolve_document_examples(&mut json, dir.path(), Some(&path), &[])
+        let deps = resolve_document_examples(&mut json, dir.path(), Some(&path), &[], None)
             .expect("`this` example must resolve");
         assert_eq!(
             json["properties"]["demo"]["x-darkmatter-example"][0]["kind"],
@@ -2599,35 +2763,53 @@ mod bare_name_phase3 {
         serde_yaml_ng::from_str(input).expect("yaml parse")
     }
 
-    // ── bare-name detection ─────────────────────────────────────────────
+    fn parses_as_bare_name(raw: &str) -> bool {
+        FileReference::new(raw).is_ok_and(|file_ref| is_bare_name(&file_ref))
+    }
+
+    // ── Parsed bare-name classification ─────────────────────────────────
 
     #[test]
     fn bare_name_plain_filename() {
-        assert!(is_bare_schema_name("claudine.yaml"));
-        assert!(is_bare_schema_name("schema.yml"));
+        assert!(parses_as_bare_name("claudine.yaml"));
+        assert!(parses_as_bare_name("schema.yml"));
     }
 
     #[test]
     fn bare_name_rejects_path_separator() {
-        assert!(!is_bare_schema_name("./claudine.yaml"));
-        assert!(!is_bare_schema_name("docs/claudine.yaml"));
-        assert!(!is_bare_schema_name("../types.yaml"));
-        assert!(!is_bare_schema_name("/abs/schema.yaml"));
-        assert!(!is_bare_schema_name(r"docs\schema.yaml"));
+        assert!(!parses_as_bare_name("./claudine.yaml"));
+        assert!(!parses_as_bare_name("docs/claudine.yaml"));
+        assert!(!parses_as_bare_name("../types.yaml"));
+        assert!(!parses_as_bare_name("/abs/schema.yaml"));
+        assert!(!parses_as_bare_name(r"docs\schema.yaml"));
     }
 
     #[test]
-    fn bare_name_rejects_magic_prefix() {
-        assert!(!is_bare_schema_name("@schema.yaml"));
-        assert!(!is_bare_schema_name("!schema.yaml"));
-        assert!(!is_bare_schema_name("%schema.yaml"));
-        assert!(!is_bare_schema_name("vault:schema.yaml"));
-        assert!(!is_bare_schema_name("vault::schema.yaml"));
+    fn bare_name_rejects_special_and_recursive_classes() {
+        for raw in [
+            "@schema.yaml",
+            "!schema.yaml",
+            "%schema.yaml",
+            "vault:schema.yaml",
+            "vault::schema.yaml",
+            "~/schema.yaml",
+            "https://example.com/schema.yaml",
+        ] {
+            let file_ref = FileReference::new(raw).unwrap();
+            assert!(!is_bare_name(&file_ref), "{raw} must not be a bare name");
+        }
     }
 
     #[test]
-    fn bare_name_rejects_empty() {
-        assert!(!is_bare_schema_name(""));
+    fn invalid_reference_fails_before_bare_name_classification() {
+        assert!(matches!(
+            FileReference::new(""),
+            Err(biscuit_file::FileReferenceError::InvalidSyntax(_))
+        ));
+        assert!(matches!(
+            FileReference::new("%"),
+            Err(biscuit_file::FileReferenceError::InvalidSyntax(_))
+        ));
     }
 
     // ── $schema bare-name resolution ────────────────────────────────────
@@ -2681,6 +2863,60 @@ mod bare_name_phase3 {
     }
 
     #[test]
+    #[serial_test::serial(schema_root_snapshot)]
+    fn bare_name_root_probe_uses_captured_environment() {
+        const NAME_VAR: &str = "DARKMATTER_SCHEMA_ROOT_NAME";
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let schemas = root.join("schemas");
+        let docs = root.join("docs");
+        fs::create_dir_all(&schemas).unwrap();
+        fs::create_dir_all(&docs).unwrap();
+        write(
+            &schemas,
+            "captured.yaml",
+            "$schema:\n  captured: 'string(required)'\n",
+        );
+
+        let request_context = FileResolutionContext::from_snapshot(
+            &docs,
+            Some(root.join("captured-home")),
+            std::collections::HashMap::from([(
+                NAME_VAR.to_string(),
+                "captured.yaml".to_string(),
+            )]),
+        );
+        let prior_name = std::env::var_os(NAME_VAR);
+        let prior_home = std::env::var_os("HOME");
+        // SAFETY: this test is serialized while process-global state is changed.
+        unsafe {
+            std::env::set_var(NAME_VAR, "ambient.yaml");
+            std::env::set_var("HOME", root.join("ambient-home"));
+        }
+
+        let value = yaml_value("'{{DARKMATTER_SCHEMA_ROOT_NAME}}'");
+        let result = resolve_yaml_schema_with_roots_in_context(
+            &value,
+            &docs,
+            std::slice::from_ref(&schemas),
+            Some(&request_context),
+        );
+
+        match prior_name {
+            Some(value) => unsafe { std::env::set_var(NAME_VAR, value) },
+            None => unsafe { std::env::remove_var(NAME_VAR) },
+        }
+        match prior_home {
+            Some(value) => unsafe { std::env::set_var("HOME", value) },
+            None => unsafe { std::env::remove_var("HOME") },
+        }
+
+        let resolved = result.expect("captured schema name resolves");
+        let required = resolved.json_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|value| value == "captured"));
+    }
+
+    #[test]
     fn bare_name_resolves_from_far_root_when_near_lacks_it() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
@@ -2705,6 +2941,107 @@ mod bare_name_phase3 {
             resolve_yaml_schema_with_roots(&v, &root.join("pkg/docs"), &roots).expect("resolves");
         let required = resolved.json_schema["required"].as_array().unwrap();
         assert!(required.iter().any(|v| v == "title"));
+    }
+
+    #[test]
+    fn bare_name_pins_to_schema_root_not_repository_root() {
+        // The precedence flip made implicit resolution repository-first. A
+        // schema-root probe must stay pinned to its root: with a collision
+        // between the repository root and a nearer configured schema root, the
+        // schema root wins (feature review-1 Finding 4). An unpinned
+        // (implicit) probe would let `<repo>/schema.yaml` shadow
+        // `<repo>/schemas/schema.yaml` and silently validate the wrong schema.
+        let tmp = tempfile::tempdir().unwrap();
+        // Canonicalize so macOS `/var` -> `/private/var` matches the workdir
+        // `gix` reports for repository discovery.
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        // A real git repo makes the repository-root collision representative of
+        // the request context used by composition hosts.
+        gix::init(&root).unwrap();
+
+        fs::create_dir_all(root.join("schemas")).unwrap();
+        fs::create_dir_all(root.join("docs")).unwrap();
+
+        // Collision: same bare name at the repository root and the configured
+        // schema root, each with a distinguishing required field.
+        write(
+            &root,
+            "schema.yaml",
+            "$schema:\n  repo_wins: 'string(required)'\n",
+        );
+        write(
+            &root.join("schemas"),
+            "schema.yaml",
+            "$schema:\n  schema_root_wins: 'string(required)'\n",
+        );
+
+        let roots = vec![root.join("schemas")];
+        let v = yaml_value("schema.yaml");
+        let resolved =
+            resolve_yaml_schema_with_roots(&v, &root.join("docs"), &roots).expect("resolves");
+
+        let required = resolved.json_schema["required"].as_array().unwrap();
+        assert!(
+            required.iter().any(|v| v == "schema_root_wins"),
+            "configured schema root must win over the repository root: {required:?}"
+        );
+        assert!(
+            !required.iter().any(|v| v == "repo_wins"),
+            "repository-root file must not be selected: {required:?}"
+        );
+        assert_eq!(resolved.referenced_files.len(), 1);
+        assert!(
+            resolved.referenced_files[0]
+                .to_string_lossy()
+                .contains("schemas"),
+            "referenced file must come from the configured schema root: {:?}",
+            resolved.referenced_files[0]
+        );
+    }
+
+    #[test]
+    fn bare_name_ordering_survives_repository_root_collision() {
+        // Nearest-first ordering across multiple configured roots must hold even
+        // when the repository root also carries the colliding name. The near
+        // root wins; neither the far root nor the repository root shadows it.
+        let tmp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        gix::init(&root).unwrap();
+
+        fs::create_dir_all(root.join("near")).unwrap();
+        fs::create_dir_all(root.join("far")).unwrap();
+        fs::create_dir_all(root.join("docs")).unwrap();
+
+        write(
+            &root,
+            "schema.yaml",
+            "$schema:\n  repo_wins: 'string(required)'\n",
+        );
+        write(
+            &root.join("near"),
+            "schema.yaml",
+            "$schema:\n  near_wins: 'string(required)'\n",
+        );
+        write(
+            &root.join("far"),
+            "schema.yaml",
+            "$schema:\n  far_wins: 'string(required)'\n",
+        );
+
+        let roots = vec![root.join("near"), root.join("far")];
+        let v = yaml_value("schema.yaml");
+        let resolved =
+            resolve_yaml_schema_with_roots(&v, &root.join("docs"), &roots).expect("resolves");
+
+        let required = resolved.json_schema["required"].as_array().unwrap();
+        assert!(
+            required.iter().any(|v| v == "near_wins"),
+            "nearest configured root must win: {required:?}"
+        );
+        assert!(
+            !required.iter().any(|v| v == "far_wins" || v == "repo_wins"),
+            "neither the far root nor the repository root may shadow the near root: {required:?}"
+        );
     }
 
     #[test]

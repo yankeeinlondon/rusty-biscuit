@@ -1,13 +1,12 @@
 name: coverage
 
-# Generates per-package LCOV coverage reports and a workspace-aggregated
-# report. Uploads artifacts for review. Report-only — no PR gating.
+# Generates one full-workspace LCOV report on the nightly schedule or by
+# explicit request. Pull requests use the affected-package coverage job in
+# `ci.yml`; pushes to main do not repeat coverage already generated for a PR.
 
 on:
-  pull_request:
-    branches: [main]
-  push:
-    branches: [main]
+  schedule:
+    - cron: "0 4 * * *"
   workflow_dispatch: {}
 
 env:
@@ -44,35 +43,10 @@ jobs:
           workspaces: ". -> target"
           shared-key: coverage
 
-      - name: Install just
-        uses: extractions/setup-just@v2
-
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@nextest
-
-      - name: Generate per-package coverage
-        run: just coverage
-
-      - name: Collect per-package LCOV reports
-        run: |
-          mkdir -p coverage-reports
-          # Per-package recipes drop `lcov-<pkg>.info` next to each package
-          # area; gather them for upload.
-          find . -type f -name 'lcov-*.info' \
-            -not -path './coverage-reports/*' \
-            -not -path './target/*' \
-            -print -exec cp {} coverage-reports/ \;
-
-      - name: Upload per-package LCOV artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: lcov-per-package
-          path: coverage-reports/
-
-      - name: Generate workspace coverage
+      - name: Generate one workspace coverage report
         run: cargo llvm-cov --workspace --lcov --output-path lcov-workspace.info
 
       - name: Upload workspace LCOV artifact

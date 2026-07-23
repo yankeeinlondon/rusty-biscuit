@@ -117,14 +117,12 @@ pub fn detect_locale() -> LocaleInfo {
 
 #[cfg(target_os = "windows")]
 fn detect_windows_locale() -> Option<String> {
-    let output = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-Command", "(Get-Culture).Name"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let name = String::from_utf8(output.stdout).ok()?.trim().to_string();
+    let name = crate::process::run_for_stdout(
+        "powershell",
+        &["-NoProfile", "-Command", "(Get-Culture).Name"],
+        crate::process::timeouts::WINDOWS_LOCALE,
+    )?;
+    let name = name.trim();
     if name.is_empty() {
         return None;
     }

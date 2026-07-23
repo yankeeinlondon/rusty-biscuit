@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::cell::{Cell, RefCell};
@@ -9,6 +9,11 @@ use tracing::{debug, instrument, warn};
 
 use crate::request::GitRequest;
 use crate::{Result, SniffError};
+
+use super::recent_commits::CommitDescSet;
+use super::worktree::WorktreeEntry;
+
+const AGGREGATE_COMMIT_WINDOW_DAYS: i64 = 3;
 
 const CONVENTIONAL_COMMIT_RE: &str = r"^([a-zA-Z0-9-]+)(?:\(([^)]*)\))?: (.+)$";
 
@@ -549,10 +554,20 @@ impl GitRepo {
         }
     }
 
+    /// Runs `f` against this instance's gix handle with the object cache sized.
+    ///
+    /// The seam that lets sibling modules add `*_with_repo` query variants which
+    /// reuse an already-discovered handle instead of paying a second
+    /// `trusted_discover`. `f` must not re-enter a `GitRepo` method: the handle
+    /// is held through a [`RefCell`] borrow for the duration of the call.
+    pub(crate) fn with_cached_gix<T>(&self, f: impl FnOnce(&gix::Repository) -> T) -> T {
+        self.ensure_cache();
+        f(&self.gix.borrow())
+    }
+
     /// Returns cached ref decorations, computing them once on first access.
     ///
-    /// Errors are suppressed: an unreadable ref store yields an empty map. For
-    /// error propagation, use [`Self::try_ref_decorations`].
+    /// Errors are suppressed: an unreadable ref store yields an empty map.
     pub(crate) fn ref_decorations(
         &self,
     ) -> std::cell::Ref<'_, HashMap<gix::ObjectId, Vec<RefDecoration>>> {
@@ -567,24 +582,6 @@ impl GitRepo {
         std::cell::Ref::map(self.ref_decorations.borrow(), |opt| opt.as_ref().unwrap())
     }
 
-    /// Fallible variant of [`Self::ref_decorations`].
-    ///
-    /// Propagates ref-store, ref-iteration, and peel failures as
-    /// [`SniffError::Git`] rather than caching a partial or empty map. On
-    /// success the result is cached for subsequent accessors.
-    pub(crate) fn try_ref_decorations(
-        &self,
-    ) -> Result<std::cell::Ref<'_, HashMap<gix::ObjectId, Vec<RefDecoration>>>> {
-        if self.ref_decorations.borrow().is_none() {
-            self.ensure_cache();
-            let decorations =
-                super::discovery::collect_ref_decorations_fallible(&self.gix.borrow())?;
-            *self.ref_decorations.borrow_mut() = Some(decorations);
-        }
-        Ok(std::cell::Ref::map(self.ref_decorations.borrow(), |opt| {
-            opt.as_ref().unwrap()
-        }))
-    }
 }
 
 impl GitRepo {
@@ -713,7 +710,9 @@ impl GitRepo {
 
     /// Current linked-worktree name, or `None` in the main worktree.
     pub fn try_current_worktree_name(&self) -> Result<Option<String>> {
-        Ok(super::worktree::current_worktree_name(&self.gix.borrow()))
+        Ok(super::worktree::current_worktree_name_from_gix(
+            &self.gix.borrow(),
+        ))
     }
 
     /// Repository-relative paths currently at non-zero index stages.
@@ -822,7 +821,7 @@ impl GitRepo {
     pub fn try_branches(&self) -> Result<Vec<LocalBranchInfo>> {
         self.ensure_cache();
         let current = self.try_current_branch()?;
-        super::remote_refresh::get_local_branches_fallible(&self.gix.borrow(), current.as_deref())
+        super::remote_refresh::get_local_branches_fallible(&self.gix.borrow(), current.as_deref(), true)
     }
 
     /// Branch projection for `sniff repo branches`.
@@ -928,14 +927,44 @@ impl GitRepo {
             super::remote_refresh::refresh_remote_tracking_refs(&self.gix.borrow(), 2);
         }
 
-        let mut recent = if request.commit_count > 0 {
+        let wants_tracking_refs = request.wants_tracking() && current_branch.is_some();
+        let needs_ref_snapshot = request.wants_ref_decorations()
+            || request.wants_branches()
+            || wants_tracking_refs
+            || (request.wants_remotes() && request.include_remote_branch_details)
+            || (request.refresh_remote_tracking && request.include_commit_remote_containment);
+        let ref_snapshot = if needs_ref_snapshot {
             self.ensure_cache();
-            let decorations = self.try_ref_decorations()?;
-            super::discovery::get_recent_commits_fallible(
+            Some(super::remote_refresh::RefSnapshot::observe(
                 &self.gix.borrow(),
-                request.commit_count,
-                Some(&decorations),
-            )?
+                request.wants_branches() || wants_tracking_refs,
+                wants_tracking_refs
+                    || (request.wants_remotes() && request.include_remote_branch_details)
+                    || (request.refresh_remote_tracking
+                        && request.include_commit_remote_containment),
+                request.wants_ref_decorations(),
+            )?)
+        } else {
+            None
+        };
+
+        let mut recent = if request.wants_commits() {
+            self.ensure_cache();
+            // Decorations are an opt-out: a caller that wants bare commit
+            // metadata should not pay for a ref-store walk and peel.
+            if request.wants_ref_decorations() {
+                super::discovery::get_recent_commits_fallible(
+                    &self.gix.borrow(),
+                    request.commit_count,
+                    ref_snapshot.as_ref().map(|refs| refs.decorations()),
+                )?
+            } else {
+                super::discovery::get_recent_commits_fallible(
+                    &self.gix.borrow(),
+                    request.commit_count,
+                    None,
+                )?
+            }
         } else {
             Vec::new()
         };
@@ -975,54 +1004,63 @@ impl GitRepo {
         };
 
         // Remotes, config, branches, and tracking are repo metadata that a pure
-        // file-change query never renders. Gating them on `wants_repo_metadata`
-        // (rather than `is_minimal`) lets a `summary().include_file_changes`
-        // request skip the per-branch `graph_ahead_behind` walk that otherwise
-        // dominates latency on repos with many local branches.
-        let wants_metadata = request.wants_repo_metadata();
-
-        let remotes = if wants_metadata {
-            super::remote_refresh::get_remotes(
+        // file-change query never renders. Each is gated on its own `wants_*`
+        // accessor, which derives the legacy `wants_repo_metadata` answer unless
+        // the caller supplied explicit controls — so a `summary()
+        // .include_file_changes` request still skips the per-branch
+        // `graph_ahead_behind` walk that otherwise dominates latency on repos
+        // with many local branches.
+        let remotes = if request.wants_remotes() {
+            super::remote_refresh::get_remotes_from_snapshot(
                 &self.gix.borrow(),
                 request.include_remote_branch_details,
+                ref_snapshot.as_ref(),
             )
         } else {
             Vec::new()
         };
 
-        let worktrees = if request.include_worktrees {
+        let worktrees = if request.wants_worktrees() {
             self.ensure_cache();
-            super::remote_refresh::get_worktrees(
+            super::remote_refresh::get_worktrees_from_snapshot(
                 &self.gix.borrow(),
                 request.full_worktree_details,
                 Some(self.repo_root.as_path()),
+                ref_snapshot.as_ref(),
             )?
         } else {
             HashMap::new()
         };
 
-        let config = if wants_metadata {
+        let config = if request.wants_config() {
             self.config()
         } else {
             GitConfig::default()
         };
 
-        let branches = if wants_metadata {
+        let branches = if request.wants_branches() {
             self.ensure_cache();
-            super::remote_refresh::get_local_branches_fallible(
+            super::remote_refresh::get_local_branches_from_snapshot(
                 &self.gix.borrow(),
                 current_branch.as_deref(),
+                request.wants_branch_divergence(),
+                ref_snapshot.as_ref().expect("branch request observes refs"),
             )?
         } else {
             Vec::new()
         };
 
-        let tracking = if wants_metadata {
-            self.ensure_cache();
-            super::remote_refresh::get_tracking_status_fallible(
-                &self.gix.borrow(),
-                current_branch.as_deref(),
-            )?
+        let tracking = if request.wants_tracking() {
+            if let Some(current_branch) = current_branch.as_deref() {
+                self.ensure_cache();
+                super::remote_refresh::get_tracking_status_from_snapshot(
+                    &self.gix.borrow(),
+                    Some(current_branch),
+                    ref_snapshot.as_ref().expect("tracking request observes refs"),
+                )?
+            } else {
+                Vec::new()
+            }
         } else {
             Vec::new()
         };
@@ -1031,10 +1069,13 @@ impl GitRepo {
             status.is_behind = super::remote_refresh::summarize_behind_status(&tracking);
             if request.include_commit_remote_containment {
                 self.ensure_cache();
-                super::remote_refresh::populate_recent_commit_remotes(
+                super::remote_refresh::populate_recent_commit_remotes_from_snapshot(
                     &self.gix.borrow(),
                     &mut recent,
                     request.max_remote_branches,
+                    ref_snapshot
+                        .as_ref()
+                        .expect("containment request observes refs"),
                 );
             }
         }
@@ -1063,6 +1104,51 @@ impl GitRepo {
             config,
             tracking,
             file_changes,
+        })
+    }
+
+    /// Observe the Git shapes used only by the repository aggregate.
+    ///
+    /// This companion is deliberately crate-private: aggregate projection is
+    /// a library operation, not a metadata flag or a field on [`GitInfo`]. The
+    /// retained repository handle lets branch, worktree, and history
+    /// observations reuse discovery, with one ref snapshot for branch facts.
+    pub(crate) fn observe_aggregate_evidence(&self) -> Result<GitAggregateEvidence> {
+        self.ensure_cache();
+        let current_branch = self.try_current_branch()?;
+        let refs = super::remote_refresh::RefSnapshot::observe(
+            &self.gix.borrow(),
+            true,
+            true,
+            false,
+        )?;
+        let branches = self.with_cached_gix(|repo| {
+            super::remote_refresh::get_branch_info_from_snapshot(
+                repo,
+                current_branch.as_deref(),
+                &refs,
+            )
+        })?;
+        let worktrees = self
+            .with_cached_gix(super::worktree::list_worktrees_from_gix)
+            .map_err(|error| SniffError::SystemInfo {
+                domain: "git.worktrees",
+                message: error.to_string(),
+            })?;
+        let current_worktree =
+            self.with_cached_gix(super::worktree::current_worktree_name_from_gix);
+        let commits = super::recent_commits::get_recent_commits_by_duration_with_repo(
+            self,
+            Duration::days(AGGREGATE_COMMIT_WINDOW_DAYS),
+            &format!("last {AGGREGATE_COMMIT_WINDOW_DAYS}d"),
+            None,
+        )?;
+
+        Ok(GitAggregateEvidence {
+            branches,
+            worktrees,
+            current_worktree,
+            commits,
         })
     }
 }
@@ -1134,6 +1220,15 @@ pub struct GitInfo {
     /// File changes with their status (staged/modified/both/conflicted/untracked).
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub file_changes: Vec<FileChange>,
+}
+
+/// Repository evidence needed only by the bare aggregate projection.
+#[derive(Debug, Clone)]
+pub(crate) struct GitAggregateEvidence {
+    pub(crate) branches: Vec<BranchInfo>,
+    pub(crate) worktrees: Vec<WorktreeEntry>,
+    pub(crate) current_worktree: Option<String>,
+    pub(crate) commits: CommitDescSet,
 }
 
 /// Represents whether the local branch is behind remote tracking branches.
@@ -1768,5 +1863,147 @@ mod tests {
                 request
             );
         }
+    }
+
+    #[test]
+    fn focused_ref_consumers_share_one_observation() {
+        let (dir, repo) = setup_repo();
+        let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+        let head = repo.head().unwrap().target().unwrap();
+        repo.remote("origin", "https://example.com/acme/project.git")
+            .unwrap();
+        repo.reference(
+            &format!("refs/remotes/origin/{branch}"),
+            head,
+            true,
+            "tracking fixture",
+        )
+        .unwrap();
+        repo.reference_symbolic(
+            "refs/remotes/origin/HEAD",
+            &format!("refs/remotes/origin/{branch}"),
+            true,
+            "default branch fixture",
+        )
+        .unwrap();
+        repo.tag_lightweight("v1", &repo.find_commit(head).unwrap().into_object(), true)
+            .unwrap();
+
+        let mut request = GitRequest::full().metadata(
+            crate::request::GitMetadataRequest::none()
+                .commits(true)
+                .ref_decorations(true)
+                .branches(true)
+                .remotes(true)
+                .tracking(true),
+        );
+        request.include_remote_branch_details = true;
+
+        let git_repo = GitRepo::discover(dir.path()).unwrap().unwrap();
+        let collector = crate::performance::PerformanceCollector::new_shared();
+        let info = crate::performance::with_current_collector(Some(collector.clone()), || {
+            git_repo.detect_with_request(&request).unwrap()
+        });
+        let counters = collector
+            .snapshot(std::time::Duration::ZERO)
+            .counters;
+
+        assert_eq!(
+            counters
+                .get(crate::performance::counters::GIT_REF_WALKS)
+                .copied()
+                .unwrap_or(0),
+            1,
+            "branches, tracking, remote tips, and decorations share one pass: {counters:?}"
+        );
+        assert!(info.recent.iter().any(|commit| !commit.refs.is_empty()));
+        assert!(info.branches.iter().any(|candidate| candidate.name == branch));
+        assert!(info.tracking.iter().any(|status| status.remote == "origin"));
+        let origin = info
+            .remotes
+            .iter()
+            .find(|remote| remote.name == "origin")
+            .unwrap();
+        assert_eq!(origin.default_branch.as_deref(), Some(branch.as_str()));
+        assert_eq!(origin.branches.as_deref(), Some(&[branch] as &[String]));
+    }
+
+    #[test]
+    fn focused_worktree_metadata_opens_no_linked_repositories() {
+        let (dir, repo) = setup_repo();
+        let linked_path = dir.path().join("linked-native-path");
+        repo.worktree("linked", &linked_path, None).unwrap();
+
+        let request = GitRequest::full().metadata(
+            crate::request::GitMetadataRequest::none().worktrees(true),
+        );
+        let git_repo = GitRepo::discover(dir.path()).unwrap().unwrap();
+        let collector = crate::performance::PerformanceCollector::new_shared();
+        let info = crate::performance::with_current_collector(Some(collector.clone()), || {
+            git_repo.detect_with_request(&request).unwrap()
+        });
+        let counters = collector
+            .snapshot(std::time::Duration::ZERO)
+            .counters;
+
+        assert_eq!(
+            counters
+                .get(crate::performance::counters::GIT_WORKTREE_OPENS)
+                .copied()
+                .unwrap_or(0),
+            0,
+            "metadata-only linked worktrees must not be opened: {counters:?}"
+        );
+        let linked = info.worktrees.get("master").or_else(|| {
+            info.worktrees
+                .values()
+                .find(|worktree| {
+                    worktree.filepath == std::fs::canonicalize(&linked_path).unwrap()
+                })
+        });
+        let linked = linked.expect("linked worktree is projected from metadata");
+        assert_eq!(
+            linked.filepath,
+            std::fs::canonicalize(linked_path).unwrap()
+        );
+        assert!(!linked.sha.is_empty());
+        assert!(!linked.is_current);
+    }
+
+    #[test]
+    fn focused_worktrees_reuse_current_linked_repository() {
+        let (dir, repo) = setup_repo();
+        let linked_path = dir.path().join("current-linked");
+        repo.worktree("current-linked", &linked_path, None).unwrap();
+
+        let request = GitRequest::full().metadata(
+            crate::request::GitMetadataRequest::none().worktrees(true),
+        );
+        let git_repo = GitRepo::discover(&linked_path).unwrap().unwrap();
+        let collector = crate::performance::PerformanceCollector::new_shared();
+        let info = crate::performance::with_current_collector(Some(collector.clone()), || {
+            git_repo.detect_with_request(&request).unwrap()
+        });
+        let counters = collector
+            .snapshot(std::time::Duration::ZERO)
+            .counters;
+
+        assert_eq!(
+            counters
+                .get(crate::performance::counters::GIT_WORKTREE_OPENS)
+                .copied()
+                .unwrap_or(0),
+            0,
+            "the already-discovered linked repository supplies current details: {counters:?}"
+        );
+        let current = info
+            .worktrees
+            .values()
+            .find(|worktree| {
+                worktree.filepath == std::fs::canonicalize(&linked_path).unwrap()
+            })
+            .expect("current linked worktree is present");
+        assert!(current.is_current);
+        assert!(!current.sha.is_empty());
     }
 }

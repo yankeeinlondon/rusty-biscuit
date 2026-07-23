@@ -124,7 +124,15 @@ fn compose_missing_explicit_system_prompt_fails_visibly() {
         ])
         .assert()
         .code(1)
-        .stderr(contains("missing-system-prompt.md"));
+        // The path is named, but a `StatusBlock` word-wraps it at the terminal
+        // width, so match the file name's tail rather than the whole path — the
+        // assertion is "the operator is told which file", not "the path is on
+        // one line".
+        .stderr(contains("system prompt file not found"))
+        .stderr(contains("system-prompt.md"))
+        // `ClaudineError` reaches the walker through the diagnostic registry,
+        // so this renders a coded block rather than the generic `Error:` line.
+        .stderr(contains("io.read_failed"));
 }
 
 #[cfg(unix)]

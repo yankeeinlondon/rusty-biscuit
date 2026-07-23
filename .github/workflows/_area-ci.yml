@@ -2,8 +2,8 @@ name: area-ci
 
 # Reusable CI building block for a single curated package area.
 #
-# Every per-area workflow calls this via `workflow_call` so platform behavior
-# stays uniform across the monorepo instead of accreting per-area. See
+# The dependency-aware `ci.yml` matrix calls this via `workflow_call` so
+# platform behavior stays uniform across the monorepo. See
 # `docs/testing-strategy.md` → "Platform Coverage (CI)" for the policy this
 # encodes (macOS compile-check only, full L1 on Linux + Windows, kache on the
 # non-Windows legs, nextest sharding for heavy areas).
@@ -47,11 +47,17 @@ on:
         description: "Enable the kache RUSTC_WRAPPER (GitHub Actions cache backend) on non-Windows legs."
         type: boolean
         default: true
+      ai-provider-stubs:
+        description: "Install inert AI-provider CLI stubs for tests that require provider discovery."
+        type: boolean
+        default: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   # Force TrueColor on headless runners so styled output matches local dev.
   COLORTERM: truecolor
+  # Native checks must not silently accept platform-specific warning drift.
+  RUSTFLAGS: "-D warnings"
 
 jobs:
   # macOS floor: compile only. macOS runner minutes bill ~10x Linux, so we catch
@@ -114,6 +120,22 @@ jobs:
         uses: extractions/setup-just@v2
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
+      - name: Install AI-provider CLI stubs
+        if: ${{ inputs.ai-provider-stubs }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          stubdir="$RUNNER_TEMP/ai-cli-stubs"
+          mkdir -p "$stubdir"
+          for bin in claude opencode roo gemini aider codex goose kimi qwen; do
+            if [ "${{ runner.os }}" = "Windows" ]; then
+              printf '@echo off\r\nexit /b 0\r\n' >"$stubdir/$bin.cmd"
+            else
+              printf '#!/usr/bin/env sh\nexit 0\n' >"$stubdir/$bin"
+              chmod +x "$stubdir/$bin"
+            fi
+          done
+          echo "$stubdir" >>"$GITHUB_PATH"
       - name: L1 tests
         shell: bash
         run: |
@@ -123,6 +145,31 @@ jobs:
           fi
           cd "${{ inputs.area }}"
           just test "${args[@]}"
+
+  lint:
+    name: lint (ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable kache
+        if: ${{ inputs.kache }}
+        uses: kunobi-ninja/kache-action@v1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: area-ci-${{ inputs.area }}-lint-ubuntu-latest
+      - name: Install just
+        uses: extractions/setup-just@v2
+      - name: Lint and documentation guards
+        run: cd "${{ inputs.area }}" && just lint
 
   # L2 (real terminal) runs only on Linux, where the tmux harness is guaranteed.
   # BISCUIT_TEST_LEVEL_REQUIRED=2 makes a genuinely missing harness hard-fail
@@ -141,6 +188,8 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
       - name: Enable kache
         if: ${{ inputs.kache }}
         uses: kunobi-ninja/kache-action@v1

@@ -97,7 +97,7 @@ $schema:
 | `boolean`    | Any JSON boolean.                                                                                      | Constraints: `default`, `required`.                                                                                                                                             |
 | `boolish`    | A JSON boolean **or** the strings `"true"` / `"false"` (any case).                                     | Compiles to `anyOf: [boolean, enum]`. A `"true"` / `"false"` value is **normalized** to a real boolean (see [Type Coercion](#type-coercion)).                                  |
 | `object`     | Any YAML/JSON object.                                                                                  | No nested-schema authoring in v1 — `object` accepts any shape. Reference an external file for deeper typing.                                                                    |
-| `file`       | A file reference parsed via `biscuit-file::FileReference`. Single or array form.                       | Constraints: `eager`, `match(glob, ...)`, `required`. **Lazy by default** (syntax-only); `file(eager)` resolves & checks existence **document-first, then launch-area fallback**, and on validation success its stored value is **rewritten** to the repo-relative resolved path. Bare `file` is left verbatim. See [Files](#files).        |
+| `file`       | A file reference parsed via `biscuit-file::FileReference`. Single or array form.                       | Constraints: `eager`, `match(glob, ...)`, `required`. **Lazy by default** (syntax-only); `file(eager)` resolves & checks existence (implicit paths repository-root first, then the document directory; explicit `./`/`../` from the document directory only), and on validation success its stored value is **rewritten** to the repo-relative resolved path. Bare `file` is left verbatim. See [Files](#files).        |
 | `enum`       | A value from an explicit set.                                                                          | Constraints required — the members are the constraint. See [Enumerations](#enumerations).                                                                                       |
 | `literal`    | Exactly one scalar value, of any scalar type.                                                          | Compiles to JSON Schema `const`. Bare `true`/`2` are typed; quoting forces string. Constraints: `required`, an equal `default`. See [Literals](#literals).                       |
 | `url`        | A string parseable as an absolute URL.                                                                 | Constraints: `scheme(...)`, `default`, `required`.                                                                                                                              |
@@ -443,11 +443,12 @@ Add `eager` to opt into existence checking. `file(eager)` requires that:
 1. The string parses as a `FileReference`.
 2. The reference resolves to an existing filesystem entry **at validation time**.
 
-Relative paths in an eager check resolve **document-first**: the prompt document's
-directory is tried first, then the captured launch area as a fallback. This is the
-same order `$schema` file references and the expression path (`file_exists`/
-`frontmatter`) use. Only a legacy caller that configures no anchor falls back to the
-ambient current working directory.
+Relative paths in an eager check resolve like implicit file references: a bare path
+(`spec.md`, `notes/spec.md`) is tried **repository-root first, then the prompt
+document's directory**, while an explicit `./`/`../` path resolves from the document
+directory only. This is the same order `$schema` file references and the expression
+path (`file_exists`/`frontmatter`) use. No ambient current working directory is read
+once the resolution context is captured.
 
 `match(globs)` is **suggestion metadata only** — it shapes path completion (which
 candidates a tool offers) but never rejects a value. An existing file that matches no
@@ -843,7 +844,12 @@ The resolution rules:
 3. **YAML sequence** at `$schema` — root union; each arm is resolved by the same rules above.
 4. **No `$schema` and no baseline** — validation succeeds vacuously and `pretty` mode emits a `no schema; vacuously valid` note (suppressed by `--quiet`).
 
-Relative paths in `$schema` references resolve from the **document's parent directory**.
+Path references in `$schema` resolve like implicit file references: a bare path is
+tried **repository-root first, then the document's directory**, while an explicit
+`./`/`../` reference resolves from the document's directory only. A bare **name**
+(`$schema: claudine.yaml`, no path separator) instead resolves against the configured
+[schema roots](#repository-trigger-schemas) nearest-first. No ambient current working
+directory is read.
 
 Remote (`http://` / `https://`) references are **not supported** in v1 and produce a clear `SchemaError::RemoteUnsupported` directing the user to download the schema locally.
 

@@ -1,10 +1,16 @@
-//! Phase 1c — per-step compose with schema validation and aggregated
-//! missing-property handling for the sequence orchestrator.
+//! Phase 1c — sequence-wide schema validation and shell approval.
 //!
-//! Each step is composed (and, for inline sequences, prepared for
-//! body write-back) with `$schema` validation. Missing-property failures
-//! are aggregated across all steps so the user can fix the full sequence in
-//! one edit, matching the direct `compose` path's interactive collection.
+//! Every step is validated and approved here, before any step runs: `$schema`
+//! required-property gaps are aggregated across all steps so the user fixes the
+//! whole sequence in one edit, and every template and lifecycle shell command is
+//! resolved and approved so no approval prompt can interrupt a running sequence.
+//!
+//! What this pass deliberately does **not** produce is a composed document per
+//! step. Each step composes at its turn against the *live* source and the
+//! accumulated runtime layers (see [`super::jit`]); a composition retained from
+//! here would be stale the moment an earlier step wrote back a body or `set` a
+//! value. The compose performed here is a validation probe whose result is
+//! discarded — only its diagnostics and its approved command bytes survive.
 
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
@@ -25,19 +31,22 @@ use crate::commands::schema_interactive::{
     collect_missing_values, emit_dropped_optional_warnings, render_status_report,
     resolve_interactive_options,
 };
+use super::jit::StepComposeContext;
 use crate::log;
 
-/// Context data for a single step in the sequence.
-///
-/// Captures the per-step environment overrides and the prepared composition
-/// so that Phase 2 execution can reuse the work done during Phase 1 pre-flight.
-pub(super) struct StepContext {
-    pub(super) env_overrides: BTreeMap<String, String>,
-    pub(super) prepared: PreparedComposition,
+/// What the sequence-wide validation pass leaves behind for execution.
+pub(super) struct SequencePreflight {
+    /// Every shell command approved across all steps, template and lifecycle
+    /// alike. Handed to each just-in-time prepare as `pre_approved_commands`, so
+    /// a running sequence never stops for an approval prompt.
+    pub(super) approved_commands: HashSet<String>,
+    /// The user `--set` overrides after any interactive collection pass, so the
+    /// values the user supplied here are the ones every step composes against.
+    pub(super) resolved_overrides: Option<serde_json::Value>,
 }
 
-/// Run Phase 1c (per-step compose) with schema validation and aggregated
-/// missing-property handling.
+/// Run Phase 1c (sequence-wide validation) with schema validation and
+/// aggregated missing-property handling.
 ///
 /// On the first pass each step is composed via
 /// [`composition::prepare_direct_with_schema`]. Missing-property errors
@@ -55,17 +64,12 @@ pub(super) fn run_phase_1c_with_schema(
     plan: &SequencePlan,
     resolved_targets: &[Option<claudine::composition::ResolvedExecutionTarget>],
     user_set_overrides: &Option<serde_json::Value>,
-    source_repo_root: Option<&std::path::Path>,
-    child_cwd: &std::path::Path,
-    launch_area: Option<&std::path::Path>,
-    shared: &SharedComposeArgs,
+    ctx: &StepComposeContext<'_>,
     effective_fail_fast: bool,
-    inline_mode: bool,
-    shared_approval_cache: composition::SharedApprovalCache,
     initial_cumulative_approved: HashSet<String>,
     interrupted: &Arc<AtomicBool>,
     silent: bool,
-) -> Result<(Vec<StepContext>, HashSet<String>)> {
+) -> Result<Option<SequencePreflight>> {
     let mut overrides = user_set_overrides.clone();
     // At most one interactive collection pass — collected values are
     // shared across all steps that need the same property, and a second
@@ -76,23 +80,21 @@ pub(super) fn run_phase_1c_with_schema(
             plan,
             resolved_targets,
             &overrides,
-            source_repo_root,
-            child_cwd,
-            launch_area,
-            shared,
+            ctx,
             effective_fail_fast,
-            inline_mode,
-            Arc::clone(&shared_approval_cache),
             initial_cumulative_approved.clone(),
             interrupted,
         )?;
 
         match attempt_result {
             Phase1cAttempt::Interrupted => {
-                return Ok((Vec::new(), initial_cumulative_approved));
+                return Ok(None);
             }
-            Phase1cAttempt::Success(contexts, approved) => {
-                return Ok((contexts, approved));
+            Phase1cAttempt::Success(approved) => {
+                return Ok(Some(SequencePreflight {
+                    approved_commands: approved,
+                    resolved_overrides: overrides,
+                }));
             }
             Phase1cAttempt::Missing(contexts) => {
                 if attempt > 0 {
@@ -108,7 +110,7 @@ pub(super) fn run_phase_1c_with_schema(
                 // every non-TTY sequence with e.g. `object(required)` to
                 // surface as `UnsupportedInteractiveSchema` instead of
                 // the actionable aggregated `MissingProperties` report.
-                let interactive = resolve_interactive_options(shared.silent);
+                let interactive = resolve_interactive_options(ctx.shared.silent);
                 if !interactive.allowed() {
                     return Err(into_sequence_missing(contexts).into());
                 }
@@ -128,7 +130,7 @@ pub(super) fn run_phase_1c_with_schema(
                     }
                     .into());
                 }
-                let collected = match collect_sequence_missing_values(&contexts, silent, launch_area) {
+                let collected = match collect_sequence_missing_values(&contexts, silent, ctx.launch_area) {
                     Ok(values) => values,
                     Err(_) => {
                         // Ctrl-C / Esc / unsupported shape — surface the
@@ -165,7 +167,7 @@ struct StepMissingContext {
 }
 
 enum Phase1cAttempt {
-    Success(Vec<StepContext>, HashSet<String>),
+    Success(HashSet<String>),
     Missing(Vec<StepMissingContext>),
     Interrupted,
 }
@@ -192,134 +194,52 @@ fn run_phase_1c_attempt(
     plan: &SequencePlan,
     resolved_targets: &[Option<claudine::composition::ResolvedExecutionTarget>],
     user_set_overrides: &Option<serde_json::Value>,
-    source_repo_root: Option<&std::path::Path>,
-    child_cwd: &std::path::Path,
-    launch_area: Option<&std::path::Path>,
-    shared: &SharedComposeArgs,
+    ctx: &StepComposeContext<'_>,
     effective_fail_fast: bool,
-    inline_mode: bool,
-    shared_approval_cache: composition::SharedApprovalCache,
     initial_cumulative_approved: HashSet<String>,
     interrupted: &Arc<AtomicBool>,
 ) -> Result<Phase1cAttempt> {
     let total_steps = plan.steps.len();
     let mut cumulative_approved = initial_cumulative_approved;
-    let mut step_contexts: Vec<StepContext> = Vec::with_capacity(total_steps);
     let mut missing_contexts: Vec<StepMissingContext> = Vec::new();
 
     for step_index in 0..total_steps {
         if interrupted.load(Ordering::SeqCst) {
             return Ok(Phase1cAttempt::Interrupted);
         }
-        let overlay = build_step_overlay(plan, step_index);
-        let step_set_overrides = overlay.as_set_overrides(user_set_overrides.clone());
-
-        let mut env_overrides: BTreeMap<String, String> = BTreeMap::new();
-        env_overrides.insert(
-            "CLAUDINE_FAIL_FAST".to_string(),
-            effective_fail_fast.to_string(),
+        // Validation layers against the *initial* runtime state — empty
+        // `outputs`, no mutations — which is exactly what the first step sees
+        // and what `--dry-run` composes against.
+        let step_set_overrides = super::jit::step_set_overrides(
+            plan,
+            step_index,
+            user_set_overrides.as_ref(),
+            None,
         );
+
         let target = resolved_targets
             .get(step_index)
             .ok_or_else(|| eyre!("missing resolved target for step {}", step_index + 1))?;
-        // A `--dry-run` step with an unresolved agent state has no target;
-        // leave `AGENT` unset so composition matches the direct compose
-        // --dry-run path (`{{env.AGENT}}` resolves to empty for those states).
-        if let Some(target) = target {
-            env_overrides.insert("AGENT".to_string(), target.provider.as_slug().to_string());
-            if let Some(ref model) = target.model {
-                env_overrides.insert("MODEL".to_string(), model.clone());
-            }
-        }
-        env_overrides.insert("YOLO".to_string(), shared.yolo.to_string());
+        let env_overrides =
+            super::jit::step_env_overrides(effective_fail_fast, ctx.shared, target.as_ref());
 
-        // Per-step schema pre-validation BEFORE preflight. If a step's
-        // effective frontmatter (source + overlay overrides) is missing
-        // required schema values, capture them for aggregation and
-        // continue — do NOT let Darkmatter's preflight compose pass
-        // surface a raw `SchemaValidationFailed` here, because that
-        // would short-circuit aggregation across remaining steps.
-        let (step_source, step_overrides) =
-            match composition::pre_validate_schema(source, Some(&step_set_overrides), launch_area) {
-                Ok(pre) => {
-                    emit_dropped_optional_warnings(&pre.dropped_optionals);
-                    (
-                        pre.source,
-                        pre.set_overrides
-                            .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new())),
-                    )
-                }
-                Err(CompositionError::MissingProperties {
-                    source_path,
-                    missing,
-                    frontmatter_description,
-                    pointer_paths,
-                }) => {
-                    let step = &plan.steps[step_index];
-                    missing_contexts.push(StepMissingContext {
-                        failure: SequenceMissingPropertiesStep {
-                            step: step_index + 1,
-                            step_name: step.name.clone(),
-                            source_path,
-                            missing,
-                            frontmatter_description,
-                            pointer_paths,
-                        },
-                        effective_overrides: Some(step_set_overrides.clone()),
-                    });
-                    continue;
-                }
-                Err(other) => return Err(other.into()),
-            };
-
-        let compose_options = build_template_preflight_options(
+        // Validation, approval, and composition run through the very same path
+        // execution uses at each step's turn, so a step that validates here
+        // cannot fail differently there for want of a second implementation.
+        match super::jit::compose_step(
+            source,
+            ctx,
+            &step_set_overrides,
             &env_overrides,
-            &step_source.resolved_path,
-            &step_overrides,
-            launch_area,
-        );
-
-        let approval_options = super::super::build_harness_shell_options_with_cache(
-            &step_source.resolved_path,
-            source_repo_root,
-            Some(Arc::clone(&shared_approval_cache)),
-        );
-
-        let template_preflight = composition::resolve_shell_approvals(
-            Some(&step_source.markdown),
-            Some(&compose_options),
-            &approval_options,
-            None,
-            None,
-        )?;
-        cumulative_approved.extend(template_preflight.approved_commands.iter().cloned());
-
-        let prepare_options = PrepareOptions {
-            set_overrides: Some(step_overrides.clone()),
-            pre_approved_commands: Some(cumulative_approved.clone()),
-            env_overrides: env_overrides.clone(),
-            perf_enabled: shared.perf,
-            source_repo_root: source_repo_root.map(std::path::Path::to_path_buf),
-            shell_working_directory: Some(child_cwd.to_path_buf()),
-            // Sequence prep has no launch-area snapshot threaded here; fall back
-            // to capture-at-prepare (the lib default).
-            prepared_context: None,
-            file_ref_fallback_dir: launch_area.map(std::path::Path::to_path_buf),
-        };
-
-        // Inline steps prepare via `prepare_inline_with_schema` so the
-        // composed `prompt` frontmatter becomes the agent prompt and the
-        // prepared closure is `Inline` (drives body write-back in Phase 2).
-        // Compose steps keep the body-as-prompt behavior.
-        let prepare_result = if inline_mode {
-            composition::prepare_inline_with_schema(&step_source, prepare_options)
-        } else {
-            composition::prepare_direct_with_schema(&step_source, prepare_options)
-        };
-        let prepared = match prepare_result {
-            Ok(prepared) => {
-                emit_dropped_optional_warnings(&prepared.dropped_optionals);
-                prepared
+            std::mem::take(&mut cumulative_approved),
+            plan.steps[step_index].executable.is_some(),
+        ) {
+            Ok(composed) => {
+                cumulative_approved = composed.approved;
+                // The composed document itself is discarded: execution
+                // re-composes this step at its turn against the live file and
+                // the accumulated runtime layers.
+                drop(composed.prepared);
             }
             Err(CompositionError::MissingProperties {
                 source_path,
@@ -337,25 +257,20 @@ fn run_phase_1c_attempt(
                         frontmatter_description,
                         pointer_paths,
                     },
-                    effective_overrides: Some(step_overrides.clone()),
+                    effective_overrides: Some(step_set_overrides.clone()),
                 });
-                // Skip harness preflight for the failed step; continue so
-                // we accumulate every step's missing properties.
+                // Continue so every step's missing properties are accumulated
+                // and the user fixes the whole sequence in one edit.
                 continue;
             }
             Err(other) => return Err(other.into()),
-        };
-
-        step_contexts.push(StepContext {
-            env_overrides,
-            prepared,
-        });
+        }
     }
 
     if !missing_contexts.is_empty() {
         return Ok(Phase1cAttempt::Missing(missing_contexts));
     }
-    Ok(Phase1cAttempt::Success(step_contexts, cumulative_approved))
+    Ok(Phase1cAttempt::Success(cumulative_approved))
 }
 
 /// Dedupe missing properties across all failed steps and prompt for each
@@ -449,43 +364,6 @@ pub(super) fn find_first_unsupported(
     None
 }
 
-/// Build the Darkmatter `ComposeOptions` for a step's template SHELL preflight.
-///
-/// The launch-area fallback is anchored on `file`-typed schema validation and
-/// read-side interpolation so an area-relative path resolves document-first then
-/// launch-area — matching this step's `pre_validate_schema` call and the final
-/// `PrepareOptions.file_ref_fallback_dir`. Without it the preflight compose would
-/// fall back to the (already-mutated) process CWD and could discover different
-/// shell commands or pass/fail schema validation inconsistently with the
-/// corrected prepare path. The fallback is applied only when `launch_area` is
-/// present, matching `PrepareOptions`'s `launch_area.map(...)`.
-fn build_template_preflight_options(
-    env_overrides: &BTreeMap<String, String>,
-    source_path: &std::path::Path,
-    set_overrides: &serde_json::Value,
-    launch_area: Option<&std::path::Path>,
-) -> darkmatter::markdown::compose::ComposeOptions {
-    let mut ctx = darkmatter::markdown::compose::ComposeContext::capture();
-    for (key, value) in env_overrides {
-        ctx.env_mut().insert(key.clone(), value.clone());
-    }
-    let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(ctx)
-        .with_source_file(source_path)
-        // Defer the lifecycle event keys (DM1), matching the main prepare pass.
-        // The preflight compose exists only to discover template `::shell`
-        // directives; without the exclusion it resolves the deferred lifecycle
-        // subtree at compose time, so a `success`/`failure` read-side file
-        // reference (a file a later event creates) trips the fatal file-ref
-        // check before that event fires. Lifecycle shell commands are audited
-        // separately via `collect_lifecycle_shell_commands`.
-        .with_exclude_keys(LIFECYCLE_EVENT_KEYS.iter().copied());
-    if let Some(launch_area) = launch_area {
-        opts = opts.with_file_ref_fallback_dir(launch_area.to_path_buf());
-    }
-    opts = opts.with_set_overrides(set_overrides.clone());
-    opts
-}
-
 fn merge_overrides(
     base: Option<&serde_json::Value>,
     collected: serde_json::Map<String, serde_json::Value>,
@@ -498,154 +376,4 @@ fn merge_overrides(
         out.insert(k, v);
     }
     serde_json::Value::Object(out)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::build_template_preflight_options;
-    use std::collections::BTreeMap;
-
-    use darkmatter::markdown::Markdown;
-
-    use claudine::composition::resolve_shell_approvals;
-    use claudine::harness::ShellApprovalOptions;
-
-    /// RAII guard that switches the process CWD and restores it on drop
-    /// (including on panic). Tests using it are serialized to avoid racing on
-    /// process-global CWD with other CWD-mutating tests.
-    struct CwdGuard {
-        prior: std::path::PathBuf,
-    }
-
-    impl CwdGuard {
-        fn enter(dir: &std::path::Path) -> Self {
-            let prior = std::env::current_dir().expect("read CWD");
-            std::env::set_current_dir(dir).expect("set CWD");
-            Self { prior }
-        }
-    }
-
-    impl Drop for CwdGuard {
-        fn drop(&mut self) {
-            let _ = std::env::set_current_dir(&self.prior);
-        }
-    }
-
-    /// Regression for the Phase 1c template-preflight fallback omission.
-    ///
-    /// A sequence step with a `::shell` directive whose `{{ … }}` argument
-    /// depends on a read-side `file_exists` against a launch-area-relative file
-    /// must see
-    /// that file during the template SHELL preflight — exactly as the per-step
-    /// `pre_validate_schema` and the final `PrepareOptions.file_ref_fallback_dir`
-    /// already do. The launch-area-only file is reachable ONLY via the threaded
-    /// fallback, and the resolved/approved command must be CWD-independent.
-    #[test]
-    #[serial_test::serial(preflight_cwd)]
-    fn template_preflight_resolves_via_launch_area_fallback() {
-        let doc_dir = tempfile::TempDir::new().unwrap();
-        let launch_dir = tempfile::TempDir::new().unwrap();
-        let unrelated = tempfile::TempDir::new().unwrap();
-
-        // `spec.md` exists ONLY under the launch-area fallback — not the prompt
-        // (document) directory, not the ambient CWD.
-        std::fs::write(launch_dir.path().join("spec.md"), "# Spec\n").unwrap();
-
-        let source_path = doc_dir.path().join("prompt.md");
-        std::fs::write(
-            &source_path,
-            "::shell echo {{ file_exists(spec) }}\n",
-        )
-        .unwrap();
-
-        // Whitelist `echo` so preflight approves without an interactive handler.
-        std::fs::write(
-            doc_dir.path().join(".darkmatter-shell-whitelist"),
-            "prefix echo\n",
-        )
-        .unwrap();
-
-        let md = Markdown::try_from(source_path.as_path()).unwrap();
-        let overrides = serde_json::json!({ "spec": "spec.md" });
-        let approval_options = ShellApprovalOptions {
-            policy_root: Some(doc_dir.path().to_path_buf()),
-            approval_handler: None,
-            ..Default::default()
-        };
-
-        // Switch ambient CWD elsewhere to prove resolution is independent of any
-        // post-launch chdir.
-        let _cwd = CwdGuard::enter(unrelated.path());
-
-        let env_overrides: BTreeMap<String, String> = BTreeMap::new();
-        let opts = build_template_preflight_options(
-            &env_overrides,
-            &source_path,
-            &overrides,
-            Some(launch_dir.path()),
-        );
-        let result =
-            resolve_shell_approvals(Some(&md), Some(&opts), &approval_options, None, None).unwrap();
-
-        assert!(
-            result.approved_commands.contains("echo true"),
-            "template preflight must resolve file_exists(spec) via the launch-area \
-             fallback; approved: {:?}",
-            result.approved_commands,
-        );
-    }
-
-    /// Companion proving the assertion above turns on the fallback specifically.
-    /// WITHOUT the fallback (the pre-fix behavior), the launch-only `spec.md` is
-    /// unreachable from the prompt dir or the unrelated CWD, so `file_exists`
-    /// resolves to `false` and the approved command differs — the exact
-    /// preflight/prepare disagreement the fix closes.
-    #[test]
-    #[serial_test::serial(preflight_cwd)]
-    fn template_preflight_without_fallback_misses_launch_area_file() {
-        let doc_dir = tempfile::TempDir::new().unwrap();
-        let launch_dir = tempfile::TempDir::new().unwrap();
-        let unrelated = tempfile::TempDir::new().unwrap();
-
-        std::fs::write(launch_dir.path().join("spec.md"), "# Spec\n").unwrap();
-
-        let source_path = doc_dir.path().join("prompt.md");
-        std::fs::write(
-            &source_path,
-            "::shell echo {{ file_exists(spec) }}\n",
-        )
-        .unwrap();
-        std::fs::write(
-            doc_dir.path().join(".darkmatter-shell-whitelist"),
-            "prefix echo\n",
-        )
-        .unwrap();
-
-        let md = Markdown::try_from(source_path.as_path()).unwrap();
-        let overrides = serde_json::json!({ "spec": "spec.md" });
-        let approval_options = ShellApprovalOptions {
-            policy_root: Some(doc_dir.path().to_path_buf()),
-            approval_handler: None,
-            ..Default::default()
-        };
-
-        let _cwd = CwdGuard::enter(unrelated.path());
-
-        let env_overrides: BTreeMap<String, String> = BTreeMap::new();
-        let opts = build_template_preflight_options(&env_overrides, &source_path, &overrides, None);
-        let result =
-            resolve_shell_approvals(Some(&md), Some(&opts), &approval_options, None, None).unwrap();
-
-        assert!(
-            result.approved_commands.contains("echo false"),
-            "without the fallback the launch-only spec.md is unreachable, so \
-             file_exists(spec) resolves false; approved: {:?}",
-            result.approved_commands,
-        );
-        assert!(
-            !result.approved_commands.contains("echo true"),
-            "no-fallback path must NOT see the launch-area file; approved: {:?}",
-            result.approved_commands,
-        );
-    }
 }

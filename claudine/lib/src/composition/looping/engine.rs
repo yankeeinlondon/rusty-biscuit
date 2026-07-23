@@ -5,11 +5,14 @@ use std::path::{Path, PathBuf};
 use serde_json::{Map, Value};
 use tracing::info;
 
+use super::super::coordinator::{EvaluatedProxyRequest, ProxyProvenance, SurfacedHandoff};
 use super::super::error::CompositionError;
 use super::super::lifecycle::{LifecycleConfig, LifecycleEmitter, LifecycleRunGuard, LifecycleRuntimeContext, LifecycleSignal};
 use super::super::lifecycle_context::LifecycleErrorInfo;
-use super::super::lifecycle_control::{MAX_PROXY_HOPS, proxy_handoff_allowed, resolve_proxy_target};
 use super::super::lifecycle_executor::{ShellRunner, StackControl, StackExecutionContext};
+use super::super::lifecycle::runtime::{
+    LifecycleCatchExecution, LifecycleCatchProtocol, LifecycleCatchResult, LifecycleCatchState,
+};
 use super::super::prepare::PrepareOptions;
 use super::super::types::{CompositionMode, LoopConfig, OnRateLimit, ResolvedCompositionSource};
 use super::actions::ActionStaging;
@@ -254,8 +257,11 @@ pub fn execute_loop_with_config(
                 iteration + 1,
                 &last_output,
                 last_exit_code,
-                base_dir,
-                None,
+                LoopFileResolution {
+                    source_path: prompt_path,
+                    fallback_dir: None,
+                    context: None,
+                },
             )?
         {
             return Ok(LoopExecutionResult::failure(
@@ -306,6 +312,7 @@ pub fn execute_loop_with_lifecycle<E>(
     effect_engine: &darkmatter::effects::EffectEngine,
     shell_runner: &dyn ShellRunner,
     emitter: &dyn LifecycleEmitter,
+    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
     mut executor: E,
 ) -> Result<LoopExecutionResult, CompositionError>
 where
@@ -343,40 +350,44 @@ where
         shell_runner,
         emitter,
         base_dir,
+        file_resolution_context,
         Some(&init_timing),
         Some(&init_current),
     );
     let init_outcome = guard.execute_event(LifecycleSignal::Initialize, &init_ctx);
-
-    // A late-binding evaluation error on `initialize` (a crashed `when:` guard
-    // or interpolation) routes through `failure` → `finalize` like any other
-    // setup failure and halts the run (Decision #5). Checked before the control
-    // match because an evaluation raise leaves `control` `None`.
-    if let Some(info) = init_outcome.evaluation_error.as_ref() {
-        let failure_outcome =
-            guard.execute_event(LifecycleSignal::Failure, &init_ctx.with_error(info));
-        // If `failure` raised, thread its error (not the original) into
-        // finalize so a `finalize.stack` can branch on the failure raise.
-        let active_err = failure_outcome
-            .evaluation_error
-            .as_ref()
-            .unwrap_or(info);
-        let finalize_outcome = guard.execute_event(
-            LifecycleSignal::Finalize,
-            &init_ctx.with_error(active_err).with_signal(LifecycleSignal::Finalize),
-        );
+    let init_result = execute_loop_catch_protocol(
+        &mut guard,
+        &init_ctx,
+        LifecycleSignal::Initialize,
+        None,
+        init_outcome.clone(),
+    );
+    if let Some(info) = init_result.evaluation_error.as_ref() {
+        let surfaced_signal = init_result
+            .evaluation_error_signal
+            .expect("initialize evaluation error remains terminal");
         return Ok(LoopExecutionResult::failure(
             initial_frontmatter,
             0,
             String::new(),
             0,
-            CompositionError::catch_evaluation_error(
+            CompositionError::lifecycle_evaluation(
+                surfaced_signal.property_name(),
                 prompt_path,
-                "initialize",
                 info,
-                Some(&failure_outcome),
-                Some(&finalize_outcome),
             ),
+        ));
+    }
+    if let Some(setup_error) = init_result.setup_error.as_ref() {
+        return Ok(LoopExecutionResult::failure(
+            initial_frontmatter,
+            0,
+            String::new(),
+            0,
+            CompositionError::LifecycleInitializeFailed {
+                source_path: prompt_path.to_path_buf(),
+                reason: setup_error.msg.clone(),
+            },
         ));
     }
 
@@ -388,7 +399,7 @@ where
     // target and asks the caller to hand off, and `Stop` falls through to the
     // iteration loop. `Retry`/`Resume`/`Defer` are rejected at parse time, so
     // they are defensive fall-throughs here.
-    if let Some(control) = init_outcome.control.clone() {
+    if let Some(control) = init_result.control.clone() {
         match control {
             StackControl::Skip => {
                 info!(
@@ -403,66 +414,39 @@ where
                 ));
             }
             StackControl::Error { reason } => {
-                let msg = reason
-                    .clone()
-                    .unwrap_or_else(|| "lifecycle initialize error".to_string());
-                return Ok(route_init_failure(
-                    &mut guard,
-                    &init_ctx,
-                    prompt_path,
-                    msg,
-                ));
+                unreachable!("the catch protocol consumes initialize error control: {reason:?}");
             }
-            StackControl::Proxy { target } => {
-                let resolved = match resolve_proxy_target(
-                    &target,
-                    prompt_path,
-                    lifecycle_ctx.repo_root,
-                ) {
-                    Ok(path) => path,
-                    Err(err) => {
-                        // Resolution failure (missing file, unresolvable
-                        // `@repo/…` reference) is reported as an initialize
-                        // failure so the user sees the underlying cause. The
-                        // typed `HarnessError`'s Diagnostic facets are threaded
-                        // through so `err.code` / `err.detail.*` reach a
-                        // `failure`/`finalize` stack.
-                        let reason =
-                            format!("proxy target `{target}` could not be resolved: {err}");
-                        return Ok(route_init_failure_typed(
-                            &mut guard,
-                            &init_ctx,
-                            prompt_path,
-                            LifecycleErrorInfo::from_harness_error(&err),
-                            reason,
-                        ));
-                    }
-                };
-                if !proxy_handoff_allowed(&[prompt_path.to_path_buf()], &resolved) {
-                    return Ok(LoopExecutionResult::failure(
-                        initial_frontmatter,
-                        0,
-                        String::new(),
-                        0,
-                        CompositionError::LifecycleProxyCycle {
-                            source_path: prompt_path.to_path_buf(),
-                            target: target.clone(),
-                            chain: vec![prompt_path.display().to_string()],
-                            limit: MAX_PROXY_HOPS,
-                        },
-                    ));
-                }
+            StackControl::Proxy {
+                target,
+                overlay,
+                location,
+            } => {
+                // Neither resolution nor the cycle/hop decision happens here.
+                // The engine has no run ledger, so it can only see this one
+                // document — which is why this call site used to pass a
+                // single-element chain and miss multi-hop history entirely.
+                // The coordinator commits the request against the
+                // invocation-wide chain instead.
+                //
                 // No Failure/Finalize/loop-gate events fire on a clean
                 // hand-off: the document is being replaced, not failed. The
-                // caller re-enters with the target, whose own `initialize`
-                // decides what happens next.
+                // target's own `initialize` decides what happens next.
+                let request = EvaluatedProxyRequest::new(
+                    target,
+                    overlay,
+                    ProxyProvenance::new(
+                        prompt_path.to_path_buf(),
+                        location,
+                        vec![prompt_path.to_path_buf()],
+                    ),
+                );
                 return Ok(LoopExecutionResult::success(
                     initial_frontmatter,
                     0,
                     String::new(),
                     0,
                 )
-                .with_init_proxy_target(resolved));
+                .with_handoff(SurfacedHandoff::Request(request)));
             }
             StackControl::Resume { .. } => {
                 // Pre-launch: no provider session to resume.
@@ -507,20 +491,6 @@ where
         }
     }
 
-    if init_outcome.routes_to_failure(LifecycleSignal::Initialize) {
-        let reason = init_outcome
-            .action_error
-            .as_ref()
-            .map(|e| e.msg.clone())
-            .unwrap_or_else(|| "lifecycle initialize failed".to_string());
-        return Ok(route_init_failure(
-            &mut guard,
-            &init_ctx,
-            prompt_path,
-            reason,
-        ));
-    }
-
     let mut frontmatter = initial_frontmatter;
     let mut iteration_count = 0usize;
     let mut last_output = String::new();
@@ -544,7 +514,8 @@ where
             let pre_mutation_lookup =
                 LoopExpressionLookup::new(&frontmatter, &pre_mutation_ambient)
                     .with_base_dir(base_dir)
-                    .with_file_ref_fallback_dir(lifecycle_ctx.launch_area);
+                    .with_file_ref_fallback_dir(lifecycle_ctx.launch_area)
+                    .with_file_resolution_context(file_resolution_context, prompt_path);
             !evaluate_condition(&config.condition, &pre_mutation_lookup)?
         };
         let ambient = LoopAmbient::new(
@@ -583,6 +554,23 @@ where
             }
         };
 
+        // A proxy surfaced by the iteration's own lifecycle ends the source
+        // document *now*: the target is not an extra iteration of this loop
+        // (R7), so no loop gate runs and no further iteration begins. Checked
+        // before fail-fast handling on purpose — a proxy selected by a
+        // `failure` stack is a clean handoff, not a failed iteration.
+        if let Some(handoff) = output.handoff {
+            iteration_count += 1;
+            let exit_code = output.exit_code;
+            return Ok(LoopExecutionResult::success(
+                frontmatter,
+                iteration_count,
+                output.output,
+                exit_code,
+            )
+            .with_handoff(handoff));
+        }
+
         last_output = output.output;
         last_exit_code = output.exit_code;
         iteration_count += 1;
@@ -616,6 +604,9 @@ where
                         exit_code: last_exit_code,
                         reason: "iteration failed".to_string(),
                         exit_reason,
+                        // The fail-fast fallback: no iteration error was
+                        // attached, so there is no chain to project from.
+                        snapshot: None,
                     }
                 }),
             ));
@@ -667,6 +658,7 @@ where
         shell_runner,
         emitter,
         loop_start,
+        file_resolution_context,
     )? {
             LoopGateOutcome::Exit => {
                 return Ok(LoopExecutionResult::success(
@@ -699,8 +691,11 @@ where
                 iteration + 1,
                 &last_output,
                 last_exit_code,
-                base_dir,
-                lifecycle_ctx.launch_area,
+                LoopFileResolution {
+                    source_path: prompt_path,
+                    fallback_dir: lifecycle_ctx.launch_area,
+                    context: file_resolution_context,
+                },
             )?
         {
             return Ok(LoopExecutionResult::failure(
@@ -725,87 +720,38 @@ where
     ))
 }
 
-/// Route an `initialize` failure (explicit `error(...)` or unintentional
-/// action error) through `failure` + `finalize` and return the typed loop
-/// failure.
-///
-/// Mirrors the non-loop path at
-/// `wrap/composition/mod.rs::execute_composition_request_inner_with_guard`:
-/// `failure` runs against the action-error context, `finalize` against the
-/// same context re-pointed at `Finalize`. The returned result reports zero
-/// iterations because no provider invocation ran.
-fn route_init_failure(
+fn execute_loop_catch_protocol(
     guard: &mut LifecycleRunGuard<'_>,
-    init_ctx: &StackExecutionContext<'_>,
-    prompt_path: &Path,
-    reason: String,
-) -> LoopExecutionResult {
-    let action_error = LifecycleErrorInfo::from_action_failure("error", reason.clone());
-    route_init_failure_with(guard, init_ctx, prompt_path, action_error, reason)
-}
-
-/// Route an `initialize` failure built from an already-typed error snapshot,
-/// preserving the source error's `Diagnostic` facets on the `err` global.
-///
-/// Used where the initialize-phase failure carries a typed cause (e.g. a
-/// `Proxy` target that fails to resolve via [`crate::harness::HarnessError`]):
-/// threading [`LifecycleErrorInfo::from_harness_error`] through here keeps
-/// `err.code` / `err.detail.*` projecting for a `failure`/`finalize` stack
-/// instead of flattening to a bare message. `fallback_reason` populates the
-/// terminal [`CompositionError::LifecycleInitializeFailed`] when neither catch
-/// event raised.
-fn route_init_failure_typed(
-    guard: &mut LifecycleRunGuard<'_>,
-    init_ctx: &StackExecutionContext<'_>,
-    prompt_path: &Path,
-    action_error: LifecycleErrorInfo,
-    fallback_reason: String,
-) -> LoopExecutionResult {
-    route_init_failure_with(guard, init_ctx, prompt_path, action_error, fallback_reason)
-}
-
-fn route_init_failure_with(
-    guard: &mut LifecycleRunGuard<'_>,
-    init_ctx: &StackExecutionContext<'_>,
-    prompt_path: &Path,
-    action_error: LifecycleErrorInfo,
-    reason: String,
-) -> LoopExecutionResult {
-    let failure_outcome =
-        guard.execute_event(LifecycleSignal::Failure, &init_ctx.with_error(&action_error));
-    // If `failure` raised, thread its error (not the original) into finalize so
-    // a `finalize.stack` can branch on the failure raise.
-    let active_err = failure_outcome
-        .evaluation_error
-        .as_ref()
-        .unwrap_or(&action_error);
-    let finalize_outcome = guard.execute_event(
-        LifecycleSignal::Finalize,
-        &init_ctx.with_error(active_err).with_signal(LifecycleSignal::Finalize),
+    origin_ctx: &StackExecutionContext<'_>,
+    origin: LifecycleSignal,
+    prior_error: Option<&LifecycleErrorInfo>,
+    origin_outcome: super::super::lifecycle_executor::LifecycleEventOutcome,
+) -> LifecycleCatchResult {
+    let mut protocol = LifecycleCatchProtocol::new(
+        origin,
+        LifecycleCatchState {
+            terminal_slot: guard.terminal_signal(),
+            finalize_emitted: guard.finalize_emitted(),
+        },
+        prior_error.cloned(),
+        origin_outcome,
     );
-    let decision = super::super::route_failure_finalize(&failure_outcome, Some(&finalize_outcome));
-    // A raise inside either catch event (failure or finalize) surfaces as the
-    // typed lifecycle evaluation error (precedence: finalize > failure >
-    // original). Otherwise the explicit `error(...)` reason stands.
-    let error = if decision.evaluation_error_signal.is_some() {
-        CompositionError::catch_evaluation_error(
-            prompt_path,
-            "initialize",
-            &action_error,
-            Some(&failure_outcome),
-            Some(&finalize_outcome),
-        )
-    } else {
-        CompositionError::LifecycleInitializeFailed {
-            source_path: prompt_path.to_path_buf(),
-            reason,
-        }
-    };
-    // The returned result reports the initialize-time frontmatter. We clone it
-    // from `init_ctx` (which borrows the caller's `initial_frontmatter`) rather
-    // than take ownership: the caller still holds `init_ctx` across this call,
-    // so moving the frontmatter in would conflict with that live borrow.
-    LoopExecutionResult::failure(init_ctx.frontmatter.clone(), 0, String::new(), 0, error)
+    while let Some(step) = protocol.next_step().cloned() {
+        let event_ctx = origin_ctx.with_signal(step.signal);
+        let event_ctx = match step.error.as_ref() {
+            Some(error) => event_ctx.with_error(error),
+            None => event_ctx,
+        };
+        let outcome = match step.execution {
+            LifecycleCatchExecution::Record => guard.execute_event(step.signal, &event_ctx),
+            LifecycleCatchExecution::RedesignateBlockedAsFailure => {
+                guard.redesignate_terminal_to_failure();
+                guard.run_event_stack(step.signal, &event_ctx)
+            }
+        };
+        assert!(protocol.record(step.signal, outcome));
+    }
+    protocol.finish().expect("loop catch protocol completed")
 }
 
 /// Outcome of the post-finalize loop gate.
@@ -847,6 +793,7 @@ fn run_loop_gate(
     shell_runner: &dyn ShellRunner,
     emitter: &dyn LifecycleEmitter,
     loop_start: std::time::Instant,
+    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
 ) -> Result<LoopGateOutcome, CompositionError> {
     let (timing, current) =
         capture_loop_lifecycle_globals(base_dir, lifecycle_ctx.launch_area, loop_start);
@@ -858,6 +805,7 @@ fn run_loop_gate(
         shell_runner,
         emitter,
         base_dir,
+        file_resolution_context,
         Some(&timing),
         Some(&current),
     );
@@ -875,24 +823,40 @@ fn run_loop_gate(
     // `finalize.stack` can react, then surfaces the typed evaluation error
     // (precedence: a raise inside `finalize` beats the loop raise).
     if let Some(info) = loop_outcome.evaluation_error.as_ref() {
-        let finalize_outcome = guard.execute_event(
-            LifecycleSignal::Finalize,
-            &loop_ctx.with_error(info).with_signal(LifecycleSignal::Finalize),
+        let result = execute_loop_catch_protocol(
+            guard,
+            &loop_ctx,
+            LifecycleSignal::Loop,
+            Some(info),
+            loop_outcome.clone(),
         );
-        let decision = super::super::route_loop_gate(&loop_outcome, Some(&finalize_outcome));
-        debug_assert!(decision.evaluation_error_signal.is_some());
+        let surfaced_signal = result
+            .evaluation_error_signal
+            .expect("loop evaluation error remains terminal");
+        let surfaced_info = result
+            .evaluation_error
+            .as_ref()
+            .expect("evaluation signal carries error info");
         return Ok(LoopGateOutcome::Fail(
-            CompositionError::catch_evaluation_error(
+            CompositionError::lifecycle_evaluation(
+                surfaced_signal.property_name(),
                 prompt_path,
-                "loop",
-                info,
-                None,
-                Some(&finalize_outcome),
+                surfaced_info,
             ),
         ));
     }
 
-    let decision = super::super::route_loop_gate(&loop_outcome, None);
+    let decision = LifecycleCatchProtocol::new(
+        LifecycleSignal::Loop,
+        LifecycleCatchState {
+            terminal_slot: guard.terminal_signal(),
+            finalize_emitted: guard.finalize_emitted(),
+        },
+        None,
+        loop_outcome,
+    )
+    .finish()
+    .expect("clean loop gate requires no catch event");
 
     // An explicit `error(...)` in the gate stack converts the loop's final
     // outcome to failure and exits — before the condition is evaluated and
@@ -941,7 +905,8 @@ fn run_loop_gate(
 
     let lookup = LoopExpressionLookup::new(frontmatter, ambient)
         .with_base_dir(base_dir)
-        .with_file_ref_fallback_dir(lifecycle_ctx.launch_area);
+        .with_file_ref_fallback_dir(lifecycle_ctx.launch_area)
+        .with_file_resolution_context(file_resolution_context, prompt_path);
     if !evaluate_condition(&config.condition, &lookup)? {
         return Ok(LoopGateOutcome::Exit);
     }
@@ -963,6 +928,7 @@ fn build_loop_stack_context<'a>(
     shell_runner: &'a dyn ShellRunner,
     emitter: &'a dyn LifecycleEmitter,
     base_dir: Option<&'a Path>,
+    file_resolution_context: Option<&'a biscuit_file::FileResolutionContext>,
     timing: Option<&'a super::super::lifecycle_context::LifecycleTiming>,
     current: Option<&'a super::super::lifecycle_context::LifecycleCurrent>,
 ) -> StackExecutionContext<'a> {
@@ -976,12 +942,17 @@ fn build_loop_stack_context<'a>(
         // live cell is unnecessary here; intra-stack visibility is handled by
         // `execute_stack`'s local working map.
         live_frontmatter: None,
+        runtime_state: None,
         err: None,
         timing,
         current,
+        // A loop gate is not inside a sequence group; `group.*` has no scope
+        // here.
+        group: None,
         base_dir,
         ctx_base_dir: lifecycle_ctx.launch_area,
         prepared_context: lifecycle_ctx.context,
+        file_resolution_context,
         effect_engine,
         shell_runner,
         emitter,
@@ -1190,14 +1161,21 @@ fn should_continue_after_cap(
     next_iteration: usize,
     last_output: &str,
     last_exit_code: i32,
-    base_dir: Option<&Path>,
-    file_ref_fallback_dir: Option<&Path>,
+    resolution: LoopFileResolution<'_>,
 ) -> Result<bool, CompositionError> {
     let ambient = LoopAmbient::new(next_iteration, false, true, last_output, last_exit_code);
     let lookup = LoopExpressionLookup::new(frontmatter, &ambient)
-        .with_base_dir(base_dir)
-        .with_file_ref_fallback_dir(file_ref_fallback_dir);
+        .with_base_dir(resolution.source_path.parent())
+        .with_file_ref_fallback_dir(resolution.fallback_dir)
+        .with_file_resolution_context(resolution.context, resolution.source_path);
     evaluate_condition(&config.condition, &lookup)
+}
+
+#[derive(Clone, Copy)]
+struct LoopFileResolution<'a> {
+    source_path: &'a Path,
+    fallback_dir: Option<&'a Path>,
+    context: Option<&'a biscuit_file::FileResolutionContext>,
 }
 
 #[cfg(test)]

@@ -1,0 +1,12 @@
+Revision: e348486c810969abe87a6b7209979034f5454b07
+Detached worktree: /tmp/claudine-mega-proxy.InQb45/tree
+Working directory: claudine
+Command: just check-windows
+Timeout policy: SIGINT at 60s; SIGKILL 5s later
+Exit status: 1
+Classification: failed
+Elapsed seconds: 0.000002584
+
+[[STDOUT]]
+[[STDERR]]
+error: justfile does not contain recipe `check-windows`

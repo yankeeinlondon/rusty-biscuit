@@ -437,7 +437,7 @@ fn materialize_json_copy_if_exists(path: &Path) -> Result<()> {
     let content = fs::read_to_string(path)?;
     let value: serde_json::Value = serde_json::from_str(&content)?;
     let content = serde_json::to_string_pretty(&value)?;
-    atomic_write(path, content.as_bytes())
+    Ok(atomic_write(path, content.as_bytes())?)
 }
 
 fn to_toml_array(values: &[String]) -> toml_edit::Array {

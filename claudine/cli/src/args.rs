@@ -116,6 +116,8 @@ pub(crate) enum Commands {
     InlineCompose(commands::compose::InlineComposeArgs),
     /// Run a serial sequence of composition steps from a single document.
     Sequence(commands::sequence::SequenceArgs),
+    /// Show the mesh NOW view: live sessions across rendezvous hosts.
+    Dashboard(commands::dashboard::DashboardArgs),
     /// Show Darkmatter runtime context, expression engine, and side effects.
     Context(commands::context::ContextArgs),
     /// Show the diagnostic error-code contract (codes, dispositions, details).

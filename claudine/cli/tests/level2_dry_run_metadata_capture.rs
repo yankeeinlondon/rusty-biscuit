@@ -46,7 +46,7 @@ use std::time::Duration;
 use test_toolkit::{Level, require_level};
 
 mod common;
-use common::{TestWorkspace, write_executable};
+use common::{TestWorkspace, clear_no_color, write_executable};
 
 /// The composition fixture: a `name`/`description` frontmatter (so the Document
 /// cell uses the name and the Description row is present) and a body with no
@@ -103,6 +103,12 @@ struct DryRunCapture {
 /// metadata table and frontmatter land on the pane via stderr; the composed
 /// body via stdout.
 fn run_dry_run_compose<H: TerminalHarness>(harness: &mut H) -> DryRunCapture {
+    // Every fixture in this file asserts a *colored* surface (256-color YAML
+    // highlighting, bold/italic headings, table cell colors). An ambient
+    // `NO_COLOR` out-votes both `FORCE_COLOR=1` and the plain fixture's real
+    // capability detection — see `common::clear_no_color`.
+    clear_no_color(harness);
+
     let workspace = TestWorkspace::named("claudine-dryrun-l2");
     let bin_dir = workspace.path().join("bin");
     fs::create_dir_all(&bin_dir).unwrap();
@@ -166,6 +172,12 @@ fn run_dry_run_compose_with_doc<H: TerminalHarness>(
     doc_content: &str,
     workspace_name: &str,
 ) -> DryRunCapture {
+    // Every fixture in this file asserts a *colored* surface (256-color YAML
+    // highlighting, bold/italic headings, table cell colors). An ambient
+    // `NO_COLOR` out-votes both `FORCE_COLOR=1` and the plain fixture's real
+    // capability detection — see `common::clear_no_color`.
+    clear_no_color(harness);
+
     let workspace = TestWorkspace::named(workspace_name);
     let bin_dir = workspace.path().join("bin");
     fs::create_dir_all(&bin_dir).unwrap();
@@ -614,6 +626,12 @@ fn level2_dry_run_document_cell_renders_osc8_link_in_wezterm() {
 /// 256-color SGR (YAML highlighting, bold/italic heading) is keyed off `TERM` /
 /// `COLORTERM` and is unaffected.
 fn run_dry_run_compose_plain<H: TerminalHarness>(harness: &mut H) -> DryRunCapture {
+    // Every fixture in this file asserts a *colored* surface (256-color YAML
+    // highlighting, bold/italic headings, table cell colors). An ambient
+    // `NO_COLOR` out-votes both `FORCE_COLOR=1` and the plain fixture's real
+    // capability detection — see `common::clear_no_color`.
+    clear_no_color(harness);
+
     let workspace = TestWorkspace::named("claudine-dryrun-l2-plain");
     let bin_dir = workspace.path().join("bin");
     fs::create_dir_all(&bin_dir).unwrap();

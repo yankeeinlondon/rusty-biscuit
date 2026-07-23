@@ -5,13 +5,15 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use claudine::stream::parser::{SemanticStreamParser, StreamParseError};
+use claudine::stream::parser::SemanticStreamParser;
 use claudine::stream::summary::StreamExecutionSummary;
 use color_eyre::eyre::Result;
 
 pub(crate) mod exit;
 pub(crate) mod spawn;
 pub(crate) mod stream_capture;
+#[cfg(test)]
+pub(crate) mod task_frame_fixtures;
 pub(crate) mod subagent_watchdog;
 pub(crate) mod termination;
 pub(crate) mod timeouts;
@@ -119,10 +121,27 @@ pub(crate) struct ProcessResult<T> {
 /// once here to avoid repeated theme detection on the streaming hot path. The
 /// state machine itself lives in [`claudine::render::AssistantStream`].
 ///
+/// `inset` reserves columns on the left for a caller that decorates the
+/// rendered lines afterwards. A sequence task frames this stream's lines with a
+/// bar gutter *after* rendering, so the renderer must wrap to a width that
+/// leaves room for it — otherwise every full-width line overflows the terminal
+/// by the gutter's width once the bar is prepended. Pass `0` for an
+/// undecorated stream.
+///
 /// [`TerminalOptions`]: darkmatter::markdown::output::terminal::TerminalOptions
-pub(crate) fn new_assistant_stream() -> claudine::render::AssistantStream {
+pub(crate) fn new_assistant_stream_inset(inset: u32) -> claudine::render::AssistantStream {
     use darkmatter::markdown::output::terminal::{TerminalImageMode, TerminalOptions};
-    let term = std::io::stdout().is_terminal().then(crate::log::terminal);
+    let term = std::io::stdout().is_terminal().then(|| {
+        let mut term = crate::log::terminal();
+        if inset > 0 {
+            // Pinned to a fixed width, not just narrowed: `width()` falls back
+            // to live detection whenever `fixed_width` is `None`, which would
+            // silently discard the inset. Saturating because a terminal
+            // narrower than the gutter has nothing left to give.
+            term.fixed_width = Some(term.width().saturating_sub(inset).max(1));
+        }
+        term
+    });
     let terminal_options = term.as_ref().map(|_| {
         let mut opts = TerminalOptions::default();
         opts.image_mode = TerminalImageMode::Never;
@@ -167,9 +186,7 @@ struct ErrorParser {
 }
 
 impl SemanticStreamParser for ErrorParser {
-    fn feed_line(&mut self, _line: &str) -> std::result::Result<(), StreamParseError> {
-        Ok(())
-    }
+    fn feed_line(&mut self, _line: &str) {}
 
     fn finish(self: Box<Self>, _exit_code: i32) -> StreamExecutionSummary {
         StreamExecutionSummary {

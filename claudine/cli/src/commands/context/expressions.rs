@@ -265,7 +265,7 @@ pub(super) fn render_expressions_modes(term: &Terminal) {
     let consequence_items = [
         "`when=\"a || b\"` is logical OR and evaluates to a boolean",
         "`{{ a || \"default\" }}` is fallback sugar and expands to the first truthy value",
-        "`{{ a && b }}` is rejected at parse time",
+        "`{{ a && b }}` is logical AND — `&&` is identical in both modes",
         "`when=\"a && b\"` is logical AND",
         "the function-call forms `and(...)` and `or(...)` are valid in both modes",
     ];

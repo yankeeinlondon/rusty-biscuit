@@ -12,17 +12,25 @@
 //!   through the real terminal's display path so glyph-width / SGR /
 //!   scroll-handling regressions are observable in captured pane text.
 //!   Input is injected as bytes via the terminal's CLI.
-//! - **Level 3** — OS-level keyboard injection (not covered by this
-//!   harness; see individual test suites for platform-specific tools).
+//! - **Level 3** — OS-level keyboard injection. The key event enters
+//!   where a physical keypress enters, so the terminal's *input encoder*
+//!   fires — the only way to observe what bytes a terminal emits for a
+//!   given chord. One injector module per platform: [`cliclick`] (macOS
+//!   Quartz events), [`xdotool`] (Linux X11 XTEST), and [`win_input`]
+//!   (Windows `SendKeys`/`SendInput` via PowerShell).
 //!
-//! Every harness's `available()` probe returns `false` cleanly when its
-//! required tooling is missing — tests then print `skipping: requires`
-//! and return `ok` without exercising the harness.
+//! Every harness's — and every Level-3 injector's — `available()` probe
+//! returns `false` cleanly when its required tooling or platform is
+//! missing; tests then print `skipping: requires` and return `ok`
+//! without exercising it. [`cliclick::available`] is the one exception:
+//! it only proves the binary is on `$PATH`, checking neither the host
+//! platform nor macOS Accessibility trust. Pair it with
+//! [`cliclick::accessibility_trusted`], which covers both.
 
 #![allow(dead_code)]
 
 use std::io::{self, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -33,6 +41,8 @@ pub mod layout_invariants;
 pub mod shared;
 pub mod tmux;
 pub mod wezterm;
+pub mod win_input;
+pub mod xdotool;
 
 /// Prefix used to mark resources owned by this test harness.
 ///
@@ -396,6 +406,32 @@ pub fn cargo_bin_dir(bin_name: &str) -> Option<PathBuf> {
         return Some(dir);
     }
     None
+}
+
+/// Appends a login-shell invocation that preserves the Cargo binary directory.
+///
+/// Login startup files may replace `PATH`, particularly when a terminal GUI
+/// launches from the desktop rather than an existing shell. The outer login
+/// shell therefore prepends the binary directory after startup, then replaces
+/// itself with the interactive shell used by the harness.
+pub(crate) fn configure_login_shell(
+    cmd: &mut Command,
+    shell: &str,
+    bin_dir: Option<&Path>,
+) {
+    cmd.arg(shell);
+    if let Some(bin_dir) = bin_dir {
+        cmd.args([
+            "-l",
+            "-c",
+            "export PATH=\"$BISCUIT_TEST_BIN_DIR:$PATH\"; \
+             unset BISCUIT_TEST_BIN_DIR; exec \"$0\" -i",
+            shell,
+        ]);
+        cmd.env("BISCUIT_TEST_BIN_DIR", bin_dir);
+    } else {
+        cmd.arg("-l");
+    }
 }
 
 /// Sets the conventional color-forcing env vars on `cmd` so the

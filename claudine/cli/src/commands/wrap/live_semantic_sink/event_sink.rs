@@ -111,6 +111,27 @@ impl SemanticEventSink for LiveSemanticSink {
             }
         }
 
+        // 4a. Dashboard status transitions (trigger 1). A
+        //     PermissionRequest not yet followed by progress means the
+        //     agent is waiting on the user; the next progress event
+        //     clears it back to active. Reports are fire-and-forget and
+        //     debounced to real edges (inert without a live daemon).
+        match &event {
+            SemanticEvent::PermissionRequest { .. } if !self.awaiting_user => {
+                self.awaiting_user = true;
+                self.status_reporter.report("waiting_on_user");
+            }
+            SemanticEvent::OutputText { .. }
+            | SemanticEvent::ToolResult { .. }
+            | SemanticEvent::TurnComplete { .. }
+                if self.awaiting_user =>
+            {
+                self.awaiting_user = false;
+                self.status_reporter.report("active");
+            }
+            _ => {}
+        }
+
         // 4b. Runaway-output content guard (Phase 6). Scan OutputText +
         //     Reasoning text only — never tool payloads (A2) — and reset
         //     the per-turn volume counters on TurnComplete (F2). The feed

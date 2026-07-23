@@ -1,5 +1,18 @@
 # Terminal Output
 
+## Contents
+
+- TerminalOptions
+- Output Functions
+- Theme Pairs
+- Color Mode Detection
+- Image Rendering
+- ANSI Rendering Gotchas
+- Mermaid Diagrams
+
+Use heading search to jump to the listed subsystem.
+
+
 darkmatter's terminal rendering with syntax highlighting, themes, and integration with biscuit-terminal.
 
 ## TerminalOptions

@@ -73,11 +73,13 @@ pub(super) fn format_safety(safety: EffectSafety, term: &Terminal) -> String {
         EffectSafety::FilesystemWrite => "FilesystemWrite",
         EffectSafety::Network => "Network",
         EffectSafety::MarkdownMutation => "MarkdownMutation",
+        EffectSafety::InMemoryState => "InMemoryState",
     };
     let colored = match safety {
         EffectSafety::FilesystemWrite => format!("<orange>{text}</orange>"),
         EffectSafety::Network => format!("<red>{text}</red>"),
         EffectSafety::MarkdownMutation => format!("<blue>{text}</blue>"),
+        EffectSafety::InMemoryState => format!("<green>{text}</green>"),
     };
     Prose::new(colored).render(term)
 }
@@ -85,7 +87,10 @@ pub(super) fn format_safety(safety: EffectSafety, term: &Terminal) -> String {
 /// Renders a descriptor's optional example for table cells.
 pub(super) fn format_example(example: Option<&darkmatter::catalog::Example>, term: &Terminal) -> String {
     match example {
-        Some(ex) => inline_code_text(&format!("{} → {}", ex.invocation, ex.result), term),
+        Some(ex) => {
+            let example = format!("{} → {}", ex.invocation, ex.result).replace('\t', r"\t");
+            inline_code_text(&example, term)
+        }
         None => String::new(),
     }
 }

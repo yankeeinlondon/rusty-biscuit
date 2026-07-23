@@ -1,10 +1,10 @@
 //! The single-source registry of locked diagnostic codes.
 //!
 //! This is the ratified code catalog from
-//! `claudine/features/2026-06-28-real-errors/error-catalog.md` §3, encoded as
-//! data: every dotted `code`, its [`Category`]/[`Disposition`]/[`Origin`]
-//! facets, an optional severity override, and the field names its `detail`
-//! payload carries. It is the contract that `claudine errors` introspects and
+//! `claudine/features/_completed/2026-06-28-real-errors/error-catalog.md` §3,
+//! encoded as data: every dotted `code`, its
+//! [`Category`]/[`Disposition`]/[`Origin`] facets, an optional severity
+//! override, and the field names its `detail` payload carries. It is the contract that `claudine errors` introspects and
 //! that a `Diagnostic` implementation must agree with.
 //!
 //! Evolution is **additive-only**: adding a new [`CodeSpec`] or a new
@@ -168,15 +168,41 @@ pub const CODES: &[CodeSpec] = &[
         disposition: Disposition::Correctable,
         origin: Origin::Author,
         severity_override: None,
-        // `fallback_dir` is optional (the launch-area anchor, projected to
-        // `null` when absent) but still a declared field so the registry and
-        // `CompositionError::detail()` agree on the full payload shape.
+        // One identity for the same authoring mistake across proxying,
+        // expressions, schemas, and transclusion — so the payload has to carry
+        // enough context to tell those surfaces apart (`source_path`,
+        // `property`, `event`) without a surface-specific code.
+        //
+        // `base_dir` and `fallback_dir` are **compatibility projections**: the
+        // two anchors the pre-`candidates` payload exposed, retained so an
+        // existing `when:` clause keeps matching. `candidates` supersedes them
+        // with the ordered, provenance-carrying record sequence.
+        //
+        // `failure` is the stable snake_case failure classification —
+        // `invalid_syntax`, `missing_context`, `no_match`, `permission_io`, or
+        // `unsupported_remote`. It is distinct from `kind`, which names the
+        // authored reference kind; `effective_kind` names the anchoring after
+        // interpolation. The `CompositionError` wrapper supplies
+        // `source_path`/`property`/`event`; the shared `biscuit-file`/harness
+        // resolver supplies `failure` on both arms and additionally projects
+        // `kind`/`effective_kind`/`repository_root`/`candidates` when a probe
+        // ran. The pre-probe form of `FileReferenceUnresolvable` and the legacy
+        // `FileReferenceDiagnostic` path leave those fields (and `failure` on
+        // the legacy path) as `null`. Values come from typed data, never
+        // back-derived from `Display` (spec §D3).
         detail: &[
             "reference",
             "kind",
             "base_dir",
             "suggestions",
             "fallback_dir",
+            "source_path",
+            "property",
+            "event",
+            "repository_root",
+            "candidates",
+            "failure",
+            "effective_kind",
         ],
     },
     CodeSpec {
@@ -250,6 +276,20 @@ pub const CODES: &[CodeSpec] = &[
         origin: Origin::Author,
         severity_override: None,
         detail: &["command"],
+    },
+    CodeSpec {
+        code: "composition.shell_approval",
+        category: Category::Composition,
+        disposition: Disposition::Correctable,
+        origin: Origin::Author,
+        severity_override: None,
+        // A shell command the author wrote could not be approved. Every reason
+        // — the user declined, the catalog blacklists it, no handler was
+        // available, `--dry-run` cannot prompt — resolves the same way: change
+        // the document or the approval configuration. That shared remediation
+        // is what keeps one code's `disposition` stable while `reason`
+        // discriminates (error-catalog §7.5).
+        detail: &["command", "source_path", "line", "reason"],
     },
     CodeSpec {
         code: "composition.failed",
@@ -489,6 +529,55 @@ mod tests {
     }
 
     #[test]
+    fn invalid_file_reference_carries_the_semantic_wrapper_context_fields() {
+        // The wrapper owns this code for every surface (proxy, expression,
+        // schema, transclusion), so the payload — not a second code — is what
+        // distinguishes them.
+        let spec = code_spec("composition.invalid_file_reference").unwrap();
+        for field in [
+            "source_path",
+            "property",
+            "event",
+            "repository_root",
+            "candidates",
+            "failure",
+            "effective_kind",
+        ] {
+            assert!(
+                spec.detail.contains(&field),
+                "missing semantic-wrapper detail field `{field}`"
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_file_reference_extension_removed_no_field() {
+        // The catalog evolves additively: the pre-extension field set must
+        // still be declared, in its original order, ahead of the additions.
+        let spec = code_spec("composition.invalid_file_reference").unwrap();
+        assert_eq!(
+            &spec.detail[..5],
+            &["reference", "kind", "base_dir", "suggestions", "fallback_dir"]
+        );
+    }
+
+    #[test]
+    fn every_code_declares_unique_detail_fields() {
+        // A duplicated field name would make `null_detail_for`'s key count
+        // disagree with the declared list without failing any other test.
+        for spec in CODES {
+            let mut seen = std::collections::HashSet::new();
+            for field in spec.detail {
+                assert!(
+                    seen.insert(field),
+                    "code `{}` declares `{field}` twice",
+                    spec.code
+                );
+            }
+        }
+    }
+
+    #[test]
     fn runaway_codes_are_unrecoverable() {
         for spec in CODES.iter().filter(|s| s.category == Category::Runaway) {
             assert_eq!(
@@ -517,8 +606,9 @@ mod tests {
     #[test]
     fn catalog_covers_the_ratified_count() {
         // 12 categories; the faithful transcription of §3 landed at 42, plus the
-        // additive `composition.schema_parse` (finding #6) → 43. This pins the
-        // count so an accidental drop or duplicate is caught.
-        assert_eq!(CODES.len(), 43);
+        // additive `composition.schema_parse` (finding #6) → 43, plus the
+        // additive `composition.shell_approval` (error-propagation §D-14) → 44.
+        // This pins the count so an accidental drop or duplicate is caught.
+        assert_eq!(CODES.len(), 44);
     }
 }

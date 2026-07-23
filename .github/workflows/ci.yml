@@ -1,0 +1,192 @@
+name: ci
+
+# Dependency-aware CI for pull requests and pushes to main. Changed workspace
+# packages are expanded through reverse Cargo dependencies and then mapped to
+# the curated package-area policy in `.github/ci/areas.json`.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scope:
+    name: Determine affected scope
+    runs-on: ubuntu-latest
+    outputs:
+      area_matrix: ${{ steps.scope.outputs.area_matrix }}
+      has_areas: ${{ steps.scope.outputs.has_areas }}
+      packages: ${{ steps.scope.outputs.packages }}
+      has_packages: ${{ steps.scope.outputs.has_packages }}
+      full_scope: ${{ steps.scope.outputs.full_scope }}
+      claudine: ${{ steps.scope.outputs.claudine }}
+      darkmatter: ${{ steps.scope.outputs.darkmatter }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: extractions/setup-just@v2
+      - name: Validate canonical area recipes
+        run: just check-canonical
+      - name: Test affected-scope calculation
+        run: python3 scripts/ci/test_affected_scope.py
+      - name: Calculate package and area scope
+        id: scope
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_BASE: ${{ github.event.before }}
+          PUSH_HEAD: ${{ github.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          scope_args=()
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            scope_args=(--all)
+          else
+            if [[ "$EVENT_NAME" == "pull_request" ]]; then
+              base="$PR_BASE"
+              head="$PR_HEAD"
+            else
+              base="$PUSH_BASE"
+              head="$PUSH_HEAD"
+            fi
+
+            if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+              scope_args=(--all)
+            else
+              mapfile -d '' changed_files < <(git diff --name-only -z "$base" "$head")
+              scope_args=(-- "${changed_files[@]}")
+            fi
+          fi
+
+          scope_json="$(python3 scripts/ci/affected_scope.py "${scope_args[@]}")"
+          area_matrix="$(jq -c '{include: .areas}' <<<"$scope_json")"
+          packages="$(jq -c '.packages' <<<"$scope_json")"
+
+          {
+            echo "area_matrix=$area_matrix"
+            echo "packages=$packages"
+            echo "has_areas=$(jq -r '.areas | length > 0' <<<"$scope_json")"
+            echo "has_packages=$(jq -r '.packages | length > 0' <<<"$scope_json")"
+            echo "full_scope=$(jq -r '.full_scope' <<<"$scope_json")"
+            echo "claudine=$(jq -r 'any(.areas[]; .area == "claudine")' <<<"$scope_json")"
+            echo "darkmatter=$(jq -r 'any(.areas[]; .area == "darkmatter")' <<<"$scope_json")"
+          } >>"$GITHUB_OUTPUT"
+
+  area-ci:
+    name: ${{ matrix.area }}
+    needs: scope
+    if: needs.scope.outputs.has_areas == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.scope.outputs.area_matrix) }}
+    uses: ./.github/workflows/_area-ci.yml
+    with:
+      area: ${{ matrix.area }}
+      check-args: ${{ matrix.check_args }}
+      full-os: ${{ toJSON(matrix.full_os) }}
+      check-os: ${{ toJSON(matrix.check_os) }}
+      shards: ${{ toJSON(matrix.shards) }}
+      soft-os: ${{ toJSON(matrix.soft_os) }}
+      l2: ${{ matrix.l2 }}
+      browser: ${{ matrix.browser }}
+      kache: ${{ matrix.kache }}
+      ai-provider-stubs: ${{ matrix.ai_provider_stubs }}
+    secrets: inherit
+
+  affected-coverage:
+    name: Coverage for affected packages
+    needs: scope
+    if: github.event_name == 'pull_request' && needs.scope.outputs.has_packages == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AFFECTED_PACKAGES: ${{ needs.scope.outputs.packages }}
+      FULL_SCOPE: ${{ needs.scope.outputs.full_scope }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: coverage-affected
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Generate one affected-scope LCOV report
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$FULL_SCOPE" == "true" ]]; then
+            selection=(--workspace)
+          else
+            selection=()
+            mapfile -t packages < <(jq -r '.[]' <<<"$AFFECTED_PACKAGES")
+            for package in "${packages[@]}"; do
+              selection+=(-p "$package")
+            done
+          fi
+          cargo llvm-cov "${selection[@]}" --lcov --output-path lcov-affected.info
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lcov-affected
+          path: lcov-affected.info
+
+  claudine-generator-signals:
+    name: Claudine generator and signals drift
+    needs: scope
+    if: needs.scope.outputs.claudine == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: claudine-generator-signals
+      - uses: extractions/setup-just@v2
+      - uses: taiki-e/install-action@nextest
+      - name: Verify generator output and signal fixtures
+        run: cd claudine && just test-gen
+
+  darkmatter-no-color:
+    name: Darkmatter color-depth tests under NO_COLOR=1
+    needs: scope
+    if: needs.scope.outputs.darkmatter == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NO_COLOR: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: area-ci-darkmatter-test-ubuntu-latest
+      - run: cargo test -p darkmatter --lib terminal::tests::test_color_depth

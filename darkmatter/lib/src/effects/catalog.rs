@@ -16,6 +16,8 @@ pub enum EffectSafety {
     Network,
     /// Markdown mutation that honors auto-rehash.
     MarkdownMutation,
+    /// In-memory state mutation only; performs no filesystem or network I/O.
+    InMemoryState,
 }
 
 /// Descriptor for a single side-effect capability.
@@ -57,6 +59,16 @@ impl Described for EffectDescriptor {
 
 /// All side-effect capability descriptors, in display order.
 pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
+    // ── State Mutation ──────────────────────────────────────────────
+    EffectDescriptor {
+        signature: "set(key, value)",
+        description: "Sets a top-level key in the in-memory state map (no disk write). Returns the prior value (or null).",
+        safety: EffectSafety::InMemoryState,
+        category: "State Mutation",
+        order: 1,
+
+        example: Some(Example { invocation: "set(\"ready\", true)", result: "null", verification: ExampleVerification::DisplayOnly("side-effect descriptions are proven by the sandbox verb harness") }),
+    },
     // ── Frontmatter Mutations ───────────────────────────────────────
     EffectDescriptor {
         signature: "set_frontmatter(file, prop, value)",
@@ -255,6 +267,13 @@ pub struct EffectVerb {
 /// [`EffectEngine`](super::EffectEngine) method. See [`EffectVerb`].
 #[cfg(test)]
 pub const EFFECT_VERBS: &[EffectVerb] = &[
+    EffectVerb {
+        signature: "set(key, value)",
+        exercise: |e| {
+            let mut state = crate::markdown::FrontmatterMap::new();
+            e.set(&mut state, "ready", serde_json::json!(true))
+        },
+    },
     EffectVerb {
         signature: "set_frontmatter(file, prop, value)",
         exercise: |e| e.set_frontmatter("d.md", "status", serde_json::json!("x")),

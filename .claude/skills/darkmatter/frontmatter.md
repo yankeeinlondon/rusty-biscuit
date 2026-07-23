@@ -1,10 +1,16 @@
-# Frontmatter Operations
+# Frontmatter Model and Operations
 
-YAML frontmatter parsing with typed access and merge strategies.
+Darkmatter retains YAML frontmatter as structured values plus raw source needed
+for source-aware diagnostics. Use this topic for typed library access, merge
+policy, and the `md frontmatter` CLI. Use [schema.md](schema.md) for validation
+and coercion, and [rendering.md](rendering.md) when a `style:` value is being
+lowered into render policy.
 
 ## Basic Usage
 
 ```rust
+use darkmatter::Markdown;
+
 let mut md: Markdown = content.into();
 
 // Typed access
@@ -23,6 +29,7 @@ if md.has_frontmatter() {
 
 ```rust
 use darkmatter::markdown::frontmatter::MergeStrategy;
+use serde_json::json;
 
 // Error on conflict (strict)
 md.fm_merge_with(json!({"tags": ["rust"]}), MergeStrategy::ErrorOnConflict)?;
@@ -45,6 +52,8 @@ md.fm_set_defaults(json!({"draft": false}))?;
 ## Typed Extraction
 
 ```rust
+use serde::Deserialize;
+
 #[derive(Deserialize)]
 struct PostMeta {
     title: String,
@@ -55,14 +64,21 @@ struct PostMeta {
 let meta: PostMeta = md.fm_parse()?;
 ```
 
+## CLI Operations
+
+Use `md frontmatter get`, `set`, and `rm` for structured changes. These commands
+parse and serialize frontmatter rather than editing YAML as text. When a
+document carries a managed `hash:` property, use the command's normal write
+path so Darkmatter can keep the stored hash consistent.
+
 ## `style:` Frontmatter
 
 `darkmatter::style` owns the document-level `style:` schema and applicators.
-It uses renderable primitives (`Length`, `Alignment`, color-backed values),
-but it writes policy onto `DarkmatterPage`; it is separate from
-`renderable::style::Style` on render-tree nodes.
+It lowers component policy onto render-tree nodes and page-level concerns onto
+the `DarkmatterPage` frame. It remains separate from
+`renderable::style::Style` on individual nodes.
 
-Active wiring is sub-spec 7:
+The supported surface includes:
 
 - page layout, background, color, stylesheet, meta, and code theme
 - table, image, block-quote, `ul`, `ol`, `li`, and HR layout/color policy
@@ -72,3 +88,6 @@ Active wiring is sub-spec 7:
 `KnownButInactive` should be empty for valid v1 schema keys. `--strict-style`
 promotes unknown and deprecated keys to errors, while valid unsupported
 combinations fail through documented `StyleApplyError` variants.
+
+Read [rendering.md](rendering.md) before changing style claims, component
+policy, page framing, code-block themes, or target folds.

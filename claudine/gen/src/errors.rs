@@ -156,6 +156,23 @@ pub enum GenError {
     )]
     FamilyKeyMissing { key: String, catalog_id: String },
 
+    #[error(
+        "provider `{slug}` declares its error vocabulary `{declared}`-sourced but a value \
+         also arrived from `{offending}` — delete the {offending} `error_vocabulary` entry \
+         (exactly one layer may own it; this is the delete-on-graduate guard)"
+    )]
+    VocabularyCollision {
+        slug: String,
+        declared: &'static str,
+        offending: &'static str,
+    },
+
+    #[error("provider `{slug}` has an invalid `error_vocabulary`: {message}")]
+    VocabularyInvalid { slug: String, message: String },
+
+    #[error("provider `{slug}` error-vocabulary generation failed: {message}")]
+    VocabularyGenInvalid { slug: String, message: String },
+
     #[error("signals doc `{path}`: {message}")]
     SignalDocInvalid { path: PathBuf, message: String },
 

@@ -39,7 +39,7 @@
 #![cfg(unix)]
 
 mod common;
-use common::{augmented_path, write_executable};
+use common::{augmented_path, clear_no_color, write_executable};
 
 use biscuit_test_harness::tmux::{kill_session_by_name, TmuxHarness};
 use biscuit_test_harness::TerminalHarness;
@@ -118,6 +118,9 @@ while :; do /bin/sleep 1; done
 
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
+    // This fixture asserts a *colored* surface under `FORCE_COLOR=1`, which an
+    // ambient `NO_COLOR` out-votes — see `common::clear_no_color`.
+    clear_no_color(&mut harness);
 
     let claudine = env!("CARGO_BIN_EXE_claudine");
     let env_pairs: [(&str, String); 6] = [

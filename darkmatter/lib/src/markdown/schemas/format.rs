@@ -5,13 +5,14 @@
 //!
 //! - **`format: darkmatter-file`** (eager) — parses the value through
 //!   [`biscuit_file::FileReference`] and confirms the resolved path exists.
-//!   Resolution follows the shared document-first / launch-area-fallback
-//!   order ([`resolve_file_ref_with_fallback`]): the prompt document
-//!   directory first, then the captured launch-area fallback, with no
-//!   ambient-CWD fallback on production paths. This mirrors the expression
-//!   path (`file_exists`/`frontmatter`) so schema validation and expression
-//!   functions agree on the same `file` value. Emitted for SimplifiedSchema
-//!   `file(eager)`.
+//!   Resolution runs through the shared document-backed context
+//!   ([`resolve_document_file_ref`]): implicit bare paths resolve
+//!   repository-root first then the prompt document directory, explicit
+//!   `./`/`../` from the document directory only, with no launch-area fallback
+//!   (D2) and no ambient-CWD read on the anchored path. This mirrors the
+//!   expression path (`file_exists`/`frontmatter`) so schema validation and
+//!   expression functions agree on the same `file` value. Emitted for
+//!   SimplifiedSchema `file(eager)`.
 //! - **`format: darkmatter-file-reference`** (lazy) — validates **syntax
 //!   only** via construction-only [`biscuit_file::FileReference::new`]: a
 //!   syntactically valid but not-yet-existing path passes; no resolve, no
@@ -59,7 +60,7 @@ use jsonschema::{Keyword, ValidationError, ValidationOptions, paths::Location};
 use serde_json::{Map, Value};
 use url::Url;
 
-use crate::markdown::compose::expression::resolve_ctx::resolve_file_ref_with_fallback;
+use crate::markdown::compose::expression::resolve_ctx::resolve_document_file_ref;
 use crate::markdown::schemas::simplified::{
     parse_property_definition, parse_schema_declaration,
 };
@@ -68,8 +69,9 @@ use crate::markdown::schemas::simplified::{
 /// for raw JSON Schema authors who want existence-checking.
 ///
 /// The eager validator parses the value as a [`FileReference`], resolves it
-/// (document-first → launch-area fallback), and fails when the file does not
-/// exist on disk.
+/// through the shared document-backed context (repository-first then
+/// source-relative for implicit paths), and fails when the file does not exist
+/// on disk.
 pub const DARKMATTER_FILE_FORMAT: &str = "darkmatter-file";
 
 /// Format name registered for lazy, syntax-only `file` references.
@@ -165,17 +167,20 @@ fn valid_iso8601_time(value: &str) -> bool {
 
 /// Registers the `darkmatter-file` format on a `ValidationOptions` builder.
 ///
-/// `base_dir`, when `Some`, is the prompt document directory and is tried
-/// first so references authored inside the document resolve next to it.
-/// `fallback`, when `Some`, is the captured launch area and is tried second
-/// for caller-supplied references not authored in the document. When both are
-/// `None` the validator resolves against the ambient process working
-/// directory (legacy behavior preserved for callers — e.g.
-/// `DarkmatterSchemas::new()` in small unit tests — that configure no anchor).
+/// `base_dir`, when `Some`, is the prompt document directory: implicit bare
+/// references resolve repository-root first then the document directory, and
+/// explicit `./`/`../` from the document directory only. When `None` (the bare
+/// validator API with no document anchor) the validator resolves against the
+/// ambient process CWD.
+///
+/// `fallback` (the captured launch area) is retained for structural
+/// compatibility with the validator-cache anchors but is **not** a resolution
+/// input: per D2 there is no launch-area fallback for references authored inside
+/// a document.
 ///
 /// This matches the shared resolution order encoded by
-/// [`resolve_file_ref_with_fallback`], so the `darkmatter-file` validator and
-/// the expression path (`file_exists`/`frontmatter`) agree on the same `file`
+/// [`resolve_document_file_ref`], so the `darkmatter-file` validator and the
+/// expression path (`file_exists`/`frontmatter`) agree on the same `file`
 /// value.
 ///
 /// Splitting this out keeps validator construction in
@@ -183,16 +188,30 @@ fn valid_iso8601_time(value: &str) -> bool {
 /// the format without the keywords.
 ///
 /// jsonschema 0.42's `with_format` accepts `F: Fn(&str) -> bool +
-/// Send + Sync + 'static`, so both anchors are captured by move into the
+/// Send + Sync + 'static`, so the anchors are captured by move into the
 /// closure — no thread-local or process-global state is required.
 pub fn register_darkmatter_formats(
     options: ValidationOptions,
     base_dir: Option<PathBuf>,
     fallback: Option<PathBuf>,
 ) -> ValidationOptions {
+    register_darkmatter_formats_in_context(options, base_dir, fallback, None)
+}
+
+pub(crate) fn register_darkmatter_formats_in_context(
+    options: ValidationOptions,
+    base_dir: Option<PathBuf>,
+    fallback: Option<PathBuf>,
+    file_resolution_context: Option<biscuit_file::FileResolutionContext>,
+) -> ValidationOptions {
     options
         .with_format(DARKMATTER_FILE_FORMAT, move |value: &str| {
-            validate_file_reference(value, base_dir.as_deref(), fallback.as_deref())
+            validate_file_reference(
+                value,
+                base_dir.as_deref(),
+                fallback.as_deref(),
+                file_resolution_context.as_ref(),
+            )
         })
         .with_format(DARKMATTER_FILE_REFERENCE_FORMAT, |value: &str| {
             // Lazy contract: syntax only. `FileReference::new` is
@@ -244,12 +263,17 @@ pub fn register_darkmatter_formats(
 /// Validates a string by parsing it as a `FileReference` and confirming the
 /// resolved path exists on disk at validation time.
 ///
-/// Resolution follows the document-first / launch-area-fallback order (see
+/// Resolution runs through the shared document-backed context (see
 /// [`resolve_file_reference`]). Failures (parse, resolution, missing file)
 /// all return `false` so the JSON Schema layer surfaces a uniform
 /// `format: darkmatter-file` error message.
-fn validate_file_reference(value: &str, base_dir: Option<&Path>, fallback: Option<&Path>) -> bool {
-    resolve_file_reference(value, base_dir, fallback).is_ok()
+fn validate_file_reference(
+    value: &str,
+    base_dir: Option<&Path>,
+    fallback: Option<&Path>,
+    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
+) -> bool {
+    resolve_file_reference_in_context(value, base_dir, fallback, file_resolution_context).is_ok()
 }
 
 /// Outcome of a [`resolve_file_reference`] call.
@@ -283,10 +307,12 @@ pub(crate) enum FileReferenceFailure {
         /// The original input, retained for inclusion in the user-facing
         /// message.
         raw: String,
-        /// CWD at the time of the call, used to render the
-        /// `while resolving from <cwd>` clause. `None` when the process
-        /// CWD cannot be determined.
-        cwd: Option<PathBuf>,
+        /// The directory resolution anchored on, used to render the
+        /// `while resolving from <dir>` clause. This is the document base
+        /// directory for an anchored resolution; for the bare-API path with no
+        /// document anchor it is the ambient process CWD (which is where that
+        /// path genuinely resolves). `None` when no anchor is known.
+        resolved_from: Option<PathBuf>,
     },
 }
 
@@ -299,11 +325,11 @@ impl fmt::Display for FileReferenceFailure {
             Self::Resolution { raw, err } => {
                 write!(f, "could not resolve file reference `{raw}`: {err}")
             }
-            Self::NoMatch { raw, cwd } => match cwd {
-                Some(cwd) => write!(
+            Self::NoMatch { raw, resolved_from } => match resolved_from {
+                Some(dir) => write!(
                     f,
                     "no existing file matched reference `{raw}` while resolving from `{}`",
-                    cwd.display()
+                    dir.display()
                 ),
                 None => write!(f, "no existing file matched reference `{raw}`"),
             },
@@ -314,20 +340,20 @@ impl fmt::Display for FileReferenceFailure {
 /// Parses `value` as a `FileReference`, resolves it, and confirms the resolved
 /// path exists.
 ///
-/// Resolution follows the shared document-first / launch-area-fallback order
-/// ([`resolve_file_ref_with_fallback`]) when either anchor is provided:
+/// When a document `base_dir` is supplied the reference resolves through the
+/// shared document-backed context ([`resolve_document_file_ref`]): explicit
+/// `./`/`../` from the base only, implicit bare paths repository-root first then
+/// the base, and the special kinds by their existing `FileReference` semantics.
+/// There is **no** launch-area fallback for these document-authored references
+/// (D2) and **no** ambient-CWD read — the `_fallback` (launch-area) anchor is
+/// retained on the signature only for structural compatibility with the
+/// validator-cache anchors and is not a resolution input.
 ///
-/// 1. absolute paths are returned as-is by `FileReference`;
-/// 2. document-relative via `resolve_from(base_dir)` — **first**, so a `file`
-///    value authored next to the prompt resolves like the expression path's
-///    `file_exists`/`frontmatter` (document-first contract);
-/// 3. launch-area fallback via `resolve_from(fallback)` — **second**, for a
-///    caller-supplied path relative to the launch area;
-/// 4. no ambient-CWD fallback on this anchored path.
-///
-/// When **both** anchors are `None` (small unit tests / callers that configure
-/// no anchor) resolution falls back to the ambient process CWD via
-/// [`FileReference::resolve`] for backward compatibility.
+/// When `base_dir` is `None` — the bare validator API (`DarkmatterSchemas::new`
+/// with no document anchor); never the document-backed compose path, which
+/// always supplies a base — resolution falls back to the ambient process CWD via
+/// [`FileReference::resolve`]. A no-match on that branch legitimately reports the
+/// ambient CWD as the directory it resolved against.
 ///
 /// Returns the resolved path on success, or a [`FileReferenceFailure`]
 /// distinguishing the three failure modes so callers can render a
@@ -337,33 +363,70 @@ pub(crate) fn resolve_file_reference(
     base_dir: Option<&Path>,
     fallback: Option<&Path>,
 ) -> Result<PathBuf, FileReferenceFailure> {
+    resolve_file_reference_in_context(value, base_dir, fallback, None)
+}
+
+fn resolve_file_reference_in_context(
+    value: &str,
+    base_dir: Option<&Path>,
+    _fallback: Option<&Path>,
+    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
+) -> Result<PathBuf, FileReferenceFailure> {
     let reference = FileReference::new(value).map_err(|err| FileReferenceFailure::InvalidSyntax {
         raw: value.to_string(),
         err,
     })?;
     let resolved = match base_dir {
-        // Anchored path: document-first, then launch-area fallback, no
-        // ambient-CWD fallback — identical order to the expression resolver.
-        Some(base_dir) => resolve_file_ref_with_fallback(&reference, base_dir, fallback),
-        // No document anchor configured. When a bare fallback is set, anchor
-        // resolution there; otherwise preserve the legacy ambient-CWD path.
-        None => match fallback {
-            Some(fallback) => reference.resolve_from(fallback),
-            None => reference.resolve(),
-        },
+        // Document-backed: repository-first then source-relative, no launch-area
+        // fallback (D2) and no ambient CWD.
+        Some(base_dir) => {
+            let (repository_root, package_area) = match file_resolution_context {
+                Some(snapshot) => (
+                    snapshot.repository_root().map(Path::to_path_buf),
+                    snapshot.package_area().map(Path::to_path_buf),
+                ),
+                None => {
+                    let repository_root = crate::markdown::compose::find_git_root_from(base_dir);
+                    let package_area = crate::markdown::compose::find_package_area_from(
+                        base_dir,
+                        repository_root.as_deref(),
+                    );
+                    (repository_root, package_area)
+                }
+            };
+            resolve_document_file_ref(
+                &reference,
+                base_dir,
+                repository_root.as_deref(),
+                package_area.as_deref(),
+                &[],
+                file_resolution_context,
+            )
+        }
+        // Bare validator API with no document anchor: resolve against the
+        // ambient process CWD. Unreachable from a real compose run.
+        None => reference.resolve(),
     };
     let path = resolved.map_err(|err| FileReferenceFailure::Resolution {
         raw: value.to_string(),
         err,
     })?;
+    // The anchored path reports the document base directory; the bare-API path
+    // resolved against the ambient CWD and reports that. No CWD re-read leaks
+    // into an anchored diagnostic.
+    let resolved_from = || {
+        base_dir
+            .map(Path::to_path_buf)
+            .or_else(|| std::env::current_dir().ok())
+    };
     let path = path.ok_or_else(|| FileReferenceFailure::NoMatch {
         raw: value.to_string(),
-        cwd: std::env::current_dir().ok(),
+        resolved_from: resolved_from(),
     })?;
     if !path.exists() {
         return Err(FileReferenceFailure::NoMatch {
             raw: value.to_string(),
-            cwd: std::env::current_dir().ok(),
+            resolved_from: resolved_from(),
         });
     }
     Ok(path)
@@ -540,6 +603,29 @@ mod tests {
     }
 
     #[test]
+    fn eager_file_validation_reuses_request_repository() {
+        let request_repo = temp_dir();
+        let nested_repo = temp_dir();
+        std::fs::create_dir_all(request_repo.path().join(".git")).unwrap();
+        std::fs::create_dir_all(nested_repo.path().join(".git/docs")).unwrap();
+        let request_target = request_repo.path().join("spec.md");
+        std::fs::write(&request_target, "request").unwrap();
+        let context = biscuit_file::FileResolutionContext::new(request_repo.path())
+            .with_repository_root(request_repo.path())
+            .for_trusted_external_base(nested_repo.path().join("docs"));
+
+        let resolved = resolve_file_reference_in_context(
+            "spec.md",
+            Some(&nested_repo.path().join("docs")),
+            None,
+            Some(&context),
+        )
+        .unwrap();
+
+        assert_eq!(resolved, request_target);
+    }
+
+    #[test]
     fn iso8601_datetime_accepts_offset_optional_and_rejects_garbage() {
         // Offset-less local datetime — valid ISO 8601, rejected by RFC 3339.
         assert!(valid_iso8601_datetime("2026-07-10T15:05:34"));
@@ -571,7 +657,7 @@ mod tests {
         let path = dir.path().join("README.md");
         std::fs::write(&path, b"x").unwrap();
         let _cwd = CwdGuard::enter(dir.path());
-        assert!(validate_file_reference("./README.md", None, None));
+        assert!(validate_file_reference("./README.md", None, None, None));
     }
 
     #[test]
@@ -579,7 +665,42 @@ mod tests {
     fn file_format_rejects_missing_file() {
         let dir = temp_dir();
         let _cwd = CwdGuard::enter(dir.path());
-        assert!(!validate_file_reference("./does-not-exist.md", None, None));
+        assert!(!validate_file_reference(
+            "./does-not-exist.md",
+            None,
+            None,
+            None,
+        ));
+    }
+
+    #[test]
+    fn file_format_package_reference_prefers_package_area_over_repository() {
+        let dir = temp_dir();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        gix::init(&root).unwrap();
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"darkmatter/lib\"]\nresolver = \"2\"\n",
+        )
+        .unwrap();
+        let package_area = root.join("darkmatter");
+        let member = package_area.join("lib");
+        std::fs::create_dir_all(member.join("src")).unwrap();
+        std::fs::create_dir_all(member.join("docs")).unwrap();
+        std::fs::write(
+            member.join("Cargo.toml"),
+            "[package]\nname = \"fixture-darkmatter\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .unwrap();
+        std::fs::write(member.join("src/lib.rs"), "").unwrap();
+        std::fs::write(root.join("shared.md"), "repository decoy").unwrap();
+        let package_target = package_area.join("shared.md");
+        std::fs::write(&package_target, "package").unwrap();
+
+        assert_eq!(
+            resolve_file_reference("!shared.md", Some(&member.join("docs")), None).unwrap(),
+            package_target,
+        );
     }
 
     #[test]
@@ -704,7 +825,7 @@ mod tests {
         );
         assert!(rendered.contains("`./does-not-exist.md`"), "rendered: {rendered}");
         assert!(rendered.contains("while resolving from"), "rendered: {rendered}");
-        assert!(matches!(err, FileReferenceFailure::NoMatch { cwd: Some(_), .. }));
+        assert!(matches!(err, FileReferenceFailure::NoMatch { resolved_from: Some(_), .. }));
     }
 
     #[test]
@@ -780,7 +901,7 @@ mod tests {
         // The contract does not fabricate a candidate absolute path; it only
         // reports the raw reference and the resolution directory.
         assert!(!rendered.contains("/darkmatter-test-missing-absolute-xyz.md "), "rendered: {rendered}");
-        assert!(matches!(err, FileReferenceFailure::NoMatch { cwd: Some(_), .. }));
+        assert!(matches!(err, FileReferenceFailure::NoMatch { resolved_from: Some(_), .. }));
     }
 
     #[test]
@@ -831,15 +952,15 @@ mod tests {
         );
         assert!(rendered.contains(&format!("`{raw}`")), "rendered: {rendered}");
         assert!(!rendered.contains("darkmatter-test-missing-recursive-xyz.md "), "rendered: {rendered}");
-        assert!(matches!(err, FileReferenceFailure::NoMatch { cwd: Some(_), .. }));
+        assert!(matches!(err, FileReferenceFailure::NoMatch { resolved_from: Some(_), .. }));
     }
 
     #[test]
-    fn file_reference_failure_no_match_omits_cwd_when_unknown() {
-        let cwd: Option<PathBuf> = None;
+    fn file_reference_failure_no_match_omits_resolved_from_when_unknown() {
+        let resolved_from: Option<PathBuf> = None;
         let failure = FileReferenceFailure::NoMatch {
             raw: "./x".to_string(),
-            cwd,
+            resolved_from,
         };
         let rendered = failure.to_string();
         assert_eq!(

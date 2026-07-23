@@ -145,34 +145,34 @@ outdated:
 # run the full Criterion bench suite for sniff-lib
 bench *args="":
     @echo -e "Running Criterion benches for {{ BOLD }}sniff{{ RESET }}"
-    @cargo bench -p sniff --features network --bench perf -- {{ args }}
+    @cargo bench -p sniff --features network,bench-internals --bench perf -- {{ args }}
 
 # run only the system-level benches
 bench-system *args="":
-    @cargo bench -p sniff --features network --bench perf -- ^system {{ args }}
+    @cargo bench -p sniff --features network,bench-internals --bench perf -- ^system {{ args }}
 
 # run only the hardware benches
 bench-hardware *args="":
-    @cargo bench -p sniff --features network --bench perf -- ^hardware {{ args }}
+    @cargo bench -p sniff --features network,bench-internals --bench perf -- ^hardware {{ args }}
 
 # run only the filesystem benches
 bench-filesystem *args="":
-    @cargo bench -p sniff --features network --bench perf -- ^filesystem {{ args }}
+    @cargo bench -p sniff --features network,bench-internals --bench perf -- ^filesystem {{ args }}
 
 # run only the programs + services inventory benches
 bench-inventory *args="":
-    @cargo bench -p sniff --features network --bench perf -- ^inventory {{ args }}
+    @cargo bench -p sniff --features network,bench-internals --bench perf -- '^(inventory|workloads_service_listing)' {{ args }}
 
 # run only the network benches (wiremock-backed)
 bench-network *args="":
-    @cargo bench -p sniff --features network --bench perf -- ^network {{ args }}
+    @cargo bench -p sniff --features network,bench-internals --bench perf -- ^network {{ args }}
 
 # run the narrow CI subset of benches (matches sniff-performance.yml)
 bench-ci *args="":
     #!/usr/bin/env bash
     set -euo pipefail
     filter="$(paste -sd'|' lib/benches/ci-bench-ids.txt | sed 's/\./\\./g')"
-    cargo bench -p sniff --features network --bench perf -- "^(${filter})$" {{ args }}
+    cargo bench -p sniff --features network,bench-internals --bench perf -- "^(${filter})$" {{ args }}
 
 # end-to-end CLI benchmarks via hyperfine (requires hyperfine on PATH)
 bench-cli:

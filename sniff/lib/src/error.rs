@@ -79,6 +79,34 @@ pub enum SniffError {
     #[error("Language detection failed: {0}")]
     LanguageDetection(String),
 
+    /// An OS call made while discovering the current user's stable identity
+    /// failed.
+    ///
+    /// The `operation` tag names the OS API that failed (e.g.
+    /// "OpenProcessToken", "GetTokenInformation") and the underlying error is
+    /// boxed as a source so its concrete type survives in the cause chain.
+    /// Callers must not soften this into a username or a placeholder: a
+    /// process that cannot learn its own principal must not create per-user
+    /// private state.
+    #[error("user identity error during {operation}: {source}")]
+    UserIdentity {
+        /// The OS operation that failed.
+        operation: &'static str,
+        /// The underlying OS error.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync + 'static>,
+    },
+
+    /// The OS succeeded but returned something that is not a usable account
+    /// identifier (e.g. a malformed SID or an undersized token buffer).
+    #[error("invalid user identity from {operation}: {message}")]
+    InvalidUserIdentity {
+        /// The OS operation that produced the unusable value.
+        operation: &'static str,
+        /// What failed validation.
+        message: String,
+    },
+
     // ─────────────────────────────────────────────────────────────────────────
     // Remote provider errors (requires `remote` feature)
     // ─────────────────────────────────────────────────────────────────────────
@@ -278,6 +306,22 @@ pub enum SniffInstallationError {
         msg: String,
     },
 
+    /// The install command was killed at its deadline rather than exiting.
+    ///
+    /// Distinct from [`SniffInstallationError::PackageManagerFailed`]: the
+    /// package manager never reached a verdict, so the host may hold a
+    /// partial install. On Unix termination is best-effort — a descendant
+    /// that detached with `setsid()` outlives the kill and may still be
+    /// modifying the host. Callers that surface this to a user must say so.
+    #[error(
+        "The package manager {manager} did not finish installing {pkg} within {timeout_secs}s and was terminated; a detached installer process may still be modifying this host"
+    )]
+    InstallationTimedOut {
+        pkg: String,
+        manager: String,
+        timeout_secs: u64,
+    },
+
     #[error("The package {pkg} is not installable on {os}!")]
     NotInstallableOnOs { pkg: String, os: String },
 
@@ -308,6 +352,22 @@ impl SniffError {
         source: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
     ) -> Self {
         SniffError::Git {
+            operation,
+            source: source.into(),
+        }
+    }
+
+    /// Construct a [`SniffError::UserIdentity`] tagging the failing OS
+    /// operation and boxing its error as the source.
+    ///
+    /// Only the Windows identity backend can fail this way today — `geteuid`
+    /// is infallible — so non-Windows builds see this only from tests.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub(crate) fn user_identity(
+        operation: &'static str,
+        source: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
+    ) -> Self {
+        SniffError::UserIdentity {
             operation,
             source: source.into(),
         }

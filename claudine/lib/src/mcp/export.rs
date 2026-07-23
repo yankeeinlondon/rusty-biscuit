@@ -287,7 +287,7 @@ pub(crate) fn write_claude_mcp(
     }
 
     let output = serde_json::to_string_pretty(&doc)?;
-    atomic_write(config_path, output.as_bytes())
+    Ok(atomic_write(config_path, output.as_bytes())?)
 }
 
 /// Write MCP servers to Codex config (TOML).
@@ -390,7 +390,7 @@ pub(crate) fn write_codex_mcp(
         mcp_table[&server.native_name] = toml_edit::Item::Table(table);
     }
 
-    atomic_write(config_path, doc.to_string().as_bytes())
+    Ok(atomic_write(config_path, doc.to_string().as_bytes())?)
 }
 
 /// Write MCP servers to Gemini config (JSON).
@@ -448,7 +448,7 @@ pub(crate) fn write_gemini_mcp(
     }
 
     let output = serde_json::to_string_pretty(&doc)?;
-    atomic_write(config_path, output.as_bytes())
+    Ok(atomic_write(config_path, output.as_bytes())?)
 }
 
 /// Write MCP servers to OpenCode config (JSON).
@@ -512,7 +512,7 @@ pub(crate) fn write_opencode_mcp(
     }
 
     let output = serde_json::to_string_pretty(&doc)?;
-    atomic_write(config_path, output.as_bytes())
+    Ok(atomic_write(config_path, output.as_bytes())?)
 }
 
 fn provider_override_value<'a>(

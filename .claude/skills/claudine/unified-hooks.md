@@ -1,5 +1,23 @@
 # Unified Hooks: Events, Provider Surfaces, and Canonical Actions
 
+## Contents
+
+- Current Model: "Hooks" vs "Actions"
+- Event Mapping to Providers
+- Event Support by Provider
+- Key Types and Structures
+- Current Configuration and Runtime Types
+- Matrix Types
+- ProviderAdapter trait
+- HookAction enum
+- CLI Surfaces
+- How It Works
+- Hook Handler Deadlines
+- Support Level Implications
+
+Use heading search to jump to the listed subsystem.
+
+
 Reference for Claudine's unified event model, covering canonical event names,
 provider-native mappings, support levels, and the current dispatch pipeline.
 

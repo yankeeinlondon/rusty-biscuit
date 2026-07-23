@@ -7,7 +7,7 @@ use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use tempfile::tempdir;
 mod common;
-use common::{augmented_path, strip_ansi, write_executable};
+use common::{augmented_path, init_git_repo, strip_ansi, write, write_executable};
 
 // ============================================================================
 // Phase 1: convergence between non-harness and harness-enabled direct compose
@@ -146,5 +146,191 @@ fn compose_dry_run_malformed_whole_value_spec_path_aborts_without_leaking() {
     assert!(
         !count_path.exists(),
         "no provider session should have been launched; stub recorded a call"
+    );
+}
+
+// ============================================================================
+// Cross-surface repository-first parity (2026-07-13-file-resolution, AC6)
+// ============================================================================
+
+/// A Darkmatter `::file` transclusion run by Claudine resolves a bare implicit
+/// reference **repository-first** on a real collision.
+///
+/// This is the cross-surface half of the file-resolution feature (AC6): the
+/// lifecycle-proxy surface is proven end-to-end by the L2 file-resolution
+/// capture; this proves the *transclusion* surface obeys the identical
+/// repository-first contract when Claudine composes the document.
+///
+/// The fixture is a genuine collision — the transcluded basename exists at
+/// **both** the repository root and the source document's directory — so the
+/// outcome discriminates precedence rather than mere existence. A CLI spawn (not
+/// a terminal capture) is the right level: the assertion is on the *content*
+/// delivered to the provider, which needs the real binary + filesystem but no
+/// TTY. The provider stub records everything it receives (argv, any file-valued
+/// argument, and stdin), so the composed prompt is captured regardless of the
+/// wrapper's delivery mechanism.
+#[cfg(unix)]
+#[test]
+fn compose_transclusion_resolves_repository_first_on_collision() {
+    let workspace = tempdir().unwrap();
+    let root = workspace.path();
+    assert!(
+        init_git_repo(root),
+        "repository-first transclusion needs a real git worktree root"
+    );
+
+    let path_dir = root.join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let capture = root.join("delivered-prompt.txt");
+    // Capture argv, file-valued args (the wrapper may pass the prompt as a
+    // tmpfile), and stdin — the composed prompt lands in one of them.
+    write_executable(
+        &path_dir.join("claude"),
+        r#"#!/bin/sh
+{
+  for a in "$@"; do
+    if [ -f "$a" ]; then cat "$a"; else printf '%s\n' "$a"; fi
+  done
+  cat
+} >> "$CLAUDINE_PROMPT_CAPTURE" 2>/dev/null
+exit 0
+"#,
+    );
+
+    // Genuine collision: same basename at the repository root and beside the
+    // source document. Repository-first must transclude the root copy.
+    write(&root.join("shared.md"), "REPO_ROOT_TRANSCLUSION_MARKER\n");
+    write(
+        &root.join("prompts/shared.md"),
+        "SOURCE_LOCAL_TRANSCLUSION_MARKER\n",
+    );
+    let doc = root.join("prompts/doc.md");
+    write(&doc, "---\n---\n::file shared.md\n");
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", root)
+        .env("PATH", augmented_path(&path_dir))
+        .env("CLAUDINE_PROMPT_CAPTURE", &capture)
+        .current_dir(root)
+        .args(["compose", "--claude", doc.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let delivered = fs::read_to_string(&capture).unwrap_or_default();
+    assert!(
+        delivered.contains("REPO_ROOT_TRANSCLUSION_MARKER"),
+        "the bare `::file shared.md` transclusion must resolve repository-first \
+         to <repo>/shared.md.\ndelivered prompt:\n{delivered}"
+    );
+    assert!(
+        !delivered.contains("SOURCE_LOCAL_TRANSCLUSION_MARKER"),
+        "repository-first must win the collision — the source-local copy must \
+         not be transcluded.\ndelivered prompt:\n{delivered}"
+    );
+}
+
+// ============================================================================
+// Cross-repository source re-anchoring (Finding 1 — D2/D10/AC12)
+// ============================================================================
+
+/// A nested bare `::file` transclusion authored inside a top-level document from
+/// repository A must resolve against repository A even when the binary is
+/// launched from an unrelated repository B.
+///
+/// Prior to the two-phase re-anchor (provisional launch-time context →
+/// definitive source-anchored context), repository discovery was driven by
+/// the launch CWD, so launching from B hijacked every nested reference in A.
+/// This test pins the post-fix behavior: the source document's repository
+/// wins regardless of where the user invoked `claudine compose` from.
+#[cfg(unix)]
+#[test]
+fn compose_transclusion_uses_source_doc_repository_not_launch_cwd() {
+    let workspace = tempdir().unwrap();
+
+    // --- Primary repo: source doc + correct transclusion target ------------
+    let repo_root = workspace.path().join("repo");
+    fs::create_dir_all(&repo_root).unwrap();
+    assert!(
+        init_git_repo(&repo_root),
+        "source-doc re-anchoring needs a real git worktree root for repo_root"
+    );
+    // The transclusion target lives at the primary repo's root.
+    write(
+        &repo_root.join("snippet.md"),
+        "PRIMARY_REPO_TRANSCLUSION_MARKER\n",
+    );
+    write(
+        &repo_root.join("nested.md"),
+        "::file snippet.md\n",
+    );
+
+    // --- Unrelated repo: decoy transclusion target --------------------------
+    let decoy_root = workspace.path().join("decoy");
+    fs::create_dir_all(&decoy_root).unwrap();
+    // `git init` on the decoy too: with no git root, biscuit-file's ambient
+    // gix walk could find repo_root by walking up, so we give decoy its own
+    // worktree root to make the test deterministic when the launch CWD lives
+    // inside it.
+    assert!(
+        init_git_repo(&decoy_root),
+        "decoy launch repo needs a real git worktree root"
+    );
+    write(
+        &decoy_root.join("snippet.md"),
+        "DECOY_REPO_TRANSCLUSION_MARKER\n",
+    );
+    write(
+        &decoy_root.join("nested.md"),
+        "::file snippet.md\n",
+    );
+
+    let prompts_dir = repo_root.join("prompts");
+    fs::create_dir_all(&prompts_dir).unwrap();
+    let doc = prompts_dir.join("uses_snippet.md");
+    // Bare transclusion resolves repository-first: with the fix, the source's
+    // repo (repo_root) wins, not the launch CWD's repo (decoy_root).
+    write(&doc, "---\n---\n::file nested.md\n");
+
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let capture = workspace.path().join("delivered-prompt.txt");
+    write_executable(
+        &path_dir.join("claude"),
+        r#"#!/bin/sh
+{
+  for a in "$@"; do
+    if [ -f "$a" ]; then cat "$a"; else printf '%s\n' "$a"; fi
+  done
+  cat
+} >> "$CLAUDINE_PROMPT_CAPTURE" 2>/dev/null
+exit 0
+"#,
+    );
+
+    // Launch from the decoy repo while targeting the document in repo_root.
+    // If repository discovery were still CWD-driven, the decoy's snippet.md
+    // would win and the delivered prompt would contain the decoy marker.
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .env("CLAUDINE_PROMPT_CAPTURE", &capture)
+        .current_dir(&decoy_root)
+        .args(["compose", "--claude", doc.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let delivered = fs::read_to_string(&capture).unwrap_or_default();
+    assert!(
+        delivered.contains("PRIMARY_REPO_TRANSCLUSION_MARKER"),
+        "the `::file snippet.md` transclusion must resolve against the source \
+         document's repository (repo_root), not the launch CWD's repository \
+         (decoy_root).\ndelivered prompt:\n{delivered}"
+    );
+    assert!(
+        !delivered.contains("DECOY_REPO_TRANSCLUSION_MARKER"),
+        "the decoy repo's snippet must not leak into a document authored in \
+         repo_root.\ndelivered prompt:\n{delivered}"
     );
 }
