@@ -87,6 +87,85 @@ fn test_clean_subcommand_ignore_incidental_newlines_preserves_source_wrapping() 
 }
 
 #[test]
+fn test_clean_line_width_modes_preserve_mixed_document_structure() {
+    let source = concat!(
+        "A top-level paragraph is deliberately long enough to wrap differently at forty and eighty display columns.\n",
+        "It also contains an authored incidental newline.\n",
+        "\n",
+        "## H2\n",
+        "\n",
+        "1. one\n",
+        "\n",
+        "    second paragraph\n",
+    );
+    let cases = [
+        (
+            vec!["clean", "-"],
+            concat!(
+                "A top-level paragraph is deliberately long enough to wrap differently at forty and eighty display columns. ",
+                "It also contains an authored incidental newline.\n",
+                "\n",
+                "## H2\n",
+                "\n",
+                "1. one\n",
+                "    \n",
+                "    second paragraph\n",
+            ),
+        ),
+        (
+            vec!["clean", "--ignore-incidental-newlines", "-"],
+            concat!(
+                "A top-level paragraph is deliberately long enough to wrap differently at forty and eighty display columns.\n",
+                "It also contains an authored incidental newline.\n",
+                "\n",
+                "## H2\n",
+                "\n",
+                "1. one\n",
+                "    \n",
+                "    second paragraph\n",
+            ),
+        ),
+        (
+            vec!["clean", "--fixed-width", "40", "-"],
+            concat!(
+                "A top-level paragraph is deliberately\n",
+                "long enough to wrap differently at forty\n",
+                "and eighty display columns. It also\n",
+                "contains an authored incidental newline.\n",
+                "\n",
+                "## H2\n",
+                "\n",
+                "1. one\n",
+                "    \n",
+                "    second paragraph\n",
+            ),
+        ),
+        (
+            vec!["clean", "--fixed-width", "80", "-"],
+            concat!(
+                "A top-level paragraph is deliberately long enough to wrap differently at forty\n",
+                "and eighty display columns. It also contains an authored incidental newline.\n",
+                "\n",
+                "## H2\n",
+                "\n",
+                "1. one\n",
+                "    \n",
+                "    second paragraph\n",
+            ),
+        ),
+    ];
+
+    for (args, expected) in cases {
+        md_cmd()
+            .args(args)
+            .write_stdin(source)
+            .assert()
+            .success()
+            .stdout(expected);
+    }
+}
+
+#[test]
 fn test_clean_subcommand_list_modes_match_library_contract() {
     let source = "- Alpha beta gamma delta\n    epsilon zeta eta theta.\n";
 
