@@ -71,6 +71,35 @@ fn test_compose_cleanup_strips_incidental_newlines_by_default() {
 }
 
 #[test]
+fn test_compose_cleanup_preserves_mixed_document_structure_and_word_boundaries() {
+    let content = concat!(
+        "Darkmatter provides useful \n",
+        "information for authors.\n",
+        "\n",
+        "## Example\n",
+        "\n",
+        "1. one\n",
+        "\n",
+        "    second paragraph\n",
+    );
+    let expected = concat!(
+        "Darkmatter provides useful information for authors.\n",
+        "\n",
+        "## Example\n",
+        "\n",
+        "1. one\n",
+        "    \n",
+        "    second paragraph\n",
+    );
+    let options = ComposeOptions::new().only(&[ComposeOperation::Cleanup]);
+
+    let (composed, report) = Markdown::from(content).compose_with(options).unwrap();
+
+    assert_eq!(composed.content(), expected);
+    assert!(report.cleanup_changed);
+}
+
+#[test]
 fn test_compose_cleanup_can_preserve_incidental_newlines() {
     let content = "This paragraph keeps\nits single newline.\n";
     let md: Markdown = content.into();

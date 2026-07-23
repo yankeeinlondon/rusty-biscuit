@@ -88,6 +88,30 @@ use super::*;
     }
 
     #[test]
+    fn top_level_blocks_do_not_consume_later_list_paragraph_context() {
+        let content = concat!(
+            "Top prose.\n",
+            "\n",
+            "## H2\n",
+            "\n",
+            "1. one\n",
+            "\n",
+            "    second paragraph\n",
+        );
+        let expected = concat!(
+            "Top prose.\n",
+            "\n",
+            "## H2\n",
+            "\n",
+            "1. one\n",
+            "    \n",
+            "    second paragraph\n",
+        );
+
+        assert_eq!(cleanup_content(content), expected);
+    }
+
+    #[test]
     fn test_list_inside_blockquote() {
         // List markers inside blockquotes should be preserved
         let content = "> - Quoted item 1\n> - Quoted item 2";

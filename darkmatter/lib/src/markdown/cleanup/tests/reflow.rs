@@ -507,6 +507,20 @@ fn assert_lines_within_width(content: &str, width: usize) {
     }
 
     #[test]
+    fn cleanup_preserves_word_separator_at_single_space_soft_break() {
+        let content = "Gather useful \ninformation here.";
+
+        assert_eq!(cleanup_content(content), "Gather useful information here.\n");
+    }
+
+    #[test]
+    fn cleanup_does_not_materialize_source_space_at_spaceless_script_boundary() {
+        let content = "\u{6F22} \n\u{5B57}";
+
+        assert_eq!(cleanup_content(content), "\u{6F22}\u{5B57}\n");
+    }
+
+    #[test]
     fn strip_incidental_newlines_preserves_setext_h1_underline() {
         let content = "Heading\n===\nbody continues";
         let stripped = strip_incidental_newlines(content);

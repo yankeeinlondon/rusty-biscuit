@@ -87,6 +87,7 @@ pub(super) fn extract_list_item_contexts(
 
 #[derive(Clone, Copy)]
 pub(super) struct AdditionalParagraphContext {
+    item_ordinal: usize,
     list_depth: usize,
     blockquote_depth: usize,
     source_body_column: usize,
@@ -105,7 +106,8 @@ pub(super) fn extract_additional_paragraph_contexts(
     opaque_body_lines: &[Range<usize>],
 ) -> Vec<AdditionalParagraphContext> {
     let mut contexts = Vec::new();
-    let mut item_sources = Vec::<Option<(usize, usize)>>::new();
+    let mut item_sources = Vec::<Option<(usize, usize, usize)>>::new();
+    let mut next_item_ordinal = 0usize;
     let mut list_depth = 0usize;
     let mut blockquote_depth = 0usize;
 
@@ -132,13 +134,18 @@ pub(super) fn extract_additional_paragraph_contexts(
                     .count();
                 let marker_width = list_container_marker_byte_width(&source_body[item_column..])
                     .unwrap_or(0);
-                item_sources.push(Some((0, item_column + marker_width)));
+                item_sources.push(Some((
+                    0,
+                    item_column + marker_width,
+                    next_item_ordinal,
+                )));
+                next_item_ordinal += 1;
             }
             Event::End(TagEnd::Item) => {
                 item_sources.pop();
             }
             Event::Start(Tag::Paragraph) => {
-                let Some((count, source_item_content_column)) =
+                let Some((count, source_item_content_column, item_ordinal)) =
                     item_sources.last_mut().and_then(Option::as_mut)
                 else {
                     continue;
@@ -150,6 +157,7 @@ pub(super) fn extract_additional_paragraph_contexts(
                         .map_or(0, |newline| newline + 1);
                     let source_line = &content[line_start..];
                     contexts.push(AdditionalParagraphContext {
+                        item_ordinal: *item_ordinal,
                         list_depth,
                         blockquote_depth,
                         source_body_column: source_body_column(source_line, blockquote_depth),
@@ -784,6 +792,7 @@ pub(super) fn fix_list_indentation(
         additional_paragraph_contexts.iter().copied().peekable();
     let mut protected_markers = protected_markers.iter().copied().peekable();
     let mut marker_ordinal = 0usize;
+    let mut consumed_item_count = 0usize;
     let mut follows_blank = false;
     let mut active_blockquote_depth = 0usize;
 
@@ -870,6 +879,7 @@ pub(super) fn fix_list_indentation(
             list_container_marker_byte_width(marker_body).zip(item_context)
         {
             item_contexts.next();
+            consumed_item_count += 1;
             if active_blockquote_depth != blockquote_depth {
                 stack.clear();
                 active_blockquote_depth = blockquote_depth;
@@ -939,7 +949,10 @@ pub(super) fn fix_list_indentation(
         } else if line_follows_blank
             && let Some(context) = additional_paragraph_contexts
                 .peek()
-                .filter(|context| context.blockquote_depth == blockquote_depth)
+                .filter(|context| {
+                    context.item_ordinal < consumed_item_count
+                        && context.blockquote_depth == blockquote_depth
+                })
                 .copied()
         {
             additional_paragraph_contexts.next();
