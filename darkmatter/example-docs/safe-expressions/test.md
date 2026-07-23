@@ -1,3 +1,10 @@
+---
+csv: "foo, bar, baz"
+list:
+    - foo
+    - bar
+    - baz
+---
 # Safe Expressions
 
 Darkmatter provides a set of operators and functions which are deemed to be _safe_ (aka, no side effects) which can be used to gather useful 
@@ -12,7 +19,9 @@ information or to mutate a document's Frontmatter.
 
 ::block when="ctx.dirty_files"
 Currently this repo has _dirty_ files which have not yet been committed to **git** and the context variable `ctx.dirty_files` makes those
-files very accessible as a CSV list: {{ctx.dirty_files}}.
+files very accessible as a CSV list: 
+
+> {{ctx.dirty_files}}
 
 Sometimes, however, the CSV presentation is not what you're looking for and the Darkmatter expression engine provides several functions which
 can change the output format of this list:
@@ -37,6 +46,12 @@ can change the output format of this list:
 
 ::block when="!ctx.dirty_files"
 
-> **Note:** this example leverages presenting the _dirty_ files in this repo but currently all files have been committed to **git**.
+> **Note:** 
+>
+> - this page's normal example leverages presenting the _dirty_ files in this repo but currently all files have been committed to **git**.
 
 ::end-block
+
+{{ as_ordered_list(csv) }}
+
+{{ as_ordered_list(list) }}
