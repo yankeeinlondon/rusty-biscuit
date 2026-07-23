@@ -2269,7 +2269,7 @@ packages:
 ---
 # Mega Merge Execution Plan
 
-Status: ready for execution
+Status: complete
 
 Source of truth: [spec.md](spec.md)
 
@@ -3024,8 +3024,19 @@ changing reviewed content:
   introduced.
 - No live conflict markers or temporary integration paths were found. The
   durable Phase 7 workflow regression suite passes 5/5 with no skips.
+- Final GitNexus comparison against `main` reports the expected CRITICAL
+  merge-scale breadth: 18,431 mapped changed symbols in 1,798 indexed files and
+  111 affected flows. Reviewed flow families are composition,
+  reference/transclusion, lifecycle/harness, sequence, file resolution, and
+  Sniff observation; each maps to focused and full-suite evidence in the
+  ledger.
 - Phase 0 is complete. Phase 7 is complete under the repository-owner policy
   that native Linux and Windows results drive post-merge hardening on `main`.
+- Pre-merge evidence commit `cce163d5dc4c1a4e074fbe175b70edc456aaf9f3`
+  was fast-forwarded to local `main` with tree
+  `cddcdfc84f7d832cd6ad8f4c151e016a18f3f0a9`. All three frozen tips remain
+  ancestors. This documentation-only completion record is then fast-forwarded
+  to `main` as the exact final candidate.
 
 ### Ancestry and history
 
@@ -3054,12 +3065,12 @@ changing reviewed content:
 
 ### Merge
 
-- [ ] Freeze the verified candidate SHA.
-- [ ] Merge that exact candidate into `main` without squashing away its source
+- [x] Freeze the verified candidate SHA.
+- [x] Merge that exact candidate into `main` without squashing away its source
   ancestry and without changing the candidate tree.
-- [ ] Verify the resulting `main` tree matches the candidate tree and all three
+- [x] Verify the resulting `main` tree matches the candidate tree and all three
   frozen tips remain ancestors of `main`.
-- [ ] Confirm the durable post-merge workflows are present on `main`. Their
+- [x] Confirm the durable post-merge workflows are present on `main`. Their
   native results begin the follow-up hardening cycle and do not block this
   local merge.
 
