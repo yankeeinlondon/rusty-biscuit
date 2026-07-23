@@ -1,0 +1,41 @@
+name: biscuit-file-tests
+
+# Native path-resolution coverage for the Biscuit File library and CLI.
+# The shared workflow supplies macOS all-target compilation, required Linux and
+# Windows L1 execution, and the package area's lint gate.
+
+on:
+  push:
+    paths:
+      - "biscuit-file/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "justfile"
+      - "just/**"
+      - ".github/workflows/biscuit-file-tests.yml"
+      - ".github/workflows/_area-ci.yml"
+  pull_request:
+    paths:
+      - "biscuit-file/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "justfile"
+      - "just/**"
+      - ".github/workflows/biscuit-file-tests.yml"
+      - ".github/workflows/_area-ci.yml"
+  workflow_dispatch: {}
+
+concurrency:
+  group: biscuit-file-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    uses: ./.github/workflows/_area-ci.yml
+    with:
+      area: biscuit-file
+      check-args: "-p biscuit-file -p biscuit-file-cli"
+      full-os: '["ubuntu-latest", "windows-latest"]'
+      check-os: '["macos-latest"]'
+      soft-os: '[]'
+    secrets: inherit

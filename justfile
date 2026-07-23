@@ -227,34 +227,15 @@ repo-deps:
     @cargo run --manifest-path scripts/Cargo.toml --bin repo-deps
 
 lint:
-    #!/usr/bin/env bash
-      set -euo pipefail
-      echo ""
-      echo "Linting all packages..."
-      echo "----------------------------"
-      echo ""
-      for area in {{ areas }}; do
-          if [ -f "$area/justfile" ]; then
-              if (cd "$area" && just --summary 2>/dev/null) | grep -qw "lint"; then
-                  echo "Linting $area..."
-                  (cd "$area" && just lint) || ( so-you-say "The ${area} package has lint errors." )
-              else
-                  if (cd "$area" && just --summary 2>/dev/null) | grep -qw "lint"; then
-                      echo "No lint command for $area"
-                      so-you-say "The ${area} package does not define a lint command" 2>/dev/null || exit 0
-                  else
-                      echo "- no lint command for the area **$area**" >&2
-                  fi
-              fi
-          else
-              echo -e "- no {{ ITALIC }}justfile{{ RESET }} for the package {{ BOLD }}$area{{ RESET }}" >&2
-
-          fi
-      done
+    @just _orchestrate lint
 
 # run sanity checks (all areas, or specific areas: just sanity claudine darkmatter)
 sanity *args="":
     @just _orchestrate sanity {{ args }}
+
+# build all areas, or specific areas: just build claudine darkmatter
+build *args="":
+    @just _orchestrate build {{ args }}
 
 # run benchmarks (all areas, or specific areas: just bench claudine darkmatter)
 bench *args="":

@@ -30,7 +30,7 @@
 #![allow(dead_code)]
 
 use std::io::{self, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -406,6 +406,32 @@ pub fn cargo_bin_dir(bin_name: &str) -> Option<PathBuf> {
         return Some(dir);
     }
     None
+}
+
+/// Appends a login-shell invocation that preserves the Cargo binary directory.
+///
+/// Login startup files may replace `PATH`, particularly when a terminal GUI
+/// launches from the desktop rather than an existing shell. The outer login
+/// shell therefore prepends the binary directory after startup, then replaces
+/// itself with the interactive shell used by the harness.
+pub(crate) fn configure_login_shell(
+    cmd: &mut Command,
+    shell: &str,
+    bin_dir: Option<&Path>,
+) {
+    cmd.arg(shell);
+    if let Some(bin_dir) = bin_dir {
+        cmd.args([
+            "-l",
+            "-c",
+            "export PATH=\"$BISCUIT_TEST_BIN_DIR:$PATH\"; \
+             unset BISCUIT_TEST_BIN_DIR; exec \"$0\" -i",
+            shell,
+        ]);
+        cmd.env("BISCUIT_TEST_BIN_DIR", bin_dir);
+    } else {
+        cmd.arg("-l");
+    }
 }
 
 /// Sets the conventional color-forcing env vars on `cmd` so the

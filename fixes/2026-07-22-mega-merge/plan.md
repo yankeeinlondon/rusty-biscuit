@@ -1,5 +1,39 @@
 ---
 total_phases: 8
+source_files_during_phase_8: []
+docs_updated_during_phase_8:
+  - fixes/2026-07-22-mega-merge/plan.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8: []
+packages_during_phase_8: []
+source_files_during_phase_7:
+  - .github/workflows/_area-ci.yml
+  - .github/workflows/biscuit-file-tests.yml
+  - .github/workflows/claudine-tests.yml
+  - .github/workflows/claudine-windows-ctrl-c.yml
+  - .github/workflows/darkmatter-tests.yml
+  - .github/workflows/test.yml
+  - tools/test-toolkit/tests/phase7_ci_workflows.rs
+docs_updated_during_phase_7:
+  - docs/testing-strategy.md
+  - fixes/2026-07-22-mega-merge/plan.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - .claude/skills/rust-testing/SKILL.md
+source_files_during_phase_6:
+  - biscuit-test-harness/src/kitty.rs
+  - biscuit-test-harness/src/lib.rs
+  - biscuit-test-harness/src/wezterm.rs
+  - homelab/server/frontend/src/auto-imports.d.ts
+  - just/devops.just
+  - justfile
+  - pnpm-lock.yaml
+  - visualizer/.gitignore
+  - visualizer/dist/index.html
+docs_updated_during_phase_6:
+  - fixes/2026-07-22-mega-merge/plan.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
 source_files_during_phase_5: []
 docs_updated_during_phase_5:
   - claudine/docs/topics/argv-normalization.md
@@ -1236,6 +1270,643 @@ source_code:
   - sniff/lib/tests/git_parity.rs
   - sniff/lib/tests/integration.rs
   - sniff/lib/tests/remote_providers.rs
+  - sniff/lib/src/filesystem/git/remote_resolver.rs
+  - biscuit-file/cli/tests/cli_tests.rs
+  - biscuit-file/lib/src/file_reference/context.rs
+  - biscuit-file/lib/src/file_reference/error.rs
+  - biscuit-file/lib/src/file_reference/mod.rs
+  - biscuit-file/lib/src/file_reference/parse.rs
+  - biscuit-file/lib/src/file_reference/resolve.rs
+  - biscuit-file/lib/src/lib.rs
+  - biscuit-file/lib/src/list_format.rs
+  - biscuit-file/lib/tests/completion_round_trip.rs
+  - biscuit-file/lib/tests/detailed_resolution.rs
+  - biscuit-file/lib/tests/implicit_relative.rs
+  - biscuit-file/lib/tests/precedence_flip.rs
+  - biscuit-file/lib/tests/reference_grammar.rs
+  - biscuit-file/lib/tests/resolution_context.rs
+  - biscuit-terminal/lib/tests/layout_matrix.rs
+  - biscuit-test-harness/src/cliclick.rs
+  - biscuit-test-harness/src/lib.rs
+  - biscuit-test-harness/src/wezterm.rs
+  - biscuit-test-harness/src/win_input.rs
+  - biscuit-test-harness/src/xdotool.rs
+  - claudine/cli/tests/fixtures/shipped_implement_route/shipped-hashes.json
+  - claudine/cli/src/commands/compose/interrupt.rs
+  - claudine/cli/src/commands/compose/loop_run.rs
+  - claudine/cli/src/commands/compose/mod.rs
+  - claudine/cli/src/commands/compose/prep.rs
+  - claudine/cli/src/commands/compose/prep/tests.rs
+  - claudine/cli/src/commands/config_tui/app.rs
+  - claudine/cli/src/commands/config_tui/tabs/messenger/input.rs
+  - claudine/cli/src/commands/context/expressions.rs
+  - claudine/cli/src/commands/context/format.rs
+  - claudine/cli/src/commands/context_render.rs
+  - claudine/cli/src/commands/context_render/tests.rs
+  - claudine/cli/src/commands/dashboard/mod.rs
+  - claudine/cli/src/commands/dashboard/tests.rs
+  - claudine/cli/src/commands/handle.rs
+  - claudine/cli/src/commands/init/prompts.rs
+  - claudine/cli/src/commands/mcp/show.rs
+  - claudine/cli/src/commands/schema_interactive/mod.rs
+  - claudine/cli/src/commands/schema_interactive/tests.rs
+  - claudine/cli/src/commands/sequence.rs
+  - claudine/cli/src/commands/wrap/composition/dry_run.rs
+  - claudine/cli/src/commands/wrap/composition/dry_run/tests.rs
+  - claudine/cli/src/commands/wrap/composition/launch.rs
+  - claudine/cli/src/commands/wrap/composition/mod.rs
+  - claudine/cli/src/commands/wrap/composition/pipeline.rs
+  - claudine/cli/src/commands/wrap/composition/pipeline/tests.rs
+  - claudine/cli/src/commands/wrap/composition/preflight.rs
+  - claudine/cli/src/commands/wrap/composition/prep_context.rs
+  - claudine/cli/src/commands/wrap/composition/runner.rs
+  - claudine/cli/src/commands/wrap/composition/target.rs
+  - claudine/cli/src/commands/wrap/composition/tests.rs
+  - claudine/cli/src/commands/wrap/env/mod.rs
+  - claudine/cli/src/commands/wrap/env/sanitize.rs
+  - claudine/cli/src/commands/wrap/exec/mod.rs
+  - claudine/cli/src/commands/wrap/exec/spawn.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/captured.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/inherited.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/mod.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/semantic.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/setup.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/tests/captured.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/tests/inherited.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/tests/mod.rs
+  - claudine/cli/src/commands/wrap/exec/task_frame_fixtures.rs
+  - claudine/cli/src/commands/wrap/exec/termination.rs
+  - claudine/cli/src/commands/wrap/exec/termination/coordinator.rs
+  - claudine/cli/src/commands/wrap/exec/termination/coordinator/tests.rs
+  - claudine/cli/src/commands/wrap/exec/termination/handle.rs
+  - claudine/cli/src/commands/wrap/exec/termination/message.rs
+  - claudine/cli/src/commands/wrap/exec/termination/mod.rs
+  - claudine/cli/src/commands/wrap/exec/termination/reasons.rs
+  - claudine/cli/src/commands/wrap/exec/termination/summary.rs
+  - claudine/cli/src/commands/wrap/exec/termination/tests/mod.rs
+  - claudine/cli/src/commands/wrap/exec/termination/tests/projection.rs
+  - claudine/cli/src/commands/wrap/exec/termination/tests/reasons.rs
+  - claudine/cli/src/commands/wrap/exec/termination/tests/wait.rs
+  - claudine/cli/src/commands/wrap/exec/termination/unix.rs
+  - claudine/cli/src/commands/wrap/exec/termination/windows.rs
+  - claudine/cli/src/commands/wrap/exec/timeouts.rs
+  - claudine/cli/src/commands/wrap/exec/timeouts/tests.rs
+  - claudine/cli/src/commands/wrap/exec/watchdog/spawn.rs
+  - claudine/cli/src/commands/wrap/exec/wiring/mod.rs
+  - claudine/cli/src/commands/wrap/exec/wiring/session.rs
+  - claudine/cli/src/commands/wrap/flags.rs
+  - claudine/cli/src/commands/wrap/flags/tests.rs
+  - claudine/cli/src/commands/wrap/harness_orch/attempt.rs
+  - claudine/cli/src/commands/wrap/harness_orch/launch.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/coordinator.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/error_routing.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/lifecycle_events.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/proxy.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/requeue.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch/tests.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/active_state_wiring.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/budget_scoping.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/coordinator_adoption.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/lifecycle_ordering.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/overlay_layering.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/proxy.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/recovery_identity.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/shell_approval.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_evaluation.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_routing.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/unowned_handoff.rs
+  - claudine/cli/src/commands/wrap/harness_orch/mod.rs
+  - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+  - claudine/cli/src/commands/wrap/harness_orch/session_key.rs
+  - claudine/cli/src/commands/wrap/harness_orch/session_key/tests.rs
+  - claudine/cli/src/commands/wrap/harness_orch/shell_options.rs
+  - claudine/cli/src/commands/wrap/harness_orch/types.rs
+  - claudine/cli/src/commands/wrap/launch_plan.rs
+  - claudine/cli/src/commands/wrap/launch_plan/tests.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/mod.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/tests/golden_stderr.rs
+  - claudine/cli/src/commands/wrap/mod.rs
+  - claudine/cli/src/commands/wrap/overlay.rs
+  - claudine/cli/src/commands/wrap/policy.rs
+  - claudine/cli/src/commands/wrap/profile/mod.rs
+  - claudine/cli/src/commands/wrap/profile/tests/positional.rs
+  - claudine/cli/src/commands/wrap/repo_home.rs
+  - claudine/cli/src/commands/wrap/repo_home/tests.rs
+  - claudine/cli/src/commands/wrap/runaway_guard.rs
+  - claudine/cli/src/commands/wrap/sequence/iterate.rs
+  - claudine/cli/src/commands/wrap/sequence/jit.rs
+  - claudine/cli/src/commands/wrap/sequence/jit/tests.rs
+  - claudine/cli/src/commands/wrap/sequence/mod.rs
+  - claudine/cli/src/commands/wrap/sequence/phase1c.rs
+  - claudine/cli/src/commands/wrap/sequence/resolve.rs
+  - claudine/cli/src/commands/wrap/sequence/task_frames.rs
+  - claudine/cli/src/commands/wrap/sequence/task_run.rs
+  - claudine/cli/src/commands/wrap/sequence/tests.rs
+  - claudine/cli/src/commands/wrap/session_report.rs
+  - claudine/cli/src/commands/wrap/session_report/tests.rs
+  - claudine/cli/src/commands/wrap/stream_io.rs
+  - claudine/cli/src/commands/wrap/system_prompt.rs
+  - claudine/cli/src/commands/wrap/system_prompt/tests.rs
+  - claudine/cli/src/commands/wrap/wrapper_exec.rs
+  - claudine/cli/src/commands/wrap/wrapper_mcp.rs
+  - claudine/cli/src/commands/wrap/wrapper_stages.rs
+  - claudine/cli/src/completion/bootstrap.rs
+  - claudine/cli/src/completion/bootstrap/tests.rs
+  - claudine/cli/src/completion/composition/magic_at.rs
+  - claudine/cli/src/completion/composition/mod.rs
+  - claudine/cli/src/completion/composition/tests.rs
+  - claudine/cli/src/completion/engine/mod.rs
+  - claudine/cli/src/completion/engine/tests.rs
+  - claudine/cli/src/completion/scopes.rs
+  - claudine/cli/src/completion/scopes/tests.rs
+  - claudine/cli/src/completion/setter_value.rs
+  - claudine/cli/src/completion/setter_value/tests.rs
+  - claudine/cli/src/completion/walker.rs
+  - claudine/cli/src/completion/walker/tests.rs
+  - claudine/cli/src/log.rs
+  - claudine/cli/src/main.rs
+  - claudine/cli/src/output/error_walker.rs
+  - claudine/cli/src/output/error_walker/tests.rs
+  - claudine/cli/src/perf/mod.rs
+  - claudine/cli/src/perf/report.rs
+  - claudine/cli/src/perf/tests/perf_tree.rs
+  - claudine/cli/src/perf/tests/report.rs
+  - claudine/cli/src/perf/tree.rs
+  - claudine/cli/tests/characterization_error_routes.rs
+  - claudine/cli/tests/common/mod.rs
+  - claudine/cli/tests/common/pty.rs
+  - claudine/cli/tests/completion_compose.rs
+  - claudine/cli/tests/completion_resolution_round_trip.rs
+  - claudine/cli/tests/compose_cli.rs
+  - claudine/cli/tests/compose_system_prompt_lifetime.rs
+  - claudine/cli/tests/composition_outputs.rs
+  - claudine/cli/tests/composition_seams.rs
+  - claudine/cli/tests/diagnostic_discovery.rs
+  - claudine/cli/tests/dispatch_inventory.rs
+  - claudine/cli/tests/effective_diagnostic_render.rs
+  - claudine/cli/tests/error_guards.rs
+  - claudine/cli/tests/error_guards/source_scan.rs
+  - claudine/cli/tests/inline_compose_cli.rs
+  - claudine/cli/tests/level2_auto_complete_operation_file.rs
+  - claudine/cli/tests/level2_context_capture.rs
+  - claudine/cli/tests/level2_dry_run_approval_capture.rs
+  - claudine/cli/tests/level2_dry_run_metadata_capture.rs
+  - claudine/cli/tests/level2_file_resolution_capture.rs
+  - claudine/cli/tests/level2_inline_compose_mismatch_capture.rs
+  - claudine/cli/tests/level2_interrupt_feedback_capture.rs
+  - claudine/cli/tests/level2_invalid_file_reference_capture.rs
+  - claudine/cli/tests/level2_lifecycle_control.rs
+  - claudine/cli/tests/level2_lifecycle_dispatch.rs
+  - claudine/cli/tests/level2_malformed_frontmatter_capture.rs
+  - claudine/cli/tests/level2_perf_capture.rs
+  - claudine/cli/tests/level2_prompt_reporting_capture.rs
+  - claudine/cli/tests/level2_removed_validation_key_capture.rs
+  - claudine/cli/tests/level2_schema_parse_capture.rs
+  - claudine/cli/tests/level2_schema_prompt_pty.rs
+  - claudine/cli/tests/level2_sequence_overlay_pty.rs
+  - claudine/cli/tests/level2_sequence_task_stream_capture.rs
+  - claudine/cli/tests/level2_stalled_generation_capture.rs
+  - claudine/cli/tests/level2_typed_error_render_capture.rs
+  - claudine/cli/tests/level2_windows_sequence_ctrl_c.rs
+  - claudine/cli/tests/level3_auto_complete_chooser.rs
+  - claudine/cli/tests/level3_auto_complete_operation_file.rs
+  - claudine/cli/tests/level3_linux_sequence_ctrl_c.rs
+  - claudine/cli/tests/level3_sequence_ctrl_c.rs
+  - claudine/cli/tests/level3_windows_sequence_ctrl_c.rs
+  - claudine/cli/tests/run_harness_loop_call_sites.rs
+  - claudine/cli/tests/sequence_cli.rs
+  - claudine/cli/tests/sequence_errors_cli.rs
+  - claudine/cli/tests/sequence_groups.rs
+  - claudine/cli/tests/sequence_jit.rs
+  - claudine/cli/tests/sequence_overlay_pty.rs
+  - claudine/cli/tests/sequence_perf.rs
+  - claudine/cli/tests/sequence_sources_cli.rs
+  - claudine/cli/tests/shipped_prompt_route_drift.rs
+  - claudine/cli/tests/shipped_prompts.rs
+  - claudine/cli/tests/test_placement.rs
+  - claudine/cli/tests/wrap_basics.rs
+  - claudine/cli/tests/wrap_compose_agent.rs
+  - claudine/cli/tests/wrap_compose_preflight.rs
+  - claudine/cli/tests/wrap_compose_validation.rs
+  - claudine/cli/tests/wrap_perf.rs
+  - claudine/contract/src/adapter.rs
+  - claudine/contract/src/tests.rs
+  - claudine/contract/src/tests/tracing_capture.rs
+  - claudine/gen/src/agent_errors_check.rs
+  - claudine/gen/src/agent_errors_check/tests.rs
+  - claudine/gen/src/emit.rs
+  - claudine/gen/src/emit/event_policy.rs
+  - claudine/gen/src/emit/execution_prompting.rs
+  - claudine/gen/src/emit/identity_paths.rs
+  - claudine/gen/src/emit/linking.rs
+  - claudine/gen/src/emit/mod.rs
+  - claudine/gen/src/emit/models_offerings.rs
+  - claudine/gen/src/emit/tests.rs
+  - claudine/gen/src/generate.rs
+  - claudine/gen/src/generate/coerce/event_policy.rs
+  - claudine/gen/src/generate/coerce/execution_prompting.rs
+  - claudine/gen/src/generate/coerce/identity_paths.rs
+  - claudine/gen/src/generate/coerce/mod.rs
+  - claudine/gen/src/generate/coerce/models_offerings.rs
+  - claudine/gen/src/generate/tests.rs
+  - claudine/gen/src/lib.rs
+  - claudine/gen/src/main.rs
+  - claudine/gen/src/registry.rs
+  - claudine/gen/src/registry/tests.rs
+  - claudine/gen/src/report.rs
+  - claudine/gen/src/report/tests.rs
+  - claudine/gen/src/vocabulary.rs
+  - claudine/gen/src/vocabulary/tests.rs
+  - claudine/gen/tests/drift.rs
+  - claudine/gen/tests/generate_ux.rs
+  - claudine/gen/tests/level2_report_terminal.rs
+  - claudine/lib/benches/runtime_hot_paths.rs
+  - claudine/lib/src/actions/bash_executor.rs
+  - claudine/lib/src/actions/hook_action.rs
+  - claudine/lib/src/actions/hook_action/tests.rs
+  - claudine/lib/src/composition/closure.rs
+  - claudine/lib/src/composition/closure/tests.rs
+  - claudine/lib/src/composition/coordinator/active.rs
+  - claudine/lib/src/composition/coordinator/commit.rs
+  - claudine/lib/src/composition/coordinator/document.rs
+  - claudine/lib/src/composition/coordinator/handoff.rs
+  - claudine/lib/src/composition/coordinator/invocation.rs
+  - claudine/lib/src/composition/coordinator/mod.rs
+  - claudine/lib/src/composition/coordinator/tests.rs
+  - claudine/lib/src/composition/coordinator/transition.rs
+  - claudine/lib/src/composition/error/mod.rs
+  - claudine/lib/src/composition/error/render.rs
+  - claudine/lib/src/composition/error/render/lifecycle.rs
+  - claudine/lib/src/composition/error/render/mod.rs
+  - claudine/lib/src/composition/error/render/provider.rs
+  - claudine/lib/src/composition/error/render/schema.rs
+  - claudine/lib/src/composition/error/render/selection.rs
+  - claudine/lib/src/composition/error/render/sequence_loop.rs
+  - claudine/lib/src/composition/error/tests.rs
+  - claudine/lib/src/composition/interpolation_conformance.rs
+  - claudine/lib/src/composition/lifecycle/action_shape.rs
+  - claudine/lib/src/composition/lifecycle/actions.rs
+  - claudine/lib/src/composition/lifecycle/actions/tests.rs
+  - claudine/lib/src/composition/lifecycle/context.rs
+  - claudine/lib/src/composition/lifecycle/context/tests.rs
+  - claudine/lib/src/composition/lifecycle/control.rs
+  - claudine/lib/src/composition/lifecycle/control/tests.rs
+  - claudine/lib/src/composition/lifecycle/executor.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/action_dispatch.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/conditions_control.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/event_time_interpolation.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/filesystem_lookup.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/mutation_visibility.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/proxy_with_evaluation.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/runtime_set.rs
+  - claudine/lib/src/composition/lifecycle/mod.rs
+  - claudine/lib/src/composition/lifecycle/parse.rs
+  - claudine/lib/src/composition/lifecycle/runtime.rs
+  - claudine/lib/src/composition/lifecycle/runtime/tests.rs
+  - claudine/lib/src/composition/lifecycle/tests.rs
+  - claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs
+  - claudine/lib/src/composition/lifecycle/tests/audio_emission.rs
+  - claudine/lib/src/composition/lifecycle/tests/diagnostics.rs
+  - claudine/lib/src/composition/lifecycle/tests/guard_runtime.rs
+  - claudine/lib/src/composition/lifecycle/tests/mod.rs
+  - claudine/lib/src/composition/lifecycle/tests/parse_config.rs
+  - claudine/lib/src/composition/lifecycle/tests/validation.rs
+  - claudine/lib/src/composition/lifecycle/validate.rs
+  - claudine/lib/src/composition/looping/actions.rs
+  - claudine/lib/src/composition/looping/actions/tests.rs
+  - claudine/lib/src/composition/looping/config.rs
+  - claudine/lib/src/composition/looping/config/tests.rs
+  - claudine/lib/src/composition/looping/engine.rs
+  - claudine/lib/src/composition/looping/engine/tests.rs
+  - claudine/lib/src/composition/looping/engine/tests/iteration_actions.rs
+  - claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs
+  - claudine/lib/src/composition/looping/engine/tests/mod.rs
+  - claudine/lib/src/composition/looping/engine/tests/rate_limits.rs
+  - claudine/lib/src/composition/looping/engine/tests/seed_state.rs
+  - claudine/lib/src/composition/looping/expression.rs
+  - claudine/lib/src/composition/looping/expression/tests/resolution_context.rs
+  - claudine/lib/src/composition/looping/types.rs
+  - claudine/lib/src/composition/mod.rs
+  - claudine/lib/src/composition/preflight.rs
+  - claudine/lib/src/composition/preflight/tests.rs
+  - claudine/lib/src/composition/prepare.rs
+  - claudine/lib/src/composition/prepare/entry.rs
+  - claudine/lib/src/composition/prepare/entry/tests.rs
+  - claudine/lib/src/composition/prepare/service.rs
+  - claudine/lib/src/composition/prepare/service/tests.rs
+  - claudine/lib/src/composition/prepare/tests.rs
+  - claudine/lib/src/composition/resolve.rs
+  - claudine/lib/src/composition/resolve/tests.rs
+  - claudine/lib/src/composition/runtime_state.rs
+  - claudine/lib/src/composition/runtime_state/tests.rs
+  - claudine/lib/src/composition/schema/classify.rs
+  - claudine/lib/src/composition/schema/mod.rs
+  - claudine/lib/src/composition/schema/tests.rs
+  - claudine/lib/src/composition/schema/translate.rs
+  - claudine/lib/src/composition/select.rs
+  - claudine/lib/src/composition/select/tests.rs
+  - claudine/lib/src/composition/sequence.rs
+  - claudine/lib/src/composition/sequence/data.rs
+  - claudine/lib/src/composition/sequence/expr.rs
+  - claudine/lib/src/composition/sequence/formal.rs
+  - claudine/lib/src/composition/sequence/grammar.rs
+  - claudine/lib/src/composition/sequence/mod.rs
+  - claudine/lib/src/composition/sequence/model.rs
+  - claudine/lib/src/composition/sequence/normalize.rs
+  - claudine/lib/src/composition/sequence/preflight/mod.rs
+  - claudine/lib/src/composition/sequence/preflight/shape.rs
+  - claudine/lib/src/composition/sequence/preflight/tests.rs
+  - claudine/lib/src/composition/sequence/reserved.rs
+  - claudine/lib/src/composition/sequence/source.rs
+  - claudine/lib/src/composition/sequence/task/group.rs
+  - claudine/lib/src/composition/sequence/task/mod.rs
+  - claudine/lib/src/composition/sequence/task/shell.rs
+  - claudine/lib/src/composition/sequence/task/shell/tests.rs
+  - claudine/lib/src/composition/sequence/task/tests.rs
+  - claudine/lib/src/composition/sequence/tests.rs
+  - claudine/lib/src/composition/types.rs
+  - claudine/lib/src/config/atomic.rs
+  - claudine/lib/src/config/claude.rs
+  - claudine/lib/src/config/claude/tests.rs
+  - claudine/lib/src/config/claudine_config.rs
+  - claudine/lib/src/config/claudine_config/tests.rs
+  - claudine/lib/src/config/messaging_block.rs
+  - claudine/lib/src/config/messaging_block/tests.rs
+  - claudine/lib/src/diagnostics/discovery.rs
+  - claudine/lib/src/diagnostics/discovery/tests.rs
+  - claudine/lib/src/diagnostics/facets.rs
+  - claudine/lib/src/diagnostics/mod.rs
+  - claudine/lib/src/diagnostics/registry.rs
+  - claudine/lib/src/diagnostics/restored.rs
+  - claudine/lib/src/diagnostics/restored/tests.rs
+  - claudine/lib/src/diagnostics/snapshot.rs
+  - claudine/lib/src/diagnostics/snapshot/tests.rs
+  - claudine/lib/src/dispatch/deps.rs
+  - claudine/lib/src/dispatch/expression.rs
+  - claudine/lib/src/dispatch/expression/tests.rs
+  - claudine/lib/src/dispatch/loader.rs
+  - claudine/lib/src/dispatch/loader/tests.rs
+  - claudine/lib/src/dispatch/matcher.rs
+  - claudine/lib/src/dispatch/matcher/tests.rs
+  - claudine/lib/src/dispatch/mod.rs
+  - claudine/lib/src/dispatch/runner/mappers.rs
+  - claudine/lib/src/dispatch/runner/mod.rs
+  - claudine/lib/src/dispatch/runner/tests.rs
+  - claudine/lib/src/dispatch/template.rs
+  - claudine/lib/src/dispatch/template/tests.rs
+  - claudine/lib/src/dispatch/tests.rs
+  - claudine/lib/src/error.rs
+  - claudine/lib/src/harness/audit.rs
+  - claudine/lib/src/harness/error.rs
+  - claudine/lib/src/harness/error/tests.rs
+  - claudine/lib/src/harness/mod.rs
+  - claudine/lib/src/harness/resolve.rs
+  - claudine/lib/src/harness/resolve/tests.rs
+  - claudine/lib/src/harness/runtime.rs
+  - claudine/lib/src/harness/runtime/tests.rs
+  - claudine/lib/src/harness/shell.rs
+  - claudine/lib/src/linking/compatibility/mod.rs
+  - claudine/lib/src/linking/compatibility/tests.rs
+  - claudine/lib/src/linking/hashing.rs
+  - claudine/lib/src/linking/skills/portable.rs
+  - claudine/lib/src/linking/skills/portable/tests.rs
+  - claudine/lib/src/mcp/catalog.rs
+  - claudine/lib/src/mcp/defaults.rs
+  - claudine/lib/src/mcp/export.rs
+  - claudine/lib/src/mcp/import.rs
+  - claudine/lib/src/mcp/import/tests.rs
+  - claudine/lib/src/mcp/inject.rs
+  - claudine/lib/src/mcp/state.rs
+  - claudine/lib/src/messaging/config.rs
+  - claudine/lib/src/messaging/config/tests.rs
+  - claudine/lib/src/messaging/mod.rs
+  - claudine/lib/src/messaging/send.rs
+  - claudine/lib/src/messaging/send/tests.rs
+  - claudine/lib/src/model_catalog/service.rs
+  - claudine/lib/src/model_catalog/service/tests.rs
+  - claudine/lib/src/permissions/engine.rs
+  - claudine/lib/src/permissions/engine/tests.rs
+  - claudine/lib/src/permissions/mutation.rs
+  - claudine/lib/src/permissions/providers/claude.rs
+  - claudine/lib/src/permissions/providers/claude/tests.rs
+  - claudine/lib/src/permissions/providers/codex.rs
+  - claudine/lib/src/permissions/providers/codex/tests.rs
+  - claudine/lib/src/permissions/providers/gemini.rs
+  - claudine/lib/src/permissions/providers/gemini/tests.rs
+  - claudine/lib/src/permissions/providers/goose.rs
+  - claudine/lib/src/permissions/providers/kimi.rs
+  - claudine/lib/src/permissions/providers/opencode.rs
+  - claudine/lib/src/permissions/providers/qwen.rs
+  - claudine/lib/src/permissions/providers/qwen/tests.rs
+  - claudine/lib/src/permissions/query.rs
+  - claudine/lib/src/permissions/query/tests.rs
+  - claudine/lib/src/protect/catalog.rs
+  - claudine/lib/src/protect/catalog/tests.rs
+  - claudine/lib/src/protect/observe.rs
+  - claudine/lib/src/protect/observe/tests.rs
+  - claudine/lib/src/protect/path.rs
+  - claudine/lib/src/protect/service.rs
+  - claudine/lib/src/protect/service/tests.rs
+  - claudine/lib/src/provider/methods.rs
+  - claudine/lib/src/provider/methods/tests.rs
+  - claudine/lib/src/provider/mod.rs
+  - claudine/lib/src/render/mod.rs
+  - claudine/lib/src/render/prompt/system.rs
+  - claudine/lib/src/render/prompt/system/tests.rs
+  - claudine/lib/src/render/task_stream.rs
+  - claudine/lib/src/render/task_stream/tests.rs
+  - claudine/lib/src/reporting/error.rs
+  - claudine/lib/src/reporting/error/tests.rs
+  - claudine/lib/src/reporting/ingest.rs
+  - claudine/lib/src/reporting/ingest/tests.rs
+  - claudine/lib/src/reporting/mod.rs
+  - claudine/lib/src/reporting/types.rs
+  - claudine/lib/src/runaway/config.rs
+  - claudine/lib/src/runaway/config/tests.rs
+  - claudine/lib/src/runaway/detector.rs
+  - claudine/lib/src/runaway/detector/tests.rs
+  - claudine/lib/src/signals/bespoke.rs
+  - claudine/lib/src/signals/bespoke/tests.rs
+  - claudine/lib/src/signals/projection_equivalence_tests.rs
+  - claudine/lib/src/stream/badges.rs
+  - claudine/lib/src/stream/badges/tests.rs
+  - claudine/lib/src/stream/logs/opencode/bridge/tests.rs
+  - claudine/lib/src/stream/logs/opencode/bridge/tests/ingest_classification.rs
+  - claudine/lib/src/stream/logs/opencode/bridge/tests/mod.rs
+  - claudine/lib/src/stream/logs/opencode/bridge/tests/session_lifecycle.rs
+  - claudine/lib/src/stream/logs/opencode/bridge/tests/signal_projection.rs
+  - claudine/lib/src/stream/logs/opencode/bridge/tests/stalled_generation_progress.rs
+  - claudine/lib/src/stream/logs/opencode/bridge/tests/stdout_stderr_coordination.rs
+  - claudine/lib/src/stream/logs/opencode/bridge/tests/usage_retry_guards.rs
+  - claudine/lib/src/stream/logs/opencode/events.rs
+  - claudine/lib/src/stream/logs/opencode/events/tests.rs
+  - claudine/lib/src/stream/mod.rs
+  - claudine/lib/src/stream/parser.rs
+  - claudine/lib/src/stream/progress.rs
+  - claudine/lib/src/stream/progress/tests.rs
+  - claudine/lib/src/stream/protocol/claude.rs
+  - claudine/lib/src/stream/protocol/claude/tests.rs
+  - claudine/lib/src/stream/protocol/codex.rs
+  - claudine/lib/src/stream/protocol/codex/tests.rs
+  - claudine/lib/src/stream/protocol/kimi.rs
+  - claudine/lib/src/stream/protocol/kimi/tests.rs
+  - claudine/lib/src/stream/protocol/opencode.rs
+  - claudine/lib/src/stream/protocol/opencode/tests.rs
+  - claudine/lib/src/stream/providers/antigravity.rs
+  - claudine/lib/src/stream/providers/claude.rs
+  - claudine/lib/src/stream/providers/claude/tests.rs
+  - claudine/lib/src/stream/providers/codex.rs
+  - claudine/lib/src/stream/providers/codex/tests.rs
+  - claudine/lib/src/stream/providers/gemini.rs
+  - claudine/lib/src/stream/providers/gemini/tests.rs
+  - claudine/lib/src/stream/providers/kimi.rs
+  - claudine/lib/src/stream/providers/kimi/tests.rs
+  - claudine/lib/src/stream/providers/opencode.rs
+  - claudine/lib/src/stream/providers/opencode/tests.rs
+  - claudine/lib/src/stream/providers/pi.rs
+  - claudine/lib/src/stream/providers/pi/tests.rs
+  - claudine/lib/src/stream/providers/qwen.rs
+  - claudine/lib/src/stream/reporting.rs
+  - claudine/lib/src/stream/reporting/tests.rs
+  - claudine/lib/src/stream/semantic.rs
+  - claudine/lib/src/stream/semantic/tests.rs
+  - claudine/lib/src/stream/stderr.rs
+  - claudine/lib/src/stream/stderr/tests.rs
+  - claudine/lib/src/stream/tool_display.rs
+  - claudine/lib/src/stream/tool_display/from_event_tests.rs
+  - claudine/lib/src/stream/tool_display/humanize_tests.rs
+  - claudine/lib/src/stream/tool_display/summary_tests.rs
+  - claudine/lib/src/stream/tool_display/tests.rs
+  - claudine/lib/src/system_prompt/change_state.rs
+  - claudine/lib/src/system_prompt/context.rs
+  - claudine/lib/src/system_prompt/prepare.rs
+  - claudine/lib/src/system_prompt/prepare/tests.rs
+  - claudine/lib/src/system_prompt/resolve.rs
+  - claudine/lib/src/system_prompt/resolve/tests.rs
+  - claudine/lib/tests/agent_errors_fleet.rs
+  - claudine/lib/tests/boundary_lint.rs
+  - claudine/lib/tests/diagnostic_detail_conformance.rs
+  - claudine/lib/tests/kimi_wire.rs
+  - claudine/lib/tests/semantic_fidelity.rs
+  - claudine/rendezvous/client/src/connector/mod.rs
+  - claudine/rendezvous/client/src/connector/tests.rs
+  - claudine/rendezvous/client/src/connector/unix.rs
+  - claudine/rendezvous/client/src/connector/windows.rs
+  - claudine/rendezvous/client/src/lib.rs
+  - claudine/rendezvous/client/src/main.rs
+  - claudine/rendezvous/client/tests/local_round_trip.rs
+  - claudine/rendezvous/client/tests/session_log_round_trip.rs
+  - claudine/rendezvous/client/tests/uds_round_trip.rs
+  - claudine/rendezvous/core/src/lib.rs
+  - claudine/rendezvous/core/src/local_endpoint.rs
+  - claudine/rendezvous/core/src/local_endpoint/test_support.rs
+  - claudine/rendezvous/core/src/local_endpoint/tests.rs
+  - claudine/rendezvous/core/src/socket.rs
+  - claudine/rendezvous/daemon/src/lib.rs
+  - claudine/rendezvous/daemon/src/local_transport/mod.rs
+  - claudine/rendezvous/daemon/src/local_transport/unix.rs
+  - claudine/rendezvous/daemon/src/local_transport/unix/tests.rs
+  - claudine/rendezvous/daemon/src/local_transport/windows.rs
+  - claudine/rendezvous/daemon/src/local_transport/windows/tests.rs
+  - claudine/rendezvous/daemon/src/main.rs
+  - claudine/rendezvous/daemon/src/peers.rs
+  - claudine/rendezvous/daemon/src/peers/tests.rs
+  - claudine/rendezvous/daemon/src/private_dir.rs
+  - claudine/rendezvous/daemon/src/private_dir/tests.rs
+  - claudine/rendezvous/daemon/src/register.rs
+  - claudine/rendezvous/daemon/src/register/tests.rs
+  - claudine/rendezvous/daemon/src/server.rs
+  - claudine/rendezvous/daemon/src/server/tests.rs
+  - claudine/rendezvous/daemon/src/service.rs
+  - claudine/rendezvous/daemon/src/service/tests/mod.rs
+  - claudine/rendezvous/daemon/src/service/tests/rpc.rs
+  - claudine/rendezvous/daemon/src/service/tests/session_register.rs
+  - claudine/rendezvous/daemon/src/service/tests/validation.rs
+  - claudine/rendezvous/daemon/src/session_log.rs
+  - claudine/rendezvous/daemon/src/session_log/append.rs
+  - claudine/rendezvous/daemon/src/session_log/mod.rs
+  - claudine/rendezvous/daemon/src/session_log/rehydrate.rs
+  - claudine/rendezvous/daemon/src/session_log/staging.rs
+  - claudine/rendezvous/daemon/src/session_log/tests.rs
+  - claudine/rendezvous/daemon/src/session_log/tests/append_rotation.rs
+  - claudine/rendezvous/daemon/src/session_log/tests/durability.rs
+  - claudine/rendezvous/daemon/src/session_log/tests/mod.rs
+  - claudine/rendezvous/daemon/src/session_log/tests/remote_validation.rs
+  - claudine/rendezvous/daemon/src/session_log/tests/replace_update.rs
+  - claudine/rendezvous/daemon/src/session_log/tests/replay_rehydration.rs
+  - claudine/rendezvous/daemon/src/session_log/validate.rs
+  - claudine/rendezvous/daemon/src/sync.rs
+  - claudine/rendezvous/daemon/src/sync/tests/envelope_validation.rs
+  - claudine/rendezvous/daemon/src/sync/tests/mod.rs
+  - claudine/rendezvous/daemon/src/sync/tests/schema_validation.rs
+  - claudine/rendezvous/daemon/src/sync/tests/snapshot_replace.rs
+  - claudine/rendezvous/daemon/tests/pairing_and_sync.rs
+  - claudine/rendezvous/daemon/tests/peer_discovery.rs
+  - claudine/rendezvous/daemon/tests/phase6_integration.rs
+  - darkmatter/lib/src/effects/catalog.rs
+  - darkmatter/lib/src/effects/error.rs
+  - darkmatter/lib/src/effects/verbs.rs
+  - darkmatter/lib/src/markdown/compose/context/effective_state.rs
+  - darkmatter/lib/src/markdown/compose/context/options.rs
+  - darkmatter/lib/src/markdown/compose/expression/error.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/path_projection.rs
+  - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+  - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+  - darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+  - darkmatter/lib/src/markdown/compose/link_normalization.rs
+  - darkmatter/lib/src/markdown/compose/link_resolve.rs
+  - darkmatter/lib/src/markdown/compose/mod.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+  - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+  - darkmatter/lib/src/markdown/compose/remote.rs
+  - darkmatter/lib/src/markdown/compose/schema_validation.rs
+  - darkmatter/lib/src/markdown/compose/tests/frontmatter.rs
+  - darkmatter/lib/src/markdown/compose/tests/rendering.rs
+  - darkmatter/lib/src/markdown/compose/tests/schema.rs
+  - darkmatter/lib/src/markdown/compose/tests/transclusion.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/mod.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/resolver.rs
+  - darkmatter/lib/src/markdown/compose/util.rs
+  - darkmatter/lib/src/markdown/reference/graph.rs
+  - darkmatter/lib/src/markdown/reference/mod.rs
+  - darkmatter/lib/src/markdown/reference/validate.rs
+  - darkmatter/lib/src/markdown/schemas/detect.rs
+  - darkmatter/lib/src/markdown/schemas/format.rs
+  - darkmatter/lib/src/markdown/schemas/mod.rs
+  - darkmatter/lib/src/markdown/schemas/reference.rs
+  - darkmatter/lib/src/markdown/schemas/resolve.rs
+  - darkmatter/lib/src/markdown/schemas/rewrite.rs
+  - darkmatter/lib/src/markdown/schemas/tests/mod.rs
+  - darkmatter/lib/src/markdown/schemas/validate.rs
+  - darkmatter/lib/tests/reference_integration.rs
+  - sniff/lib/src/os/mod.rs
+  - sniff/lib/src/os/user.rs
+  - biscuit-test-harness/src/kitty.rs
+  - homelab/server/frontend/src/auto-imports.d.ts
+  - just/devops.just
+  - justfile
+  - pnpm-lock.yaml
+  - visualizer/.gitignore
+  - visualizer/dist/index.html
+  - .github/workflows/_area-ci.yml
+  - .github/workflows/biscuit-file-tests.yml
+  - .github/workflows/claudine-tests.yml
+  - .github/workflows/claudine-windows-ctrl-c.yml
+  - .github/workflows/darkmatter-tests.yml
+  - .github/workflows/test.yml
+  - tools/test-toolkit/tests/phase7_ci_workflows.rs
 documentation:
   - .claude/skills/sniff/SKILL.md
   - .claude/skills/sniff/extending.md
@@ -1279,6 +1950,282 @@ documentation:
   - sniff/lib/benches/README.md
   - sniff/reviews/2026-07-13-perf/spec.md
   - sniff/reviews/2026-07-14-filesystem-observation/review.md
+  - prompts/_implement/implement-plan.md
+  - .claudine/non-interactive.md
+  - biscuit-file/docs/dependencies.md
+  - biscuit-file/docs/topics/file-references.md
+  - biscuit-test-harness/README.md
+  - claudine/docs/dependencies.md
+  - claudine/docs/rendezvous/current-state.md
+  - claudine/docs/rendezvous/design.md
+  - claudine/docs/rendezvous/index.md
+  - claudine/docs/research/local_runners/_fleet.md
+  - claudine/docs/research/local_runners/llamacpp.md
+  - claudine/docs/research/local_runners/lmstudio.md
+  - claudine/docs/research/local_runners/ollama.md
+  - claudine/docs/research/local_runners/omlx.md
+  - claudine/docs/research/local_runners/vllm.md
+  - claudine/docs/topics/building-an-agent-wrapper.md
+  - claudine/docs/topics/cli-pre-parsing.md
+  - claudine/docs/topics/completions/index.md
+  - claudine/docs/topics/completions/shell-completions.md
+  - claudine/docs/topics/composition.md
+  - claudine/docs/topics/context/expression-engine.md
+  - claudine/docs/topics/execution-flow.md
+  - claudine/docs/topics/flow-control/looping.md
+  - claudine/docs/topics/flow-control/sequences.md
+  - claudine/docs/topics/lifecycle.md
+  - claudine/docs/topics/non-interactive-sessions.md
+  - claudine/docs/topics/provider-metadata.md
+  - claudine/docs/topics/stream-parsing.md
+  - claudine/docs/topics/system-prompt.md
+  - claudine/docs/topics/unified-events.md
+  - claudine/features/2026-07-11-fleet-validate-and-resume/spec.md
+  - claudine/features/2026-07-11-module-structure/critical-plan.md
+  - claudine/features/2026-07-11-module-structure/nice-plan.md
+  - claudine/features/2026-07-11-module-structure/phase6-discovery.md
+  - claudine/features/2026-07-11-module-structure/review.md
+  - claudine/features/2026-07-11-module-structure/strong-plan.md
+  - claudine/features/2026-07-11-sequence-plus/plan.md
+  - claudine/features/2026-07-11-sequence-plus/spec.md
+  - claudine/features/2026-07-12-rendezvous-dashboard/windows-support-followup.md
+  - claudine/features/2026-07-13-error-propogation/spec.md
+  - claudine/features/2026-07-13-file-resolution/spec.md
+  - claudine/features/2026-07-13-proxy-with/spec.md
+  - claudine/features/_completed/2026-06-14-auto-complete/plan.md
+  - claudine/features/_completed/2026-06-14-auto-complete/review-3.md
+  - claudine/features/_completed/2026-06-14-auto-complete/review-5.md
+  - claudine/features/_completed/2026-06-14-auto-complete/spec.md
+  - claudine/fixes/2026-07-13-rendezvous-local-ipc/spec.md
+  - claudine/rendezvous/README.md
+  - claudine/reviews/2026-07-01-dry-review/review.md
+  - claudine/reviews/2026-07-14-module-assessment/review.md
+  - darkmatter/docs/inline/fm-interpolation.md
+  - darkmatter/docs/inline/schema-validation.md
+  - darkmatter/docs/topics/context-variables.md
+  - darkmatter/docs/topics/darkmatter-expressions.md
+  - darkmatter/docs/topics/magic-paths.md
+  - darkmatter/docs/topics/schema-definition.md
+  - darkmatter/docs/transclusion/block-transclusion.md
+  - darkmatter/docs/transclusion/transclusion-design.md
+  - prompts/_implement/implement-review.md
+  - prompts/_implement/review-findings-plan.md
+  - prompts/_reviews/suggestion-review.md
+  - prompts/commit.md
+  - prompts/faster-builds-and-tests.md
+  - biscuit-terminal/fixes/2026-07-22-table-width/spec.md
+  - claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md
+  - claudine/docs/rendezvous/local-ipc.md
+  - claudine/docs/research/herdr.md
+  - claudine/docs/research/model-serving-api-standards/_research.md
+  - claudine/docs/topics/agentic-research-as-a-typed-knowledge-pipeline.md
+  - claudine/docs/topics/error-architecture.md
+  - claudine/docs/topics/messaging.md
+  - claudine/features/2026-07-11-sequence-plus/gate-run-2026-07-18.md
+  - claudine/features/2026-07-11-sequence-plus/gate-run-2026-07-19-l3-linux.md
+  - claudine/features/2026-07-11-sequence-plus/gate-run-2026-07-19-linux.md
+  - claudine/features/2026-07-11-sequence-plus/gate-run-2026-07-19-windows.md
+  - claudine/features/2026-07-11-sequence-plus/gate-run-2026-07-21-windows.md
+  - claudine/features/2026-07-11-sequence-plus/l3-ctrl-c-runbook.md
+  - claudine/features/2026-07-11-sequence-plus/phase-1-baseline.md
+  - claudine/features/2026-07-11-sequence-plus/review-1.md
+  - claudine/features/2026-07-11-sequence-plus/review-10.md
+  - claudine/features/2026-07-11-sequence-plus/review-11.md
+  - claudine/features/2026-07-11-sequence-plus/review-12.md
+  - claudine/features/2026-07-11-sequence-plus/review-2.md
+  - claudine/features/2026-07-11-sequence-plus/review-3.md
+  - claudine/features/2026-07-11-sequence-plus/review-4.md
+  - claudine/features/2026-07-11-sequence-plus/review-5.md
+  - claudine/features/2026-07-11-sequence-plus/review-6.md
+  - claudine/features/2026-07-11-sequence-plus/review-7.md
+  - claudine/features/2026-07-11-sequence-plus/review-8.md
+  - claudine/features/2026-07-11-sequence-plus/review-9.md
+  - claudine/features/2026-07-11-sequence-plus/validation-matrix.md
+  - claudine/features/2026-07-13-error-propogation/burndown-triage.md
+  - claudine/features/2026-07-13-error-propogation/decisions.md
+  - claudine/features/2026-07-13-error-propogation/inventory.md
+  - claudine/features/2026-07-13-error-propogation/plan.md
+  - claudine/features/2026-07-13-error-propogation/review-1.md
+  - claudine/features/2026-07-13-error-propogation/review-2.md
+  - claudine/features/2026-07-13-error-propogation/review-3.md
+  - claudine/features/2026-07-13-error-propogation/review-4.md
+  - claudine/features/2026-07-13-error-propogation/review-5.md
+  - claudine/features/2026-07-13-error-propogation/review-6.md
+  - claudine/features/2026-07-13-error-propogation/review-7.md
+  - claudine/features/2026-07-13-error-propogation/review-8.md
+  - claudine/features/2026-07-13-error-propogation/review-9.md
+  - claudine/features/2026-07-13-file-resolution/decisions.md
+  - claudine/features/2026-07-13-file-resolution/inventory.md
+  - claudine/features/2026-07-13-file-resolution/plan.md
+  - claudine/features/2026-07-13-file-resolution/review-1.md
+  - claudine/features/2026-07-13-file-resolution/review-2.md
+  - claudine/features/2026-07-13-file-resolution/review-3.md
+  - claudine/features/2026-07-13-file-resolution/review-4.md
+  - claudine/features/2026-07-13-file-resolution/review-5.md
+  - claudine/features/2026-07-13-file-resolution/review-6.md
+  - claudine/features/2026-07-13-file-resolution/review-7.md
+  - claudine/features/2026-07-13-file-resolution/review-8.md
+  - claudine/features/2026-07-13-file-resolution/review-9.md
+  - claudine/features/2026-07-13-proxy-with/notes/acceptance-map.md
+  - claudine/features/2026-07-13-proxy-with/notes/baseline.md
+  - claudine/features/2026-07-13-proxy-with/notes/state-migration.md
+  - claudine/features/2026-07-13-proxy-with/plan.md
+  - claudine/features/2026-07-13-proxy-with/review-1.md
+  - claudine/features/2026-07-13-proxy-with/review-10.md
+  - claudine/features/2026-07-13-proxy-with/review-11.md
+  - claudine/features/2026-07-13-proxy-with/review-12.md
+  - claudine/features/2026-07-13-proxy-with/review-13.md
+  - claudine/features/2026-07-13-proxy-with/review-14.md
+  - claudine/features/2026-07-13-proxy-with/review-15.md
+  - claudine/features/2026-07-13-proxy-with/review-16.md
+  - claudine/features/2026-07-13-proxy-with/review-17.md
+  - claudine/features/2026-07-13-proxy-with/review-18.md
+  - claudine/features/2026-07-13-proxy-with/review-3.md
+  - claudine/features/2026-07-13-proxy-with/review-4.md
+  - claudine/features/2026-07-13-proxy-with/review-5.md
+  - claudine/features/2026-07-13-proxy-with/review-6.md
+  - claudine/features/2026-07-13-proxy-with/review-7.md
+  - claudine/features/2026-07-13-proxy-with/review-8.md
+  - claudine/features/2026-07-13-proxy-with/review-9.md
+  - claudine/features/2026-07-20-lifecycle-ergonomics/spec.md
+  - claudine/features/2026-07-20-local-runners-plus/improvements.md
+  - claudine/features/_completed/2026-07-11-module-structure/critical-plan.md
+  - claudine/features/_completed/2026-07-11-module-structure/nice-plan.md
+  - claudine/features/_completed/2026-07-11-module-structure/phase6-discovery.md
+  - claudine/features/_completed/2026-07-11-module-structure/review.md
+  - claudine/features/_completed/2026-07-11-module-structure/strong-plan.md
+  - claudine/fixes/2026-07-09-shared-resources/spec.md
+  - claudine/fixes/2026-07-11-display-issue/plan.md
+  - claudine/fixes/2026-07-13-cli-switches/plan.md
+  - claudine/fixes/2026-07-13-rendezvous-local-ipc/change-notes.md
+  - claudine/fixes/2026-07-13-rendezvous-local-ipc/plan.md
+  - claudine/fixes/2026-07-13-rendezvous-local-ipc/review-1.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/_research.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/acceptance-ledger.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/baselines/summary.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/claudine-log.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/conflict-checklist.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/conflict-report.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/dirty-worktree-inventory.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/error-prop-and-file-resolution-log.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact-review.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/execution-seed/compose-prep.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/execution-seed/composition-error.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/execution-seed/composition-pipeline.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/execution-seed/darkmatter-options.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/execution-seed/harness-loop.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/execution-seed/loop-engine.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/execution-seed/sequence-entry.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/execution-seed/wrapper-stages.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/final-audit-detect.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation-merge-detect.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/compose-prep.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/composition-entry.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/composition-error.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/composition-pipeline.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/composition-runner.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/control-dispatch.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/error-render.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/file-cli-src-commands-compose-prep-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/file-cli-src-commands-wrap-composition-mod-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/file-cli-src-commands-wrap-composition-pipeline-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/file-cli-src-commands-wrap-composition-runner-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/file-cli-src-commands-wrap-harness-orch-loop-control-control-dispatch-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/file-cli-src-commands-wrap-harness-orch-loop-control-proxy-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/file-cli-src-commands-wrap-harness-orch-loop-control-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/file-cli-src-commands-wrap-harness-orch-prompt-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/file-cli-src-commands-wrap-harness-orch-types-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/file-cli-src-commands-wrap-overlay-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/file-cli-src-commands-wrap-sequence-iterate-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/file-cli-src-commands-wrap-sequence-mod-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/file-cli-src-commands-wrap-sequence-phase1c-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/file-cli-src-commands-wrap-wrapper-stages-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/file-darkmatter-lib-src-markdown-compose-context-options-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/file-lib-src-composition-error-mod-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/file-lib-src-composition-error-render-mod-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/file-lib-src-composition-lifecycle-context-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/file-lib-src-composition-lifecycle-executor-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/file-lib-src-composition-looping-engine-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/file-lib-src-composition-mod-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/file-lib-src-composition-preflight-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/file-lib-src-composition-prepare-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/file-lib-src-composition-types-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/harness-loop.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/harness-prompt.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/harness-types.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/overlay.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/proxy-routing.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/sequence-entry.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/sequence-iterate.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/sequence-preflight.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/foundation/wrapper-stages.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/index-freshness.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/phase1-detect-changes.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/proxy-merge-detect.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/proxy/file-cli-src-commands-compose-prep-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/proxy/file-cli-src-commands-wrap-composition-mod-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/proxy/file-cli-src-commands-wrap-composition-pipeline-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/proxy/file-cli-src-commands-wrap-composition-runner-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/proxy/file-cli-src-commands-wrap-harness-orch-loop-control-control-dispatch-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/proxy/file-cli-src-commands-wrap-harness-orch-loop-control-proxy-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/proxy/file-cli-src-commands-wrap-harness-orch-loop-control-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/proxy/file-cli-src-commands-wrap-harness-orch-prompt-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/proxy/file-cli-src-commands-wrap-harness-orch-types-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/proxy/file-cli-src-commands-wrap-overlay-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/proxy/file-cli-src-commands-wrap-sequence-iterate-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/proxy/file-cli-src-commands-wrap-sequence-mod-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/proxy/file-cli-src-commands-wrap-sequence-phase1c-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/proxy/file-cli-src-commands-wrap-wrapper-stages-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/proxy/file-darkmatter-lib-src-markdown-compose-context-options-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/proxy/file-lib-src-composition-error-mod-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/proxy/file-lib-src-composition-error-render-mod-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/proxy/file-lib-src-composition-lifecycle-context-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/proxy/file-lib-src-composition-lifecycle-executor-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/proxy/file-lib-src-composition-looping-engine-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/proxy/file-lib-src-composition-mod-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/proxy/file-lib-src-composition-preflight-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/proxy/file-lib-src-composition-prepare-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/proxy/file-lib-src-composition-types-rs.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/reconciliation-detect.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/impact/symbol-resolution.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/phase1-closeout.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/phase1-gates/current-gate-summary.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/phase2-audit.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/phase2-gates.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/phase2-test-map.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/phase3-audit.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/phase3-gates.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/phase3-test-map.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/phase4-gates.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/phase4-test-map.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/phase5-gates.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/phase5-test-map.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/phase6-gates.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/phase6-test-map.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/plan.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/proxy-with-log.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/review-1.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/reviewed-seed-audit.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/sha-ledger.md
+  - claudine/fixes/2026-07-20-claudine-mega-merge/spec.md
+  - claudine/fixes/_unscheduled/1-windows-compose-interrupt-guard/spec.md
+  - claudine/reviews/2026-07-01-dry-review/plan.md
+  - claudine/reviews/_completed/2026-07-14-module-assessment/phase-1-baseline.md
+  - claudine/reviews/_completed/2026-07-14-module-assessment/plan.md
+  - claudine/reviews/_completed/2026-07-14-module-assessment/review-2.md
+  - claudine/reviews/_completed/2026-07-14-module-assessment/review-3.md
+  - claudine/reviews/_completed/2026-07-14-module-assessment/review-4.md
+  - claudine/reviews/_completed/2026-07-14-module-assessment/review-5.md
+  - claudine/reviews/_completed/2026-07-14-module-assessment/review-6.md
+  - claudine/reviews/_completed/2026-07-14-module-assessment/spec.md
+  - darkmatter/features/2026-07-15-type-system/spec.md
+  - sniff/docs/dependencies.md
+  - sniff/fixes/2026-07-22-inefficient-calling/spec.md
+  - ~/features/2026-07-20-router-fixture/log.md
+  - claudine/docs/topics/argv-normalization.md
+  - claudine/docs/topics/signal-handling.md
+  - claudine/docs/topics/timeouts.md
+  - docs/testing-strategy.md
 packages_during_phase_3:
   - biscuit-file
   - biscuit-file-cli
@@ -1293,7 +2240,14 @@ packages_during_phase_3:
   - rendezvous-core
   - rendezvous-daemon
   - sniff
+packages_during_phase_6:
+  - biscuit-test-harness
+  - homelab-frontend
+  - visualizer
+  - worktree-cli
 packages:
+  - biscuit-file
+  - biscuit-file-cli
   - claudine
   - claudine-catalog-types
   - claudine-cli
@@ -1302,11 +2256,9 @@ packages:
   - darkmatter
   - darkmatter-cli
   - dmls
-  - rendezvous-client
-  - rendezvous-core
-  - rendezvous-daemon
   - sniff
   - sniff-cli
+  - test-toolkit
 ---
 # Mega Merge Execution Plan
 
@@ -1866,22 +2818,22 @@ requires the affected gates plus the final aggregate gates again.
 
 ### Workspace-wide gates
 
-- [ ] `just check-canonical`
-- [ ] `just build`
-- [ ] `just test` — all Cargo workspace packages from metadata, Level 1
-- [ ] `just doctest`
-- [ ] `just lint` — zero warnings and zero failures
-- [ ] `just all` — all canonical tiers for every curated package area
-- [ ] `just check-test-interrupts`
-- [ ] `just test-leaks sniff biscuit-file darkmatter claudine`
+- [x] `just check-canonical`
+- [x] `just build`
+- [x] `just test` — all Cargo workspace packages from metadata, Level 1
+- [x] `just doctest`
+- [x] `just lint` — zero warnings and zero failures
+- [x] `just all` — all canonical tiers for every curated package area
+- [x] `just check-test-interrupts`
+- [x] `just test-leaks sniff biscuit-file darkmatter claudine`
 
 ### Hard-required affected-area gates
 
-- [ ] `(cd sniff && BISCUIT_TEST_LEVEL_REQUIRED=2 just test-l2)`
-- [ ] `(cd darkmatter && BISCUIT_TEST_LEVEL_REQUIRED=2 just test-l2)`
-- [ ] `(cd claudine && BISCUIT_TEST_LEVEL_REQUIRED=2 just test-l2)`
-- [ ] `(cd darkmatter && BISCUIT_BROWSER_REQUIRED=1 just test-browser)`
-- [ ] `(cd claudine && just signals-check && just test-gen)`
+- [x] `(cd sniff && BISCUIT_TEST_LEVEL_REQUIRED=2 just test-l2)`
+- [x] `(cd darkmatter && BISCUIT_TEST_LEVEL_REQUIRED=2 just test-l2)`
+- [x] `(cd claudine && BISCUIT_TEST_LEVEL_REQUIRED=2 just test-l2)`
+- [x] `(cd darkmatter && BISCUIT_BROWSER_REQUIRED=1 just test-browser)`
+- [x] `(cd claudine && just signals-check && just test-gen)`
 
 Record executed, passed, skipped, and not-applicable counts separately. A skip
 in an affected L1/L2 gate is a blocker unless the test is intentionally
@@ -1897,14 +2849,14 @@ does not satisfy runtime path, filesystem, or work-counter behavior.
 
 - [ ] Keep the existing Sniff macOS/Linux/Windows all-target and L1 matrix, and
   Unix L2 legs, green.
-- [ ] Promote Darkmatter's Windows leg from soft evidence to a required check
+- [x] Promote Darkmatter's Windows leg from soft evidence to a required check
   for this candidate. Enable its reusable Linux L2 and headless-browser jobs.
-- [ ] Add durable Biscuit File and Claudine area coverage through the shared
+- [x] Add durable Biscuit File and Claudine area coverage through the shared
   area-CI workflow (or an equally strict existing workflow): macOS all-target
   check, Linux and Windows L1, and Linux hard-required L2 where applicable.
   Preserve Claudine's generator/signals job and Windows Ctrl+C runtime job.
-- [ ] Ensure workflow lint/check output treats warnings as failures.
-- [ ] Do not use a temporary workflow that is deleted before the final
+- [x] Ensure workflow lint/check output treats warnings as failures.
+- [x] Do not use a temporary workflow that is deleted before the final
   candidate SHA; the evidence must correspond to the tree being merged.
 
 ### Native functional matrix
@@ -1938,6 +2890,29 @@ cancelled, skipped, allowed-to-fail, or superseded run is not evidence.
 
 ## Phase 8 — Final review, ancestry proof, and merge to main
 
+### Phase 8 execution evidence
+
+The 2026-07-22 no-commit execution stopped before merge:
+
+- Candidate `HEAD` is `6379ea3f06057d3960b8302c1d7c9010b4d7c178`
+  plus reviewed, uncommitted Phase 6–8 changes.
+- All three source branch tips still equal their frozen SHAs. The Sniff source
+  worktree is clean; pre-existing Darkmatter untracked files and Claudine's
+  modified `CLAUDE.md` plus local settings remain untouched.
+- None of the three frozen source tips is an ancestor of candidate `HEAD`.
+  `main..HEAD` has six single-parent phase commits and no first-parent merge
+  commits, so the required Sniff → Darkmatter → Claudine ancestry proof fails.
+- GitNexus compare detection against `main`, with the explicit mega-merge
+  worktree path, reports CRITICAL aggregate risk: 18,425 changed symbols in
+  1,795 files, 111 affected processes. The Claudine merge/conflict ledger is
+  incomplete, so that scope is not fully explained.
+- The unstaged diff passes `git diff --check`. `git diff --check main...HEAD`
+  reports 228 whitespace or blank-EOF violations across 100 committed files.
+- No live conflict markers, temporary/spike paths, or local-setting paths were
+  found among committed or uncommitted changed files.
+- Phase 0 and the native Phase 7 evidence matrix still contain unchecked
+  tasks. The candidate is therefore not eligible to freeze or merge.
+
 ### Ancestry and history
 
 - [ ] Run:
@@ -1949,12 +2924,12 @@ cancelled, skipped, allowed-to-fail, or superseded run is not evidence.
 - [ ] Inspect `git log --first-parent --merges --oneline` and the parent list of
   each stage commit. Confirm Sniff → Darkmatter → Claudine order and two-parent
   merge commits.
-- [ ] Confirm the source branch tips still equal the frozen SHAs and source
+- [x] Confirm the source branch tips still equal the frozen SHAs and source
   worktree status has not changed due to this execution.
 
 ### Change and conflict review
 
-- [ ] Run GitNexus `detect_changes` with compare scope against `main` and the
+- [x] Run GitNexus `detect_changes` with compare scope against `main` and the
   explicit `mega-merge` worktree path.
 - [ ] Review all reported affected processes and all HIGH/CRITICAL symbols.
   Compare them to the conflict ledger; unexplained scope is a blocker.

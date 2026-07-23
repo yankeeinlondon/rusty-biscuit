@@ -213,6 +213,16 @@ by construction instead of accreting per-area and per-incident.
   how a platform is lit up before its latent cross-platform backlog is burned
   down. Read Windows *test* results accordingly — they are evidence, not a gate,
   until the leg is deliberately promoted to a required check.
+- **Integration candidates use required native legs**: a caller that supplies
+  `soft-os: '[]'` makes every configured L1 host blocking. Biscuit File,
+  Darkmatter, and Claudine use this strict mode. Darkmatter also enables the
+  reusable Linux L2 and browser jobs; Claudine enables Linux L2 and installs
+  portable inert provider stubs for discovery-dependent tests.
+- **Warnings and lint are gates**: the reusable workflow exports
+  `RUSTFLAGS=-D warnings` for native compilation and tests, and its Linux lint
+  job runs the package area's `just lint` recipe. Area-specific documentation,
+  generated-artifact, and typed-error guards wired into that recipe therefore
+  remain blocking CI checks.
 
 ### Feature-gated surfaces
 

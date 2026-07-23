@@ -18,7 +18,6 @@
 #![allow(dead_code)]
 
 use std::env;
-use std::ffi::OsString;
 use std::io;
 use std::process::{Command, Stdio};
 use std::sync::Once;
@@ -698,18 +697,8 @@ impl TerminalHarness for WezTermHarness {
             cmd.args(["--workspace", BACKGROUND_WORKSPACE]);
         }
         cmd.arg("--");
-        cmd.arg(&shell);
-        cmd.arg("-l");
-
-        if let Some(bin_dir) =
-            super::cargo_bin_dir("bt").or_else(|| super::cargo_bin_dir("question"))
-        {
-            let current_path = env::var_os("PATH").unwrap_or_default();
-            let mut new_path = OsString::from(bin_dir);
-            new_path.push(":");
-            new_path.push(current_path);
-            cmd.env("PATH", new_path);
-        }
+        let bin_dir = super::cargo_bin_dir("bt").or_else(|| super::cargo_bin_dir("question"));
+        super::configure_login_shell(&mut cmd, &shell, bin_dir.as_deref());
 
         // Force color on the spawned shell so `bt`'s color detection is
         // deterministic regardless of how the test runner inherits TTY

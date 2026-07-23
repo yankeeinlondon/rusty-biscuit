@@ -164,10 +164,18 @@ _test pkg *args="":
     exit_code=0
     if cargo nextest --version >/dev/null 2>&1; then
         echo -e "ℹ️ using {{ green }}cargo nextest run{{ reset }}"
-        cargo nextest run -p {{ pkg }} -E '!(test(/level2_/) + test(/level3_/) + test(/browser_/) + test(/real_/) + test(/slow_/))' --no-tests=pass {{ args }} || exit_code=$?
+        filter='!(test(/level2_/) + test(/level3_/) + test(/browser_/) + test(/real_/) + test(/slow_/))'
+        if [[ "{{ pkg }}" == "worktree-cli" ]]; then
+            filter='!(test(/level2_/) + test(/level3_/) + test(/browser_/) + test(/real_/) + test(/slow_/) + test(/perf_/))'
+        fi
+        cargo nextest run -p {{ pkg }} -E "$filter" --no-tests=pass {{ args }} || exit_code=$?
     else
         echo -e "ℹ️ using {{ green }}cargo test{{ reset }}"
-        cargo test -p {{ pkg }} {{ args }} -- --skip level2_ --skip level3_ --skip browser_ --skip real_ --skip slow_ || exit_code=$?
+        skip_args=(--skip level2_ --skip level3_ --skip browser_ --skip real_ --skip slow_)
+        if [[ "{{ pkg }}" == "worktree-cli" ]]; then
+            skip_args+=(--skip perf_)
+        fi
+        cargo test -p {{ pkg }} {{ args }} -- "${skip_args[@]}" || exit_code=$?
     fi
 
     duration=$SECONDS

@@ -30,6 +30,9 @@ concurrency:
   group: darkmatter-tests-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  RUSTFLAGS: "-D warnings"
+
 jobs:
   ci:
     uses: ./.github/workflows/_area-ci.yml
@@ -41,6 +44,9 @@ jobs:
       # darkmatter's L1 suite is the largest in the repo; partition it 4 ways so
       # the run stays well under the 30-minute ceiling it was breaching.
       shards: '["1/4", "2/4", "3/4", "4/4"]'
+      soft-os: '[]'
+      l2: true
+      browser: true
     secrets: inherit
 
   # Area-specific regression guard (kept out of the shared workflow): the local
