@@ -1,5 +1,14 @@
 # Hook Actions
 
+## Contents
+
+- Supported Actions
+- Context Variables
+- Conditional Execution (when)
+
+Use heading search to jump to the listed subsystem.
+
+
 Actions are the responses Claudine executes when an event fires during an agentic CLI session. Each event binding in `~/.claudine/config.json` specifies an ordered list of actions. Actions are executed sequentially in declaration order. Most actions are fire-and-forget, but `Call` can return a `HookResponse` to influence agent behavior on blocking events.
 
 ## Supported Actions

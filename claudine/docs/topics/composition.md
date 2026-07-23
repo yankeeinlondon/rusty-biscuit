@@ -1,8 +1,6 @@
 ---
-hash: ef46db3751d8e999-9feef357d846d4b8
-last_updated: 2026-07-17
-hash: ef46db3751d8e999-85300401b8df67fe
-last_updated: 2026-07-18
+hash: ef46db3751d8e999-29017d4641855f32
+last_updated: 2026-07-22
 ---
 # Claudine Composition
 
@@ -856,141 +854,18 @@ The following interfaces have been removed and replaced by the two canonical com
 
 ## Sequence Composition
 
-Sequence composition runs a single source document multiple times, once per step in a defined list, with step-specific state injected into the composition context on each run.
+Sequences use one unified step/task model. A task declares exactly one executable: a prompt file reference, shell command, side effect, group, or task file reference. A step with no executable composes the source document body.
 
-```sh
-claudine sequence @deploy.md
-claudine sequence --fail-fast false @batch.md
-```
+Execution has two phases:
 
-### When to Use Sequence
+1. **Static preflight** walks the complete task graph before any task runs. Dynamic sources resolve once, referenced documents load transitively with cycle detection, schemas collect into one validation pass, and every reachable shell command is resolved and approved byte-for-byte.
+2. **Just-in-time execution** re-reads and composes each task when its turn begins, so prior inline writes and runtime mutations are visible.
 
-Use `claudine sequence` when you have a fixed list of items and need to compose the same template document against each item independently. Each step is a full one-shot composition run — with its own provider selection, lifecycle evaluation, and pre-flight shell approval. The sequence command is serial; steps do not run in parallel.
+`outputs` is the sole task-output accumulator. Groups may run serially or in parallel with bounded `max_parallel`, snapshot isolation, declaration-ordered mutation merge, and all-siblings-complete failure handling. Parallel groups reject write-back collisions during preflight; group-level loops remain unsupported until commit semantics are defined.
 
-### Compose vs Inline Steps
+A root `prompt` property selects inline closure behavior for the final active target. Step/task `prompt` values are file references; the two meanings occur at different levels. External YAML uses `sequence:` directly or kinded `task`/`group` documents. The retired external `kind: sequence` plus `list:` form is not accepted.
 
-A sequence runs each step as either a **compose** step or an **inline** step, decided once for the whole run by the same signal that splits the top-level `compose` and `inline-compose` commands: the presence of a `prompt` frontmatter property on the source document.
-
-- **No `prompt` property** — each step is a `compose` (chained-document) run: the composed **body** is sent as the agent prompt and no file is mutated.
-- **`prompt` property present** — each step is an `inline-compose` run: the composed **`prompt`** (with per-step `{{state}}` interpolation) is sent as the agent prompt, and the provider's output **replaces the document body** on disk, preserving the original frontmatter and bumping `last_updated` (see [Inline Composition](#inline-composition)).
-
-Because steps run serially and the body is written back after each one, an inline step's agent reads the body that the previous step wrote. A `prompt` property that is present but not a string is rejected up front with `PromptPropertyWrongType` — before any step launches — exactly as `inline-compose` does.
-
-### Inline Sequence Definition
-
-Sequences can be defined directly in the source document's frontmatter as a scalar list or an object list.
-
-**Scalar list** — each step value is a plain string:
-
-```yaml
-sequence:
-  - one
-  - two
-  - three
-fail_fast: false
-```
-
-**Object list** — each step value is an object; `name` is required:
-
-```yaml
-sequence:
-  - name: one
-    color: red
-  - name: two
-    color: blue
-```
-
-### External YAML Sequence Definition
-
-When the `sequence` frontmatter property is a string, Claudine resolves it through the shared `FileReference` contract: a bare implicit reference is repository-root first, then the source document's directory; an explicit `./`/`../` reference is the source directory only; `@` is a magic-root search and `~/` is home-pinned.
-
-**Plain list form** — the external file contains a `sequence:` key:
-
-```yaml
-# steps.yaml
-sequence:
-  - name: Codex CLI
-    site: https://developers.openai.com/codex/cli
-  - name: Claude Code
-    site: https://claude.ai/code
-```
-
-**Template form** — the external file uses `kind/list/template` to apply a shared template across all items:
-
-```yaml
-# steps.yaml
-kind: sequence
-template:
-  desc: "{{name}} (_site: {{site}}, repo: {{repo || 'n/a'}}_)"
-list:
-  - name: Codex CLI
-    site: https://developers.openai.com/codex/cli
-    repo: https://github.com/openai/codex
-  - name: Claude Code
-    site: https://claude.ai/code
-```
-
-Template rules:
-
-- `kind: sequence` is optional; when present it must equal `sequence`
-- `list` must be a non-empty list of objects, each with `name`
-- `template` is only supported in the `kind/list/template` external-file form
-- Template values must be strings; each template string is rendered against the item's own fields
-- Rendered template fields are merged into the item; they may not overwrite reserved step keys
-
-### Template Evaluation
-
-Each step runs the source document through Darkmatter's composition pipeline with a set of reserved variables injected as overrides. These variables are always set by the sequence runner and cannot be overridden by `--set`:
-
-| Variable | Type | Description |
-|---|---|---|
-| `state` | string or object | The current step value (scalar string or full object) |
-| `previous_state` | string, object, or null | The previous step's value, or null for the first step |
-| `next_state` | string, object, or null | The next step's value, or null for the last step |
-| `is_first` | boolean | `true` when this is the first step |
-| `is_last` | boolean | `true` when this is the last step |
-| `step` | integer | One-based index of the current step |
-| `total_steps` | integer | Total number of steps in the sequence |
-
-For object steps, fields are accessed through `state`: `{{state.name}}`, `{{state.color}}`, etc. Field values are not promoted to top-level variables to avoid collisions with reserved keys or other frontmatter properties such as `agent` or `timeout`.
-
-The `FAIL_FAST` environment variable is also injected per step so that `{{env.FAIL_FAST}}` and `::shell` directives see the same policy as the child provider process.
-
-### Fail-Fast Behavior
-
-By default, a sequence stops on the first failed step. Failure means any of: pre-flight failure, preparation failure, non-zero provider exit, or unrecovered lifecycle failure.
-
-The effective fail-fast policy is determined by:
-
-1. **`--fail-fast` CLI flag** — overrides the document default for this invocation
-2. **`fail_fast` frontmatter property** — document-level default; must be a boolean
-3. **Built-in default** — `true` when neither is specified
-
-```yaml
-# document default: continue on failure
-fail_fast: false
-```
-
-```sh
-# CLI override: stop on first failure regardless of document default
-claudine sequence --fail-fast true @batch.md
-```
-
-The `--fail-fast` flag accepts boolish values: `true`, `false`, `1`, `0`, `yes`, `no`.
-
-### The `FAIL_FAST` Environment Variable
-
-Claudine injects `FAIL_FAST=true` or `FAIL_FAST=false` into the composition environment for each step. This makes the effective policy visible to `{{env.FAIL_FAST}}` interpolation inside the template and to any `::shell` directives that inspect the environment.
-
-### Error Handling Semantics
-
-When `fail_fast` is `true` (the default), Claudine stops immediately after the first failed step and exits with code `1`. Steps after the failure are not executed.
-
-When `fail_fast` is `false`, Claudine records each step's result and continues through all steps regardless of failures. After the last step, Claudine exits with `0` if all steps succeeded, or `1` if one or more steps failed.
-
-Lifecycle recovery actions (`retry`, `resume`, `proxy`) apply within a single step only. A `proxy` stays inside its current step: no step advance, no restart, and the step keeps its scoped inputs and timing identity. There is no cross-step recovery mechanism.
-
-> **Note:** The `fail_fast` frontmatter key is reserved for sequence control. It is not passed to Darkmatter's internal compose options.
+See [Sequences](flow-control/sequences.md) for the complete authoring and execution contract.
 
 ## Architecture
 

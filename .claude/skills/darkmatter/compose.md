@@ -1,8 +1,24 @@
 ---
-hash: ef46db3751d8e999-fd3fb8e6e2ed5d86
-last_updated: 2026-07-18
+hash: ef46db3751d8e999-5e5b031489ae302f
+last_updated: 2026-07-22
 ---
 # Compose Pipeline
+
+## Contents
+
+- Pipeline Overview
+- API
+- Text Replacement
+- Interpolation
+- ComposeReport
+- Pre-Flight Shell Approval
+- Shell Command Caching
+- Error Handling
+- Transclusion
+- Module Structure
+
+Use heading search to jump to the listed subsystem.
+
 
 The darkmatter compose pipeline provides document preparation through four phases:
 Inline Pre, Transclusion, Inline Post, and Finalization.
@@ -360,7 +376,7 @@ commands, authorize the union once, and pass the merged set back via
 `with_pre_approved_commands`. `md compose --shell` reports the condition-blind
 candidates. The lower-level `collect_shell_commands(&md, &options)` returns the
 raw `ShellCommandEntry` list. See
-[`docs/inline/preflight-checks.md`](../../../darkmatter/docs/inline/preflight-checks.md).
+`docs/inline/preflight-checks.md`.
 
 ## Shell Command Caching
 
@@ -378,7 +394,7 @@ own spelling:
 A repeated command whose executable is on the built-in volatile allowlist
 (`uuidgen`, `date`, `openssl`) emits a one-time discoverability warning
 suggesting `--no-cache`. See
-[`docs/inline/shell-expansion.md`](../../../darkmatter/docs/inline/shell-expansion.md).
+`docs/inline/shell-expansion.md`.
 
 ## Error Handling
 

@@ -29,7 +29,7 @@ Key code:
 - Fuzzy matcher — [`claudine/cli/src/completion/fuzzy.rs`](../../../cli/src/completion/fuzzy.rs)
 - Shell scripts — [`claudine/cli/src/completion/bootstrap.rs`](../../../cli/src/completion/bootstrap.rs)
 - `__complete` CLI contract — [`claudine/cli/src/commands/completions.rs`](../../../cli/src/commands/completions.rs)
-- Interactive schema collection — [`claudine/cli/src/commands/schema_interactive.rs`](../../../cli/src/commands/schema_interactive.rs)
+- Interactive schema collection — [`claudine/cli/src/commands/schema_interactive/mod.rs`](../../../cli/src/commands/schema_interactive/mod.rs)
 
 ## Installation
 
@@ -496,7 +496,7 @@ When the cursor sits on a setter slot of `claudine compose`,
 prompt-file argument is already committed, the completer consults the
 prompt's `$schema` declaration via Darkmatter before falling back to the
 shell default. Implementation lives in
-[`completion/schema_completion.rs`](../../../cli/src/completion/schema_completion.rs).
+[`completion/schema_completion/mod.rs`](../../../cli/src/completion/schema_completion/mod.rs).
 
 ### Property names (before `=`)
 
@@ -940,7 +940,7 @@ flowchart TD
 
 | Module | Role |
 |---|---|
-| [`engine.rs`](../../../cli/src/completion/engine.rs) | Entry point; classifies the cursor slot and dispatches. |
+| [`engine/mod.rs`](../../../cli/src/completion/engine/mod.rs) | Entry point; classifies the cursor slot and dispatches. |
 | [`root_menu.rs`](../../../cli/src/completion/root_menu.rs) | Curated subcommand menu + `init` visibility. |
 | [`composition/mod.rs`](../../../cli/src/completion/composition/mod.rs) | Shared compose/inline-compose/sequence pipeline. |
 | [`setter_value.rs`](../../../cli/src/completion/setter_value.rs) | `@`-gated file completion inside `name=value` setters. |
@@ -950,7 +950,7 @@ flowchart TD
 | [`fuzzy.rs`](../../../cli/src/completion/fuzzy.rs) | Subsequence matching with prefix-length progression. |
 | [`bootstrap.rs`](../../../cli/src/completion/bootstrap.rs) | Shell scripts (bash/zsh/fish) + legacy PowerShell/Elvish. |
 | [`commands/completions.rs`](../../../cli/src/commands/completions.rs) | `claudine completions` and the hidden `__complete`. |
-| [`schema_completion.rs`](../../../cli/src/completion/schema_completion.rs) | Schema-aware property-name and property-value completion for setter slots. |
+| [`schema_completion/mod.rs`](../../../cli/src/completion/schema_completion/mod.rs) | Schema-aware property-name and property-value completion for setter slots. |
 | [`autocomplete_ui.rs`](../../../cli/src/completion/autocomplete_ui.rs) | ENTER-path chooser / confirmation dialog rendering. |
 | [`default_glob.rs`](../../../cli/src/completion/default_glob.rs) | Bare `file`/`file[]` markdown candidate gatherer. |
-| [`commands/schema_interactive.rs`](../../../cli/src/commands/schema_interactive.rs) | Interactive collection of missing `$schema` properties. |
+| [`commands/schema_interactive/mod.rs`](../../../cli/src/commands/schema_interactive/mod.rs) | Interactive collection of missing `$schema` properties. |

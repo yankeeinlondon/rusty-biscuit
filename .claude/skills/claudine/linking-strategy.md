@@ -1,5 +1,19 @@
 # Linking Strategy
 
+## Contents
+
+- Why Linking Exists
+- Resource Types
+- Scopes
+- Algorithm Phases
+- Key Types
+- Provider Skill Paths
+- Provider Command Paths
+- Conflict Detection and Resolution
+
+Use heading search to jump to the listed subsystem.
+
+
 Claudine's linking system synchronizes skills, commands, agents, and scripts across the compiled agentic CLI provider catalog. The goal is **write once, use everywhere**: author a resource in one canonical provider and have it appear in all compatible providers via symlinks or format-converted derived artifacts.
 
 ## Why Linking Exists

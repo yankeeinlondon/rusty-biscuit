@@ -1,5 +1,18 @@
 # Document Comparison
 
+## Contents
+
+- Delta (Structural Diff)
+- DocumentChange Classification (9 variants)
+- ChangeAction (14 variants)
+- Key Types
+- Visual Diff (Standalone)
+- Heading Normalization
+- Table of Contents
+
+Use heading search to jump to the listed subsystem.
+
+
 Structural diff with change classification for markdown documents, plus visual diff for arbitrary strings/files.
 
 ## Delta (Structural Diff)

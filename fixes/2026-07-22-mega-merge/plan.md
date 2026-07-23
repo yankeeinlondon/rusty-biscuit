@@ -1,5 +1,59 @@
 ---
 total_phases: 8
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+  - claudine/docs/topics/argv-normalization.md
+  - claudine/docs/topics/cli-pre-parsing.md
+  - claudine/docs/topics/completions/shell-completions.md
+  - claudine/docs/topics/composition.md
+  - claudine/docs/topics/signal-handling.md
+  - claudine/docs/topics/timeouts.md
+  - fixes/2026-07-22-mega-merge/plan.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/claudine/SKILL.md
+  - .claude/skills/claudine/architecture.md
+  - .claude/skills/claudine/argv-normalization.md
+  - .claude/skills/claudine/cli-pre-parsing.md
+  - .claude/skills/claudine/cli-reference.md
+  - .claude/skills/claudine/completions/shell-completions.md
+  - .claude/skills/claudine/composition.md
+  - .claude/skills/claudine/error-architecture.md
+  - .claude/skills/claudine/hook-actions.md
+  - .claude/skills/claudine/lifecycle.md
+  - .claude/skills/claudine/linking-strategy.md
+  - .claude/skills/claudine/log-reporting.md
+  - .claude/skills/claudine/mcp-catalog.md
+  - .claude/skills/claudine/mcp-mode.md
+  - .claude/skills/claudine/messaging.md
+  - .claude/skills/claudine/opencode-event-sources.md
+  - .claude/skills/claudine/protect-service.md
+  - .claude/skills/claudine/research/cross-referencing/gemini-cli.md
+  - .claude/skills/claudine/signal-handling.md
+  - .claude/skills/claudine/system-prompt.md
+  - .claude/skills/claudine/timeline.md
+  - .claude/skills/claudine/timeouts.md
+  - .claude/skills/claudine/traces-and-logging.md
+  - .claude/skills/claudine/unified-hooks.md
+  - .claude/skills/darkmatter/SKILL.md
+  - .claude/skills/darkmatter/comparison.md
+  - .claude/skills/darkmatter/compose.md
+  - .claude/skills/darkmatter/dmls.md
+  - .claude/skills/darkmatter/errors.md
+  - .claude/skills/darkmatter/frontmatter-crates.md
+  - .claude/skills/darkmatter/frontmatter.md
+  - .claude/skills/darkmatter/library-surfaces.md
+  - .claude/skills/darkmatter/pulldown-cmark.md
+  - .claude/skills/darkmatter/rendering.md
+  - .claude/skills/darkmatter/schema.md
+  - .claude/skills/darkmatter/structure.md
+  - .claude/skills/darkmatter/terminal.md
+  - .claude/skills/sniff/SKILL.md
+  - .claude/skills/sniff/architecture.md
+  - .claude/skills/sniff/cli.md
+  - .claude/skills/sniff/performance.md
+  - .claude/skills/sniff/programs.md
+  - .claude/skills/sniff/remote-and-repository.md
 source_files_during_phase_4: []
 docs_updated_during_phase_4:
   - CLAUDE.md
@@ -1239,7 +1293,20 @@ packages_during_phase_3:
   - rendezvous-core
   - rendezvous-daemon
   - sniff
-packages: []
+packages:
+  - claudine
+  - claudine-catalog-types
+  - claudine-cli
+  - claudine-contract
+  - claudine-gen
+  - darkmatter
+  - darkmatter-cli
+  - dmls
+  - rendezvous-client
+  - rendezvous-core
+  - rendezvous-daemon
+  - sniff
+  - sniff-cli
 ---
 # Mega Merge Execution Plan
 
@@ -1722,60 +1789,67 @@ describe the final implementation once.
 
 ### Common audit for all three skills
 
-- [ ] Compare the merged package architecture, public APIs, CLI commands,
+- [x] Compare the merged package architecture, public APIs, CLI commands,
   test recipes, platform behavior, and invariants to every claim in
   `.claude/skills/{claudine,darkmatter,sniff}/`.
-- [ ] Assume code is correct when a comment or skill claim drifts; update or
+- [x] Assume code is correct when a comment or skill claim drifts; update or
   remove the stale documentation in the same documentation phase.
-- [ ] Validate the frontmatter description contains the real trigger contexts
+- [x] Validate the frontmatter description contains the real trigger contexts
   and the body does not carry a redundant “when to use” section.
-- [ ] Search for consumers of top-level `hash` and `last_updated` before
+- [x] Search for consumers of top-level `hash` and `last_updated` before
   changing them. Normalize the entry files to portable Agent Skills
   frontmatter; do not retain non-standard top-level keys without a documented
   consumer and reviewed exception.
-- [ ] Do not add Codex-specific `agents/openai.yaml` sidecars merely for this
+- [x] Do not add Codex-specific `agents/openai.yaml` sidecars merely for this
   gate. These repository skills target the provider-neutral Agent Skills core.
-- [ ] Keep essential procedures and safety invariants in `SKILL.md`; move
+- [x] Keep essential procedures and safety invariants in `SKILL.md`; move
   history, catalogs, long examples, and subsystem detail to directly linked
   references.
-- [ ] Keep each `SKILL.md` below 500 lines and approximately 5,000 words.
-- [ ] Ensure every retained long operational reference is navigable (compact
+- [x] Keep each `SKILL.md` below 500 lines and approximately 5,000 words.
+- [x] Ensure every retained long operational reference is navigable (compact
   contents list or an explicit, reviewed reason that its existing structure is
   sufficient).
-- [ ] Avoid duplicated facts between `SKILL.md` and references. The entry point
+- [x] Avoid duplicated facts between `SKILL.md` and references. The entry point
   should route; the reference should own the detail.
-- [ ] Validate every local Markdown link and symlink resolves from the skill
+- [x] Validate every local Markdown link and symlink resolves from the skill
   directory. Fix the known Darkmatter `code_block.rs` relative link.
-- [ ] Confirm all resource paths use portable relative references and that no
+- [x] Confirm all resource paths use portable relative references and that no
   link depends on a source worktree outside the skill package.
+
+Navigation review: long operational references carry compact contents lists.
+The retained `research/` fleet records and `summaries/` are intentionally
+excepted from added hand-written contents blocks: each file is already a
+single-provider or single-topic corpus with a consistent generated heading
+hierarchy, and inserting maintained navigation into generated research would
+create a second drift surface. Owner: Claudine package area.
 
 ### Skill-specific restructuring
 
-- [ ] Claudine: preserve its concise architecture/CLI routing, then audit the
+- [x] Claudine: preserve its concise architecture/CLI routing, then audit the
   incoming `error-architecture.md`, `messaging.md`, architecture, CLI, linking,
   and research links for final-behavior drift and duplication.
-- [ ] Darkmatter: move the DMLS phase chronology, extracted-surface catalog,
+- [x] Darkmatter: move the DMLS phase chronology, extracted-surface catalog,
   and detailed rendering implementation notes behind directly linked topic
   references. Keep the composition/schema/context/remote authority and browser
   safety contract in the entry point.
-- [ ] Sniff: move work-counter evidence and detailed catalog/CLI material behind
+- [x] Sniff: move work-counter evidence and detailed catalog/CLI material behind
   topic references. Keep platform support, request-cost tiers, aggregate versus
   focused worktree semantics, and cross-platform test gotchas in the entry
   point.
 
 ### Mechanical validation
 
-- [ ] Run for each skill:
+- [x] Run for each skill:
 
   `uv run --with pyyaml /Users/ken/.claude/skills/.system/skill-creator/scripts/quick_validate.py .claude/skills/<skill>`
 
-- [ ] Run the link/symlink check from the skill directory and record zero
+- [x] Run the link/symlink check from the skill directory and record zero
   broken targets.
-- [ ] Record final line and word counts for all three entry points.
-- [ ] Render/read each entry point and one routed topic as a cold reader; verify
+- [x] Record final line and word counts for all three entry points.
+- [x] Render/read each entry point and one routed topic as a cold reader; verify
   that the correct next document is discoverable without loading unrelated
   subsystems.
-- [ ] Re-run package documentation drift guards, including Claudine's lifecycle
+- [x] Re-run package documentation drift guards, including Claudine's lifecycle
   facet check and any generated-doc checks.
 
 ### Exit gate

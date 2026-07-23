@@ -1,10 +1,28 @@
 ---
-hash: ef46db3751d8e999-8e60d79447372a8e
+hash: ef46db3751d8e999-7ba4e8bda2fc74df
 last_updated: 2026-07-22
 ---
 # Claudine CLI Reference
 
 Complete command documentation with examples and options.
+
+## Contents
+
+- [Global options](#global-options)
+- [`claudine init`](#claudine-init)
+- [`claudine hooks`](#claudine-hooks)
+- [`claudine actions`](#claudine-actions)
+- [Wrapped provider commands](#wrapped-provider-commands)
+- [Composition commands](#composition-commands)
+- [MCP commands](#claudine-mcp)
+- [Resource linking](#claudine-skills--claudine-commands--claudine-agents)
+- [Logs](#claudine-logs)
+- [Providers](#claudine-providers)
+- [Dashboard](#claudine-dashboard)
+- [Completions](#claudine-completions-shell)
+
+This compact index routes by command family; use heading search for a specific
+subcommand or flag.
 
 ## Global Options
 
@@ -310,7 +328,7 @@ claudine sequence @pipeline.yaml dir=features/my-feature
 
 > **`prompt` means two things.** At the document root it is *prose* that flips the sequence to inline-compose; on a step or task it is a *file reference* to a prompt document. They never co-occur at the same level.
 
-Full user contract: [`claudine/docs/topics/flow-control/sequences.md`](../../../claudine/docs/topics/flow-control/sequences.md).
+Full user contract: `claudine/docs/topics/flow-control/sequences.md`.
 
 #### `--fail-fast <BOOL>`
 

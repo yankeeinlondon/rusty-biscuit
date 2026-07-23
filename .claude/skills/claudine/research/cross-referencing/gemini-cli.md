@@ -108,7 +108,7 @@ As of v0.26.0+, Gemini CLI ships with built-in skills:
 
 ### Gotchas
 
-1. **"Lazy reader" effect**: If you reference linked files from SKILL.md (e.g., `[Details](./details.md)`) without the full skill folder being loaded, the model may hallucinate details. Gemini's activation flow loads the entire directory, so ensure all referenced files are within the skill folder.
+1. **"Lazy reader" effect**: If you reference linked files from SKILL.md (e.g., `Details`) without the full skill folder being loaded, the model may hallucinate details. Gemini's activation flow loads the entire directory, so ensure all referenced files are within the skill folder.
 
 2. **Description is everything**: Unlike Claude Code where the body of SKILL.md drives selection, Gemini CLI relies heavily on the `description` frontmatter field for deciding when to activate a skill. Write thorough, trigger-phrase-rich descriptions.
 

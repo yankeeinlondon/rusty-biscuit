@@ -2,6 +2,23 @@
 
 Deep technical documentation for Claudine's event model, provider adapters, dispatch pipeline, stream parsing, composition, and configuration system.
 
+## Contents
+
+- [Library module structure](#library-module-structure)
+- [Event support matrix](#event-support-matrix)
+- [Key types](#key-types)
+- [Provider adapters](#provider-adapters)
+- [Dispatch pipeline](#dispatch-pipeline)
+- [Stream parsing](#stream-parsing)
+- [Composition](#composition)
+- [Configuration schema](#configuration-schema)
+- [Skill linking](#skill-linking)
+- [Rendezvous package-area family](#rendezvous-package-area-family)
+
+Use the heading search if a subsection name has changed; the sections above are
+the stable subsystem routes rather than an exhaustive list of every nested
+heading.
+
 ## Library Module Structure
 
 ```
@@ -15,23 +32,33 @@ claudine/lib/src/
 │   ├── prepare/   → The canonical preparation service (prepare/service.rs) and the entry-reason stage matrix as data (prepare/entry.rs); prepare.rs holds the two sanctioned composers prepare_direct/prepare_inline
 │   └── schema/    → Schema-aware preparation, error translation, problem classification, and status reporting
 ├── config/       → Agent detection, hook registration, atomic writes, backups
+├── diagnostics/  → Typed facets, discovery, effective selection, and snapshots
 ├── dispatch/     → Event processing pipeline
 │   ├── logging.rs        → Event metadata preparation and JSONL logging
 │   ├── protect_bridge.rs → Protect observations mapped into hook responses
 │   └── wrapper_flags.rs  → Wrapper environment flags and repository root extraction
 ├── events/       → Normalized event model and types (16 events, 10 providers)
+├── harness/      → Shell audit, timeouts, attempt classification, and recovery infrastructure
 ├── hook_adapters/ → Native hook request/response adapters (ProviderAdapter trait) — parse provider hook payloads; distinct from stream/providers (stdout NDJSON parsers)
+├── interrupt.rs  → Process-scoped user-interrupt state
 ├── linking/      → Cross-provider skill synchronization (4 resource types) with portability classification
 ├── mcp/          → MCP catalog, defaults, import/export, session, and injection
+├── messaging/    → Outbound messaging route resolution and delivery
+├── model_catalog/ → Expected model offerings, aliases, validation, and drift
+├── opencode_config.rs → OpenCode configuration parsing and projection
 ├── permissions/  → Provider-agnostic PolicyEngine for permission queries and mutation planning
 │   └── providers/common.rs → Format-agnostic helpers shared across provider backends (first_source_id, one_shot_plan constructor)
+├── protect/      → Regex deny catalog for commands, paths, and MCP responses
+├── provider/     → Generated metadata registry plus hand-written provider behavior
 ├── render/       → Functional render components (FinalMessage, AgentPrompt/SystemPrompt, EventRenderer + DISPATCH table, MetricsReport, StreamRenderable/AssistantStream); consume data + policy (DisplayPolicy), never `match provider`
 ├── reporting/    → JSONL-to-SQLite reporting index, sync, and typed queries
-├── services/     → Cross-provider runtime policy services (ProtectService)
+├── runaway/      → Content-guard detection and configuration
+├── signals/      → Generated and bespoke normalized signal catalog and hub
 ├── stream/       → Eight structured-stream parser implementations serving nine provider identities (Kilo reuses OpenCode's; Goose has no native parser) + summary/reporting
 │   ├── logs/opencode/bridge/   → Stderr bridge: ingest dispatch, session tracking, stall guard, signals, formatting
 │   ├── logs/opencode/classify/ → Error classification: asset, LLM, session, text utilities
 │   └── logs/opencode/state.rs  → Shared stderr state and summary merge
+├── system_prompt/ → Launch-context discovery and system-prompt resolution
 └── error.rs      → ClaudineError enum
 ```
 
@@ -728,7 +755,7 @@ Test commands run from the `claudine/rendezvous/` area justfile: `just check`, `
 
 ### Local IPC — the typed endpoint
 
-Authoritative doc: [`claudine/docs/rendezvous/local-ipc.md`](../../../claudine/docs/rendezvous/local-ipc.md). Read it before touching endpoint, daemon-boot, or connector code.
+Authoritative doc: `claudine/docs/rendezvous/local-ipc.md`. Read it before touching endpoint, daemon-boot, or connector code.
 
 The load-bearing rules:
 

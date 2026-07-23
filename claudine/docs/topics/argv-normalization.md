@@ -14,7 +14,7 @@ understands. clap remains the authoritative parser; the normalizer
 never consults clap, never reads the filesystem, and only reshapes
 input on the way in.
 
-The implementation lives in [`claudine/cli/src/argv.rs`](../../cli/src/argv.rs),
+The implementation lives in [`claudine/cli/src/argv/mod.rs`](../../cli/src/argv/mod.rs),
 and is wired into [`claudine/cli/src/main.rs`](../../cli/src/main.rs) as
 the single pre-clap entry point.
 

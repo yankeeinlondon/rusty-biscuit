@@ -11,6 +11,17 @@ last_updated: 2026-05-02
 ---
 # Frontmatter Parser Research: `frontmatter-gen` vs `serde_yaml_ng`
 
+## Contents
+
+- Summary
+- serdeyamlng
+- frontmatter-gen
+- LSP-Specific Recommendation
+- Decision Matrix
+
+Use heading search to jump to the listed subsystem.
+
+
 This compares `frontmatter-gen` `0.0.5` and `serde_yaml_ng` `0.10.0` as candidates for Darkmatter frontmatter handling in an LSP implementation.
 
 Sources checked:

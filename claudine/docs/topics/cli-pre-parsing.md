@@ -12,10 +12,10 @@ through normalization into `Cli::parse_from` — explains why the
 pre-parser exists at all, and captures the best practices that keep
 the layer maintainable as the CLI surface grows.
 
-- Pre-parser implementation: [`claudine/cli/src/argv.rs`](../../cli/src/argv.rs)
+- Pre-parser implementation: [`claudine/cli/src/argv/mod.rs`](../../cli/src/argv/mod.rs)
 - Pre-parser wiring: [`claudine/cli/src/main.rs`](../../cli/src/main.rs)
 - Clap surface: [`claudine/cli/src/args.rs`](../../cli/src/args.rs)
-- Feature spec: `2026-04-17-cli-pre-processing`
+- Feature spec: `claudine/features/_completed/2026-04-17-cli-pre-processing/spec.md`
 - Rule-by-rule reference: [argv-normalization.md](./argv-normalization.md)
 
 ## Pipeline overview
@@ -250,7 +250,7 @@ failure instead of a silent forwarding bug.
 
 ### 4. Gate rules narrowly
 
-Rules 1, 3, and 4 are gated to composition subcommands. Rule 2 is
+Rules 1 and 4 are gated to composition subcommands. Rule 2 is
 flag-driven and applies anywhere `--provider` appears. Expanding a
 rule's scope — e.g. firing Rule 1 on wrapper subcommands — breaks
 wrapper passthrough: a user typing `claudine claude --gemini file.md`
@@ -338,4 +338,4 @@ greedy-positional + `--help` interaction).
   ensure the wrapper lenient pass continues to accept unknown tokens
   after any pre-parser change.
 
-Reference: feature `2026-04-17-cli-pre-processing`.
+Reference: `claudine/features/_completed/2026-04-17-cli-pre-processing/spec.md`.
