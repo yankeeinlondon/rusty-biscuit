@@ -21,7 +21,10 @@ use std::env;
 use std::io;
 use std::process::{Command, Stdio};
 use std::sync::Once;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+#[cfg(target_os = "macos")]
+use std::time::Instant;
 
 use super::{
     CAPTURE_TIMEOUT, CLEANUP_TIMEOUT, CapturedFrame, QUERY_TIMEOUT, SEND_TIMEOUT, SPAWN_TIMEOUT,

@@ -805,10 +805,10 @@ mod tests {
         assert!(term.tab_width > 0);
     }
 
+    #[cfg(not(target_os = "linux"))]
     #[test]
     fn test_terminal_distro_none_on_non_linux() {
         let term = Terminal::new();
-        #[cfg(not(target_os = "linux"))]
         assert!(term.distro.is_none());
     }
 

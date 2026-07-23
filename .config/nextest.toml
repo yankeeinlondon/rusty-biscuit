@@ -108,6 +108,15 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 filter = 'test(=context_reports_preserve_all_columns_at_minimum_supported_width)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
+# This real-terminal style test intentionally drives dozens of separate `bt`
+# commands and waits for WezTerm to expose a stable frame after each one. The
+# WezTerm CLI round trips complete more slowly on Linux and push a healthy run
+# past the default 30s termination ceiling. Keep the override test-specific so
+# other L2 tests still detect hangs at the default deadline.
+[[profile.default.overrides]]
+filter = 'test(=level2_render_tree_style_in_wezterm)'
+slow-timeout = { period = "30s", terminate-after = 3 }
+
 # Browser-tier tests spawn real headless Chrome, whose multi-process teardown
 # (helper + crashpad processes that inherit the test's stdout) routinely takes
 # longer than the default 100ms leak window — producing spurious LEAK-FAILs even
@@ -249,6 +258,13 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 # default-profile note: a bare-leaf filter matches no lib unit test).
 [[profile.ci.overrides]]
 filter = 'test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)'
+slow-timeout = { period = "30s", terminate-after = 3 }
+
+# See the default-profile note: WezTerm CLI capture round trips make this
+# command-dense real-terminal test exceed CI's 30s termination ceiling on
+# Linux.
+[[profile.ci.overrides]]
+filter = 'test(=level2_render_tree_style_in_wezterm)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
 # See the default-profile note: headless-Chrome teardown exceeds the 100ms leak
