@@ -14,10 +14,10 @@ name: rendezvous-tests
 #      is the half of this contract with no other coverage, so a soft-failing
 #      Windows leg would mean shipping it untested. This leg gates.
 #
-# Sniff's stable-user detector keeps its existing three-OS matrix in `test.yml`
-# (`sniff-cross-platform`); it is not duplicated here. What this workflow adds
-# for Sniff is the compile check, so a change to `sniff::os::user` that breaks a
-# Rendezvous consumer surfaces against Rendezvous.
+# Sniff's stable-user detector keeps its three-OS runtime matrix in `ci.yml`;
+# it is not duplicated here. What this workflow adds for Sniff is the
+# Rendezvous consumer check, so a change to `sniff::os::user` that breaks that
+# boundary surfaces against Rendezvous.
 
 on:
   push:

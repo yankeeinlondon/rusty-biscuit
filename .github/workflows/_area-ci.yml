@@ -2,8 +2,8 @@ name: area-ci
 
 # Reusable CI building block for a single curated package area.
 #
-# Every per-area workflow calls this via `workflow_call` so platform behavior
-# stays uniform across the monorepo instead of accreting per-area. See
+# The dependency-aware `ci.yml` matrix calls this via `workflow_call` so
+# platform behavior stays uniform across the monorepo. See
 # `docs/testing-strategy.md` → "Platform Coverage (CI)" for the policy this
 # encodes (macOS compile-check only, full L1 on Linux + Windows, kache on the
 # non-Windows legs, nextest sharding for heavy areas).
