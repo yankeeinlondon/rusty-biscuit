@@ -59,7 +59,7 @@ commit yolo="true" agent="opencode" model="":
     else
         if [[ "{{ agent }}" == "opencode" ]]; then
             if [[ -z "{{ model }}" ]]; then
-                model="--model minimax/MiniMax-M3"
+                model="--model minimax-coding-plan/MiniMax-M3"
             fi
         fi
     fi

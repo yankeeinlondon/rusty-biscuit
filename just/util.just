@@ -170,7 +170,7 @@ _get_design_doc dir:
 _choose_model question="Choose a Model":
     #!/usr/bin/env bash
     set -euo pipefail
-    model="$(printf '%s\n' 'zai-coding-plan/glm-5.2' 'minimax/MiniMax-M3' 'kimi-for-coding/k2p6' 'kimi-for-coding/k2p7' 'omlx/Qwen3.6-35B-A3B-oQ6' 'omlx/Qwen3.6-27B-nvfp4' | fzf --border --border-label '{{ question }}')"
+    model="$(printf '%s\n' 'zai-coding-plan/glm-5.2' 'minimax-coding-plan/MiniMax-M3' 'kimi-for-coding/k2p6' 'kimi-for-coding/k2p7' 'omlx/Qwen3.6-35B-A3B-oQ6' 'omlx/Qwen3.6-27B-nvfp4' | fzf --border --border-label '{{ question }}')"
     echo "${model}"
 
 # return a list of all `*review*.md` files found features, fixes, and reviews

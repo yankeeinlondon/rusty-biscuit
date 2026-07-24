@@ -39,6 +39,9 @@ use super::summary::StreamExecutionSummary;
 use super::token_usage::NormalizedTokenUsage;
 use crate::provider_id::Provider;
 
+const GENERIC_SERVER_ERROR: &str =
+    "Unexpected server error. Check server logs for details.";
+
 /// An unsupported runtime identity was supplied to the shared OpenCode parser.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 #[error("OpenCode stream parser supports only OpenCode and Kilo identities, got {provider:?}")]
@@ -294,8 +297,20 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
 
     fn handle_error(&mut self, event: OpenCodeError, raw_kind: &str) {
         self.is_error = true;
-        self.error_kind = event.resolved_kind();
-        self.error_message = event.resolved_message();
+        let error_kind = event.resolved_kind();
+        let error_message = event.resolved_message();
+
+        // OpenCode can follow a concrete provider failure with this generic
+        // server error. Preserve the actionable message already emitted.
+        if self.error_message.as_deref().is_some_and(|message| {
+            message != GENERIC_SERVER_ERROR
+                && error_message.as_deref() == Some(GENERIC_SERVER_ERROR)
+        }) {
+            return;
+        }
+
+        self.error_kind = error_kind;
+        self.error_message = error_message;
 
         let mut extra = self.base_extra(raw_kind);
         if let Some(kind) = &self.error_kind {
