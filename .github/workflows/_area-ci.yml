@@ -153,12 +153,26 @@ jobs:
       - name: L1 tests
         shell: bash
         run: |
-          args=()
+          # --no-fail-fast (D6/D7): a bounded shard must run ALL its tests so one
+          # slow or failing test cannot suppress the rest of the shard's evidence.
+          args=(--no-fail-fast)
           if [ "${{ matrix.shard }}" != "1/1" ]; then
-            args=(--partition "count:${{ matrix.shard }}")
+            args+=(--partition "count:${{ matrix.shard }}")
           fi
           cd "${{ inputs.area }}"
           just test "${args[@]}"
+      # Per-area/OS/shard JUnit (D7). strategy.job-index keeps the name unique
+      # within this job; the area + OS prefix keeps it unique across the run, so
+      # shards never overwrite each other. (Recipes that run nextest once per
+      # package currently capture the last package's results — full multi-package
+      # aggregation is a follow-up.)
+      - name: Upload L1 JUnit
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-${{ inputs.area }}-L1-${{ matrix.os }}-${{ strategy.job-index }}
+          path: target/nextest/ci/test-results.xml
+          if-no-files-found: ignore
 
   lint:
     name: lint (ubuntu)
@@ -226,6 +240,13 @@ jobs:
         uses: taiki-e/install-action@nextest
       - name: L2 tests
         run: cd "${{ inputs.area }}" && just test-l2
+      - name: Upload L2 JUnit
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-${{ inputs.area }}-L2-ubuntu
+          path: target/nextest/ci/test-results.xml
+          if-no-files-found: ignore
 
   browser:
     name: test-browser (ubuntu)
@@ -259,3 +280,10 @@ jobs:
         uses: taiki-e/install-action@nextest
       - name: Browser tests
         run: cd "${{ inputs.area }}" && just test-browser
+      - name: Upload browser JUnit
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-${{ inputs.area }}-browser-ubuntu
+          path: target/nextest/ci/test-results.xml
+          if-no-files-found: ignore

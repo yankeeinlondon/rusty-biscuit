@@ -174,6 +174,27 @@ fn area_policy_retains_native_and_heavy_area_coverage() {
     }
 }
 
+#[test]
+fn heavy_areas_shard_l1_and_surface_all_failures() {
+    // Both heavy areas (claudine ~3964 tests, darkmatter) declare 4-shard L1
+    // policy sized from measured cold-run durations (~7-8 min/shard).
+    let areas = read(".github/ci/areas.json");
+    assert!(
+        areas.matches(r#""shards": ["1/4", "2/4", "3/4", "4/4"]"#).count() >= 2,
+        "claudine and darkmatter must both declare measured 4-shard L1 policy"
+    );
+
+    let shared = workflow("_area-ci.yml");
+    assert!(
+        shared.contains("--no-fail-fast"),
+        "L1 shards must run --no-fail-fast so one failure cannot hide the shard's evidence (D7)"
+    );
+    assert!(
+        shared.contains("actions/upload-artifact") && shared.contains("junit-"),
+        "each test tier must publish collision-free per-shard JUnit artifacts (D7)"
+    );
+}
+
 // --- D5: controlled required toolchain + latest-stable advisory ---------------
 
 #[test]

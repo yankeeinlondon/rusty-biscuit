@@ -116,14 +116,14 @@ workspace Cargo commands or root lifecycle recipes as routine final gates.
 
 ## Phase 2: Make Required Gates Deterministic and Bounded
 
-- [ ] **Task 2.1: Record the Phase 2 change and verification scope.**
+- [x] **Task 2.1: Record the Phase 2 change and verification scope.**
   - Repeat symbol impact analysis and `sniff` package/package-area/downstream
     discovery for toolchain, nextest, area workflow, Claudine, and Darkmatter
     changes.
   - Record comparable cold-run runner class, OS, request shape, test count, and
     duration evidence before changing timeout or shard policy.
 
-- [ ] **Task 2.2: Pin required CI and add latest-stable advisory coverage.**
+- [x] **Task 2.2: Pin required CI and add latest-stable advisory coverage.**
   - Replace `channel = "stable"` in `rust-toolchain.toml` with the reviewed exact
     Rust version and include every component required by build, Clippy, and
     read-only formatting checks.
@@ -135,7 +135,7 @@ workspace Cargo commands or root lifecycle recipes as routine final gates.
   - Document the reviewed toolchain-advancement procedure and required
     diagnostics review.
 
-- [ ] **Task 2.3: Make the CI nextest profile explicit and evidence-based.**
+- [x] **Task 2.3: Make the CI nextest profile explicit and evidence-based.**
   - Pass `--profile ci` from every CI nextest invocation and log the selected
     profile.
   - Set blanket CI L1 retries to zero in `.config/nextest.toml`.
@@ -148,7 +148,7 @@ workspace Cargo commands or root lifecycle recipes as routine final gates.
     once, a scoped resource-sensitive override retries as configured, and CI
     emits JUnit.
 
-- [ ] **Task 2.4: Recalculate heavy-area shards from comparable measurements.**
+- [x] **Task 2.4: Recalculate heavy-area shards from comparable measurements.**
   - Archive cold Linux CI counts and durations for Claudine and each existing
     Darkmatter shard before changing policy.
   - Add Claudine L1 shards and update Darkmatter's four-shard setting in
