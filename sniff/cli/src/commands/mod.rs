@@ -95,6 +95,20 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    if matches!(cli.command.as_ref(), Some(Commands::Runtime)) {
+        let runtime = sniff::os::detect_runtime_environment();
+        if cli.json {
+            output::print_json_value(
+                serde_json::to_value(runtime)?,
+                perf.build_report().as_ref(),
+            );
+        } else {
+            output::emit_text(&output::render_runtime_environment(runtime), cli.plain);
+            perf.emit_stdout(None);
+        }
+        return Ok(());
+    }
+
     let output_filter = cli
         .command
         .as_ref()

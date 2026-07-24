@@ -334,6 +334,9 @@ pub enum Commands {
     /// Show only OS information (name, kernel, locale, timezone)
     Os,
 
+    /// Show whether the runtime is native, WSL 1, or WSL 2
+    Runtime,
+
     /// Show only hardware information (CPU, GPU, memory, storage)
     Hardware,
 
@@ -486,6 +489,7 @@ impl Commands {
     pub fn to_output_filter(&self) -> OutputFilter {
         match self {
             Commands::Os => OutputFilter::Os,
+            Commands::Runtime => OutputFilter::Os,
             Commands::Hardware => OutputFilter::Hardware,
             Commands::Network => OutputFilter::Network,
             Commands::Filesystem { .. } => OutputFilter::Filesystem,
@@ -1178,6 +1182,7 @@ pub const AFTER_HELP: &str = "\
 Commands:
   System:
     sniff os              Show OS information
+    sniff runtime         Show native, WSL 1, or WSL 2 runtime
     sniff hardware        Show hardware information
     sniff network         Show network information
     sniff cpu             Show CPU information
@@ -1377,6 +1382,14 @@ mod tests {
             assert!(matches!(
                 parse_args(&["topics"]).unwrap().command,
                 Some(Commands::Topics)
+            ));
+        }
+
+        #[test]
+        fn runtime_subcommand_parses() {
+            assert!(matches!(
+                parse_args(&["runtime"]).unwrap().command,
+                Some(Commands::Runtime)
             ));
         }
 

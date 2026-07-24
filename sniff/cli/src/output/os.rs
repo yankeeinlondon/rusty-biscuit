@@ -7,6 +7,10 @@ use sniff::hardware::NtpStatus;
 
 use super::format_uptime;
 
+pub fn render_runtime_environment(runtime: sniff::os::RuntimeEnvironment) -> String {
+    Prose::new(format!("<b>Runtime:</b> {runtime}")).render_optimistic(None)
+}
+
 pub fn render_os_section(os: &sniff::OsInfo, verbose: u8) -> String {
     let mut out = String::new();
     let title = Prose::new("<b><u>Operating System:</u></b>").render_optimistic(None);

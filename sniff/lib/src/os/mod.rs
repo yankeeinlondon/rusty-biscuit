@@ -27,6 +27,7 @@ use crate::request::OsRequest;
 mod distro;
 mod locale;
 mod package_manager;
+mod runtime;
 mod time;
 mod user;
 #[cfg(any(target_os = "windows", test))]
@@ -44,6 +45,8 @@ pub use package_manager::{
     detect_macos_package_managers, detect_windows_package_managers, get_commands_for_manager,
     get_path_dirs,
 };
+pub use runtime::{RuntimeEnvironment, detect_runtime_environment};
+pub(crate) use runtime::runtime_environment_from_markers;
 pub use time::{
     NtpStatus, TimeInfo, detect_ntp_status, detect_timezone, detect_timezone_with_options,
 };

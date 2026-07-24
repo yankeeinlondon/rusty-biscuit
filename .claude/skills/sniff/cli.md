@@ -13,6 +13,7 @@ Use this reference for command discovery and output-mode behavior.
 ## Common host commands
 
 ```text
+sniff runtime
 sniff hardware
 sniff cpu
 sniff audio-devices

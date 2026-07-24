@@ -443,10 +443,7 @@ fn detect_is_wsl() -> bool {
 /// `/proc/sys/kernel/osrelease`, so an absent `/proc` yields `false` — the
 /// non-WSL (native Linux) fallback.
 fn proc_markers_indicate_wsl(version: &str, osrelease: &str) -> bool {
-    [version, osrelease].iter().any(|contents| {
-        let lower = contents.to_lowercase();
-        lower.contains("microsoft") || lower.contains("wsl")
-    })
+    crate::os::runtime_environment_from_markers(version, osrelease).is_wsl()
 }
 
 // ---------------------------------------------------------------------------

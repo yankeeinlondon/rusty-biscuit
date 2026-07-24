@@ -1290,6 +1290,32 @@ fn test_os_subcommand_json_output() {
 }
 
 #[test]
+fn test_runtime_subcommand_text_output() {
+    cargo_bin_cmd!("sniff")
+        .args(["runtime", "--plain"])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("Runtime: "));
+}
+
+#[test]
+fn test_runtime_subcommand_json_output() {
+    let output = cargo_bin_cmd!("sniff")
+        .args(["runtime", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let runtime: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert!(
+        matches!(runtime.as_str(), Some("native" | "wsl1" | "wsl2")),
+        "unexpected runtime: {runtime}"
+    );
+}
+
+#[test]
 fn test_hardware_subcommand_text_output() {
     cargo_bin_cmd!("sniff")
         .arg("hardware")

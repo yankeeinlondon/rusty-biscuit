@@ -72,6 +72,7 @@ Use subcommands to filter output to specific sections.
 
 ```bash
 sniff os          # OS information (name, kernel, locale, timezone)
+sniff runtime     # Native, WSL 1, or WSL 2 runtime
 sniff hardware    # Hardware information (CPU, GPU, memory, storage)
 sniff network     # Network information (interfaces, local IPs, WAN IP)
 sniff filesystem  # Filesystem information (git, languages, monorepo)

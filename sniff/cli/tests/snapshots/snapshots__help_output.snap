@@ -20,6 +20,7 @@ Usage: sniff [OPTIONS] [COMMAND]
 Commands:
   System:
     sniff os              Show OS information
+    sniff runtime         Show native, WSL 1, or WSL 2 runtime
     sniff hardware        Show hardware information
     sniff network         Show network information
     sniff cpu             Show CPU information
