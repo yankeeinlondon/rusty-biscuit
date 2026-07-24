@@ -32,6 +32,7 @@ fn inputs_for(provider: Provider) -> LaunchPlanInputs {
         opencode_config_base: None,
         codex_last_message_path: PathBuf::from("/tmp/claudine-test-last.txt"),
         provider_env_baseline: HashMap::new(),
+        codex_sqlite_home: None,
         credential_policy: CredentialPolicyInputs::default(),
         invocation: RecordedLaunch {
             facets: facets.clone(),
@@ -439,6 +440,34 @@ fn explicit_include_survives_a_provider_switch() {
         patch.contains(&EnvChange::Remove("CODEX_API_KEY".into())),
         "only the included key is exempt; got {patch:?}",
     );
+}
+
+#[test]
+fn a_replay_onto_codex_uses_the_pre_shadow_sqlite_home() {
+    let mut inputs = inputs_for(Provider::Goose);
+    inputs.codex_sqlite_home = Some(OsString::from("/home/real/.codex"));
+
+    let patch = patch_after_switch(&inputs, Provider::Codex);
+
+    assert!(patch.contains(&EnvChange::Set(
+        OsString::from("CODEX_SQLITE_HOME"),
+        OsString::from("/home/real/.codex"),
+    )));
+}
+
+#[test]
+fn a_replay_away_from_codex_removes_the_derived_sqlite_home() {
+    let mut inputs = inputs_for(Provider::Codex);
+    inputs.codex_sqlite_home = Some(OsString::from("/home/real/.codex"));
+    inputs
+        .provider_env_baseline
+        .insert(OsString::from("CODEX_SQLITE_HOME"), None);
+
+    let patch = patch_after_switch(&inputs, Provider::Goose);
+
+    assert!(patch.contains(&EnvChange::Remove(OsString::from(
+        "CODEX_SQLITE_HOME"
+    ))));
 }
 
 /// A rebuild that holds the provider still leaves credential admission alone:

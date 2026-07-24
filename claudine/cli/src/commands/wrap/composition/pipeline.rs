@@ -96,6 +96,8 @@ struct SelectionPhase {
 
 struct EnvironmentPhase {
     env_plan: env::EnvPlan,
+    /// The native Codex SQLite directory captured before shadowing `HOME`.
+    codex_sqlite_home: Option<std::ffi::OsString>,
     effective_prompt: String,
     mcp_extra_args: Vec<String>,
     /// R8 — the MCP inputs a per-attempt rebuild recomputes injection from,
@@ -198,13 +200,12 @@ pub(super) fn execute_composition_request_inner_with_guard<'guard, 'runtime>(
     );
 
     let prepare_span = tracing::info_span!("composition_prepare").entered();
-    let selection = proceed_phase!(resolve_selection_and_launch(&mut attempt));
-
-    // --dry-run seam. Composition, shell expansion, and body/frontmatter
-    // finalization have all happened in `prepare`; provider/model selection has
-    // just resolved. Stop here — before MCP shadow-HOME materialization, argv
-    // and system-prompt overlay construction, the child-CWD switch, and every
-    // lifecycle event — and emit the composed artifacts.
+    // --dry-run seam. Composition, shell expansion, body/frontmatter
+    // finalization, and provider/model selection have all happened in
+    // `prepare`. Stop here — before provider executable discovery, MCP
+    // shadow-HOME materialization, argv and system-prompt overlay construction,
+    // the child-CWD switch, and every lifecycle event — and emit the composed
+    // artifacts.
     //
     // The seam sits *ahead of* lifecycle dispatch because dry run is
     // contractually side-effect free: it fires no lifecycle event, so a stack
@@ -214,9 +215,15 @@ pub(super) fn execute_composition_request_inner_with_guard<'guard, 'runtime>(
     // side-effect-free") and its non-goal of turning dry run into lifecycle
     // simulation.
     if attempt.request.dry_run {
-        return Ok(emit_dry_run_outcome(&mut attempt, selection.provider));
+        let provider = attempt
+            .request
+            .resolved_target
+            .as_ref()
+            .map_or(Provider::Claude, |target| target.provider);
+        return Ok(emit_dry_run_outcome(&mut attempt, provider));
     }
 
+    let selection = proceed_phase!(resolve_selection_and_launch(&mut attempt));
     let mut environment =
         proceed_phase!(prepare_environment_and_mcp(&mut attempt, &selection));
     let command = proceed_phase!(construct_argv_and_system_prompt(
@@ -296,18 +303,6 @@ fn emit_dry_run_outcome(
 fn resolve_selection_and_launch(
     attempt: &mut CompositionAttempt<'_, '_>,
 ) -> CompositionPhaseResult<SelectionPhase> {
-    // An unresolved target means provider selection would have to prompt, which
-    // a dry run must never do — so this variant of the seam fires before target
-    // resolution and reports the unresolved state instead. `Provider::Claude` is
-    // an inert placeholder in the outcome; the rendered agent cell carries the
-    // real (unresolved) state.
-    if attempt.request.dry_run && attempt.request.resolved_target.is_none() {
-        return CompositionPhaseResult::Completed(Box::new(emit_dry_run_outcome(
-            attempt,
-            Provider::Claude,
-        )));
-    }
-
     let request = &attempt.request;
     let term = &attempt.term;
     CompositionPhaseResult::from_result((|| -> Result<SelectionPhase> {
@@ -502,6 +497,23 @@ fn prepare_environment_and_mcp(
         // delivery) is provider-shaped, and a refreshed document that lands on a
         // different provider must not inherit those writes.
         let mut pre_provider_env = env_plan.env.clone();
+        let codex_sqlite_home = if env_plan.shadow_home_path.is_some() {
+            Some(
+                crate::commands::wrap::repo_home::codex_sqlite_home()?
+                    .into_os_string(),
+            )
+        } else {
+            None
+        };
+        if provider == Provider::Codex && codex_sqlite_home.is_some() {
+            // The derived value belongs to Codex, not to invocation-wide repo
+            // isolation. Record the ambient baseline so a provider transition
+            // removes it or restores an explicit user value.
+            match std::env::var_os("CODEX_SQLITE_HOME") {
+                Some(value) => pre_provider_env.insert("CODEX_SQLITE_HOME".into(), value),
+                None => pre_provider_env.remove(std::ffi::OsStr::new("CODEX_SQLITE_HOME")),
+            };
+        }
         if needs_mcp_shadow_home && !needs_repo_shadow_home {
             // `HOME` is the one provider-shaped key written before this point:
             // `build_child_env_with_launch` materializes the MCP shadow home for
@@ -660,6 +672,7 @@ fn prepare_environment_and_mcp(
 
         Ok(EnvironmentPhase {
             env_plan,
+            codex_sqlite_home,
             effective_prompt,
             mcp_extra_args,
             mcp_rebuild,
@@ -696,6 +709,7 @@ fn construct_argv_and_system_prompt(
         let effective_non_interactive = *effective_non_interactive;
         let EnvironmentPhase {
             env_plan,
+            codex_sqlite_home,
             effective_prompt,
             mcp_extra_args,
             mcp_rebuild,
@@ -1069,6 +1083,7 @@ fn construct_argv_and_system_prompt(
                 system_prompt_scoped_tmp: scoped_tmp.clone(),
                 sandbox_requested: request.sandbox,
                 provider_env_baseline,
+                codex_sqlite_home: codex_sqlite_home.clone(),
                 credential_policy: credential_policy.clone(),
                 has_model_env: env_plan
                     .env

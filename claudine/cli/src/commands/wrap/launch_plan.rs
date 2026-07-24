@@ -330,6 +330,9 @@ pub(crate) struct LaunchPlanInputs {
     /// attempt that dropped `model:` or moved provider inherited the opening
     /// document's `MODEL`, `OPENCODE_CONFIG_CONTENT`, and shadow `HOME`.
     pub(crate) provider_env_baseline: HashMap<OsString, Option<OsString>>,
+    /// Codex's pre-shadow SQLite directory when this invocation materialized a
+    /// shadow home. Replayed only when an attempt selects Codex.
+    pub(crate) codex_sqlite_home: Option<OsString>,
     /// The unsanitized ambient credential environment plus explicit `--include`
     /// intent. See [`CredentialPolicyInputs`].
     pub(crate) credential_policy: CredentialPolicyInputs,
@@ -379,6 +382,7 @@ impl LaunchPlanInputs {
             opencode_config_base: None,
             codex_last_message_path: codex_last_message.unwrap_or_default(),
             provider_env_baseline: HashMap::new(),
+            codex_sqlite_home: None,
             credential_policy: CredentialPolicyInputs::default(),
             invocation: RecordedLaunch {
                 facets,
@@ -637,6 +641,11 @@ fn replay(
         "YOLO".into(),
         if yolo_applied { "true" } else { "false" }.into(),
     ));
+    if facets.provider == Provider::Codex
+        && let Some(sqlite_home) = inputs.codex_sqlite_home.as_ref()
+    {
+        env_overlay.push(("CODEX_SQLITE_HOME".into(), sqlite_home.clone()));
+    }
 
     // -- entrypoint and session mode ---------------------------------------
     profile.apply_entrypoint(&mut args, facets.non_interactive);

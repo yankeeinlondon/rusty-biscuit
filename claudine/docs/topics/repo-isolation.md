@@ -70,6 +70,19 @@ Codex custom prompts are user-scoped rather than repo-scoped in the same way as 
 
 When `--repo` is active, user prompt files are excluded and only the repo-side prompt source is materialized into the shadow home.
 
+Codex SQLite state is not part of that overlay. Claudine sets
+`CODEX_SQLITE_HOME` to the directory Codex would have used before `HOME` was
+changed, preserving an explicit `CODEX_SQLITE_HOME` or `CODEX_HOME` when
+present. Codex's configured `sqlite_home` retains its native higher precedence.
+This keeps plain and wrapped Codex sessions in one state database and ensures
+the database, WAL, and shared-memory files are opened through one directory.
+Claudine never copies or links those live files into the shadow home.
+
+Regular databases left under the shadow home by older Claudine versions are
+preserved as recoverable legacy state but are no longer opened. Legacy database
+symbolic links are removed with their sidecars because they can split SQLite's
+locking paths.
+
 ## What We Intentionally Preserve
 
 The current implementation tries hard to preserve the parts of a user's setup that are necessary for a working session:

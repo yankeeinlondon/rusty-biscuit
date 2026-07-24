@@ -55,6 +55,7 @@ fn plan_inputs() -> launch_plan::LaunchPlanInputs {
                 Some(std::ffi::OsString::from("/home/real")),
             ),
         ]),
+        codex_sqlite_home: None,
         invocation: launch_plan::RecordedLaunch {
             facets: launch_plan::DocumentLaunchFacets {
                 provider: Provider::Goose,

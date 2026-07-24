@@ -3,6 +3,7 @@ use std::process::Command;
 use super::*;
 use serial_test::serial;
 use tempfile::TempDir;
+use test_toolkit::EnvGuard;
 
 fn init_git_repo(path: &Path) -> bool {
     Command::new("git")
@@ -75,6 +76,92 @@ fn volatile_state_files_match_live_dbs_only() {
     assert!(!is_volatile_state_file(OsStr::new(
         "state_5.sqlite.codex-repair-1780436523.0.bak"
     )));
+}
+
+#[test]
+#[serial]
+fn codex_sqlite_home_defaults_to_pre_shadow_codex_home() {
+    let tmp = TempDir::new().unwrap();
+    let _home = EnvGuard::set_safe("HOME", tmp.path());
+    let _codex_home = EnvGuard::remove_safe("CODEX_HOME");
+    let _sqlite_home = EnvGuard::remove_safe("CODEX_SQLITE_HOME");
+
+    assert_eq!(codex_sqlite_home().unwrap(), tmp.path().join(".codex"));
+}
+
+#[test]
+#[serial]
+fn codex_sqlite_home_respects_codex_home_and_explicit_sqlite_home() {
+    let tmp = TempDir::new().unwrap();
+    let codex_home = tmp.path().join("custom-codex");
+    let sqlite_home = tmp.path().join("custom-sqlite");
+    let _home = EnvGuard::set_safe("HOME", tmp.path());
+    let _codex_home = EnvGuard::set_safe("CODEX_HOME", &codex_home);
+    let _sqlite_home = EnvGuard::remove_safe("CODEX_SQLITE_HOME");
+
+    assert_eq!(codex_sqlite_home().unwrap(), codex_home);
+
+    let _sqlite_home = EnvGuard::set_safe("CODEX_SQLITE_HOME", &sqlite_home);
+    assert_eq!(codex_sqlite_home().unwrap(), sqlite_home);
+}
+
+#[test]
+#[serial]
+fn codex_sqlite_home_rejects_relative_paths() {
+    let _sqlite_home = EnvGuard::set_safe("CODEX_SQLITE_HOME", "relative/state");
+    assert!(codex_sqlite_home().is_err());
+}
+
+#[cfg(unix)]
+#[test]
+#[serial]
+fn codex_shadow_home_uses_real_sqlite_directory_and_preserves_legacy_state() {
+    let tmp = TempDir::new().unwrap();
+    let user_home = tmp.path().join("home");
+    let repo = tmp.path().join("repo");
+    let real_codex_home = user_home.join(".codex");
+    let shadow_codex_home = user_home.join(".claudine/.codex");
+    let legacy_state = shadow_codex_home.join("state_5.sqlite");
+    fs::create_dir_all(&real_codex_home).unwrap();
+    fs::create_dir_all(&shadow_codex_home).unwrap();
+    fs::create_dir_all(&repo).unwrap();
+    fs::write(&legacy_state, b"legacy-shadow-state").unwrap();
+
+    let _home = EnvGuard::set_safe("HOME", &user_home);
+    let _codex_home = EnvGuard::remove_safe("CODEX_HOME");
+    let _sqlite_home = EnvGuard::remove_safe("CODEX_SQLITE_HOME");
+
+    let (env, _, _) =
+        build_repo_home_env(Provider::Codex, &repo, false, false, Some(&repo)).unwrap();
+
+    assert_eq!(
+        env.get(OsStr::new("CODEX_SQLITE_HOME")),
+        Some(&OsString::from(&real_codex_home))
+    );
+    assert_eq!(
+        fs::read(&legacy_state).unwrap(),
+        b"legacy-shadow-state",
+        "regular shadow-owned databases are recoverable legacy state"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+#[serial]
+fn non_codex_shadow_home_does_not_receive_codex_sqlite_home() {
+    let tmp = TempDir::new().unwrap();
+    let user_home = tmp.path().join("home");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(user_home.join(".claude")).unwrap();
+    fs::create_dir_all(&repo).unwrap();
+
+    let _home = EnvGuard::set_safe("HOME", &user_home);
+    let _sqlite_home = EnvGuard::remove_safe("CODEX_SQLITE_HOME");
+
+    let (env, _, _) =
+        build_repo_home_env(Provider::Claude, &repo, true, false, Some(&repo)).unwrap();
+
+    assert!(!env.contains_key(OsStr::new("CODEX_SQLITE_HOME")));
 }
 
 #[test]
