@@ -1,4 +1,10 @@
+# Required-CI toolchain authority (D5 / OQ1 Option A). Pinning an exact version
+# — not floating `stable` — makes local and CI builds provably identical and
+# stabilizes rustfmt/clippy, curing the main<->branch fmt-drift hazard. Advance
+# it deliberately via the scheduled `rust-latest-stable` advisory workflow, never
+# by editing to `stable`. rustfmt is pinned here so read-only `cargo fmt --check`
+# uses the same formatter everywhere.
 [toolchain]
-channel = "stable"
+channel = "1.97.1"
 profile = "minimal"
-components = ["clippy"]
+components = ["clippy", "rustfmt"]

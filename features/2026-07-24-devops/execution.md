@@ -1,7 +1,7 @@
 ---
 plan_file: features/2026-07-24-devops/plan.md
 phases: 5
-status: "phase 1 complete (local gates green; CI-only ACs pending a branch run)"
+status: "phase 1 complete + validated on CI; phase 2 in progress (toolchain pin landed)"
 stop_reason: ""
 started: 24 July 2026
 scope: Phase 1 — Restore Bootstrap and Release Signal
@@ -93,6 +93,20 @@ Three CI runs on the branch (`pull_request` event → full scope, since this PR 
 **Doc follow-up (Phase 2/4):** `.claude/skills/rust-devops/kache.md` says "Windows … Supported" — true for the kache *binary*, but the *kache-action@v1* rejects win32-x64. Worth a note when kache docs are updated.
 
 Contract test updated both times so the text checks now encode the corrected patterns. Local suite: 10/10 Rust, 11/11 Python, actionlint clean.
+
+## Phase 2 progress (in branch, incremental)
+
+Decision confirmed with user (OQ1): pin **exactly `1.97.1`** (verified current latest stable via `rustup check`; CI already resolves it). Landing Phase 2 in safe, CI-verifiable increments rather than rewiring 12 workflows at once.
+
+- [x] **Task 2.2 (core): controlled required toolchain + latest-stable advisory.**
+  - `rust-toolchain.toml`: `channel = "stable"` → `"1.97.1"`; components `["clippy", "rustfmt"]`. Effective immediately — the toml wins over floating `@stable` defaults, so CI keeps building on 1.97.1 while local dev converges off 1.96.0. Verified locally: `rustup` auto-installed 1.97.1 and the contract suite compiled+passed under it.
+  - New `.github/workflows/rust-latest-stable.yml`: scheduled (weekly) + manual advisory, overrides the pin via `RUSTUP_TOOLCHAIN=stable`, runs `cargo fmt --all --check` + representative area gates, non-required.
+  - Contract tests: `required_ci_pins_an_exact_rust_toolchain`, `latest_stable_advisory_is_separate_and_non_required`. Suite now 12/12; actionlint clean.
+- [ ] **Task 2.2 (remainder): drop the 22 `dtolnay/rust-toolchain@stable` overrides** in the required path (ci.yml + _area-ci.yml) so the file is strictly authoritative, handling `llvm-tools-preview` (coverage) + `clippy,rustfmt` (lint) component installs. Deferred — cross-12-workflow, CI-risky; wants its own branch-CI verification.
+- [ ] **Task 2.3** explicit `--profile ci` from every CI nextest call + `retries = 0` + scoped-retry justification + JUnit. (nextest.toml currently `retries = 3` in BOTH profiles — the documented 4×-run hazard.)
+- [ ] **Task 2.4** shard recalc — **needs a full uncancelled CI measurement run** (spec gives Claudine ≈3,963 tests as evidence to slot Claudine sharding; Darkmatter's 4 shards need cold-run durations).
+- [ ] **Task 2.5** stage area build/lint before test fan-out in `_area-ci.yml`.
+- [ ] **Task 2.6** docs + comment drift.
 
 ## Files Changed
 

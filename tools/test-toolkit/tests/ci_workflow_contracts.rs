@@ -165,6 +165,42 @@ fn area_policy_retains_native_and_heavy_area_coverage() {
     }
 }
 
+// --- D5: controlled required toolchain + latest-stable advisory ---------------
+
+#[test]
+fn required_ci_pins_an_exact_rust_toolchain() {
+    let toolchain = read("rust-toolchain.toml");
+    assert!(
+        !toolchain.contains(r#"channel = "stable""#),
+        "rust-toolchain.toml must not float on `stable` (fmt/clippy drift hazard)"
+    );
+    assert!(
+        toolchain.contains(r#"channel = "1."#),
+        "rust-toolchain.toml must pin an exact 1.x version"
+    );
+    assert!(
+        toolchain.contains("clippy") && toolchain.contains("rustfmt"),
+        "the pinned toolchain must ship clippy (lint) and rustfmt (read-only fmt check)"
+    );
+}
+
+#[test]
+fn latest_stable_advisory_is_separate_and_non_required() {
+    let advisory = workflow("rust-latest-stable.yml");
+    assert!(
+        advisory.contains("schedule:") && advisory.contains("workflow_dispatch"),
+        "latest-stable must be a scheduled/manual advisory, not part of required CI"
+    );
+    assert!(
+        advisory.contains("RUSTUP_TOOLCHAIN: stable"),
+        "advisory must override the pin with floating latest stable"
+    );
+    assert!(
+        advisory.contains("cargo fmt --all --check"),
+        "advisory must run a read-only formatting check, never write-mode"
+    );
+}
+
 // --- D13/OQ2/OQ3: release follows CI and stays hermetic -----------------------
 
 #[test]

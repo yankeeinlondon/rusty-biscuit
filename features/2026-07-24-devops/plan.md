@@ -4,7 +4,7 @@ created: 2026-07-24
 phase: 1
 agent: codex/default
 yolo: true
-status: "phase 1 complete (local gates green; CI-only ACs pending branch run)"
+status: "phase 1 done (CI-validated); phase 2 in progress — toolchain pin landed"
 ---
 
 # Reliable CI/CD and DevOps Execution Plan
