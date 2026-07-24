@@ -455,9 +455,11 @@ The CLI executor under `cli/src/commands/wrap/composition/` keeps stable entry
 points and public re-exports in `mod.rs`. `pipeline.rs` owns one
 `CompositionAttempt` across ordered selection/launch, environment/MCP,
 argv/system-prompt, lifecycle-runtime, initialize-routing, and provider-handoff
-phases. Each phase returns `CompositionPhaseResult`, so completed dry runs,
-blocked lifecycle routing, preparation failures, and normal progression stay
-explicit without flattening attempt state into the entry module.
+phases. Each phase returns `CompositionPhaseResult`, so completed early
+outcomes, blocked lifecycle routing, preparation failures, and normal
+progression stay explicit without flattening attempt state into the entry
+module. Composition dry-runs return before these launch phases and never
+validate or resolve the selected executable path.
 
 Other concerns remain split by responsibility:
 

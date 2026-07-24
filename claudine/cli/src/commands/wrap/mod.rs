@@ -251,11 +251,15 @@ fn run_provider_wrapper_inner(
 
     let cwd = std::env::current_dir()?;
 
-    let binary_path = info_span!(
-        "wrapper_binary_resolution",
-        provider = %provider,
-    )
-    .in_scope(|| resolve_binary_path_direct(profile, None))?;
+    let binary_path = if args.dry_run {
+        PathBuf::from(profile.binary())
+    } else {
+        info_span!(
+            "wrapper_binary_resolution",
+            provider = %provider,
+        )
+        .in_scope(|| resolve_binary_path_direct(profile, None))?
+    };
 
     // ------------------------------------------------------------------
     // Stage 2: Extract launch intent from CLI and passthrough argv

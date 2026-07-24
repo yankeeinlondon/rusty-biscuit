@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-29017d4641855f32
-last_updated: 2026-07-22
+hash: ef46db3751d8e999-40dd9eaf7e578f83
+last_updated: 2026-07-23
 ---
 # Claudine Composition
 
@@ -405,8 +405,10 @@ Everything up to the seam runs normally:
 - Shell commands in the document graph are **executed for real** — they produce actual side effects and their output is interpolated into the frontmatter and body.
 - Shell-command approval and writability checks run normally.
 - Provider and model resolution run normally.
+- Selected-executable availability validation and path resolution are skipped;
+  the selected agent does not need to be installed or present on `PATH`.
 
-The seam sits in `wrap::composition::pipeline::execute_composition_request_inner_with_guard`, immediately after selection resolves. Everything past it is skipped: MCP shadow-HOME materialization, argv and system-prompt overlay construction, the child-CWD switch, the lifecycle runtime, and the provider spawn.
+The seam sits in `wrap::composition::pipeline::execute_composition_request_inner_with_guard`, immediately after provider/model selection resolves. Everything past it is skipped: selected-executable validation/path resolution, MCP shadow-HOME materialization, argv and system-prompt overlay construction, the child-CWD switch, the lifecycle runtime, and the provider spawn. Installed-provider inventory may still run when agent selection or the rendered resolution breakdown needs it; that inventory never makes the selected executable a dry-run prerequisite.
 
 **Dry run fires no lifecycle events and has no filesystem side effects of its own.** Because the seam is ahead of lifecycle dispatch, `initialize`/`blocked`/`finalize` never fire, so a stack carrying `append_line`, `set_frontmatter`, or `shell` cannot touch the workspace during a run the user asked to be a rehearsal, and no dynamic `proxy` route can be traversed. For `inline-compose` the source file is likewise **never mutated** (`last_updated` is untouched).
 

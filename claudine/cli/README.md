@@ -187,7 +187,7 @@ Shared wrapper flags:
 | `--use <ID[,ID...]>` | Add specific MCP catalog IDs or aliases and enable MCP composition |
 | `--sandbox` | Enable provider-specific sandboxing |
 | `--repo` | Use only repo-scoped skills, commands, and agents via a shadow HOME |
-| `--dry-run` | Show what would be executed without launching the child |
+| `--dry-run` | Show what would be executed without requiring or launching the child executable |
 | `--perf` | Emit a detailed performance report to stderr after execution |
 | `-q, --quiet` | Show only the header line; suppress env details |
 | `--silent` | Suppress all Claudine preflight output |
@@ -195,6 +195,10 @@ Shared wrapper flags:
 
 Wrapper behavior:
 
+- **Dry-run executable independence**: provider wrappers render the planned
+  command using the profile's executable name without resolving it on `PATH`;
+  the provider need not be installed. Live runs still validate the executable
+  before launch.
 - **Interactivity default**: providing a prompt string implies non-interactive mode. Use `-i`/`--interactive` to override back to interactive when providing a startup prompt.
 - **Execution line**: displays `Claudine ▸ {provider} {badges} {prompt}` — only the user's prompt text is shown (provider-specific switches are not leaked). Truncated to one terminal line.
 - **Structured streaming**: non-interactive runs use provider-native structured output (stream-json, JSONL, NDJSON, or JSON-RPC 2.0 for Kimi) as the internal control plane. Claudine deserializes each line into a strongly typed `*Event` / `*Envelope` enum from `claudine::stream::protocol` (one module per provider), reconstructs clean assistant text for stdout, and emits metadata summaries to stderr. Every run follows a **9-section model** (execution line, env, system prompt, agent prompt, session ID, thinking prose, tool/info events, final STDOUT, and metadata) with strictly enforced spacing (at most one blank line between sections).

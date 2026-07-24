@@ -392,7 +392,14 @@ Delivers the composed prompt via `profile.prompt_delivery()` (places prompt in a
 
 ##### 6i. Dry Run Check
 
-If `--dry-run`: prints what would be executed and exits with code 0.
+This is the raw provider-wrapper dry-run seam: it renders the planned command
+using the profile's executable name and exits with code 0 without resolving
+that executable on `PATH`.
+
+Composition commands return at their earlier post-composition seam, immediately
+after provider/model resolution. They do not enter the provider/env wiring
+steps above, validate or resolve the selected executable, construct MCP/argv/
+system-prompt launch state, or build the lifecycle runtime.
 
 ##### 6j. Preflight Checks
 

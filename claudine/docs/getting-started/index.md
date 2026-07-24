@@ -159,7 +159,7 @@ which do the same thing regardless of the agent you are using:
     --asp <FILE>             Append a system prompt from a file
     --rsp <FILE>             Replace the providers system prompt with contents from a file
 -t, --timeout <SECONDS>   Timeout in seconds (non-interactive only)
-    --dry-run             Show what would be executed without launching the child
+    --dry-run             Show what would be executed without requiring or launching the child executable
 -q, --quiet              Suppress env details and info; still show the system prompt when set
     --silent              Suppress all Claudine preflight output
     --operation <OP>      Set the OPERATION env var for the wrapped session

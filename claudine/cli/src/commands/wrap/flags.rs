@@ -91,7 +91,7 @@ pub struct WrapperArgs {
     #[arg(long = "stall-timeout", value_name = "DURATION")]
     pub stall_timeout: Option<String>,
 
-    /// Show what would be executed without launching the child.
+    /// Show what would be executed without requiring or launching the child executable.
     #[arg(long)]
     pub dry_run: bool,
 
@@ -259,7 +259,7 @@ pub(crate) fn print_wrapper_help(provider: Provider) {
            \x20     --rsp <FILE>             Replace the provider's system prompt with contents from a file\n\
             \x20 -t, --timeout <DURATION>  Wall-clock timeout like 30s, 5m, 2h (non-interactive only)\n\
          \x20     --stall-timeout <DURATION>  OpenCode stalled-generation backstop like 10m; 0s disables\n\
-         \x20     --dry-run             Show what would be executed without launching the child\n\
+         \x20     --dry-run             Show what would be executed without requiring or launching the child executable\n\
          \x20 -q, --quiet              Suppress env details and info; still show the system prompt when set\n\
          \x20     --silent              Suppress all Claudine preflight output\n\
          \x20     --operation <OP>      Set the OPERATION env var for the wrapped session\n\

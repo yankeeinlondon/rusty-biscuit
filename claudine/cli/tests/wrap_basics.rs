@@ -53,6 +53,11 @@ fn wrapper_help_includes_expected_flags() {
         plain.contains("--perf"),
         "help output should describe performance reporting; stdout was: {plain}"
     );
+    assert!(
+        plain.contains("without requiring or launching the child executable"),
+        "dry-run help must state that the provider executable is not required; \
+         stdout was: {plain}"
+    );
 }
 
 #[test]

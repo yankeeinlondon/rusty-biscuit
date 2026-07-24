@@ -169,7 +169,7 @@ pub struct SharedComposeArgs {
     #[arg(long)]
     pub repo: bool,
 
-    /// Show what would be executed without launching the child.
+    /// Show the composed result without requiring or launching the provider executable.
     #[arg(long)]
     pub dry_run: bool,
 

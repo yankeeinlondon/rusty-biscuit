@@ -336,9 +336,13 @@ Overrides the document's `fail_fast`. Precedence: CLI → document → default `
 
 ### `--dry-run`
 
-Runs the full composition pipeline **up to but not including provider launch**, then emits the composed result instead of sending it to a provider. Available on all three commands; suitable for CI rehearsal because it exercises the identical path minus the spawn.
+Runs composition through provider/model resolution, then emits the composed result before launch wiring begins. Available on all three commands and suitable for CI rehearsal.
 
 - Schema validation, shell-command execution (real side effects), and the shell-audit pre-flight all run normally.
+- Selected-executable availability validation and path resolution do not run;
+  the selected provider need not be installed or present on `PATH`. Claudine
+  may still inventory installed providers when automatic selection or the
+  rendered agent-resolution breakdown requires it.
 - The provider is never launched; `inline-compose --dry-run` therefore **does not mutate** the source file.
 - **stdout** = composed body; **stderr** = highlighted YAML frontmatter + a metadata table (Document as a blue OSC8 link, Description, Agent, Model, YOLO, Session mode/source, and Area when inside a monorepo). So `compose --dry-run doc.md > body.md` captures only the body.
 - `--quiet` / `--silent` have **no effect** under `--dry-run`.
@@ -477,7 +481,7 @@ Claudine can wrap provider CLIs with preflight checks, argument translation, env
 | `-p, --prompt-file <FILE>` | Source initial prompt from a Markdown file (composed with Darkmatter) |
 | `--frontmatter-prompt <FILE>` | Inline composition: use frontmatter prompt as input |
 | `--compose <FILE>` | Chained composition: compose full document and use as prompt |
-| `--dry-run` | Show what would be executed without launching the child |
+| `--dry-run` | Show what would be executed without requiring or launching the child executable |
 | `-q, --quiet` | Show only the header line; suppress env details |
 | `--silent` | Suppress all Claudine preflight output |
 | `--perf` | Print a reconciling performance tree to stderr after the run (see [`--perf`](#--perf)) |
@@ -485,6 +489,10 @@ Claudine can wrap provider CLIs with preflight checks, argument translation, env
 
 ### Wrapper Behavior
 
+- **Dry-run executable independence**: provider wrappers render the planned
+  command using the profile's executable name without resolving it on `PATH`;
+  the provider need not be installed. Live runs still validate the executable
+  before launch.
 - **Interactivity default**: providing a prompt string implies non-interactive mode. Use `-i`/`--interactive` to override back to interactive when providing a startup prompt.
 - **Execution line**: displays `Claudine ▸ {provider} {badges} {prompt}` — only the user's prompt text is shown (provider-specific switches are not leaked). Truncated to one terminal line.
 - **Structured streaming**: non-interactive runs use provider-native structured output (stream-json, JSONL, NDJSON) as the internal control plane. Claudine parses the stream live, reconstructs clean assistant text for stdout, and emits metadata summaries to stderr.

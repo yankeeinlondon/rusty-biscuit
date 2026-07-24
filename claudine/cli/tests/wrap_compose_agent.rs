@@ -297,8 +297,7 @@ fn assert_direct_wrap_dry_run_delivers_prompt(provider_slug: &str) {
     fs::create_dir_all(&path_dir).unwrap();
     seed_minimal_config(workspace.path());
 
-    // Dry-run resolves the provider binary but does not spawn it.
-    write_executable(&path_dir.join(provider_slug), "#!/bin/sh\nexit 0\n");
+    // An empty PATH proves dry-run neither resolves nor spawns the provider.
 
     let output = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")

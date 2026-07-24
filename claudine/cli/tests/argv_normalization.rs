@@ -210,10 +210,13 @@ fn headline_compose_with_plain_setter_behaves_as_before() {
 fn headline_compose_with_setter_then_late_flags_preserves_flag_semantics() {
     let workspace = tempdir().unwrap();
     let fixture = write_fixture(workspace.path(), "clarify.md");
+    let empty_path = workspace.path().join("empty-path");
+    fs::create_dir(&empty_path).unwrap();
 
     let output = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
         .env("TERM_WIDTH", "120")
+        .env("PATH", empty_path)
         .args([
             "compose",
             fixture.to_str().unwrap(),
@@ -258,10 +261,13 @@ fn headline_compose_with_setter_then_late_flags_preserves_flag_semantics() {
 fn headline_compose_with_setter_before_late_flags_preserves_flag_semantics() {
     let workspace = tempdir().unwrap();
     let fixture = write_fixture(workspace.path(), "setter-first.md");
+    let empty_path = workspace.path().join("empty-path");
+    fs::create_dir(&empty_path).unwrap();
 
     let output = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
         .env("TERM_WIDTH", "120")
+        .env("PATH", empty_path)
         .args([
             "compose",
             fixture.to_str().unwrap(),
