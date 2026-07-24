@@ -132,6 +132,15 @@ fn primary_ci_runs_a_bootstrap_preflight_before_fan_out() {
 }
 
 #[test]
+fn area_ci_selects_the_ci_nextest_profile_explicitly() {
+    let shared = workflow("_area-ci.yml");
+    assert!(
+        shared.contains("NEXTEST_PROFILE: ci"),
+        "area CI must explicitly select the `ci` nextest profile, not rely on detection (D6)"
+    );
+}
+
+#[test]
 fn area_ci_treats_rust_warnings_as_failures_and_runs_lint() {
     let shared = workflow("_area-ci.yml");
     assert!(
@@ -182,6 +191,21 @@ fn required_ci_pins_an_exact_rust_toolchain() {
         toolchain.contains("clippy") && toolchain.contains("rustfmt"),
         "the pinned toolchain must ship clippy (lint) and rustfmt (read-only fmt check)"
     );
+}
+
+#[test]
+fn required_ci_honors_the_toolchain_file_without_stable_override() {
+    for name in ["ci.yml", "_area-ci.yml"] {
+        let source = workflow(name);
+        assert!(
+            !source.contains("dtolnay/rust-toolchain@stable"),
+            "{name} must honor rust-toolchain.toml, not override it with floating @stable"
+        );
+        assert!(
+            source.contains("rustup show"),
+            "{name} must materialize the pinned toolchain from rust-toolchain.toml"
+        );
+    }
 }
 
 #[test]

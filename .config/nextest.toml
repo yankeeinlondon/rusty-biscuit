@@ -215,14 +215,31 @@ filter = 'package(claudine-cli) & binary(characterization_error_routes)'
 leak-timeout = { period = "1s", result = "fail" }
 
 [profile.ci]
-# Same behavior for CI environment
-retries = 3
+# Deterministic L1 failures must run exactly ONCE (D6). Blanket retries would run
+# a compile/assertion/timeout failure up to 4× before reporting the same result —
+# masking flakes and quadrupling wasted time. Only the resource-sensitive tiers
+# below keep a scoped, justified retry.
+retries = 0
 # Stricter slow-test marker for CI, same generous termination ceiling.
 slow-timeout = { period = "10s", terminate-after = 3 }
 # Leaked child processes are a hard failure in CI as well.
 leak-timeout = { period = "100ms", result = "fail" }
 # JUnit XML for CI dashboards.
 junit = { path = "test-results.xml" }
+
+# Scoped retry — real-terminal (L2) tier only. tmux/PTY spawn and WezTerm/Kitty
+# remote-control round-trips are inherently timing-sensitive under CI contention;
+# this is a documented resource-contention retry, not a blanket flake mask (D6).
+[[profile.ci.overrides]]
+filter = 'test(/level2_/)'
+retries = 2
+
+# Scoped retry — browser tier only. Headless-Chrome multi-process startup/teardown
+# is timing-sensitive; the tier already runs -j 1 (see `_test_browser`) so retries
+# never compound resource pressure.
+[[profile.ci.overrides]]
+filter = 'test(/browser_/)'
+retries = 2
 
 [[profile.ci.overrides]]
 filter = 'test(=compose_loop_rate_limit_pause_waits_then_continues)'

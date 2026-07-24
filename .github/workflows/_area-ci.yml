@@ -58,6 +58,10 @@ env:
   COLORTERM: truecolor
   # Native checks must not silently accept platform-specific warning drift.
   RUSTFLAGS: "-D warnings"
+  # Explicitly select the CI nextest profile (D6) — every `cargo nextest` in the
+  # area recipes honors this and logs "nextest profile: ci". No reliance on
+  # implicit environment detection.
+  NEXTEST_PROFILE: ci
 
 jobs:
   # macOS floor: compile only. macOS runner minutes bill ~10x Linux, so we catch
@@ -72,7 +76,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
       - name: Install protoc
         uses: arduino/setup-protoc@v3
         with:
@@ -108,7 +113,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
       - name: Install protoc
         uses: arduino/setup-protoc@v3
         with:
@@ -160,9 +166,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
+      # clippy + rustfmt come from rust-toolchain.toml (the single authority).
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
       - name: Install protoc
         uses: arduino/setup-protoc@v3
         with:
@@ -195,7 +201,8 @@ jobs:
       BISCUIT_TEST_LEVEL_REQUIRED: "2"
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
       - name: Install protoc
         uses: arduino/setup-protoc@v3
         with:
@@ -229,7 +236,8 @@ jobs:
       BISCUIT_BROWSER_REQUIRED: "1"
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
       - name: Install protoc
         uses: arduino/setup-protoc@v3
         with:
