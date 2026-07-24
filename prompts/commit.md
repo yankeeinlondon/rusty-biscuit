@@ -5,7 +5,7 @@ step_timeout: 12m
 show_system_prompt: false
 operation: commit
 agent: opencode
-model: minimax/MiniMax-M3
+model: minimax-coding-plan/MiniMax-M3
 initialize:
     stack:
         - when: "length(ctx.staged_files) == 0"

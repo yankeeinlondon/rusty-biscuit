@@ -205,9 +205,8 @@ jobs for unrelated areas.
 - **Heavy areas shard** their L1 run via nextest `--partition count:i/N` across
   parallel matrix jobs (e.g. darkmatter). Combined with the build cache this
   keeps wall-clock under the 30-min ceiling.
-- **Build cache**: the reusable workflow enables `kache` (GitHub Actions cache
-  backend) on the Linux/macOS legs; Windows is unsupported by kache and uses
-  `Swatinem/rust-cache` only.
+- **Build cache**: the reusable workflow enables the pinned `kache` version
+  with the GitHub Actions cache backend on Linux, macOS, and Windows.
 - **Soft legs report but do not gate**: `_area-ci.yml`'s `soft-os` input
   (default `["windows-latest"]`) marks a test leg `continue-on-error`. This is
   how a platform is lit up before its latent cross-platform backlog is burned
@@ -321,7 +320,7 @@ Rust and long wall-clock times.
 | One dependency-aware `ci.yml` caller + reusable `_area-ci.yml` | Uniform platform behavior without starting jobs for unrelated areas. |
 | macOS compile-checked (not full-tested) on PRs | GitHub macOS runners bill ~10× Linux; the `check` job catches macOS compile drift cheaply while full L1 runs on Linux + Windows. |
 | Windows runs full L1 | Windows is the highest-risk platform for silent API/type drift; compile-only would miss runtime-shaped bugs. |
-| `kache` on Linux/macOS legs only | kache does not support Windows (compilation fails there); Windows stays on `Swatinem/rust-cache`. |
+| Pinned `kache` on Linux, macOS, and Windows | The same compiler-cache behavior and cache-key version applies to every native CI leg. |
 
 See also:
 

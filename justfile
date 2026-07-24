@@ -22,6 +22,7 @@ ITALIC := '\033[3m'
 RESET := '\033[0m'
 RED := '\033[31m'
 GREEN := '\033[32m'
+KACHE_VERSION := "0.8.0"
 
 default:
     #!/usr/bin/env bash
@@ -321,15 +322,15 @@ check-canonical *args="":
         exit 1
     fi
 
-# commits all the staged changes using model from MODEL or COMMIT_MODEL in OpenCode
+# commits all the staged changes using model from COMMIT_MODEL or MODEL in OpenCode
 commit *args="":
     @echo ""
     @echo -e "Committing staged changes in the {{ BOLD }}Rusty Biscuit{{ RESET }} monorepo to git"
-    @echo -e "{{ DIM }}{{ ITALIC }}- using the {{ RESET }}{{ ITALIC }}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M3}} {{ DIM }}model{{ RESET }}"
+    @echo -e "{{ DIM }}{{ ITALIC }}- using the {{ RESET }}{{ ITALIC }}${COMMIT_MODEL:-${MODEL:-minimax-coding-plan/MiniMax-M3}} {{ DIM }}model{{ RESET }}"
     @echo ""
     @echo -e "{{ BOLD }}{{ BLUE }}Staged Files:{{ RESET }}"
     @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
-    @claudine compose "@prompts/commit.md" --opencode --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M3}}" -y {{ args }}
+    @claudine compose "@prompts/commit.md" --opencode --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax-coding-plan/MiniMax-M3}}" -y {{ args }}
     @just _speak "git commits completed in rusty-biscuit monorepo"
     @sniff repo git-status 2>/dev/null || exit 0
     @echo
@@ -351,19 +352,21 @@ cp:
     @echo "All committed files from {{ BOLD }}rusty-biscuit{{ RESET }} monorepo have now been pushed to remote."
     @echo
 
-# install rusty-biscuit CLI's which are used in devops
-init: _ensure-build-deps
+# install rusty-biscuit and third-party CLIs used for development
+init: _ensure-build-deps _ensure-kache _ensure-gitnexus
     #!/usr/bin/env bash
     set -euo pipefail
     # Source cargo env in case _ensure-build-deps just installed Rust
     [[ -f "$HOME/.cargo/env" ]] && source "$HOME/.cargo/env"
     echo -e "Initializing the {{ RED }}rusty-biscuit{{ RESET }} monorepo"
     echo
-    echo -e "First step is to ensure CLI's used for devops are installed"
+    echo -e "First step is to ensure CLIs used for development are installed"
     echo
+    (cd sniff && just install)
+    sniff runtime
+    kache doctor
     (cd biscuit-terminal && just install)
     (cd darkmatter && just install)
-    (cd sniff && just install)
     (cd playa && just install)
     (cd biscuit-speaks && just install)
 
@@ -400,6 +403,110 @@ _ensure-build-deps:
         exit 1
     fi
     echo "Build dependencies installed."
+
+# ensure the repository-pinned Rust compiler cache is available
+_ensure-kache:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [[ -f "$HOME/.cargo/env" ]] && source "$HOME/.cargo/env"
+
+    installed_version=""
+    if command -v kache &> /dev/null; then
+        installed_version=$(kache --version | awk '{print $2}')
+    fi
+
+    if [[ "$installed_version" == "{{ KACHE_VERSION }}" ]]; then
+        exit 0
+    fi
+
+    if command -v cargo-binstall &> /dev/null; then
+        RUSTC_WRAPPER="" cargo binstall \
+            --no-confirm \
+            --version "{{ KACHE_VERSION }}" \
+            kache
+    else
+        RUSTC_WRAPPER="" cargo install \
+            --locked \
+            --force \
+            --version "{{ KACHE_VERSION }}" \
+            kache
+    fi
+
+    kache --version
+
+# ensure GitNexus and its native parser are available for this host
+_ensure-gitnexus:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if ! command -v node &> /dev/null || ! command -v npm &> /dev/null; then
+        echo "GitNexus requires Node.js 22 or newer and npm." >&2
+        exit 1
+    fi
+
+    node_major=$(node -p 'Number(process.versions.node.split(".")[0])')
+    if (( node_major < 22 )); then
+        echo "GitNexus requires Node.js 22 or newer; found $(node --version)." >&2
+        exit 1
+    fi
+
+    npm_global_root_native=$(npm root --global)
+    npm_global_root="$npm_global_root_native"
+    if command -v cygpath &> /dev/null; then
+        npm_global_root=$(cygpath --unix "$npm_global_root_native")
+    fi
+    gitnexus_root="$npm_global_root/gitnexus"
+    gitnexus_root_for_node="$gitnexus_root"
+    if command -v cygpath &> /dev/null; then
+        gitnexus_root_for_node=$(cygpath --windows "$gitnexus_root")
+    fi
+
+    run_global_npm() {
+        if [[ -w "$npm_global_root" || (-d "$gitnexus_root" && -w "$gitnexus_root") ]]; then
+            npm "$@"
+        elif command -v sudo &> /dev/null; then
+            sudo npm "$@"
+        else
+            echo "The npm global package directory is not writable: $npm_global_root" >&2
+            echo "Configure a user-writable npm prefix, then run just init again." >&2
+            return 1
+        fi
+    }
+
+    if ! command -v gitnexus &> /dev/null || [[ ! -f "$gitnexus_root/package.json" ]]; then
+        echo "Installing GitNexus..."
+        run_global_npm install --global gitnexus@latest
+    fi
+
+    if [[ ! -d "$gitnexus_root/node_modules/tree-sitter" ]]; then
+        echo "GitNexus installation is missing its tree-sitter dependency." >&2
+        exit 1
+    fi
+
+    if ! GITNEXUS_TREE_SITTER="$gitnexus_root_for_node/node_modules/tree-sitter" \
+        node -e 'require(process.env.GITNEXUS_TREE_SITTER)' &> /dev/null; then
+        echo "Building GitNexus tree-sitter support for $(node -p '`${process.platform}-${process.arch}, Node ${process.versions.node}`')..."
+        run_global_npm rebuild tree-sitter \
+            --prefix "$gitnexus_root" \
+            --build-from-source
+    fi
+
+    GITNEXUS_TREE_SITTER="$gitnexus_root_for_node/node_modules/tree-sitter" \
+        node -e 'require(process.env.GITNEXUS_TREE_SITTER)'
+    gitnexus --version
+    echo "GitNexus is ready."
+
+# report the active compiler-cache configuration and health
+cache-status:
+    @sniff runtime
+    @kache doctor
+    @kache stats
+    @kache daemon
+
+# install kache's optional login service for remote caching
+cache-daemon-install:
+    @kache daemon install
+    @kache daemon
 
 # sync a just recipe from one justfile to all others that have it
 sync-recipe recipe source:

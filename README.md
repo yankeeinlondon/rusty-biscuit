@@ -79,8 +79,12 @@ uv tool install rust-just
 
 Once installed run `just init` from the repo's root which will:
 
-- ensure you have all necessary build tools for you operating system
-- install some core CLI's from this monorepo to make sure all your `justfile` configurations will work with full fidelity
+- ensure you have all necessary build tools for your operating system
+- install and verify the repository-pinned kache compiler cache
+- install some core CLIs from this monorepo to make sure all your `justfile` configurations will work with full fidelity
+
+See [Development Environment Initialization](./docs/initization.md) for the
+complete process, platform behavior, and troubleshooting guidance.
 
 At this point you're ready to explore, install, test, whatever you like.
 

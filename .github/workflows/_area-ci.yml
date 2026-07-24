@@ -5,8 +5,8 @@ name: area-ci
 # The dependency-aware `ci.yml` matrix calls this via `workflow_call` so
 # platform behavior stays uniform across the monorepo. See
 # `docs/testing-strategy.md` → "Platform Coverage (CI)" for the policy this
-# encodes (macOS compile-check only, full L1 on Linux + Windows, kache on the
-# non-Windows legs, nextest sharding for heavy areas).
+# encodes (macOS compile-check only, full L1 on Linux + Windows, kache on every
+# supported runner, nextest sharding for heavy areas).
 
 on:
   workflow_call:
@@ -44,7 +44,7 @@ on:
         type: boolean
         default: false
       kache:
-        description: "Enable the kache RUSTC_WRAPPER (GitHub Actions cache backend) on non-Windows legs."
+        description: "Enable the kache RUSTC_WRAPPER with the GitHub Actions cache backend."
         type: boolean
         default: true
       ai-provider-stubs:
@@ -78,8 +78,10 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Enable kache
-        if: ${{ inputs.kache && runner.os != 'Windows' }}
+        if: ${{ inputs.kache }}
         uses: kunobi-ninja/kache-action@v1
+        with:
+          version: 0.8.0
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -110,8 +112,10 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Enable kache
-        if: ${{ inputs.kache && runner.os != 'Windows' }}
+        if: ${{ inputs.kache }}
         uses: kunobi-ninja/kache-action@v1
+        with:
+          version: 0.8.0
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -162,6 +166,8 @@ jobs:
       - name: Enable kache
         if: ${{ inputs.kache }}
         uses: kunobi-ninja/kache-action@v1
+        with:
+          version: 0.8.0
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -193,6 +199,8 @@ jobs:
       - name: Enable kache
         if: ${{ inputs.kache }}
         uses: kunobi-ninja/kache-action@v1
+        with:
+          version: 0.8.0
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -221,6 +229,8 @@ jobs:
       - name: Enable kache
         if: ${{ inputs.kache }}
         uses: kunobi-ninja/kache-action@v1
+        with:
+          version: 0.8.0
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
