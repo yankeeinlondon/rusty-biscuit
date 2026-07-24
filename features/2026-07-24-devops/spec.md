@@ -1,6 +1,8 @@
 ---
 status: draft
-reviewed: false
+reviewed: true
+reviewed_by: claude/default
+reviewed_on: 2026-07-24
 ---
 
 # Reliable CI/CD and DevOps Specification
@@ -196,6 +198,15 @@ The pinned kache version must have one authoritative repository value consumed
 by local bootstrap and GitHub Actions. Local recipes, documentation, and
 workflows must not independently drift to different versions.
 
+Today the local authority is `KACHE_VERSION := "0.8.0"` in the root `justfile`
+(consumed by `_ensure-kache`), while GitHub Actions delegate version selection
+to `kunobi-ninja/kache-action`. These are two independent authorities that can
+drift. The implementation must collapse them to one: either the action reads the
+justfile-exported value, or both read a single dedicated file (for example
+`.github/kache-version` or a repository variable) that the justfile also
+consumes. The chosen mechanism must fail loudly — not silently fall back to a
+floating version — if the two sides disagree.
+
 The implementation must verify the installed version before exporting
 `RUSTC_WRAPPER`. Cache keys must include all compatibility inputs required by
 kache, including its version, target platform, Rust toolchain, and any other
@@ -222,6 +233,19 @@ Preflight must validate:
 At minimum, bootstrap is exercised on Linux, Windows, and macOS whenever a
 global CI/tooling file can affect those platforms. Package jobs depend on the
 successful preflight result.
+
+Preflight OS breadth scales with scope so that healthy package-local changes do
+not pay a triple-OS penalty:
+
+- A package-local change runs preflight on the scope-calculation host (Linux)
+  plus only the operating systems its selected areas actually require under
+  `full_os`/`soft_os` policy.
+- A change to a global CI/tooling input (see D11) runs preflight on all three
+  operating systems before any fan-out, because such a change can break
+  bootstrap on a platform none of the changed packages name directly.
+
+Package jobs depend on the successful preflight result for the operating systems
+they target.
 
 If preflight fails, no dependent area matrix is launched. The workflow must
 report one concise bootstrap failure per affected OS instead of dozens of
@@ -254,6 +278,15 @@ continue after another area fails.
 Required pull-request and `main` validation must run on a repository-controlled
 Rust version rather than silently changing whenever the `stable` channel moves.
 The exact pin and update mechanism must be explicit and reviewable.
+
+The concrete location of that pin is a load-bearing decision, not an
+implementation detail, because `rust-toolchain.toml` currently pins only
+`channel = "stable"` and every workflow overrides it with
+`dtolnay/rust-toolchain@stable`. That same `stable` floating channel is the
+documented cause of rustfmt drift poisoning `main`↔branch merges (see the repo
+CLAUDE.md "Formatting" section). Pinning an exact version therefore also
+stabilizes rustfmt and Clippy, but it changes what toolchain local developers
+resolve. The mechanism is resolved in Open Question OQ1.
 
 A separate scheduled or manually dispatched compatibility workflow tests the
 current latest stable toolchain. Latest-stable failures are advisory until the
@@ -367,6 +400,21 @@ The affected-scope test suite must fail if a workspace member is added without
 one of these outcomes. It must also fail for duplicate ownership, nonexistent
 package names, invalid area directories, or unsupported platform policy.
 
+"Platform policy" here refers to the per-area fields already present in
+`.github/ci/areas.json`: `full_os` (the exhaustive OS matrix an area must gate
+on) and `soft_os` (operating systems whose failures are advisory for that area).
+The ownership validator must treat these as first-class:
+
+- An area's `full_os`/`soft_os` entries must name only supported runner OSes.
+- `soft_os` must not list an OS that the area's cross-platform contract requires
+  to gate. This encodes the corresponding non-goal ("does not make Windows
+  failures soft by default …") as a testable rule rather than a convention.
+- New capability policy introduced by this spec — shard counts (D7), backend
+  requirements (D8), native prerequisites (D9), and canary membership (D11) —
+  is declared in the same per-area records so that one file is the single
+  policy surface. Adding an area without required capability fields, or with an
+  unknown field, fails validation.
+
 The root documentation and existing matrix-testing specification must be
 updated where they still state stale workspace or area counts.
 
@@ -378,10 +426,16 @@ workflow may continue to select every affected area.
 
 Before full fan-out, global changes run a small canary set that exercises:
 
-- a small pure-Rust area;
-- a native-dependency area;
-- a heavy/sharded area;
+- a small pure-Rust area (candidate: `biscuit-hash`);
+- a native-dependency area (candidate: `playa`, once its ALSA provisioning is
+  fixed under D9);
+- a heavy/sharded area (candidate: `darkmatter` or `claudine`);
 - the three supported operating systems where relevant.
+
+Canary membership is declared as area policy in `.github/ci/areas.json` (a
+per-area `canary` flag), not hard-coded in the workflow, so the set evolves with
+the same review path as shards and platform policy. The candidates above are the
+recommended initial selection, not a permanent constant.
 
 Canaries supplement bootstrap and catch shared recipe errors that metadata alone
 cannot detect. A canary failure prevents the remaining full-scope fan-out.
@@ -411,12 +465,14 @@ contract they verify.
 
 Release-plz must not run concurrently with unvalidated `main` changes. It should
 be triggered after the required primary CI workflow succeeds on `main`, or by an
-equivalent mechanism that enforces that dependency.
+equivalent mechanism that enforces that dependency. The concrete trigger
+mechanism is resolved in Open Question OQ2.
 
 Release calculation must be hermetic:
 
 - begin from a clean checkout;
-- define the role of nested `schematic/Cargo.lock`;
+- define the role of nested `schematic/Cargo.lock` (resolved in Open Question
+  OQ3);
 - use locked/frozen Cargo behavior where compatible with release-plz;
 - detect and report any file mutation before a branch checkout;
 - either prevent expected generated lockfile changes or isolate them in a
@@ -489,6 +545,122 @@ scope-calculation tests are included whenever their inputs change.
 An explicitly documented CI aggregation test may exercise the full curated
 matrix. Routine local verification must not use a bare root Cargo lifecycle
 command or an unscoped root `just` lifecycle recipe.
+
+## Open Questions
+
+These three forks are load-bearing design decisions rather than implementation
+details. Each carries a recommendation, but each should be confirmed before the
+phase that depends on it begins. The Delivery Plan below assumes the recommended
+option in each case.
+
+### OQ1: Where does the required Rust toolchain pin live? (gates Phase 1, D5)
+
+The required-CI toolchain must stop floating with `stable`. The pin's location
+determines whether it also fixes the documented rustfmt-drift hazard and whether
+local developers are forced onto the pinned version.
+
+- **Option A — Pin an exact version in `rust-toolchain.toml`** (e.g.
+  `channel = "1.89.0"`), and drop the `@stable` override from required
+  workflows so they honor the file.
+  - Pros: one source of truth for local and CI; rustup auto-installs it so
+    local builds match CI exactly; **stabilizes rustfmt and Clippy, directly
+    curing the `main`↔branch fmt-drift poisoning** called out in CLAUDE.md;
+    already the file every tool reads.
+  - Cons: every contributor is moved onto the pinned toolchain on next build;
+    the latest-stable advisory workflow must override the file explicitly.
+- **Option B — Keep `rust-toolchain.toml` at `stable`; pin only in workflows**
+  via a repository variable consumed by `dtolnay/rust-toolchain@<version>`.
+  - Pros: local developer experience is unchanged; the pin is CI-only and easy
+    to bump in one place.
+  - Cons: local ≠ CI, so a contributor's `stable` rustfmt still drifts from
+    CI's — the fmt-drift hazard survives; two toolchain concepts (local
+    "stable", CI "pinned") to reason about.
+- **Option C — Introduce a dedicated `.github/rust-version` file** consumed by
+  both a `rust-toolchain.toml`-generating step and the workflows.
+  - Pros: single authoritative value; keeps `rust-toolchain.toml` generated,
+    not hand-edited.
+  - Cons: adds a generation/verification step and a new failure mode; more
+    moving parts than Option A for the same outcome.
+
+**Recommendation: Option A.** It is the only option that also resolves the
+rustfmt-drift problem the repo already documents as actively poisoning merges,
+and it keeps local and CI toolchains provably identical. The "forces local
+upgrade" cost is a one-time `rustup` install and is exactly the behavior a
+controlled toolchain is meant to produce. The advisory latest-stable workflow
+(already required by D5) supplies the escape hatch for testing newer compilers.
+
+### OQ2: How is release automation gated on successful CI? (gates Phase 0, D13)
+
+Release-plz currently runs on every push to `main`, beside — and racing — the
+validation it should follow.
+
+- **Option A — `workflow_run` trigger:** the Release-plz workflow triggers on
+  `workflow_run` of the primary CI workflow with `conclusion == success` on
+  `main`.
+  - Pros: native GitHub dependency; no change to the primary workflow;
+    release cannot start until CI is green.
+  - Cons: `workflow_run` workflows execute from the default-branch definition
+    (a known footgun for editing the trigger); slightly indirect to reason
+    about in the Actions UI.
+- **Option B — Branch protection + required status check, release-plz gated on
+  the merged PR:** keep release-plz on `pull_request: closed`/`merged`, and
+  rely on branch protection to guarantee `main` only advances through green CI.
+  - Pros: no new trigger; the "release" job already keys off a merged, labeled
+    PR; branch protection is the intended enforcement point.
+  - Cons: the `push`-triggered `release-pr` job still races; requires branch
+    protection to be configured and kept correct out-of-band (not visible in
+    the repo).
+- **Option C — Fold release into the primary CI workflow** as a final job
+  `needs:`-gated on all validation jobs.
+  - Pros: strongest ordering guarantee, fully in-repo and reviewable.
+  - Cons: couples release cadence to the CI workflow lifecycle; complicates the
+    "one primary validation run per commit" story (D12) by mixing publication
+    into validation; larger blast radius for CI edits.
+
+**Recommendation: Option A.** It expresses the dependency the spec actually
+wants ("release follows successful required CI") directly and in-repo, without
+depending on branch-protection state that is invisible to reviewers, and without
+entangling publication with validation as Option C does. The `workflow_run`
+default-branch footgun is documented and one-time; note it in a workflow comment
+per the Required Documentation Updates.
+
+### OQ3: What is the role of nested `schematic/Cargo.lock`? (gates Phase 0, D13)
+
+`schematic/schema` is excluded from the workspace, so `schematic/` carries its
+own `Cargo.lock` that release-plz's transient checkout mutated, which then
+blocked its return to `main`. The lockfile's tracked status must be decided.
+
+- **Option A — Commit and pin it; run release-plz with locked/frozen Cargo:**
+  keep `schematic/Cargo.lock` tracked and require `--locked` so no operation
+  rewrites it mid-run; any needed update is a deliberate, reviewed commit.
+  - Pros: reproducible resolution for the excluded crate; the mutation that
+    caused the failure cannot recur under `--locked`; matches how workspace
+    lockfiles are already treated.
+  - Cons: contributors must remember to update it deliberately when
+    `schematic/schema` deps change; release-plz must support `--locked` for the
+    step that touched it.
+- **Option B — Gitignore it:** stop tracking `schematic/Cargo.lock` entirely.
+  - Pros: nothing to dirty, so the checkout conflict disappears.
+  - Cons: loses reproducible builds for the excluded crate; a library-style
+    lockfile omission that undercuts the reproducibility the rest of the repo
+    relies on; CI would resolve fresh each run.
+- **Option C — Isolate release-plz in a disposable worktree:** let release-plz
+  operate in a throwaway worktree whose lifecycle never touches the primary
+  checkout's `schematic/Cargo.lock`.
+  - Pros: leaves the tracked-vs-ignored question untouched; contains any
+    mutation to a directory that is discarded.
+  - Cons: more workflow machinery; the excluded-crate lockfile can still drift
+    silently since nothing pins it; interacts with release-plz's own worktree
+    assumptions (the very thing that failed).
+
+**Recommendation: Option A.** The failure was a *dirty-file-blocks-checkout*
+race, and `--locked` plus a committed lockfile removes the mutation at its
+source while preserving reproducible resolution for the excluded crate —
+consistent with how the workspace lockfile is handled. Option C only relocates
+the mutation without pinning it; Option B trades a real reproducibility
+guarantee for convenience. If a specific release-plz step genuinely must
+regenerate the lockfile, wrap only that step in Option C's disposable worktree
+as a targeted supplement to A, not a replacement.
 
 ## Delivery Plan
 
@@ -649,6 +821,10 @@ Implementation must update, as applicable:
 - repository and area dependency documentation for native tools;
 - `.claude/skills/rust-testing/`;
 - `.claude/skills/rust-devops/kache.md`;
+- the `.github/ci/areas.json` policy documentation, covering every field the
+  ownership validator enforces — existing (`check_args`, `soft_os`, `full_os`,
+  `shards`, `l2`, `browser`) and newly introduced by this spec (`canary`,
+  backend requirements, and native-prerequisite declarations);
 - root contributor/agent guidance containing stale workspace counts;
 - the earlier matrix-testing specification where its current-state statements
   have drifted;
