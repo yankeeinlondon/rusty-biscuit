@@ -79,13 +79,21 @@ fn area_ci_activates_kache_through_the_verified_composite_action() {
         !shared.contains("version: 0.8.0"),
         "area CI must not carry a duplicate hard-coded kache version literal"
     );
+    // Opt-in gating flows through the composite's `enabled` input, NOT an `if:`
+    // on the `uses:` step — a step that combines `if: ${{ inputs.kache }}` with a
+    // local composite `uses:` fails to load on the runner.
     assert!(
-        shared.contains("if: ${{ inputs.kache }}"),
-        "kache activation must stay opt-in per the `kache` input"
+        shared.contains("enabled: ${{ inputs.kache }}"),
+        "kache activation must stay opt-in by passing the `kache` input to the composite"
     );
 
-    // The composite action is the single point that reads and verifies the pin.
+    // The composite action is the single point that reads and verifies the pin,
+    // and gates itself on its declared `enabled` input.
     let action = read(".github/actions/enable-kache/action.yml");
+    assert!(
+        action.contains("enabled:") && action.contains("inputs.enabled == 'true'"),
+        "enable-kache must gate on a declared `enabled` input, not a caller `if:`"
+    );
     assert!(
         action.contains(".github/kache-version"),
         "enable-kache must resolve the pinned version from the single authority"

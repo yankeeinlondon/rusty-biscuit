@@ -78,8 +78,9 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Enable and verify kache
-        if: ${{ inputs.kache }}
         uses: ./.github/actions/enable-kache
+        with:
+          enabled: ${{ inputs.kache }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -110,8 +111,9 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Enable and verify kache
-        if: ${{ inputs.kache }}
         uses: ./.github/actions/enable-kache
+        with:
+          enabled: ${{ inputs.kache }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -160,8 +162,9 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Enable and verify kache
-        if: ${{ inputs.kache }}
         uses: ./.github/actions/enable-kache
+        with:
+          enabled: ${{ inputs.kache }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -191,8 +194,9 @@ jobs:
       - name: Install tmux
         run: sudo apt-get update && sudo apt-get install -y tmux
       - name: Enable and verify kache
-        if: ${{ inputs.kache }}
         uses: ./.github/actions/enable-kache
+        with:
+          enabled: ${{ inputs.kache }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -219,8 +223,9 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Enable and verify kache
-        if: ${{ inputs.kache }}
         uses: ./.github/actions/enable-kache
+        with:
+          enabled: ${{ inputs.kache }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"

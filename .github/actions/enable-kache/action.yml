@@ -3,14 +3,25 @@ description: >-
   Install, activate, and verify the repository-pinned kache RUSTC_WRAPPER from
   the single version authority at .github/kache-version. A missing executable or
   version mismatch is a bootstrap failure; a cache miss or reservation collision
-  is not (kache falls through to real rustc). Callers gate this with
-  `if: ${{ inputs.kache }}` so non-cache jobs never require RUSTC_WRAPPER=kache.
+  is not (kache falls through to real rustc).
+
+# Gating lives on the `enabled` input rather than on the caller's `uses:` step,
+# because a step that combines `if: ${{ inputs.kache }}` with a LOCAL composite
+# `uses:` fails to load ("Unrecognized named-value: 'inputs'"). Callers pass
+# `enabled: ${{ inputs.kache }}`; when it is not 'true', every step no-ops so
+# non-cache jobs never require RUSTC_WRAPPER=kache.
+inputs:
+  enabled:
+    description: "Install and activate kache when 'true'; otherwise no-op."
+    required: false
+    default: "true"
 
 runs:
   using: composite
   steps:
     - name: Resolve pinned kache version
       id: pinned
+      if: ${{ inputs.enabled == 'true' }}
       shell: bash
       run: |
         set -euo pipefail
@@ -22,6 +33,7 @@ runs:
         echo "version=$version" >>"$GITHUB_OUTPUT"
 
     - name: Install and activate kache
+      if: ${{ inputs.enabled == 'true' }}
       uses: kunobi-ninja/kache-action@v1
       with:
         version: ${{ steps.pinned.outputs.version }}
@@ -30,6 +42,7 @@ runs:
     # command runs in a later step. A mismatch fails this named bootstrap step
     # rather than silently building through an unexpected wrapper.
     - name: Verify kache executable and version
+      if: ${{ inputs.enabled == 'true' }}
       shell: bash
       run: |
         set -euo pipefail
