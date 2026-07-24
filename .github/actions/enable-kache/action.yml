@@ -8,8 +8,9 @@ description: >-
 # Gating lives on the `enabled` input rather than on the caller's `uses:` step,
 # because a step that combines `if: ${{ inputs.kache }}` with a LOCAL composite
 # `uses:` fails to load ("Unrecognized named-value: 'inputs'"). Callers pass
-# `enabled: ${{ inputs.kache }}`; when it is not 'true', every step no-ops so
-# non-cache jobs never require RUSTC_WRAPPER=kache.
+# `enabled: ${{ inputs.kache && runner.os != 'Windows' }}`; when it is not 'true'
+# every step no-ops, so non-cache jobs never require RUSTC_WRAPPER=kache. Windows
+# is excluded because kache-action@v1 rejects win32-x64 ("Unsupported platform").
 inputs:
   enabled:
     description: "Install and activate kache when 'true'; otherwise no-op."

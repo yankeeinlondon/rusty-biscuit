@@ -80,7 +80,10 @@ jobs:
       - name: Enable and verify kache
         uses: ./.github/actions/enable-kache
         with:
-          enabled: ${{ inputs.kache }}
+          # kache-action@v1 rejects win32-x64 ("Unsupported platform"), so the
+          # cache is Linux/macOS-only. Windows builds without it (D1: a missing
+          # cache must reduce performance, never make a platform's build fail).
+          enabled: ${{ inputs.kache && runner.os != 'Windows' }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -113,7 +116,10 @@ jobs:
       - name: Enable and verify kache
         uses: ./.github/actions/enable-kache
         with:
-          enabled: ${{ inputs.kache }}
+          # kache-action@v1 rejects win32-x64 ("Unsupported platform"), so the
+          # cache is Linux/macOS-only. Windows builds without it (D1: a missing
+          # cache must reduce performance, never make a platform's build fail).
+          enabled: ${{ inputs.kache && runner.os != 'Windows' }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -164,7 +170,10 @@ jobs:
       - name: Enable and verify kache
         uses: ./.github/actions/enable-kache
         with:
-          enabled: ${{ inputs.kache }}
+          # kache-action@v1 rejects win32-x64 ("Unsupported platform"), so the
+          # cache is Linux/macOS-only. Windows builds without it (D1: a missing
+          # cache must reduce performance, never make a platform's build fail).
+          enabled: ${{ inputs.kache && runner.os != 'Windows' }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -196,7 +205,10 @@ jobs:
       - name: Enable and verify kache
         uses: ./.github/actions/enable-kache
         with:
-          enabled: ${{ inputs.kache }}
+          # kache-action@v1 rejects win32-x64 ("Unsupported platform"), so the
+          # cache is Linux/macOS-only. Windows builds without it (D1: a missing
+          # cache must reduce performance, never make a platform's build fail).
+          enabled: ${{ inputs.kache && runner.os != 'Windows' }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -225,7 +237,10 @@ jobs:
       - name: Enable and verify kache
         uses: ./.github/actions/enable-kache
         with:
-          enabled: ${{ inputs.kache }}
+          # kache-action@v1 rejects win32-x64 ("Unsupported platform"), so the
+          # cache is Linux/macOS-only. Windows builds without it (D1: a missing
+          # cache must reduce performance, never make a platform's build fail).
+          enabled: ${{ inputs.kache && runner.os != 'Windows' }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"

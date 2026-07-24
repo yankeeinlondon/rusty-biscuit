@@ -83,8 +83,8 @@ fn area_ci_activates_kache_through_the_verified_composite_action() {
     // on the `uses:` step — a step that combines `if: ${{ inputs.kache }}` with a
     // local composite `uses:` fails to load on the runner.
     assert!(
-        shared.contains("enabled: ${{ inputs.kache }}"),
-        "kache activation must stay opt-in by passing the `kache` input to the composite"
+        shared.contains("enabled: ${{ inputs.kache && runner.os != 'Windows' }}"),
+        "kache must be opt-in AND Linux/macOS-only (kache-action@v1 rejects win32-x64)"
     );
 
     // The composite action is the single point that reads and verifies the pin,
