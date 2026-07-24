@@ -76,6 +76,24 @@ Documented in:
 - `plan.md` → Planning Baseline bullet corrected with pointer to the spec resolution.
 - New guard test `lockfiles_stay_gitignored_so_release_checkout_cannot_block` protects the premise against a future force-add. Contract suite now 10/10.
 
+## Branch CI run — learnings (PR #2, branch `devops-phase-1-bootstrap-release`)
+
+Three CI runs on the branch (`pull_request` event → full scope, since this PR changes global inputs):
+
+**Validated working in real CI (the CI-only ACs I could not check locally):**
+- `scope` job classifies the global change as `full` and emits a **3-OS preflight matrix** (AC33 mechanics).
+- `preflight` passes on **ubuntu + windows + macos** — the cross-platform shell assumptions I flagged (`just check-canonical` bash/grep on Windows, `python3` on Windows, wrapper-free `cargo metadata`) all hold (AC1, AC34 mechanics).
+- `needs: [scope, preflight]` gating works — area jobs start only after preflight is green.
+- After fixes, **0 kache failures** and **0 infra failures**; remaining reds are pre-existing product/lint (`biscuit-speaks` unused var, `playa` lint) = Phase 2/3, exactly as the spec's Evidence predicted.
+
+**Two bugs the branch run caught that ALL local checks (actionlint + text contract tests) missed:**
+1. **Composite `if:` load error.** A step with both `if: ${{ inputs.kache }}` and `uses: <local composite>` fails at workflow-prep: *"Unrecognized named-value: 'inputs'"*. Broke every area job at the kache step. Fix: gate inside the composite via a declared `enabled` input; caller passes `enabled: ${{ ... }}`. (commit `3eaf5e50`)
+2. **kache-action@v1 is Windows-incompatible.** `kunobi-ninja/kache-action@v1` errors *"Unsupported platform: win32-x64"*. Pre-existing (old workflow ran it on Windows unconditionally) but blocking for `soft_os: []` areas like `biscuit-file`. Fix: `enabled: ${{ inputs.kache && runner.os != 'Windows' }}` — kache is Linux/macOS-only; Windows builds without the cache (D1). (commit `73baba87`)
+
+**Doc follow-up (Phase 2/4):** `.claude/skills/rust-devops/kache.md` says "Windows … Supported" — true for the kache *binary*, but the *kache-action@v1* rejects win32-x64. Worth a note when kache docs are updated.
+
+Contract test updated both times so the text checks now encode the corrected patterns. Local suite: 10/10 Rust, 11/11 Python, actionlint clean.
+
 ## Files Changed
 
 - `.cargo/config.toml` — **deleted** (removed mandatory global `rustc-wrapper = "kache"`; `.cargo/` now empty/gone). D1.
