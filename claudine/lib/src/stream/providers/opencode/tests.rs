@@ -132,6 +132,35 @@ fn error_event_emits_error() {
 }
 
 #[test]
+fn current_opencode_error_shape_preserves_provider_message() {
+    let (events, mut parser) = new_parser();
+    parser.feed_line(
+        r#"{"type":"error","error":{"name":"UnknownError","data":{"message":"Model not found: minimax/MiniMax-M3. Did you mean: MiniMax-M3?"}}}"#,
+    );
+    parser.feed_line(
+        r#"{"type":"error","error":{"name":"UnknownError","data":{"message":"Unexpected server error. Check server logs for details."}}}"#,
+    );
+
+    let collected = events.lock().unwrap().clone();
+    assert_eq!(collected.len(), 1);
+    assert!(matches!(
+        collected[0],
+        SemanticEvent::Error {
+            ref message,
+            terminal: true,
+            ..
+        } if message == "Model not found: minimax/MiniMax-M3. Did you mean: MiniMax-M3?"
+    ));
+
+    let summary = parser.finish(1);
+    assert_eq!(summary.error_kind.as_deref(), Some("UnknownError"));
+    assert_eq!(
+        summary.error_message.as_deref(),
+        Some("Model not found: minimax/MiniMax-M3. Did you mean: MiniMax-M3?")
+    );
+}
+
+#[test]
 fn unknown_event_becomes_provider_extension() {
     let (events, mut parser) = new_parser();
     parser

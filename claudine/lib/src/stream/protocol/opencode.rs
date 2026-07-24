@@ -262,7 +262,7 @@ pub struct OpenCodeUsage {
     pub total_tokens: Option<u64>,
 }
 
-/// Error event with flat `error_type`/`error_message` OR nested `error` object.
+/// Error event with flat `error_type`/`error_message` or a nested `error` object.
 #[derive(Debug, Default, Deserialize)]
 pub struct OpenCodeError {
     #[serde(default)]
@@ -280,6 +280,16 @@ pub struct OpenCodeErrorDetail {
     #[serde(rename = "type", default)]
     pub kind: Option<String>,
     #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub message: Option<String>,
+    #[serde(default)]
+    pub data: Option<OpenCodeErrorData>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct OpenCodeErrorData {
+    #[serde(default)]
     pub message: Option<String>,
 }
 
@@ -287,13 +297,26 @@ impl OpenCodeError {
     pub fn resolved_kind(&self) -> Option<String> {
         self.error_type
             .clone()
-            .or_else(|| self.error.as_ref().and_then(|e| e.kind.clone()))
+            .or_else(|| {
+                self.error
+                    .as_ref()
+                    .and_then(|error| error.kind.clone().or_else(|| error.name.clone()))
+            })
     }
 
     pub fn resolved_message(&self) -> Option<String> {
         self.error_message
             .clone()
-            .or_else(|| self.error.as_ref().and_then(|e| e.message.clone()))
+            .or_else(|| {
+                self.error.as_ref().and_then(|error| {
+                    error.message.clone().or_else(|| {
+                        error
+                            .data
+                            .as_ref()
+                            .and_then(|data| data.message.clone())
+                    })
+                })
+            })
             .or_else(|| self.message.clone())
     }
 }
