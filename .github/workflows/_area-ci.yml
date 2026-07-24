@@ -77,11 +77,9 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Enable kache
+      - name: Enable and verify kache
         if: ${{ inputs.kache }}
-        uses: kunobi-ninja/kache-action@v1
-        with:
-          version: 0.8.0
+        uses: ./.github/actions/enable-kache
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -111,11 +109,9 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Enable kache
+      - name: Enable and verify kache
         if: ${{ inputs.kache }}
-        uses: kunobi-ninja/kache-action@v1
-        with:
-          version: 0.8.0
+        uses: ./.github/actions/enable-kache
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -163,11 +159,9 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Enable kache
+      - name: Enable and verify kache
         if: ${{ inputs.kache }}
-        uses: kunobi-ninja/kache-action@v1
-        with:
-          version: 0.8.0
+        uses: ./.github/actions/enable-kache
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -196,11 +190,9 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Install tmux
         run: sudo apt-get update && sudo apt-get install -y tmux
-      - name: Enable kache
+      - name: Enable and verify kache
         if: ${{ inputs.kache }}
-        uses: kunobi-ninja/kache-action@v1
-        with:
-          version: 0.8.0
+        uses: ./.github/actions/enable-kache
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -226,11 +218,9 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Enable kache
+      - name: Enable and verify kache
         if: ${{ inputs.kache }}
-        uses: kunobi-ninja/kache-action@v1
-        with:
-          version: 0.8.0
+        uses: ./.github/actions/enable-kache
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"

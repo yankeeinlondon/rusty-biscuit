@@ -111,6 +111,62 @@ class AffectedScopeTests(unittest.TestCase):
         self.assertTrue(scope["full_scope"])
         self.assertEqual(["alpha", "beta"], [area["area"] for area in scope["areas"]])
 
+    def test_windows_path_separators_select_owning_area(self) -> None:
+        scope = calculate_scope(
+            [r"alpha\lib\src\lib.rs"],
+            self.root,
+            self.metadata,
+            self.area_config,
+        )
+        self.assertEqual(["alpha", "beta"], [area["area"] for area in scope["areas"]])
+        self.assertEqual("package", scope["change_class"])
+
+    def test_package_local_change_derives_area_preflight_os(self) -> None:
+        scope = calculate_scope(
+            ["alpha/lib/src/lib.rs"],
+            self.root,
+            self.metadata,
+            self.area_config,
+        )
+        self.assertEqual("package", scope["change_class"])
+        # Scope host plus the areas' default full_os/soft_os policy — no macOS
+        # penalty for a healthy package-local change.
+        self.assertEqual(["ubuntu-latest", "windows-latest"], scope["preflight_os"])
+
+    def test_global_change_runs_three_os_preflight(self) -> None:
+        scope = calculate_scope(
+            [".config/nextest.toml"],
+            self.root,
+            self.metadata,
+            self.area_config,
+        )
+        self.assertEqual("full", scope["change_class"])
+        self.assertEqual(
+            ["macos-latest", "ubuntu-latest", "windows-latest"],
+            scope["preflight_os"],
+        )
+        self.assertIn(".config/nextest.toml", scope["preflight_reason"])
+
+    def test_kache_version_change_selects_full_scope(self) -> None:
+        scope = calculate_scope(
+            [".github/kache-version"],
+            self.root,
+            self.metadata,
+            self.area_config,
+        )
+        self.assertTrue(scope["full_scope"])
+        self.assertEqual("full", scope["change_class"])
+
+    def test_documentation_only_change_uses_scope_host_preflight(self) -> None:
+        scope = calculate_scope(
+            ["docs/architecture.md"],
+            self.root,
+            self.metadata,
+            self.area_config,
+        )
+        self.assertEqual("documentation", scope["change_class"])
+        self.assertEqual(["ubuntu-latest"], scope["preflight_os"])
+
 
 if __name__ == "__main__":
     unittest.main()

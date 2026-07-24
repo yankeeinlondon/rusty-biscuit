@@ -4,6 +4,7 @@ created: 2026-07-24
 phase: 1
 agent: codex/default
 yolo: true
+status: "phase 1 complete (local gates green; CI-only ACs pending branch run)"
 ---
 
 # Reliable CI/CD and DevOps Execution Plan
@@ -17,8 +18,12 @@ three open questions:
   honor that file.
 - Gate release automation with a successful `workflow_run` of the primary CI
   workflow on `main`.
-- Keep `schematic/Cargo.lock` tracked and require locked Cargo resolution during
-  release calculation.
+- Keep release automation hermetic during release calculation. (Superseded
+  2026-07-24: the original "keep `schematic/Cargo.lock` tracked + `--locked`"
+  wording assumed a tracked lockfile, but `**/Cargo.lock` is gitignored
+  repository-wide. Resolved to OQ3 Option C — keep every lockfile ignored, gate
+  on `workflow_run`, and assert a clean *tracked* worktree. See the spec's OQ3
+  "Resolution" block.)
 
 The current discovery baseline is 72 Cargo workspace packages reported by
 `sniff repo packages` and 18 curated area records in `.github/ci/areas.json`.
@@ -34,7 +39,7 @@ workspace Cargo commands or root lifecycle recipes as routine final gates.
 
 ## Phase 1: Restore Bootstrap and Release Signal
 
-- [ ] **Task 1.1: Record the Phase 1 change and verification scope.**
+- [x] **Task 1.1: Record the Phase 1 change and verification scope.**
   - Run GitNexus impact analysis before changing any Python, Rust, or shell
     symbol and use `sniff` to identify affected packages, areas, and downstream
     consumers.
@@ -42,7 +47,7 @@ workspace Cargo commands or root lifecycle recipes as routine final gates.
     gates plus the workflow-contract and scope-calculation tests that will be
     run.
 
-- [ ] **Task 1.2: Make kache optional and establish one version authority.**
+- [x] **Task 1.2: Make kache optional and establish one version authority.**
   - Remove the repository-wide `rustc-wrapper = "kache"` setting from
     `.cargo/config.toml`.
   - Move the pinned kache version to one dedicated repository value consumed by
@@ -56,7 +61,7 @@ workspace Cargo commands or root lifecycle recipes as routine final gates.
     bootstrap step, while a cache miss or reservation collision uses documented
     pass-through behavior.
 
-- [ ] **Task 1.3: Add dependency-aware bootstrap preflight before area fan-out.**
+- [x] **Task 1.3: Add dependency-aware bootstrap preflight before area fan-out.**
   - Extend `scripts/ci/affected_scope.py` and its tests to classify global
     CI/tooling inputs separately from package-local and documentation-only
     changes and to emit the preflight OS matrix and reason.
@@ -71,7 +76,7 @@ workspace Cargo commands or root lifecycle recipes as routine final gates.
     failed bootstrap creates at most one actionable failure per selected OS and
     launches no dependent area jobs.
 
-- [ ] **Task 1.4: Make release calculation clean, locked, and validation-gated.**
+- [x] **Task 1.4: Make release calculation clean, locked, and validation-gated.**
   - Update `.github/workflows/release-plz.yml` so release-PR calculation runs
     only after the primary `ci` workflow succeeds on `main`, using
     `workflow_run` with explicit branch, repository, conclusion, and source-SHA
@@ -87,7 +92,7 @@ workspace Cargo commands or root lifecycle recipes as routine final gates.
   - Preserve the labeled merged-release-PR publication contract while ensuring
     release failures remain under release-specific job and workflow names.
 
-- [ ] **Task 1.5: Add bootstrap and release workflow contract tests.**
+- [x] **Task 1.5: Add bootstrap and release workflow contract tests.**
   - Expand `scripts/ci/test_affected_scope.py` with Windows-path normalization,
     package-local OS selection, global three-OS preflight, documentation-only
     scope, missing-kache, invalid-kache, and fan-out suppression cases.
@@ -98,7 +103,7 @@ workspace Cargo commands or root lifecycle recipes as routine final gates.
   - Add a clean-checkout regression that runs Cargo metadata with kache absent
     and `RUSTC_WRAPPER` unset.
 
-- [ ] **Validation checkpoint 1: Prove clean bootstrap and release ordering.**
+- [x] **Validation checkpoint 1: Prove clean bootstrap and release ordering.**
   - Run the recorded Phase 1 package-area build, test, and lint gates and the
     Python/workflow contract tests.
   - Exercise preflight on Linux, Windows, and macOS through GitHub Actions,

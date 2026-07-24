@@ -70,6 +70,16 @@ Release-plz failed independently while calculating the next version for
 `schematic/Cargo.lock`, then could not return to `main` because checkout would
 overwrite that dirty file.
 
+Update (2026-07-24, during Phase 1 implementation): `**/Cargo.lock` has been
+gitignored repository-wide since 2026-04-08, so neither the root nor the nested
+`schematic/Cargo.lock` is tracked. `git check-ignore` confirms both are ignored;
+neither appears in `git ls-files`. Under that policy git does not surface a
+regenerated lockfile in `git status --porcelain` and does not block a branch
+checkout on it, so the specific checkout-overwrite failure described above cannot
+recur as originally stated. The remaining, still-valid problem is ordering:
+release automation races the validation it should follow. This reframes OQ3
+below; its resolution is recorded there.
+
 Release automation currently runs on every push to `main`, so this release
 failure appears beside test workflows even though it has a different purpose
 and root cause.
@@ -661,6 +671,38 @@ the mutation without pinning it; Option B trades a real reproducibility
 guarantee for convenience. If a specific release-plz step genuinely must
 regenerate the lockfile, wrap only that step in Option C's disposable worktree
 as a targeted supplement to A, not a replacement.
+
+**Resolution (2026-07-24, implemented in Phase 1 — supersedes the recommendation
+above).** During implementation the premise of Option A proved stale. The
+workspace lockfiles are *not* tracked: `**/Cargo.lock` has been gitignored since
+2026-04-08 (see the "Update" note under "Release failure"). Option A's
+justification — "consistent with how the workspace lockfile is already treated" —
+therefore does not hold, and committing only `schematic/Cargo.lock` would create a
+lone tracked lockfile inconsistent with the rest of the repository. `--locked`
+would also fail with no committed lockfile to honor. The confirmed choice is
+**Option C, adapted to the existing ignore policy**:
+
+- Keep every `Cargo.lock` gitignored; commit no lockfile. The ignore policy is
+  itself what isolates the failure — a regenerated `schematic/Cargo.lock` is
+  invisible to `git status`/`git checkout`, so it cannot dirty tracked state or
+  block the return to `main`. No literal disposable worktree is required, because
+  an ignored file cannot affect tracked state in the first place.
+- Gate release calculation on a successful `ci` `workflow_run` (OQ2 Option A),
+  removing the race that was the other half of the observed failure.
+- Assert a clean *tracked* worktree (`git status --porcelain
+  --untracked-files=no`) before and after release calculation, so any mutation of
+  a *tracked* file surfaces as a release-specific failure.
+- A workflow contract test asserts `**/Cargo.lock` stays ignored, protecting this
+  premise against a future force-add that would reintroduce the original failure.
+
+**Scope change.** Phase 1 / Task 1.4 therefore does *not* add `--locked` and does
+*not* track `schematic/Cargo.lock`. Reproducible dependency resolution for the
+workspace-excluded `schematic/schema` crate remains unpinned — but that is the
+pre-existing, deliberate repository posture (the root lockfile is ignored too),
+unchanged by this feature rather than newly regressed. Acceptance Criterion 27
+("release-plz begins from a clean checkout and does not fail because
+`schematic/Cargo.lock` became dirty") is satisfied by the ignore policy plus the
+tracked-worktree assertions rather than by a committed, `--locked` lockfile.
 
 ## Delivery Plan
 

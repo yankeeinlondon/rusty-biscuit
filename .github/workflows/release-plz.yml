@@ -1,7 +1,22 @@
 name: Release-plz
 
+# Release automation is gated on validation (D13 / OQ2 Option A): the release-PR
+# calculation runs only AFTER the required `ci` workflow concludes successfully
+# on `main`, instead of racing it on every push.
+#
+# Footgun: `workflow_run` workflows execute the definition from the DEFAULT
+# BRANCH, not from the triggering commit. Edits to this trigger take effect only
+# once merged to `main`.
+#
+# Lockfile note: every `Cargo.lock` is gitignored (repo policy since
+# 2026-04-08), so release-plz regenerating `schematic/Cargo.lock` cannot dirty
+# tracked state or block a branch checkout. The clean-worktree assertions below
+# therefore inspect tracked files only.
 on:
-  push:
+  workflow_run:
+    workflows: ["ci"]
+    types:
+      - completed
     branches:
       - main
   pull_request:
@@ -21,7 +36,12 @@ jobs:
   release-plz-pr:
     name: Create Release PR
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.repository == 'yankeeinlondon/rusty-biscuit'
+    # Only after a SUCCESSFUL ci run on main in the canonical repository.
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.repository == 'yankeeinlondon/rusty-biscuit'
     concurrency:
       group: release-plz-${{ github.ref }}
       cancel-in-progress: false
@@ -29,6 +49,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          # Check out exactly the main commit that CI validated.
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
 
       - name: Install Rust
@@ -41,12 +63,36 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Assert clean tracked worktree before release calculation
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+            echo "::error title=release bootstrap::tracked files were modified before release calculation began"
+            git status --porcelain --untracked-files=no
+            exit 1
+          fi
+
       - name: Run release-plz
         uses: release-plz/action@v0.5
         with:
           command: release-pr
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # release-pr pushes its changes to a dedicated release branch, so the
+      # checked-out commit must stay clean. A dirty tracked worktree here means
+      # release-plz mutated a tracked file in place — surface it as a release
+      # failure rather than letting it silently poison a later checkout.
+      - name: Assert clean tracked worktree after release calculation
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+            echo "::error title=release bootstrap::release calculation left tracked modifications in the worktree"
+            git status --porcelain --untracked-files=no
+            exit 1
+          fi
 
   release-plz-release:
     name: Publish Release
@@ -75,6 +121,16 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Assert clean tracked worktree before publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+            echo "::error title=release bootstrap::tracked files were modified before publication began"
+            git status --porcelain --untracked-files=no
+            exit 1
+          fi
 
       - name: Run release-plz
         uses: release-plz/action@v0.5

@@ -22,7 +22,10 @@ ITALIC := '\033[3m'
 RESET := '\033[0m'
 RED := '\033[31m'
 GREEN := '\033[32m'
-KACHE_VERSION := "0.8.0"
+# Single kache version authority, shared with GitHub Actions via
+# `.github/kache-version` (D2). Both sides read the same file, so they cannot
+# drift to different versions.
+KACHE_VERSION := trim(`cat .github/kache-version`)
 
 default:
     #!/usr/bin/env bash
