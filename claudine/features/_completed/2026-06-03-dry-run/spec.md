@@ -4,12 +4,17 @@ Ironically, now what we need is a "working" `--dry-run` feature for all of the c
 
 ## Pipeline Scope
 
-`--dry-run` exercises the **full composition pipeline up to but not including provider launch**. This means:
+`--dry-run` exercises composition through provider/model resolution, then
+returns before launch wiring. This means:
 
 - Schema validation runs normally
 - Interactive prompts (including shell-command approval) behave exactly as in normal mode
 - Harness pre-checks run normally
 - Provider selection and agent resolution run normally
+- Selected-executable availability validation and path resolution do not run;
+  the selected provider need not be installed or present on `PATH`
+- Installed-provider inventory may still run when automatic selection or the
+  rendered agent-resolution breakdown requires it
 - **The provider is never launched** — no request is sent to any agentic CLI
 
 This makes `claudine compose --dry-run` suitable for CI gating and reliable rehearsal.
@@ -100,7 +105,7 @@ If an error occurs during composition, the error is rendered to **stderr** inste
 
 ## Acceptance Criteria
 
-- [x] `claudine compose --dry-run doc.md` composes the document through the full pipeline but does not launch a provider — `compose_dry_run_body_only_on_stdout_metadata_on_stderr`, `compose_dry_run_perf_renders_report_without_agent_execution`
+- [x] `claudine compose --dry-run doc.md` composes the document through provider/model resolution without requiring or launching a provider executable — `compose_dry_run_body_only_on_stdout_metadata_on_stderr`, `compose_dry_run_perf_renders_report_without_agent_execution`
 - [x] Shell commands referenced in the document are executed for real; their output is available for interpolation and expansion — `compose_dry_run_yolo_bypasses_shell_gate` (body on stdout contains the executed command output), `level2_pty_dry_run_shell_approval_prompt_appears_and_allows`
 - [x] The composed document body is written to stdout — `compose_dry_run_body_only_on_stdout_metadata_on_stderr`
 - [x] The rendered frontmatter and metadata table are written to stderr — `compose_dry_run_body_only_on_stdout_metadata_on_stderr`

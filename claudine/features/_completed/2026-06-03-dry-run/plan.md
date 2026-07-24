@@ -75,9 +75,10 @@ Converts [`spec.md`](spec.md) into an ordered, dependency-aware execution plan.
 ## Goal
 
 Make `--dry-run` a real, useful gate for `claudine compose`, `claudine inline-compose`,
-and `claudine sequence`: run the **full composition pipeline up to but not including
-provider launch**, then emit the composed body to **stdout** and the finalized
-frontmatter + a metadata table to **stderr**. Suitable for CI gating and rehearsal.
+and `claudine sequence`: run composition through provider/model resolution, then
+emit the composed body to **stdout** and the finalized frontmatter + a metadata
+table to **stderr** before selected-executable validation or launch wiring. The
+selected provider need not be installed. Suitable for CI gating and rehearsal.
 
 ## Current State (grounding)
 
