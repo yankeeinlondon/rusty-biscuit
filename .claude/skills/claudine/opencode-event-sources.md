@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-4c29486ecc27d639
-last_updated: 2026-07-22
+hash: ef46db3751d8e999-e0f59bf1a61e2da8
+last_updated: 2026-07-23
 ---
 
 # OpenCode Event Sources
@@ -95,6 +95,12 @@ Failure-shaped lines (`ProviderLimit`, `MalformedAsset`, `ApiFailure`,
 `bridge/mod.rs`.
 
 ## Failure Classifications
+
+For stdout NDJSON, a concrete provider error takes precedence over a later
+`Unexpected server error. Check server logs for details.` event from the same
+turn. OpenCode can emit both for one failure; Claudine emits and retains only
+the actionable first error so terminal output and the end-of-run summary agree.
+Other error sequences retain their normal last-event behavior.
 
 The `ProviderLimit` classification replaces the earlier monolithic `RateLimit`
 variant with a four-kind model that distinguishes **provider capacity** from
