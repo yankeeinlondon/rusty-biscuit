@@ -11,9 +11,9 @@ reviewed: true
 
 ## Context: What we have today
 
-The monorepo contains **48 workspace packages** grouped under **17 curated package areas** defined in the root `justfile` `areas` variable.
+The monorepo contains **72 workspace packages** (point-in-time; source of truth is `cargo metadata --no-deps --format-version 1`) grouped under **21 curated package areas** defined in `.github/ci/areas.json`.
 
-Currently, the primary CI validation (`.github/workflows/test.yml`) runs exclusively on `ubuntu-latest` (Linux). On every pull request or push, it executes `just check-canonical` followed by `just all` to build and test all 17 curated areas on Linux. While extremely fast and efficient, this setup fails to catch platform-specific regressions on Windows or WSL1 (e.g. file-path translation differences in `biscuit-file`, terminal manipulation differences in `biscuit-terminal`, or system-discovery bugs in `sniff`).
+Currently, the primary CI validation (`.github/workflows/test.yml`) runs exclusively on `ubuntu-latest` (Linux). On every pull request or push, it executes `just check-canonical` followed by `just all` to build and test all 21 curated areas on Linux. While extremely fast and efficient, this setup fails to catch platform-specific regressions on Windows or WSL1 (e.g. file-path translation differences in `biscuit-file`, terminal manipulation differences in `biscuit-terminal`, or system-discovery bugs in `sniff`).
 
 We also have a local git hook (`.githooks/pre-push`) that uses a dynamic change detection recipe (`just changed-areas`) to restrict pre-push validation only to modified package areas.
 

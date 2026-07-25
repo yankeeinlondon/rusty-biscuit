@@ -2,7 +2,7 @@
 
 ## Workspace Gotchas
 
-- 48 workspace members. Source of truth is `cargo metadata --no-deps --format-version 1` — not directory names.
+- 72 workspace members. Source of truth is `cargo metadata --no-deps --format-version 1` — not directory names.
 - `schematic/schema` lives in the repo but is **excluded from the workspace**. Use `--manifest-path schematic/schema/Cargo.toml` to work on it.
 
 ## Language 

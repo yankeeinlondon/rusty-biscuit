@@ -2,7 +2,7 @@
 name: monorepos
 description: Expert knowledge for building and managing monorepos across JavaScript, TypeScript, Rust, Go, and JVM — workspace standards (npm, pnpm, Yarn, Cargo, Go workspaces, Gradle, Maven), task-orchestration tools (Nx, Turborepo, Bazel, Pants, Rush, Lerna, moon), and versioning (Changesets). Use when structuring a monorepo, choosing task-orchestration tooling, or setting up workspace versioning and release flows.
 last_updated: 2026-07-15T00:00:00Z
-hash: a275077af6cb393c-a1926b83eb6b8e02
+hash: a275077af6cb393c-05583f2213837257
 ---
 
 # Monorepos
@@ -25,7 +25,8 @@ Expert guidance for structuring and managing monorepos—single repositories con
 ## Rusty Biscuit Verification Override
 
 The generic workspace-wide Cargo examples in monorepo references are not local
-verification advice. Rusty Biscuit has 48 workspace members:
+verification advice. Rusty Biscuit has 72 workspace members (point-in-time; run
+`cargo metadata --no-deps --format-version 1` for the current count):
 
 - Identify changed packages and upstream/downstream symbol impact first, then
   map it to package areas with `sniff`.

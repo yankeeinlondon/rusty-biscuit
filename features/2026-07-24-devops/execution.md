@@ -133,7 +133,7 @@ Decision confirmed with user (OQ1): pin **exactly `1.97.1`** (verified current l
 - [x] **Task 4.3** canaries: biscuit-hash (pure-Rust) + playa (native) + darkmatter (heavy) flagged `canary:true`; affected_scope emits `canaries`; ci.yml runs a canary stage first on full scope (canary_matrix) and gates the non-canary fan-out + specialized jobs on canary success/skip (a canary failure blocks fan-out). Contract test.
 - [~] **Task 4.4 (partial)** renamed opaque `hooks-tests.yml` -> `pre-push-hook-tests.yml`. Remaining: consolidate specialized workflows (rendezvous/claudine-windows/captured-stdout/etc.) under ci.yml + stable CI/area/gate/OS/shard naming + failure-class summary. LARGE -- own effort.
 - [x] **Task 4.5 (scope part)** scope job writes an actionable `## CI scope` summary to $GITHUB_STEP_SUMMARY (event, change class, full-scope+reason, preflight OS, canaries, areas, package count, toolchain, kache). Failure-class summary is part of the 4.4 remainder.
-- [ ] **Task 4.6** remove stale package/area counts across docs (now 21 curated areas, not 18).
+- [x] **Task 4.6** stale counts fixed (subagent): CLAUDE.md/AGENTS.md 48->72 members; matrix-testing spec 17->21 areas + source-of-truth corrected to areas.json; rust/monorepos skills (hashes regenerated) + 2 more. Non-essential counts point to cargo metadata/areas.json.
 
 ## Files Changed
 
