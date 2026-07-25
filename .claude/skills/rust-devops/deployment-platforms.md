@@ -604,7 +604,7 @@ Goal: real, auto-updating installs on every major platform with **no external re
 
 ### Phase 3 — Official channels & crates.io (project-scale)
 
-14. **Publish the internal crate graph to crates.io** (`publish = false` → versioned, path-deps replaced with version deps, topological publish). This unblocks first-class `cargo install darkmatter-cli` / `claudine-cli` *and* the smooth binstall path. Treat as its own initiative — it touches ~48 workspace members.
+14. **Publish the internal crate graph to crates.io** (`publish = false` → versioned, path-deps replaced with version deps, topological publish). This unblocks first-class `cargo install darkmatter-cli` / `claudine-cli` *and* the smooth binstall path. Treat as its own initiative — it touches ~72 workspace members.
 15. **Homebrew core** and **nixpkgs** PRs — broad default-tap/default-channel reach once the projects clear notability bars.
 16. **Chocolatey**, **snap**, optionally **Debian/Fedora official** — diminishing returns; add on demand.
 

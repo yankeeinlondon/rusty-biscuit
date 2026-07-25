@@ -1,4 +1,4 @@
-name: hooks-tests
+name: pre-push-hook-tests
 
 # Path-filtered test workflow for the .githooks/ shell hooks and the
 # `just` recipes that orchestrate them. Runs whenever the hook, its
@@ -13,20 +13,20 @@ on:
       - ".githooks/**"
       - "justfile"
       - "just/**"
-      - ".github/workflows/hooks-tests.yml"
+      - ".github/workflows/pre-push-hook-tests.yml"
   pull_request:
     paths:
       - ".githooks/**"
       - "justfile"
       - "just/**"
-      - ".github/workflows/hooks-tests.yml"
+      - ".github/workflows/pre-push-hook-tests.yml"
   workflow_dispatch: {}
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 concurrency:
-  group: hooks-tests-${{ github.ref }}
+  group: pre-push-hook-tests-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

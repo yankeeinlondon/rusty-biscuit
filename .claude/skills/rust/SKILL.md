@@ -2,7 +2,7 @@
 name: rust
 description: Expert knowledge for Rust systems programming — ownership, borrowing, type safety, error handling, async patterns, performance optimization, and 2024-edition improvements. Use when writing or reviewing idiomatic Rust, resolving borrow-checker or lifetime issues, structuring error handling, or optimizing performance.
 last_updated: 2026-07-15
-hash: 352b2caf7cdd68a6-25eab10b5d5ca11c
+hash: 352b2caf7cdd68a6-c28f14dd5d9ef962
 ---
 
 # Rust
@@ -171,7 +171,8 @@ The generic advice above is overridden here by rusty-biscuit conventions.
   recipes or exact `-p <pkg>` selectors.
 - Never run `cargo build --workspace`, `cargo check --workspace`, a bare root
   `cargo build`/`cargo check`/`cargo test`, or unscoped root `just` lifecycle
-  recipes as a routine final gate. There are 48 workspace members and the
+  recipes as a routine final gate. There are 72 workspace members (point-in-time;
+  run `cargo metadata --no-deps --format-version 1` for the current count) and the
   target directory is large. Workspace-wide runs require an explicitly
   requested release/CI aggregation task and a documented reason.
 - Tests run under **nextest** with an L1/L2/L3 level taxonomy — see the `rust-testing` skill for `require_level!` and the canonical recipes.

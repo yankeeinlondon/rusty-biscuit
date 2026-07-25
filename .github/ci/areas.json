@@ -1,7 +1,8 @@
 [
   {
     "area": "biscuit-hash",
-    "check_args": "-p biscuit-hash -p biscuit-hash-cli"
+    "check_args": "-p biscuit-hash -p biscuit-hash-cli",
+    "canary": true
   },
   {
     "area": "biscuit-location",
@@ -38,6 +39,7 @@
   {
     "area": "playa",
     "check_args": "-p playa -p playa-cli",
+    "canary": true,
     "native": {
       "ubuntu-latest": ["libasound2-dev", "libpulse-dev"]
     }
@@ -53,7 +55,8 @@
     "soft_os": [],
     "l2": true,
     "browser": true,
-    "backends": ["tmux", "wezterm"]
+    "backends": ["tmux", "wezterm"],
+    "canary": true
   },
   {
     "area": "sniff",
@@ -88,5 +91,21 @@
   {
     "area": "biscuit-contract",
     "check_args": "-p biscuit-contract"
+  },
+  {
+    "area": "biscuit-icon",
+    "check_args": "-p biscuit-icon -p biscuit-icon-cli",
+    "l2": true,
+    "backends": ["tmux", "wezterm"]
+  },
+  {
+    "area": "renderable",
+    "check_args": "-p renderable"
+  },
+  {
+    "area": "worktree",
+    "check_args": "-p worktree -p worktree-cli",
+    "l2": true,
+    "backends": ["tmux", "kitty"]
   }
 ]

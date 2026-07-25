@@ -121,6 +121,20 @@ Decision confirmed with user (OQ1): pin **exactly `1.97.1`** (verified current l
 - [x] **Task 3.5** native prereqs: new `install-native` composite (apt/brew, named failure, no-op when empty) wired into all 5 _area-ci jobs before build/test; ci.yml passes `native`; Playa Linux ALSA/Pulse now provisioned; created playa/docs/dependencies.md. Contract test + shellcheck-clean. CI-caught bug: `` bash idiom yields `{}}` (jq parse error) breaking every job; fixed by defaulting before expansion (proven locally against the exact failure).
 - [x] **Task 3.6** regression coverage satisfied: python schema tests (unknown backend, invalid OS, native typing, non-bool flag) + contract tests (L2 backend policy, native provisioning). 18 contract + 18 python green.
 
+## Phase 4 progress (in branch)
+
+- **Task 4.1 scope:** 72 workspace members; 52 owned by the 18 curated areas; **20 orphans** in 13 dirs (rendezvous/homelab-integrations are NOT orphans — they nest under claudine/homelab).
+- [x] **Task 4.2: complete, unique workspace ownership (user-decided classification).**
+  - **Promoted 3 CI-ready orphans to curated areas:** `renderable`, `worktree`, `biscuit-icon` (added its missing `bench` recipe). All have the full 12 canonical recipes (`check-canonical` green). biscuit-icon + worktree get `l2:true` + backends (tmux + wezterm/kitty).
+  - **Exempted 15 packages** in new `.github/ci/exemptions.json` with reasons: test-infra crates (test-toolkit, biscuit-test-harness, biscuit-browser-harness), experimental (agent-sandbox-cli, tabby, ui), real-areas-pending-canonical-recipes (biscuit-visualized, messenger*), and not-fully-working (visualizer, biscuit-clipboard*, reaper*).
+  - `affected_scope.py` gains `validate_ownership` (D10): every member owned-by-area OR exempt; fails by name on unmapped member, owned-and-exempt contradiction, or stale exemption. `load_exemptions` rejects duplicates/empty reasons. Documented in `.github/ci/README.md`.
+  - Tests: **24/24 python** (6 new ownership cases). Real workspace validates clean.
+  - **User note:** biscuit-visualized/messenger/biscuit-icon(done)/etc. "all eventually need inclusion"; the exemption reasons track the exact blocker (complete canonical recipes) so promotion is a tracked follow-up.
+- [x] **Task 4.3** canaries: biscuit-hash (pure-Rust) + playa (native) + darkmatter (heavy) flagged `canary:true`; affected_scope emits `canaries`; ci.yml runs a canary stage first on full scope (canary_matrix) and gates the non-canary fan-out + specialized jobs on canary success/skip (a canary failure blocks fan-out). Contract test.
+- [~] **Task 4.4 (partial)** renamed opaque `hooks-tests.yml` -> `pre-push-hook-tests.yml`. Remaining: consolidate specialized workflows (rendezvous/claudine-windows/captured-stdout/etc.) under ci.yml + stable CI/area/gate/OS/shard naming + failure-class summary. LARGE -- own effort.
+- [x] **Task 4.5 (scope part)** scope job writes an actionable `## CI scope` summary to $GITHUB_STEP_SUMMARY (event, change class, full-scope+reason, preflight OS, canaries, areas, package count, toolchain, kache). Failure-class summary is part of the 4.4 remainder.
+- [x] **Task 4.6** stale counts fixed (subagent): CLAUDE.md/AGENTS.md 48->72 members; matrix-testing spec 17->21 areas + source-of-truth corrected to areas.json; rust/monorepos skills (hashes regenerated) + 2 more. Non-essential counts point to cargo metadata/areas.json.
+
 ## Files Changed
 
 - `.cargo/config.toml` — **deleted** (removed mandatory global `rustc-wrapper = "kache"`; `.cargo/` now empty/gone). D1.

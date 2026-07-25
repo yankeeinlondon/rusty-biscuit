@@ -33,6 +33,8 @@ jobs:
       preflight_os: ${{ steps.scope.outputs.preflight_os }}
       preflight_reason: ${{ steps.scope.outputs.preflight_reason }}
       change_class: ${{ steps.scope.outputs.change_class }}
+      canary_matrix: ${{ steps.scope.outputs.canary_matrix }}
+      has_canaries: ${{ steps.scope.outputs.has_canaries }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -71,13 +73,25 @@ jobs:
           fi
 
           scope_json="$(python3 scripts/ci/affected_scope.py "${scope_args[@]}")"
-          area_matrix="$(jq -c '{include: .areas}' <<<"$scope_json")"
           packages="$(jq -c '.packages' <<<"$scope_json")"
+
+          # Canary orchestration (D11): a global (full-scope) change runs the
+          # canary areas FIRST; the rest fan out only after they pass. A
+          # package-local change has no canary stage and fans out directly.
+          if [[ "$(jq -r '.full_scope' <<<"$scope_json")" == "true" ]]; then
+            canary_matrix="$(jq -c '{include: [.areas[] | select(.canary == true)]}' <<<"$scope_json")"
+            area_matrix="$(jq -c '{include: [.areas[] | select(.canary != true)]}' <<<"$scope_json")"
+          else
+            canary_matrix='{"include":[]}'
+            area_matrix="$(jq -c '{include: .areas}' <<<"$scope_json")"
+          fi
 
           {
             echo "area_matrix=$area_matrix"
+            echo "canary_matrix=$canary_matrix"
             echo "packages=$packages"
-            echo "has_areas=$(jq -r '.areas | length > 0' <<<"$scope_json")"
+            echo "has_areas=$(jq -r '.include | length > 0' <<<"$area_matrix")"
+            echo "has_canaries=$(jq -r '(.full_scope == true) and ((.canaries | length) > 0)' <<<"$scope_json")"
             echo "has_packages=$(jq -r '.packages | length > 0' <<<"$scope_json")"
             echo "full_scope=$(jq -r '.full_scope' <<<"$scope_json")"
             echo "claudine=$(jq -r 'any(.areas[]; .area == "claudine")' <<<"$scope_json")"
@@ -86,6 +100,24 @@ jobs:
             echo "preflight_reason=$(jq -r '.preflight_reason' <<<"$scope_json")"
             echo "change_class=$(jq -r '.change_class' <<<"$scope_json")"
           } >>"$GITHUB_OUTPUT"
+
+          # One actionable scope summary (D15).
+          {
+            echo "## CI scope"
+            echo ""
+            echo "| field | value |"
+            echo "|---|---|"
+            echo "| event | ${EVENT_NAME} |"
+            echo "| change class | $(jq -r '.change_class' <<<"$scope_json") |"
+            echo "| full scope | $(jq -r '.full_scope' <<<"$scope_json") |"
+            echo "| reason | $(jq -r '.preflight_reason' <<<"$scope_json") |"
+            echo "| preflight OS | $(jq -rc '.preflight_os | join(", ")' <<<"$scope_json") |"
+            echo "| canaries | $(jq -rc 'if (.full_scope == true) and ((.canaries | length) > 0) then (.canaries | join(", ")) else "(none — no canary stage)" end' <<<"$scope_json") |"
+            echo "| affected areas | $(jq -rc 'if (.areas | length) > 0 then ([.areas[].area] | join(", ")) else "(none)" end' <<<"$scope_json") |"
+            echo "| affected packages | $(jq -r '.packages | length' <<<"$scope_json") |"
+            echo "| toolchain | $(grep '^channel' rust-toolchain.toml | cut -d'"' -f2) |"
+            echo "| kache version | $(cat .github/kache-version) |"
+          } >>"$GITHUB_STEP_SUMMARY"
 
   # Bootstrap preflight (D3). Verifies a clean runner can initialize the shared
   # toolchain, discover scope, and pass the canonical-recipe and scope-calc
@@ -139,10 +171,41 @@ jobs:
       - name: Test affected-scope calculation
         run: python3 scripts/ci/test_affected_scope.py
 
+  # Global-change canaries (D11). For a full-scope change, run a small
+  # representative set (pure-Rust, native-dependency, heavy) BEFORE the rest of
+  # the areas fan out. A canary failure prevents the remaining full-scope jobs
+  # from starting; canary success does NOT replace full validation.
+  canary:
+    name: canary / ${{ matrix.area }}
+    needs: [scope, preflight]
+    if: needs.scope.outputs.has_canaries == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.scope.outputs.canary_matrix) }}
+    uses: ./.github/workflows/_area-ci.yml
+    with:
+      area: ${{ matrix.area }}
+      check-args: ${{ matrix.check_args }}
+      full-os: ${{ toJSON(matrix.full_os) }}
+      check-os: ${{ toJSON(matrix.check_os) }}
+      shards: ${{ toJSON(matrix.shards) }}
+      soft-os: ${{ toJSON(matrix.soft_os) }}
+      l2: ${{ matrix.l2 }}
+      browser: ${{ matrix.browser }}
+      kache: ${{ matrix.kache }}
+      ai-provider-stubs: ${{ matrix.ai_provider_stubs }}
+      native: ${{ toJSON(matrix.native) }}
+    secrets: inherit
+
   area-ci:
     name: ${{ matrix.area }}
-    needs: [scope, preflight]
-    if: needs.scope.outputs.has_areas == 'true'
+    needs: [scope, preflight, canary]
+    # Runs when there are (non-canary) areas AND the canary stage passed or was
+    # skipped (package-local change). A canary failure blocks this fan-out.
+    if: >-
+      !cancelled() &&
+      needs.scope.outputs.has_areas == 'true' &&
+      (needs.canary.result == 'success' || needs.canary.result == 'skipped')
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.scope.outputs.area_matrix) }}
@@ -163,8 +226,12 @@ jobs:
 
   affected-coverage:
     name: Coverage for affected packages
-    needs: [scope, preflight]
-    if: github.event_name == 'pull_request' && needs.scope.outputs.has_packages == 'true'
+    needs: [scope, preflight, canary]
+    if: >-
+      !cancelled() &&
+      github.event_name == 'pull_request' &&
+      needs.scope.outputs.has_packages == 'true' &&
+      (needs.canary.result == 'success' || needs.canary.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -206,8 +273,11 @@ jobs:
 
   claudine-generator-signals:
     name: Claudine generator and signals drift
-    needs: [scope, preflight]
-    if: needs.scope.outputs.claudine == 'true'
+    needs: [scope, preflight, canary]
+    if: >-
+      !cancelled() &&
+      needs.scope.outputs.claudine == 'true' &&
+      (needs.canary.result == 'success' || needs.canary.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -229,8 +299,11 @@ jobs:
 
   darkmatter-no-color:
     name: Darkmatter color-depth tests under NO_COLOR=1
-    needs: [scope, preflight]
-    if: needs.scope.outputs.darkmatter == 'true'
+    needs: [scope, preflight, canary]
+    if: >-
+      !cancelled() &&
+      needs.scope.outputs.darkmatter == 'true' &&
+      (needs.canary.result == 'success' || needs.canary.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:

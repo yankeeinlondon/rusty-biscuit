@@ -13,9 +13,11 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 AREA_CONFIG = ROOT / ".github" / "ci" / "areas.json"
+EXEMPTIONS_CONFIG = ROOT / ".github" / "ci" / "exemptions.json"
 GLOBAL_PATHS = {
     ".config/nextest.toml",
     ".github/ci/areas.json",
+    ".github/ci/exemptions.json",
     ".github/kache-version",
     ".github/workflows/_area-ci.yml",
     ".github/workflows/ci.yml",
@@ -136,6 +138,76 @@ def load_area_config(path: Path) -> list[dict[str, Any]]:
 
     validate_area_schema(areas)
     return [{**AREA_DEFAULTS, **area} for area in areas]
+
+
+def load_exemptions(path: Path) -> dict[str, str]:
+    """Load the package -> reason CI-ownership exemption map.
+
+    ## Errors
+
+    Raises ``RuntimeError`` for a duplicate exemption or an empty reason.
+    """
+    if not path.exists():
+        return {}
+    with path.open(encoding="utf-8") as config_file:
+        entries = json.load(config_file)
+    exemptions: dict[str, str] = {}
+    for entry in entries:
+        package = entry["package"]
+        if package in exemptions:
+            raise RuntimeError(f"duplicate CI-ownership exemption for '{package}'")
+        if not entry.get("reason", "").strip():
+            raise RuntimeError(f"exemption for '{package}' must give a non-empty reason")
+        exemptions[package] = entry["reason"]
+    return exemptions
+
+
+def validate_ownership(
+    metadata: dict[str, Any],
+    root: Path,
+    area_config: list[dict[str, Any]],
+    exemptions: dict[str, str],
+) -> None:
+    """Every Cargo workspace member must have exactly one CI owner (D10).
+
+    A member is owned when it lives under a curated area directory or is listed
+    in the exemption map. Cargo metadata is the source of truth for membership.
+
+    ## Errors
+
+    Raises ``RuntimeError`` naming the offending packages for an unmapped member,
+    a package that is both owned and exempt, or an exemption for a package that
+    no longer exists.
+    """
+    packages = workspace_packages(metadata)
+    area_names = {area["area"] for area in area_config}
+    all_names = {package["name"] for package in packages.values()}
+    owned_names = {
+        package["name"]
+        for package in packages.values()
+        if owner_area(package, root, area_names) is not None
+    }
+
+    unmapped = sorted(all_names - owned_names - exemptions.keys())
+    if unmapped:
+        raise RuntimeError(
+            "workspace packages have no CI owner or exemption: "
+            f"{unmapped}. Add each to a curated area in .github/ci/areas.json "
+            "(the area's justfile must define all canonical recipes) or to "
+            ".github/ci/exemptions.json with a reason."
+        )
+
+    contradictory = sorted(exemptions.keys() & owned_names)
+    if contradictory:
+        raise RuntimeError(
+            f"packages are both owned by a curated area and exempted: {contradictory}"
+        )
+
+    stale = sorted(exemptions.keys() - all_names)
+    if stale:
+        raise RuntimeError(
+            f"exemptions reference packages not in the workspace: {stale}"
+        )
 
 
 def global_trigger(files: list[str]) -> str | None:
@@ -287,6 +359,10 @@ def calculate_scope(
         files, selected_areas, full_scope, force_all
     )
 
+    canaries = [
+        area["area"] for area in selected_areas if area.get("canary", False)
+    ]
+
     return {
         "areas": selected_areas,
         "packages": selected_packages,
@@ -294,6 +370,7 @@ def calculate_scope(
         "change_class": change_class,
         "preflight_os": preflight_os,
         "preflight_reason": preflight_reason,
+        "canaries": canaries,
     }
 
 
@@ -352,7 +429,9 @@ def main() -> None:
     args = parse_args()
     area_config = load_area_config(AREA_CONFIG)
     validate_area_config(ROOT, area_config)
+    exemptions = load_exemptions(EXEMPTIONS_CONFIG)
     metadata = load_metadata(ROOT)
+    validate_ownership(metadata, ROOT, area_config, exemptions)
     scope = calculate_scope(args.files, ROOT, metadata, area_config, args.all)
     print(json.dumps(scope, separators=(",", ":")))
 

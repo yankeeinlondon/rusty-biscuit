@@ -157,6 +157,38 @@ fn area_ci_selects_the_ci_nextest_profile_explicitly() {
 }
 
 #[test]
+fn global_changes_run_canaries_before_full_fan_out() {
+    let ci = workflow("ci.yml");
+    assert!(
+        ci.contains("canary:") && ci.contains("fromJSON(needs.scope.outputs.canary_matrix)"),
+        "ci.yml must define a canary stage driven by the scope-derived canary matrix (D11)"
+    );
+    assert!(
+        ci.contains("has_canaries"),
+        "the canary stage must gate on a full-scope canary selection"
+    );
+    assert!(
+        ci.contains("needs: [scope, preflight, canary]")
+            && ci.contains("needs.canary.result == 'success' || needs.canary.result == 'skipped'"),
+        "the area fan-out must not start after a canary failure (D11)"
+    );
+    let areas = read(".github/ci/areas.json");
+    assert!(
+        areas.contains(r#""canary": true"#),
+        "areas.json must declare initial global-change canaries (D11)"
+    );
+}
+
+#[test]
+fn scope_job_emits_an_actionable_summary() {
+    let ci = workflow("ci.yml");
+    assert!(
+        ci.contains("$GITHUB_STEP_SUMMARY") && ci.contains("## CI scope"),
+        "the scope job must write an actionable scope summary to the step summary (D15)"
+    );
+}
+
+#[test]
 fn area_ci_treats_rust_warnings_as_failures_and_runs_lint() {
     let shared = workflow("_area-ci.yml");
     assert!(

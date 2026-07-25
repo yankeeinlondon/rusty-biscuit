@@ -751,7 +751,7 @@ reserved for candidates).
 For end-to-end latency, the harness at
 `claudine/cli/tests/completion_perf.rs`
 spawns a fresh `claudine` process per iteration against a fixture
-that mirrors the rusty-biscuit scale (~48 packages, ~2000 markdown
+that mirrors the rusty-biscuit scale (~72 packages, ~2000 markdown
 files). Run it explicitly:
 
 ```sh

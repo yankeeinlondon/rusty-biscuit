@@ -248,14 +248,14 @@ workspace Cargo commands or root lifecycle recipes as routine final gates.
 
 ## Phase 4: Complete Ownership, Canaries, Orchestration, and Diagnostics
 
-- [ ] **Task 4.1: Record the Phase 4 change and verification scope.**
+- [x] **Task 4.1: Record the Phase 4 change and verification scope.**
   - Run impact analysis for changed scope/policy symbols and use `sniff` plus
     Cargo metadata to capture all workspace packages, owning areas, specialized
     workflow owners, exemptions, and downstream consumers.
   - Record the exact CI aggregation scenarios used to validate global canaries
     and specialized orchestration.
 
-- [ ] **Task 4.2: Enforce complete, unique workspace ownership.**
+- [x] **Task 4.2: Enforce complete, unique workspace ownership.**
   - Extend the area-policy validator so every Cargo workspace member is owned
     by exactly one curated area, named specialized workflow, or explicit
     exemption with reason and replacement evidence.
@@ -266,7 +266,7 @@ workspace Cargo commands or root lifecycle recipes as routine final gates.
   - Keep Cargo metadata as the package source of truth and add fixtures for all
     positive and negative ownership cases.
 
-- [ ] **Task 4.3: Add policy-driven global-change canaries.**
+- [x] **Task 4.3: Add policy-driven global-change canaries.**
   - Add a per-area `canary` field and select an initial pure-Rust,
     native-dependency, and heavy/sharded area based on the specification's
     candidates and measured runtime.
@@ -303,7 +303,7 @@ workspace Cargo commands or root lifecycle recipes as routine final gates.
   - Preserve raw logs and JUnit artifacts while ensuring the summary alone
     identifies area, gate, OS, shard, and first useful error.
 
-- [ ] **Task 4.6: Remove stale scope documentation and policy drift.**
+- [x] **Task 4.6: Remove stale scope documentation and policy drift.**
   - Update `AGENTS.md`, `CLAUDE.md`, `README.md`,
     `docs/testing-strategy.md`, `docs/topics/ci-cd.md`,
     `features/2026-06-07-matrix-testing/spec.md`, and affected local skills to
