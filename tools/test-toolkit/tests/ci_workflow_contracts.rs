@@ -191,6 +191,28 @@ fn area_policy_retains_native_and_heavy_area_coverage() {
 }
 
 #[test]
+fn l2_provisions_and_verifies_only_the_ci_capable_backend() {
+    let shared = workflow("_area-ci.yml");
+    // tmux/PTY is the only backend a headless runner can host; it is installed
+    // AND its runtime reachability is verified (D8).
+    assert!(
+        shared.contains("apt-get install -y tmux") && shared.contains("tmux -V"),
+        "the L2 job must provision AND verify the tmux backend"
+    );
+    // No global L2 hard-require: WezTerm/Kitty/Apple-backed tests must skip
+    // cleanly here, not panic on a runner that cannot host their GUI.
+    assert!(
+        !shared.contains("BISCUIT_TEST_LEVEL_REQUIRED:"),
+        "the L2 job must not SET a global L2 hard-require (would panic GUI-only tests)"
+    );
+    // Focus safety: CI must never run L3 or take foreground focus.
+    assert!(
+        !shared.contains("BISCUIT_L3_TAKE_FOCUS") && !shared.contains("test-l3"),
+        "CI must not run L3 or enable focus-taking"
+    );
+}
+
+#[test]
 fn areas_declaring_native_deps_are_provisioned() {
     // Playa's Linux ALSA/PulseAudio headers must be declared as area policy and
     // installed before build/test — a missing lib is a provisioning failure, not

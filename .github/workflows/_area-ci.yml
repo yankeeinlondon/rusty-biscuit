@@ -226,9 +226,13 @@ jobs:
       - name: Lint and documentation guards
         run: cd "${{ inputs.area }}" && just lint
 
-  # L2 (real terminal) runs only on Linux, where the tmux harness is guaranteed.
-  # BISCUIT_TEST_LEVEL_REQUIRED=2 makes a genuinely missing harness hard-fail
-  # rather than skip. On Windows/macOS the tier skips cleanly via require_level!.
+  # L2 (real terminal). tmux/PTY is the ONLY backend provisionable in headless
+  # CI (D8): WezTerm/Kitty/Apple Terminal require running INSIDE that GUI (their
+  # `available()` gates need WEZTERM_UNIX_SOCKET / KITTY_LISTEN_ON / a live
+  # Terminal.app session), so those tests skip cleanly here via require_level!.
+  # We hard-require the provisioned backend by VERIFYING tmux is reachable rather
+  # than setting a global BISCUIT_TEST_LEVEL_REQUIRED, which would panic the
+  # GUI-backed tests this runner cannot host.
   l2:
     name: test-l2 (ubuntu)
     # Expensive optional tier runs only after L1 passes (D4).
@@ -236,8 +240,6 @@ jobs:
     if: ${{ inputs.l2 }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      BISCUIT_TEST_LEVEL_REQUIRED: "2"
     steps:
       - uses: actions/checkout@v4
       - name: Install native prerequisites
@@ -250,8 +252,13 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Install tmux
-        run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Provision and verify the tmux backend
+        run: |
+          sudo apt-get update && sudo apt-get install -y tmux
+          # Verify runtime reachability (D8): a broken tmux fails this named
+          # provisioning step — the hard-require for the one L2 backend CI hosts.
+          # `tmux -V` needs no server or display, so it takes no focus.
+          tmux -V
       - name: Enable and verify kache
         uses: ./.github/actions/enable-kache
         with:
