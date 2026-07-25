@@ -4,7 +4,7 @@ created: 2026-07-24
 phase: 1
 agent: codex/default
 yolo: true
-status: "phase 1 done (CI-validated); phase 2 in progress — toolchain pin landed"
+status: "phase 1 + phase 2 complete; branch devops-phase-1-bootstrap-release; phases 3-5 pending"
 ---
 
 # Reliable CI/CD and DevOps Execution Plan
@@ -158,7 +158,7 @@ workspace Cargo commands or root lifecycle recipes as routine final gates.
   - Publish JUnit per area, OS, gate, and shard with stable collision-free
     artifact names and retain the measurement metadata used to tune policy.
 
-- [ ] **Task 2.5: Stage area prerequisites before test fan-out.**
+- [x] **Task 2.5: Stage area prerequisites before test fan-out.**
   - Refactor `.github/workflows/_area-ci.yml` into explicit bootstrap,
     area build/check and lint, L1 shard, and optional-tier dependencies.
   - Prevent L1, L2, and browser jobs from starting after deterministic build or
@@ -167,14 +167,14 @@ workspace Cargo commands or root lifecycle recipes as routine final gates.
   - Preserve required macOS, Windows, and Linux coverage and identify the gate
     and OS in stable job names.
 
-- [ ] **Task 2.6: Update deterministic-gate documentation and contracts.**
+- [x] **Task 2.6: Update deterministic-gate documentation and contracts.**
   - Update `docs/testing-strategy.md`, `.claude/skills/rust-testing/`, and
     `.claude/skills/rust-devops/kache.md` for the pinned toolchain, explicit CI
     profile, retry rules, shard evidence, and staged gate graph.
   - Correct or remove adjacent workflow and nextest comments that no longer
     describe behavior.
 
-- [ ] **Validation checkpoint 2: Prove deterministic, bounded required gates.**
+- [x] **Validation checkpoint 2: Prove deterministic, bounded required gates.**
   - Run the recorded Phase 2 package-area gates, nextest configuration tests,
     scope tests, and workflow contract tests.
   - Confirm one deterministic L1 failure executes once and prevents redundant
@@ -285,6 +285,12 @@ workspace Cargo commands or root lifecycle recipes as routine final gates.
   - Remove duplicated bootstrap and broad L1 coverage while preserving each
     workflow's unique runtime evidence.
   - Name every job using the stable hierarchy `CI / area / gate / OS / shard`.
+  - Rename the opaque `hooks-tests` workflow. It tests the `.githooks/pre-push`
+    git hook and the `changed-areas` justfile recipe, but "hooks-tests" reads
+    ambiguously (git hooks vs. webhooks vs. UI hooks). Rename to a self-describing
+    name (e.g. `pre-push-hook-tests`) or fold it in as `CI / githooks / <gate>`.
+    Note: the hook is opt-in (`core.hooksPath` defaults to `.git/hooks`, not
+    `.githooks/`), so CI only verifies the script is correct.
 
 - [ ] **Task 4.5: Emit one actionable scope and failure summary.**
   - Carry event, base/head revisions, normalized changed files, affected seeds,

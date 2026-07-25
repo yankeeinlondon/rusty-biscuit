@@ -181,6 +181,25 @@ reverse Cargo dependencies, maps them to the curated policy in
 `.github/workflows/_area-ci.yml`. Platform behavior is uniform without starting
 jobs for unrelated areas.
 
+A bootstrap `preflight` job runs first (3 OSes for global CI/tooling changes, a
+scoped OS set for package-local changes) and gates the area fan-out via
+`needs: [scope, preflight]`. Within each area, `_area-ci.yml` jobs are staged:
+`lint` (build + clippy) → `test` (L1 shards) → optional `l2`/`browser`. A
+deterministic build/lint failure therefore skips the test tiers instead of
+re-reporting the same error, while independent areas still run in parallel
+(`fail-fast: false`).
+
+### Toolchain
+
+`rust-toolchain.toml` pins the exact version (`channel = "1.97.1"`,
+`components = ["clippy", "rustfmt"]`), not a floating `stable`, so local and CI
+builds are provably identical and rustfmt/clippy stay stable. Required CI honors
+this file — each toolchain step is `rustup show` (which materializes the pinned
+toolchain); there are no `dtolnay/rust-toolchain@stable` overrides. The scheduled
+(and manual) `.github/workflows/rust-latest-stable.yml` advisory workflow tests
+the latest stable toolchain (`RUSTUP_TOOLCHAIN=stable`) and runs
+`cargo fmt --check`. It is **non-required** — advisory only.
+
 ### Policy
 
 | Concern | Linux (`ubuntu-latest`) | Windows (`windows-latest`) | macOS (`macos-latest`) |
@@ -203,10 +222,25 @@ jobs for unrelated areas.
   casing. `BISCUIT_TEST_LEVEL_REQUIRED=2` is set only on the Linux leg (where the
   tmux harness is guaranteed) so a genuinely broken harness still hard-fails.
 - **Heavy areas shard** their L1 run via nextest `--partition count:i/N` across
-  parallel matrix jobs (e.g. darkmatter). Combined with the build cache this
-  keeps wall-clock under the 30-min ceiling.
-- **Build cache**: the reusable workflow enables the pinned `kache` version
-  with the GitHub Actions cache backend on Linux, macOS, and Windows.
+  parallel matrix jobs. Darkmatter keeps 4 shards (measured 6.7–8.2 min/shard);
+  Claudine runs a 4-shard L1 (`["1/4","2/4","3/4","4/4"]`), sized from a measured
+  cold run (~3964 tests, ~27 min unsharded → ~7 min/shard). L1 shards run with
+  `--no-fail-fast` so one slow or failing test cannot suppress the rest of a
+  shard's evidence, and per-shard JUnit is uploaded under collision-free names.
+  Combined with the build cache this keeps wall-clock under the 30-min ceiling.
+- **CI selects the `ci` nextest profile** explicitly (`NEXTEST_PROFILE: ci` in
+  `_area-ci.yml`; nextest logs `nextest profile: ci`). In `.config/nextest.toml`
+  `[profile.ci]` sets `retries = 0`, so a deterministic L1 failure runs exactly
+  once; scoped `retries = 2` overrides remain only for the `test(/level2_/)` and
+  `test(/browser_/)` tiers (documented resource contention). `[profile.default]`
+  keeps `retries = 3` for local dev — only the CI profile went to 0.
+- **Build cache**: `kache` is opt-in — there is no committed global
+  `rustc-wrapper`. The reusable workflow enables the pinned `kache` version
+  (single authority in `.github/kache-version`, verified by the
+  `.github/actions/enable-kache` composite action) with the GitHub Actions
+  cache backend on Linux and macOS **only**. `kunobi-ninja/kache-action@v1`
+  rejects `win32-x64` (`Unsupported platform`), so Windows CI builds without
+  kache.
 - **Soft legs report but do not gate**: `_area-ci.yml`'s `soft-os` input
   (default `["windows-latest"]`) marks a test leg `continue-on-error`. This is
   how a platform is lit up before its latent cross-platform backlog is burned
@@ -320,7 +354,7 @@ Rust and long wall-clock times.
 | One dependency-aware `ci.yml` caller + reusable `_area-ci.yml` | Uniform platform behavior without starting jobs for unrelated areas. |
 | macOS compile-checked (not full-tested) on PRs | GitHub macOS runners bill ~10× Linux; the `check` job catches macOS compile drift cheaply while full L1 runs on Linux + Windows. |
 | Windows runs full L1 | Windows is the highest-risk platform for silent API/type drift; compile-only would miss runtime-shaped bugs. |
-| Pinned `kache` on Linux, macOS, and Windows | The same compiler-cache behavior and cache-key version applies to every native CI leg. |
+| Pinned `kache` on Linux and macOS (opt-in) | One version authority (`.github/kache-version`) applies the same cache-key version to every kache-eligible leg. `kache-action@v1` rejects `win32-x64`, so Windows builds without it. |
 
 See also:
 

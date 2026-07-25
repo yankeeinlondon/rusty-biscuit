@@ -132,6 +132,22 @@ fn primary_ci_runs_a_bootstrap_preflight_before_fan_out() {
 }
 
 #[test]
+fn area_test_tiers_are_staged_after_build_and_lint() {
+    let shared = workflow("_area-ci.yml");
+    // L1 shards gate on the lint/build stage — a deterministic compile/lint
+    // failure must not spawn redundant shards that re-report the same error (D4).
+    assert!(
+        shared.contains("needs: lint"),
+        "the L1 test job must depend on the lint/build stage (D4)"
+    );
+    // The expensive L2 and browser tiers run only after L1.
+    assert!(
+        shared.matches("needs: test").count() >= 2,
+        "the L2 and browser tiers must each depend on L1 (D4)"
+    );
+}
+
+#[test]
 fn area_ci_selects_the_ci_nextest_profile_explicitly() {
     let shared = workflow("_area-ci.yml");
     assert!(

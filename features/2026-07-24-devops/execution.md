@@ -1,7 +1,7 @@
 ---
 plan_file: features/2026-07-24-devops/plan.md
 phases: 5
-status: "phase 1 complete + validated on CI; phase 2 in progress (toolchain pin landed)"
+status: "phase 1 + phase 2 COMPLETE (CI-verified); phases 3-5 pending"
 stop_reason: ""
 started: 24 July 2026
 scope: Phase 1 — Restore Bootstrap and Release Signal
@@ -109,10 +109,8 @@ Decision confirmed with user (OQ1): pin **exactly `1.97.1`** (verified current l
   - **Changes:** `areas.json` claudine `shards: ["1/4".."4/4"]` (≈7 min/shard); darkmatter unchanged. `_area-ci.yml` L1 step now `--no-fail-fast` (D6/D7 — a shard must run ALL its tests; the fail-fast is exactly what hid 3562 claudine tests). Per-tier JUnit upload with collision-free `junit-<area>-<gate>-<os>-<job-index>` names.
   - **Also confirmed from the same run:** `nextest profile: ci` is logged (Task 2.3 / AC15 ✅); 30/30 toolchain steps + all kache/preflight green (Task 2.2 ✅).
   - **Caveats (follow-ups, not Phase 2 blockers):** (a) recipes that run nextest once per package overwrite `test-results.xml`, so per-shard JUnit currently captures the last package — full aggregation is a follow-up; (b) the `1 timed out` claudine test is a real product/test defect (Phase 2/3 area-owned), now visible instead of masked.
-- [ ] **Task 2.5** stage area build/lint before test fan-out in `_area-ci.yml`.
-- [ ] **Task 2.6** docs + comment drift.
-- [ ] **Task 2.5** stage area build/lint before test fan-out in `_area-ci.yml`.
-- [ ] **Task 2.6** docs + comment drift.
+- [x] **Task 2.5** staged `_area-ci.yml`: lint -> test (L1) -> optional l2/browser via `needs:`. A build/lint failure now skips the test tiers (fixes the biscuit-speaks lint+test redundancy); expensive L2/browser run only after L1. actionlint validates the DAG; contract test `area_test_tiers_are_staged_after_build_and_lint`.
+- [x] **Task 2.6** docs updated (subagent, verified): docs/testing-strategy.md + rust-testing SKILL.md (hash regenerated) + rust-devops/kache.md — pinned toolchain, explicit ci profile/retries, shard evidence, staged gates, kache opt-in + Windows caveat. Fixed drifted `_area-ci.yml` header comment ("kache on every runner" -> Linux/macOS only).
 
 ## Files Changed
 

@@ -5,8 +5,9 @@ name: area-ci
 # The dependency-aware `ci.yml` matrix calls this via `workflow_call` so
 # platform behavior stays uniform across the monorepo. See
 # `docs/testing-strategy.md` → "Platform Coverage (CI)" for the policy this
-# encodes (macOS compile-check only, full L1 on Linux + Windows, kache on every
-# supported runner, nextest sharding for heavy areas).
+# encodes: macOS compile-check only; full L1 on Linux + Windows; staged so a
+# build/lint failure skips the test tiers; kache on Linux/macOS runners
+# (kache-action@v1 rejects win32-x64); nextest sharding for heavy areas.
 
 on:
   workflow_call:
@@ -100,6 +101,12 @@ jobs:
   # sharded across parallel jobs via nextest `--partition`.
   test:
     name: test (${{ matrix.os }}${{ matrix.shard != '1/1' && format(' {0}', matrix.shard) || '' }})
+    # Stage after build/lint (D4): a deterministic compile or lint failure blocks
+    # the L1 shards so they don't recompile and re-report the same source error
+    # (e.g. an unused-variable warning that fails both lint and, under
+    # RUSTFLAGS=-D warnings, every test build). Other areas stay independent —
+    # the ci.yml area matrix runs with fail-fast: false.
+    needs: lint
     strategy:
       fail-fast: false
       matrix:
@@ -208,6 +215,8 @@ jobs:
   # rather than skip. On Windows/macOS the tier skips cleanly via require_level!.
   l2:
     name: test-l2 (ubuntu)
+    # Expensive optional tier runs only after L1 passes (D4).
+    needs: test
     if: ${{ inputs.l2 }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -250,6 +259,8 @@ jobs:
 
   browser:
     name: test-browser (ubuntu)
+    # Expensive optional tier runs only after L1 passes (D4).
+    needs: test
     if: ${{ inputs.browser }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
