@@ -1,25 +1,13 @@
 name: claudine-windows-ctrl-c
 
-# Opt-in Windows-host runtime verification for Claudine's wrapper Ctrl+C parity.
-# This runs the ignored Windows console-control integration test that needs a
-# Windows host and an attached console.
+# Reusable Windows-host runtime verification for Claudine's wrapper Ctrl+C
+# parity. Orchestrated by `ci.yml` when Claudine is in the affected scope (D12),
+# so it no longer self-triggers on pushes/PRs. Runs the ignored Windows
+# console-control integration test that needs a Windows host and an attached
+# console. Also dispatchable manually.
 
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/claudine-windows-ctrl-c.yml"
-      - "Cargo.lock"
-      - "Cargo.toml"
-      - "claudine/**"
-      - "just/**"
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/claudine-windows-ctrl-c.yml"
-      - "Cargo.lock"
-      - "Cargo.toml"
-      - "claudine/**"
-      - "just/**"
+  workflow_call: {}
   workflow_dispatch: {}
 
 env:
@@ -27,21 +15,17 @@ env:
   CARGO_TERM_COLOR: never
   RUSTFLAGS: "-D warnings"
 
-concurrency:
-  group: claudine-windows-ctrl-c-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   verify:
-    name: Windows Ctrl+C runtime verification
+    name: claudine / L3 windows Ctrl+C
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
 
       # Backstop for the vendored protoc in rendezvous-core's build.rs:
       # a system protoc if the vendored binary is ever unavailable.

@@ -35,6 +35,7 @@ jobs:
       change_class: ${{ steps.scope.outputs.change_class }}
       canary_matrix: ${{ steps.scope.outputs.canary_matrix }}
       has_canaries: ${{ steps.scope.outputs.has_canaries }}
+      area_names: ${{ steps.scope.outputs.area_names }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -96,6 +97,7 @@ jobs:
             echo "full_scope=$(jq -r '.full_scope' <<<"$scope_json")"
             echo "claudine=$(jq -r 'any(.areas[]; .area == "claudine")' <<<"$scope_json")"
             echo "darkmatter=$(jq -r 'any(.areas[]; .area == "darkmatter")' <<<"$scope_json")"
+            echo "area_names=$(jq -c '[.areas[].area]' <<<"$scope_json")"
             echo "preflight_os=$(jq -c '.preflight_os' <<<"$scope_json")"
             echo "preflight_reason=$(jq -r '.preflight_reason' <<<"$scope_json")"
             echo "change_class=$(jq -r '.change_class' <<<"$scope_json")"
@@ -325,3 +327,28 @@ jobs:
           workspaces: ". -> target"
           shared-key: area-ci-darkmatter-test-ubuntu-latest
       - run: cargo test -p darkmatter --lib terminal::tests::test_color_depth
+
+  # Specialized runtime contracts (D12): orchestrated by the primary workflow,
+  # selected from affected scope, so there is one CI run per commit instead of a
+  # separate wall of path-triggered workflows. Each preserves its unique runtime
+  # evidence; shared bootstrap lives in the reusable workflow it calls.
+  claudine-windows-ctrl-c:
+    name: claudine-windows-ctrl-c
+    needs: [scope, preflight, canary]
+    if: >-
+      !cancelled() &&
+      needs.scope.outputs.claudine == 'true' &&
+      (needs.canary.result == 'success' || needs.canary.result == 'skipped')
+    uses: ./.github/workflows/claudine-windows-ctrl-c.yml
+    secrets: inherit
+
+  rendezvous:
+    name: rendezvous
+    needs: [scope, preflight, canary]
+    if: >-
+      !cancelled() &&
+      (contains(fromJSON(needs.scope.outputs.area_names), 'claudine') ||
+       contains(fromJSON(needs.scope.outputs.area_names), 'sniff')) &&
+      (needs.canary.result == 'success' || needs.canary.result == 'skipped')
+    uses: ./.github/workflows/rendezvous-tests.yml
+    secrets: inherit
