@@ -4,7 +4,7 @@ created: 2026-07-24
 phase: 1
 agent: codex/default
 yolo: true
-status: "phase 1 + phase 2 complete; branch devops-phase-1-bootstrap-release; phases 3-5 pending"
+status: "phases 1-3 complete; branch devops-phase-1-bootstrap-release; phases 4-5 pending"
 ---
 
 # Reliable CI/CD and DevOps Execution Plan
@@ -186,14 +186,14 @@ workspace Cargo commands or root lifecycle recipes as routine final gates.
 
 ## Phase 3: Align Test Tiers with Provisioned Capabilities
 
-- [ ] **Task 3.1: Record the Phase 3 change and verification scope.**
+- [x] **Task 3.1: Record the Phase 3 change and verification scope.**
   - Run impact analysis before changing harness, recipe, or test-selection
     symbols and use `sniff` to record all harness consumers and native-dependent
     areas.
   - Record platform-specific compile checks and focus-safe L2/browser tests in
     the verification scope.
 
-- [ ] **Task 3.2: Define capability policy in `.github/ci/areas.json`.**
+- [x] **Task 3.2: Define capability policy in `.github/ci/areas.json`.**
   - Add explicit per-area backend requirements and per-OS native prerequisites
     alongside existing L2/browser policy.
   - Define a strict policy schema with required/defaulted fields, supported
@@ -202,7 +202,7 @@ workspace Cargo commands or root lifecycle recipes as routine final gates.
     `soft_os`, `shards`, `l2`, `browser`, `kache`, AI-provider stubs, backend
     requirements, native prerequisites, and the later canary flag.
 
-- [ ] **Task 3.3: Split L2 selection by terminal backend.**
+- [x] **Task 3.3: Split L2 selection by terminal backend.**
   - Introduce stable machine-readable selectors for tmux/PTY, WezTerm, Kitty,
     Apple Terminal, and future backends using names, filters, or equivalent
     metadata.
@@ -213,7 +213,7 @@ workspace Cargo commands or root lifecycle recipes as routine final gates.
   - Audit existing `level2_` tests and reclassify selectors that do not match
     their actual resource requirements without changing L1/L2/L3 semantics.
 
-- [ ] **Task 3.4: Provision and verify selected backends without taking focus.**
+- [x] **Task 3.4: Provision and verify selected backends without taking focus.**
   - For each selected backend, provision or attach headlessly, verify runtime
     reachability rather than executable presence, export only that backend's
     contract, and clean up only resources created by the harness.
@@ -221,7 +221,7 @@ workspace Cargo commands or root lifecycle recipes as routine final gates.
   - Add focus-safety assertions for L2/browser workflows and keep L3 disabled
     unless explicitly and safely authorized.
 
-- [ ] **Task 3.5: Move native prerequisites into area policy.**
+- [x] **Task 3.5: Move native prerequisites into area policy.**
   - Teach the reusable area workflow to install and verify only the native
     packages declared for the selected area and OS, with named provisioning
     failures before build/test commands.
@@ -231,14 +231,14 @@ workspace Cargo commands or root lifecycle recipes as routine final gates.
   - Update `playa/docs/dependencies.md` (creating the area dependency document if
     absent) and other owning-area dependency docs for declared native tools.
 
-- [ ] **Task 3.6: Add capability and provisioning regression tests.**
+- [x] **Task 3.6: Add capability and provisioning regression tests.**
   - Add policy tests for unknown backends, invalid OS/package-manager mappings,
     unsupported hard requirements, and missing native prerequisites.
   - Add workflow/harness contracts proving tmux-only selection excludes other
     backends, WezTerm reachability is checked before hard requirement, L3 stays
     off, and missing ALSA fails provisioning rather than product tests.
 
-- [ ] **Validation checkpoint 3: Prove resource-matched, focus-safe tiers.**
+- [x] **Validation checkpoint 3: Prove resource-matched, focus-safe tiers.**
   - Run the recorded harness consumer and native-area build, test, and lint
     gates, plus policy and workflow contracts.
   - Exercise each selected L2 backend on its supported runner and verify no
