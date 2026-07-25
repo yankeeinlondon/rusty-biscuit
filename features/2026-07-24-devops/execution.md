@@ -112,6 +112,16 @@ Decision confirmed with user (OQ1): pin **exactly `1.97.1`** (verified current l
 - [x] **Task 2.5** staged `_area-ci.yml`: lint -> test (L1) -> optional l2/browser via `needs:`. A build/lint failure now skips the test tiers (fixes the biscuit-speaks lint+test redundancy); expensive L2/browser run only after L1. actionlint validates the DAG; contract test `area_test_tiers_are_staged_after_build_and_lint`.
 - [x] **Task 2.6** docs updated (subagent, verified): docs/testing-strategy.md + rust-testing SKILL.md (hash regenerated) + rust-devops/kache.md — pinned toolchain, explicit ci profile/retries, shard evidence, staged gates, kache opt-in + Windows caveat. Fixed drifted `_area-ci.yml` header comment ("kache on every runner" -> Linux/macOS only).
 
+## Phase 3 progress (in branch)
+
+- **Task 3.1 scope:** Phase 3 touches the L2 terminal-backend harness (`biscuit-test-harness`), `_area-ci.yml` L2/browser provisioning, area `just test-l2` recipes, `areas.json` policy schema, `affected_scope.py` validation, and native-dep areas (Playa ALSA). A discovery agent is mapping the exact backend-selection + native-prereq mechanics (the first agent died in a power cut; re-launched).
+- [x] **Task 3.2 (foundation): strict capability-policy schema.** `affected_scope.py` now validates every `areas.json` record via `validate_area_schema` (D10): required fields (`area`, `check_args`), unknown-field rejection, supported-runner-OS enforcement on `full_os`/`check_os`/`soft_os`/`native` keys, known-backend vocabulary (`tmux`/`wezterm`/`kitty`/`apple-terminal`), `native` OS→packages typing, and boolean-flag typing. New optional fields `backends`, `native`, `canary` added with empty defaults. Documented every field in new `.github/ci/README.md`. Tests: 18/18 (added 7 schema cases). Real `areas.json` validates clean.
+- [ ] **Task 3.2 (remainder):** populate per-area `backends`/`native` values (needs discovery map).
+- [ ] **Task 3.3** split L2 selection by terminal backend (recipes/filters; hard-require only selected backend).
+- [ ] **Task 3.4** provision+verify selected backends without taking focus; L3 stays off.
+- [ ] **Task 3.5** native prereqs in area policy + CI provisioning (Playa ALSA); update `playa/docs/dependencies.md`.
+- [ ] **Task 3.6** capability/provisioning regression tests.
+
 ## Files Changed
 
 - `.cargo/config.toml` — **deleted** (removed mandatory global `rustc-wrapper = "kache"`; `.cargo/` now empty/gone). D1.

@@ -44,7 +44,22 @@ AREA_DEFAULTS: dict[str, Any] = {
     "browser": False,
     "kache": True,
     "ai_provider_stubs": False,
+    # Capability policy (D8/D9/D11). `backends`: L2 terminal backends this area's
+    # tests require. `native`: OS -> system packages needed to build/test.
+    # `canary`: whether this area is a global-change canary (Phase 4).
+    "backends": [],
+    "native": {},
+    "canary": False,
 }
+
+# Single policy surface (D10). Every area record is validated against this
+# schema so a typo, an unsupported runner OS, or an unknown field fails loudly
+# instead of silently mis-scoping CI.
+SUPPORTED_RUNNER_OS = {"ubuntu-latest", "windows-latest", "macos-latest"}
+KNOWN_L2_BACKENDS = {"tmux", "wezterm", "kitty", "apple-terminal"}
+REQUIRED_AREA_FIELDS = {"area", "check_args"}
+OS_LIST_FIELDS = ("full_os", "check_os", "soft_os")
+ALLOWED_AREA_FIELDS = REQUIRED_AREA_FIELDS | set(AREA_DEFAULTS)
 
 
 def load_metadata(root: Path) -> dict[str, Any]:
@@ -58,10 +73,68 @@ def load_metadata(root: Path) -> dict[str, Any]:
     return json.loads(result.stdout)
 
 
+def validate_area_schema(areas: list[dict[str, Any]]) -> None:
+    """Validate each raw area record against the capability-policy schema (D10).
+
+    ## Errors
+
+    Raises ``RuntimeError`` naming the offending area and field for a missing
+    required field, an unknown field, an unsupported runner OS, an unknown L2
+    backend, or a mistyped value.
+    """
+    for index, area in enumerate(areas):
+        label = area.get("area", f"<record {index}>")
+
+        missing = REQUIRED_AREA_FIELDS - area.keys()
+        if missing:
+            raise RuntimeError(f"area '{label}' is missing required field(s): {sorted(missing)}")
+
+        unknown = area.keys() - ALLOWED_AREA_FIELDS
+        if unknown:
+            raise RuntimeError(
+                f"area '{label}' has unknown field(s): {sorted(unknown)}; "
+                f"allowed fields are {sorted(ALLOWED_AREA_FIELDS)}"
+            )
+
+        for field in OS_LIST_FIELDS:
+            if field in area:
+                invalid = [os for os in area[field] if os not in SUPPORTED_RUNNER_OS]
+                if invalid:
+                    raise RuntimeError(
+                        f"area '{label}' field '{field}' names unsupported runner OS(es): "
+                        f"{invalid}; supported: {sorted(SUPPORTED_RUNNER_OS)}"
+                    )
+
+        for backend in area.get("backends", []):
+            if backend not in KNOWN_L2_BACKENDS:
+                raise RuntimeError(
+                    f"area '{label}' requires unknown L2 backend '{backend}'; "
+                    f"known backends: {sorted(KNOWN_L2_BACKENDS)}"
+                )
+
+        native = area.get("native", {})
+        if not isinstance(native, dict):
+            raise RuntimeError(f"area '{label}' field 'native' must be an OS->packages map")
+        for os_name, packages in native.items():
+            if os_name not in SUPPORTED_RUNNER_OS:
+                raise RuntimeError(
+                    f"area '{label}' field 'native' names unsupported OS '{os_name}'"
+                )
+            if not isinstance(packages, list) or not all(isinstance(p, str) for p in packages):
+                raise RuntimeError(
+                    f"area '{label}' field 'native.{os_name}' must be a list of package names"
+                )
+
+        for field in ("l2", "browser", "kache", "ai_provider_stubs", "canary"):
+            if field in area and not isinstance(area[field], bool):
+                raise RuntimeError(f"area '{label}' field '{field}' must be a boolean")
+
+
 def load_area_config(path: Path) -> list[dict[str, Any]]:
     with path.open(encoding="utf-8") as config_file:
         areas = json.load(config_file)
 
+    validate_area_schema(areas)
     return [{**AREA_DEFAULTS, **area} for area in areas]
 
 

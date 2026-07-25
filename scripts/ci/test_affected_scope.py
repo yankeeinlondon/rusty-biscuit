@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from affected_scope import calculate_scope
+from affected_scope import calculate_scope, validate_area_schema
 
 
 def package(root: Path, name: str, relative_manifest: str) -> dict[str, object]:
@@ -166,6 +166,51 @@ class AffectedScopeTests(unittest.TestCase):
         )
         self.assertEqual("documentation", scope["change_class"])
         self.assertEqual(["ubuntu-latest"], scope["preflight_os"])
+
+
+class AreaSchemaTests(unittest.TestCase):
+    def test_valid_capability_policy_passes(self) -> None:
+        validate_area_schema(
+            [
+                {
+                    "area": "alpha",
+                    "check_args": "-p alpha",
+                    "backends": ["tmux", "wezterm"],
+                    "native": {"ubuntu-latest": ["libasound2-dev"]},
+                    "canary": True,
+                }
+            ]
+        )
+
+    def test_missing_required_field_is_rejected(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "missing required"):
+            validate_area_schema([{"area": "alpha"}])
+
+    def test_unknown_field_is_rejected(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "unknown field"):
+            validate_area_schema([{"area": "alpha", "check_args": "-p alpha", "l3": True}])
+
+    def test_unsupported_runner_os_is_rejected(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "unsupported runner OS"):
+            validate_area_schema(
+                [{"area": "alpha", "check_args": "-p alpha", "full_os": ["freebsd-latest"]}]
+            )
+
+    def test_unknown_backend_is_rejected(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "unknown L2 backend"):
+            validate_area_schema(
+                [{"area": "alpha", "check_args": "-p alpha", "backends": ["ghostty"]}]
+            )
+
+    def test_native_must_be_os_to_packages_map(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "native"):
+            validate_area_schema(
+                [{"area": "alpha", "check_args": "-p alpha", "native": ["libasound2-dev"]}]
+            )
+
+    def test_non_boolean_flag_is_rejected(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "must be a boolean"):
+            validate_area_schema([{"area": "alpha", "check_args": "-p alpha", "l2": "yes"}])
 
 
 if __name__ == "__main__":
