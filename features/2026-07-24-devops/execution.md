@@ -130,9 +130,9 @@ Decision confirmed with user (OQ1): pin **exactly `1.97.1`** (verified current l
   - `affected_scope.py` gains `validate_ownership` (D10): every member owned-by-area OR exempt; fails by name on unmapped member, owned-and-exempt contradiction, or stale exemption. `load_exemptions` rejects duplicates/empty reasons. Documented in `.github/ci/README.md`.
   - Tests: **24/24 python** (6 new ownership cases). Real workspace validates clean.
   - **User note:** biscuit-visualized/messenger/biscuit-icon(done)/etc. "all eventually need inclusion"; the exemption reasons track the exact blocker (complete canonical recipes) so promotion is a tracked follow-up.
-- [ ] **Task 4.3** policy-driven global-change canaries (canary field exists; needs ci.yml orchestration).
-- [ ] **Task 4.4** orchestrate specialized workflows from primary CI + `hooks-tests` rename + stable job naming.
-- [ ] **Task 4.5** one actionable scope + failure summary (GITHUB_STEP_SUMMARY).
+- [x] **Task 4.3** canaries: biscuit-hash (pure-Rust) + playa (native) + darkmatter (heavy) flagged `canary:true`; affected_scope emits `canaries`; ci.yml runs a canary stage first on full scope (canary_matrix) and gates the non-canary fan-out + specialized jobs on canary success/skip (a canary failure blocks fan-out). Contract test.
+- [~] **Task 4.4 (partial)** renamed opaque `hooks-tests.yml` -> `pre-push-hook-tests.yml`. Remaining: consolidate specialized workflows (rendezvous/claudine-windows/captured-stdout/etc.) under ci.yml + stable CI/area/gate/OS/shard naming + failure-class summary. LARGE -- own effort.
+- [x] **Task 4.5 (scope part)** scope job writes an actionable `## CI scope` summary to $GITHUB_STEP_SUMMARY (event, change class, full-scope+reason, preflight OS, canaries, areas, package count, toolchain, kache). Failure-class summary is part of the 4.4 remainder.
 - [ ] **Task 4.6** remove stale package/area counts across docs (now 21 curated areas, not 18).
 
 ## Files Changed

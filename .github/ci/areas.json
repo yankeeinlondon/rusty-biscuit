@@ -1,7 +1,8 @@
 [
   {
     "area": "biscuit-hash",
-    "check_args": "-p biscuit-hash -p biscuit-hash-cli"
+    "check_args": "-p biscuit-hash -p biscuit-hash-cli",
+    "canary": true
   },
   {
     "area": "biscuit-location",
@@ -38,6 +39,7 @@
   {
     "area": "playa",
     "check_args": "-p playa -p playa-cli",
+    "canary": true,
     "native": {
       "ubuntu-latest": ["libasound2-dev", "libpulse-dev"]
     }
@@ -53,7 +55,8 @@
     "soft_os": [],
     "l2": true,
     "browser": true,
-    "backends": ["tmux", "wezterm"]
+    "backends": ["tmux", "wezterm"],
+    "canary": true
   },
   {
     "area": "sniff",

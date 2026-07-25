@@ -359,6 +359,10 @@ def calculate_scope(
         files, selected_areas, full_scope, force_all
     )
 
+    canaries = [
+        area["area"] for area in selected_areas if area.get("canary", False)
+    ]
+
     return {
         "areas": selected_areas,
         "packages": selected_packages,
@@ -366,6 +370,7 @@ def calculate_scope(
         "change_class": change_class,
         "preflight_os": preflight_os,
         "preflight_reason": preflight_reason,
+        "canaries": canaries,
     }
 
 
