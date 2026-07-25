@@ -158,6 +158,7 @@ jobs:
       browser: ${{ matrix.browser }}
       kache: ${{ matrix.kache }}
       ai-provider-stubs: ${{ matrix.ai_provider_stubs }}
+      native: ${{ toJSON(matrix.native) }}
     secrets: inherit
 
   affected-coverage:

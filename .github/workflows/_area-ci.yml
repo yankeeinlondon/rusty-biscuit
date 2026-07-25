@@ -52,6 +52,10 @@ on:
         description: "Install inert AI-provider CLI stubs for tests that require provider discovery."
         type: boolean
         default: false
+      native:
+        description: "JSON map of runner-OS (e.g. ubuntu-latest) -> native packages to install before build/test."
+        type: string
+        default: "{}"
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -77,6 +81,10 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Install native prerequisites
+        uses: ./.github/actions/install-native
+        with:
+          native: ${{ inputs.native }}
       - name: Set up the pinned Rust toolchain
         run: rustup show
       - name: Install protoc
@@ -120,6 +128,10 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Install native prerequisites
+        uses: ./.github/actions/install-native
+        with:
+          native: ${{ inputs.native }}
       - name: Set up the pinned Rust toolchain
         run: rustup show
       - name: Install protoc
@@ -187,6 +199,10 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Install native prerequisites
+        uses: ./.github/actions/install-native
+        with:
+          native: ${{ inputs.native }}
       # clippy + rustfmt come from rust-toolchain.toml (the single authority).
       - name: Set up the pinned Rust toolchain
         run: rustup show
@@ -224,6 +240,10 @@ jobs:
       BISCUIT_TEST_LEVEL_REQUIRED: "2"
     steps:
       - uses: actions/checkout@v4
+      - name: Install native prerequisites
+        uses: ./.github/actions/install-native
+        with:
+          native: ${{ inputs.native }}
       - name: Set up the pinned Rust toolchain
         run: rustup show
       - name: Install protoc
@@ -268,6 +288,10 @@ jobs:
       BISCUIT_BROWSER_REQUIRED: "1"
     steps:
       - uses: actions/checkout@v4
+      - name: Install native prerequisites
+        uses: ./.github/actions/install-native
+        with:
+          native: ${{ inputs.native }}
       - name: Set up the pinned Rust toolchain
         run: rustup show
       - name: Install protoc

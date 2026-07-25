@@ -191,6 +191,28 @@ fn area_policy_retains_native_and_heavy_area_coverage() {
 }
 
 #[test]
+fn areas_declaring_native_deps_are_provisioned() {
+    // Playa's Linux ALSA/PulseAudio headers must be declared as area policy and
+    // installed before build/test — a missing lib is a provisioning failure, not
+    // a product-test failure (D9).
+    let areas = read(".github/ci/areas.json");
+    assert!(
+        areas.contains("libasound2-dev"),
+        "playa must declare its Linux native audio prerequisites in areas.json"
+    );
+    let shared = workflow("_area-ci.yml");
+    assert!(
+        shared.contains("uses: ./.github/actions/install-native"),
+        "area jobs must provision declared native prerequisites via the shared action"
+    );
+    let action = read(".github/actions/install-native/action.yml");
+    assert!(
+        action.contains("apt-get install") && action.contains("brew install"),
+        "install-native must provision on Linux (apt) and macOS (brew)"
+    );
+}
+
+#[test]
 fn heavy_areas_shard_l1_and_surface_all_failures() {
     // Both heavy areas (claudine ~3964 tests, darkmatter) declare 4-shard L1
     // policy sized from measured cold-run durations (~7-8 min/shard).

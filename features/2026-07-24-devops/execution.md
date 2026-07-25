@@ -116,10 +116,10 @@ Decision confirmed with user (OQ1): pin **exactly `1.97.1`** (verified current l
 
 - **Task 3.1 scope:** Phase 3 touches the L2 terminal-backend harness (`biscuit-test-harness`), `_area-ci.yml` L2/browser provisioning, area `just test-l2` recipes, `areas.json` policy schema, `affected_scope.py` validation, and native-dep areas (Playa ALSA). A discovery agent is mapping the exact backend-selection + native-prereq mechanics (the first agent died in a power cut; re-launched).
 - [x] **Task 3.2 (foundation): strict capability-policy schema.** `affected_scope.py` now validates every `areas.json` record via `validate_area_schema` (D10): required fields (`area`, `check_args`), unknown-field rejection, supported-runner-OS enforcement on `full_os`/`check_os`/`soft_os`/`native` keys, known-backend vocabulary (`tmux`/`wezterm`/`kitty`/`apple-terminal`), `native` OS→packages typing, and boolean-flag typing. New optional fields `backends`, `native`, `canary` added with empty defaults. Documented every field in new `.github/ci/README.md`. Tests: 18/18 (added 7 schema cases). Real `areas.json` validates clean.
-- [ ] **Task 3.2 (remainder):** populate per-area `backends`/`native` values (needs discovery map).
+- [x] **Task 3.2 (remainder):** declared `backends` (biscuit-terminal: tmux/wezterm/kitty/apple-terminal; darkmatter/claudine: tmux/wezterm) and Playa `native` ({ubuntu-latest: libasound2-dev, libpulse-dev}) in areas.json.
 - [ ] **Task 3.3** split L2 selection by terminal backend (recipes/filters; hard-require only selected backend).
 - [ ] **Task 3.4** provision+verify selected backends without taking focus; L3 stays off.
-- [ ] **Task 3.5** native prereqs in area policy + CI provisioning (Playa ALSA); update `playa/docs/dependencies.md`.
+- [x] **Task 3.5** native prereqs: new `install-native` composite (apt/brew, named failure, no-op when empty) wired into all 5 _area-ci jobs before build/test; ci.yml passes `native`; Playa Linux ALSA/Pulse now provisioned; created playa/docs/dependencies.md. Contract test + shellcheck-clean.
 - [ ] **Task 3.6** capability/provisioning regression tests.
 
 ## Files Changed
