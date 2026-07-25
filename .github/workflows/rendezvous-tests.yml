@@ -19,37 +19,18 @@ name: rendezvous-tests
 # Rendezvous consumer check, so a change to `sniff::os::user` that breaks that
 # boundary surfaces against Rendezvous.
 
+# Orchestrated by `ci.yml` when Claudine or Sniff is in the affected scope (D12);
+# no longer self-triggers on pushes/PRs. Also dispatchable manually.
 on:
-  push:
-    paths:
-      - "claudine/rendezvous/**"
-      - "claudine/cli/**"
-      - "sniff/lib/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "just/**"
-      - ".github/workflows/rendezvous-tests.yml"
-  pull_request:
-    paths:
-      - "claudine/rendezvous/**"
-      - "claudine/cli/**"
-      - "sniff/lib/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "just/**"
-      - ".github/workflows/rendezvous-tests.yml"
+  workflow_call: {}
   workflow_dispatch: {}
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
-concurrency:
-  group: rendezvous-tests-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   native:
-    name: native (${{ matrix.os }})
+    name: rendezvous / native (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
@@ -62,8 +43,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
 
       # Backstop for the vendored protoc in rendezvous-core's build.rs.
       - name: Install protoc

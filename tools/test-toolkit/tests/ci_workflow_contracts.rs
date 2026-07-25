@@ -368,6 +368,28 @@ fn heavy_areas_shard_l1_and_surface_all_failures() {
     );
 }
 
+#[test]
+fn rendezvous_is_reusable_and_orchestrated_preserving_native_evidence() {
+    let rz = workflow("rendezvous-tests.yml");
+    assert!(
+        rz.contains("workflow_call"),
+        "rendezvous must be a reusable workflow orchestrated by ci.yml (D12)"
+    );
+    assert!(
+        rz.contains("os: [macos-latest, ubuntu-latest, windows-latest]"),
+        "rendezvous must keep its three-OS native IPC matrix (unique runtime evidence)"
+    );
+    assert!(
+        !rz.contains("\n  push:\n"),
+        "rendezvous must not self-trigger on push once orchestrated"
+    );
+    let ci = workflow("ci.yml");
+    assert!(
+        ci.contains("uses: ./.github/workflows/rendezvous-tests.yml"),
+        "ci.yml must orchestrate rendezvous when claudine/sniff are in scope (D12)"
+    );
+}
+
 // --- D5: controlled required toolchain + latest-stable advisory ---------------
 
 #[test]
@@ -481,5 +503,16 @@ fn claudine_preserves_native_windows_ctrl_c_evidence() {
     assert!(
         windows.contains(r#"RUSTFLAGS: "-D warnings""#),
         "the specialized Windows runtime job must reject Rust warnings"
+    );
+    // D12: the specialized workflow is reusable and orchestrated by ci.yml when
+    // Claudine is in scope — not a separate path-triggered workflow.
+    assert!(
+        windows.contains("workflow_call"),
+        "the Windows Ctrl+C workflow must be reusable (workflow_call)"
+    );
+    let ci = workflow("ci.yml");
+    assert!(
+        ci.contains("uses: ./.github/workflows/claudine-windows-ctrl-c.yml"),
+        "ci.yml must orchestrate the Windows Ctrl+C specialized workflow (D12)"
     );
 }
