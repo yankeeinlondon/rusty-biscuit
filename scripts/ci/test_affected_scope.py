@@ -7,7 +7,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from affected_scope import calculate_scope, validate_area_schema
+from affected_scope import (
+    calculate_scope,
+    load_exemptions,
+    validate_area_schema,
+    validate_ownership,
+)
 
 
 def package(root: Path, name: str, relative_manifest: str) -> dict[str, object]:
@@ -211,6 +216,74 @@ class AreaSchemaTests(unittest.TestCase):
     def test_non_boolean_flag_is_rejected(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "must be a boolean"):
             validate_area_schema([{"area": "alpha", "check_args": "-p alpha", "l2": "yes"}])
+
+
+class OwnershipTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        self.area_config = [{"area": "alpha", "check_args": "-p alpha-core"}]
+
+        def package(name: str, relative_manifest: str) -> dict[str, object]:
+            return {"id": name, "name": name, "manifest_path": str(self.root / relative_manifest)}
+
+        packages = [
+            package("alpha-core", "alpha/lib/Cargo.toml"),
+            package("beta-app", "beta/app/Cargo.toml"),
+            package("shared-tests", "tools/shared-tests/Cargo.toml"),
+        ]
+        self.metadata = {
+            "workspace_members": [p["id"] for p in packages],
+            "packages": packages,
+            "resolve": {"nodes": []},
+        }
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def test_all_members_owned_or_exempt_passes(self) -> None:
+        validate_ownership(
+            self.metadata,
+            self.root,
+            self.area_config,
+            {"beta-app": "reason", "shared-tests": "reason"},
+        )
+
+    def test_unmapped_member_fails_with_package_name(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "no CI owner or exemption.*beta-app"):
+            validate_ownership(
+                self.metadata, self.root, self.area_config, {"shared-tests": "reason"}
+            )
+
+    def test_owned_and_exempt_is_a_contradiction(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "both owned"):
+            validate_ownership(
+                self.metadata,
+                self.root,
+                self.area_config,
+                {"alpha-core": "r", "beta-app": "r", "shared-tests": "r"},
+            )
+
+    def test_stale_exemption_for_missing_package_fails(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "not in the workspace"):
+            validate_ownership(
+                self.metadata,
+                self.root,
+                self.area_config,
+                {"beta-app": "r", "shared-tests": "r", "ghost": "r"},
+            )
+
+    def test_load_exemptions_rejects_duplicates(self) -> None:
+        path = self.root / "exemptions.json"
+        path.write_text('[{"package": "x", "reason": "a"}, {"package": "x", "reason": "b"}]')
+        with self.assertRaisesRegex(RuntimeError, "duplicate"):
+            load_exemptions(path)
+
+    def test_load_exemptions_requires_reason(self) -> None:
+        path = self.root / "exemptions.json"
+        path.write_text('[{"package": "x", "reason": "  "}]')
+        with self.assertRaisesRegex(RuntimeError, "non-empty reason"):
+            load_exemptions(path)
 
 
 if __name__ == "__main__":

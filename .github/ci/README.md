@@ -30,6 +30,21 @@ order must match the root `justfile` `areas :=` list.
 
 Supported runner OS values: `ubuntu-latest`, `windows-latest`, `macos-latest`.
 
+## Ownership completeness (`exemptions.json`)
+
+Every Cargo workspace member (per `cargo metadata`) must be owned by exactly one
+of: a curated area (it lives under an `area` directory), or an explicit exemption
+in `.github/ci/exemptions.json`. `validate_ownership` fails the scope calculation
+— naming the offending package — for an unmapped member, a package that is both
+owned and exempt, or an exemption for a package that no longer exists.
+
+`exemptions.json` is a list of `{ "package": "<name>", "reason": "<why>" }`.
+Reasons are required and non-empty. Exemptions cover shared test-infra crates
+(exercised transitively), experimental/unstable packages, and real areas whose
+justfiles do not yet define the full canonical recipe set (promote them by
+completing the recipes, adding them to the `areas` list + this file, and removing
+the exemption).
+
 ## Adding or changing an area
 
 1. Add/adjust the record here **and** keep the `area` order aligned with the root

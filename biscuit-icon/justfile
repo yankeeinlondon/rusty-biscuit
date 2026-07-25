@@ -63,6 +63,10 @@ doctest *args="":
     @just _doctest biscuit-icon {{ args }}
     @just _doctest biscuit-icon-cli {{ args }}
 
+bench *args="":
+    @just _bench biscuit-icon {{ args }}
+    @just _bench biscuit-icon-cli {{ args }}
+
 fuzz:
     @echo "fuzz: not applicable for biscuit-icon"
 

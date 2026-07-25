@@ -88,5 +88,21 @@
   {
     "area": "biscuit-contract",
     "check_args": "-p biscuit-contract"
+  },
+  {
+    "area": "biscuit-icon",
+    "check_args": "-p biscuit-icon -p biscuit-icon-cli",
+    "l2": true,
+    "backends": ["tmux", "wezterm"]
+  },
+  {
+    "area": "renderable",
+    "check_args": "-p renderable"
+  },
+  {
+    "area": "worktree",
+    "check_args": "-p worktree -p worktree-cli",
+    "l2": true,
+    "backends": ["tmux", "kitty"]
   }
 ]

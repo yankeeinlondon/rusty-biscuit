@@ -15,7 +15,7 @@ import "./just/spec.just"
 
 # List of areas in this monorepo
 
-areas := "biscuit-hash biscuit-location biscuit-speaks biscuit-terminal biscuit-tui schematic biscuit-file unchained-ai playa tree-hugger darkmatter sniff model-citizen claudine research queue homelab biscuit-contract"
+areas := "biscuit-hash biscuit-location biscuit-speaks biscuit-terminal biscuit-tui schematic biscuit-file unchained-ai playa tree-hugger darkmatter sniff model-citizen claudine research queue homelab biscuit-contract biscuit-icon renderable worktree"
 BOLD := '\033[1m'
 DIM := '\033[2m'
 ITALIC := '\033[3m'
