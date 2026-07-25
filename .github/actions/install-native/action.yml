@@ -1,0 +1,56 @@
+name: Install native prerequisites
+description: >-
+  Install an area's declared native OS packages (from areas.json `native`)
+  BEFORE any build/test command (D9). A provisioning failure fails this named
+  step, not a downstream product test. No-ops when the area declares nothing
+  for the current runner OS.
+
+inputs:
+  native:
+    description: "JSON map of runner-OS (e.g. ubuntu-latest) -> list of packages."
+    required: false
+    default: "{}"
+
+runs:
+  using: composite
+  steps:
+    - name: Provision native packages
+      shell: bash
+      env:
+        NATIVE_JSON: ${{ inputs.native }}
+      run: |
+        set -euo pipefail
+        # NOTE: do NOT inline `${NATIVE_JSON:-{}}` — bash closes the ${...} on the
+        # default's first `}`, yielding `{}}` and a jq parse error. Default first.
+        native_json="${NATIVE_JSON:-}"
+        if [ -z "$native_json" ]; then
+          native_json='{}'
+        fi
+        case "${{ runner.os }}" in
+          Linux) key=ubuntu-latest ;;
+          macOS) key=macos-latest ;;
+          Windows) key=windows-latest ;;
+          *) key="" ;;
+        esac
+        # Space-join the declared packages, then split into an array so each is a
+        # distinct install argument (bash-3.2-safe; no mapfile).
+        pkgs_str="$(jq -r --arg k "$key" '.[$k] // [] | .[]' <<<"$native_json" | tr '\n' ' ')"
+        if [ -z "${pkgs_str// /}" ]; then
+          echo "no native prerequisites declared for $key"
+          exit 0
+        fi
+        read -ra pkgs <<<"$pkgs_str"
+        echo "installing native prerequisites for $key: ${pkgs[*]}"
+        case "${{ runner.os }}" in
+          Linux)
+            sudo apt-get update
+            sudo apt-get install -y "${pkgs[@]}"
+            ;;
+          macOS)
+            brew install "${pkgs[@]}"
+            ;;
+          Windows)
+            echo "::error title=native prerequisites::Windows native package install is not configured for: ${pkgs[*]}"
+            exit 1
+            ;;
+        esac

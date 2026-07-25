@@ -15,7 +15,8 @@
     "area": "biscuit-terminal",
     "check_args": "-p biscuit-terminal -p biscuit-terminal-cli",
     "l2": true,
-    "browser": true
+    "browser": true,
+    "backends": ["tmux", "wezterm", "kitty", "apple-terminal"]
   },
   {
     "area": "biscuit-tui",
@@ -36,7 +37,10 @@
   },
   {
     "area": "playa",
-    "check_args": "-p playa -p playa-cli"
+    "check_args": "-p playa -p playa-cli",
+    "native": {
+      "ubuntu-latest": ["libasound2-dev", "libpulse-dev"]
+    }
   },
   {
     "area": "tree-hugger",
@@ -48,7 +52,8 @@
     "shards": ["1/4", "2/4", "3/4", "4/4"],
     "soft_os": [],
     "l2": true,
-    "browser": true
+    "browser": true,
+    "backends": ["tmux", "wezterm"]
   },
   {
     "area": "sniff",
@@ -62,9 +67,11 @@
   {
     "area": "claudine",
     "check_args": "-p claudine-catalog-types -p claudine -p claudine-contract -p claudine-cli -p claudine-gen",
+    "shards": ["1/4", "2/4", "3/4", "4/4"],
     "soft_os": [],
     "l2": true,
-    "ai_provider_stubs": true
+    "ai_provider_stubs": true,
+    "backends": ["tmux", "wezterm"]
   },
   {
     "area": "research",

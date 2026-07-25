@@ -30,16 +30,15 @@ jobs:
       full_scope: ${{ steps.scope.outputs.full_scope }}
       claudine: ${{ steps.scope.outputs.claudine }}
       darkmatter: ${{ steps.scope.outputs.darkmatter }}
+      preflight_os: ${{ steps.scope.outputs.preflight_os }}
+      preflight_reason: ${{ steps.scope.outputs.preflight_reason }}
+      change_class: ${{ steps.scope.outputs.change_class }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: extractions/setup-just@v2
-      - name: Validate canonical area recipes
-        run: just check-canonical
-      - name: Test affected-scope calculation
-        run: python3 scripts/ci/test_affected_scope.py
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
       - name: Calculate package and area scope
         id: scope
         shell: bash
@@ -83,11 +82,66 @@ jobs:
             echo "full_scope=$(jq -r '.full_scope' <<<"$scope_json")"
             echo "claudine=$(jq -r 'any(.areas[]; .area == "claudine")' <<<"$scope_json")"
             echo "darkmatter=$(jq -r 'any(.areas[]; .area == "darkmatter")' <<<"$scope_json")"
+            echo "preflight_os=$(jq -c '.preflight_os' <<<"$scope_json")"
+            echo "preflight_reason=$(jq -r '.preflight_reason' <<<"$scope_json")"
+            echo "change_class=$(jq -r '.change_class' <<<"$scope_json")"
           } >>"$GITHUB_OUTPUT"
+
+  # Bootstrap preflight (D3). Verifies a clean runner can initialize the shared
+  # toolchain, discover scope, and pass the canonical-recipe and scope-calc
+  # guards on every selected OS BEFORE any package area fans out. Matrix breadth
+  # scales with change class: a package-local change runs the scope host plus its
+  # areas' required OSes; a global CI/tooling change runs all three. Area jobs
+  # depend on this, so a broken bootstrap produces one actionable failure per
+  # selected OS instead of dozens of package failures.
+  preflight:
+    name: preflight (${{ matrix.os }})
+    needs: scope
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.scope.outputs.preflight_os) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install just
+        uses: extractions/setup-just@v2
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+      - name: Verify toolchain and required tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustc -vV
+          cargo -V
+          just --version
+          cargo nextest --version
+          protoc --version
+      # Proves a fresh checkout runs Cargo WITHOUT the optional kache wrapper
+      # (D1). RUSTC_WRAPPER is explicitly cleared so a stray environment value
+      # cannot mask a broken clean-checkout path.
+      - name: Cargo metadata without build acceleration
+        shell: bash
+        env:
+          RUSTC_WRAPPER: ""
+        run: cargo metadata --no-deps --format-version 1 >/dev/null
+      - name: Validate canonical area recipes
+        run: just check-canonical
+      - name: Test affected-scope calculation
+        run: python3 scripts/ci/test_affected_scope.py
 
   area-ci:
     name: ${{ matrix.area }}
-    needs: scope
+    needs: [scope, preflight]
     if: needs.scope.outputs.has_areas == 'true'
     strategy:
       fail-fast: false
@@ -104,11 +158,12 @@ jobs:
       browser: ${{ matrix.browser }}
       kache: ${{ matrix.kache }}
       ai-provider-stubs: ${{ matrix.ai_provider_stubs }}
+      native: ${{ toJSON(matrix.native) }}
     secrets: inherit
 
   affected-coverage:
     name: Coverage for affected packages
-    needs: scope
+    needs: [scope, preflight]
     if: github.event_name == 'pull_request' && needs.scope.outputs.has_packages == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -117,9 +172,10 @@ jobs:
       FULL_SCOPE: ${{ needs.scope.outputs.full_scope }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: llvm-tools-preview
+      - name: Set up the pinned toolchain with coverage components
+        run: |
+          rustc --version
+          rustup component add llvm-tools-preview
       - name: Install protoc
         uses: arduino/setup-protoc@v3
         with:
@@ -150,13 +206,14 @@ jobs:
 
   claudine-generator-signals:
     name: Claudine generator and signals drift
-    needs: scope
+    needs: [scope, preflight]
     if: needs.scope.outputs.claudine == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
       - name: Install protoc
         uses: arduino/setup-protoc@v3
         with:
@@ -172,7 +229,7 @@ jobs:
 
   darkmatter-no-color:
     name: Darkmatter color-depth tests under NO_COLOR=1
-    needs: scope
+    needs: [scope, preflight]
     if: needs.scope.outputs.darkmatter == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -180,7 +237,8 @@ jobs:
       NO_COLOR: "1"
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
       - name: Install protoc
         uses: arduino/setup-protoc@v3
         with:

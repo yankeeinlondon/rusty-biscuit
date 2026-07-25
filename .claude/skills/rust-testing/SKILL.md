@@ -4,7 +4,7 @@ description: |-
   Monorepo testing guide: L1/L2/L3 taxonomy, canonical just recipes,
   `require_level!` gating, nextest filtersets, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 1acc7c1c76b11142-6a178a04ff761c20
+hash: 1acc7c1c76b11142-1abbdaf41ce89290
 last_updated: 2026-07-15
 ---
 # Rust Testing — Rusty Biscuit Monorepo
@@ -104,10 +104,16 @@ For durable native CI, register curated package-area policy in
 `.github/ci/areas.json`. The dependency-aware `.github/workflows/ci.yml`
 caller calculates changed workspace packages plus their reverse Cargo
 dependencies, maps them to that policy, and fans the resulting matrix into
-`.github/workflows/_area-ci.yml`. Integration candidates that require native
-Windows evidence set `soft_os` to an empty array; enabling `l2` or `browser`
-makes the Linux harness tier hard-required. The shared workflow runs each
-selected area's lint/docs guards and compiles with warnings denied.
+`.github/workflows/_area-ci.yml`. A bootstrap `preflight` job gates that fan-out
+(`needs: [scope, preflight]`), and within each area the jobs are staged —
+`lint` (build + clippy) → `test` (L1 shards) → optional `l2`/`browser` — so a
+deterministic build/lint failure skips the test tiers rather than re-reporting
+it. Integration candidates that require native Windows evidence set `soft_os` to
+an empty array; enabling `l2` or `browser` makes the Linux harness tier
+hard-required. The shared workflow runs each selected area's lint/docs guards and
+compiles with warnings denied. Heavy areas shard their L1 run via nextest
+`--partition count:i/N` with `--no-fail-fast` (darkmatter and claudine both use
+4 shards); CI selects the `ci` nextest profile explicitly.
 
 Pull requests generate one LCOV report for the same affected package closure.
 The standalone `coverage.yml` performs one full-workspace pass nightly or on
@@ -190,7 +196,11 @@ reaps only **dead-pid** resources, never live ones; and no dependence on shared
 pane geometry/state.
 
 **Flakiness under parallel load** concentrates in timing-sensitive tests (signal
-delivery, interactive choosers). `retries = 3` is the sanctioned backstop. Avoid
+delivery, interactive choosers). `retries = 3` is the sanctioned backstop in the
+`default` (local-dev) profile. **CI is different:** it selects the `ci` profile
+(`NEXTEST_PROFILE: ci`), where `[profile.ci]` uses `retries = 0` so deterministic
+L1 failures run exactly once; scoped `retries = 2` overrides survive only for the
+`test(/level2_/)` and `test(/browser_/)` tiers. Avoid
 the **two-phase capture race**: polling for an *intermediate* marker (a chooser
 hint) and then taking a *separate* `capture()` for the *final* content can grab a
 half-painted frame under load — poll for the content you will assert on, in the

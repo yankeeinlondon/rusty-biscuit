@@ -16,6 +16,7 @@ AREA_CONFIG = ROOT / ".github" / "ci" / "areas.json"
 GLOBAL_PATHS = {
     ".config/nextest.toml",
     ".github/ci/areas.json",
+    ".github/kache-version",
     ".github/workflows/_area-ci.yml",
     ".github/workflows/ci.yml",
     "Cargo.lock",
@@ -24,7 +25,41 @@ GLOBAL_PATHS = {
     "rust-toolchain.toml",
     "scripts/ci/affected_scope.py",
 }
-GLOBAL_PREFIXES = (".cargo/", "just/")
+GLOBAL_PREFIXES = (".cargo/", ".github/actions/", "just/")
+
+# Bootstrap-preflight breadth (D3). A global CI/tooling change validates every
+# runner OS before fan-out; a package-local change validates only the scope host
+# plus the OSes its selected areas actually run on.
+ALL_RUNNER_OS = ["macos-latest", "ubuntu-latest", "windows-latest"]
+SCOPE_HOST_OS = "ubuntu-latest"
+
+# Per-area policy defaults, shared by config loading and preflight OS derivation
+# so a test that passes minimal area records still resolves OS policy.
+AREA_DEFAULTS: dict[str, Any] = {
+    "full_os": ["ubuntu-latest", "windows-latest"],
+    "check_os": ["macos-latest"],
+    "shards": ["1/1"],
+    "soft_os": ["windows-latest"],
+    "l2": False,
+    "browser": False,
+    "kache": True,
+    "ai_provider_stubs": False,
+    # Capability policy (D8/D9/D11). `backends`: L2 terminal backends this area's
+    # tests require. `native`: OS -> system packages needed to build/test.
+    # `canary`: whether this area is a global-change canary (Phase 4).
+    "backends": [],
+    "native": {},
+    "canary": False,
+}
+
+# Single policy surface (D10). Every area record is validated against this
+# schema so a typo, an unsupported runner OS, or an unknown field fails loudly
+# instead of silently mis-scoping CI.
+SUPPORTED_RUNNER_OS = {"ubuntu-latest", "windows-latest", "macos-latest"}
+KNOWN_L2_BACKENDS = {"tmux", "wezterm", "kitty", "apple-terminal"}
+REQUIRED_AREA_FIELDS = {"area", "check_args"}
+OS_LIST_FIELDS = ("full_os", "check_os", "soft_os")
+ALLOWED_AREA_FIELDS = REQUIRED_AREA_FIELDS | set(AREA_DEFAULTS)
 
 
 def load_metadata(root: Path) -> dict[str, Any]:
@@ -38,21 +73,78 @@ def load_metadata(root: Path) -> dict[str, Any]:
     return json.loads(result.stdout)
 
 
+def validate_area_schema(areas: list[dict[str, Any]]) -> None:
+    """Validate each raw area record against the capability-policy schema (D10).
+
+    ## Errors
+
+    Raises ``RuntimeError`` naming the offending area and field for a missing
+    required field, an unknown field, an unsupported runner OS, an unknown L2
+    backend, or a mistyped value.
+    """
+    for index, area in enumerate(areas):
+        label = area.get("area", f"<record {index}>")
+
+        missing = REQUIRED_AREA_FIELDS - area.keys()
+        if missing:
+            raise RuntimeError(f"area '{label}' is missing required field(s): {sorted(missing)}")
+
+        unknown = area.keys() - ALLOWED_AREA_FIELDS
+        if unknown:
+            raise RuntimeError(
+                f"area '{label}' has unknown field(s): {sorted(unknown)}; "
+                f"allowed fields are {sorted(ALLOWED_AREA_FIELDS)}"
+            )
+
+        for field in OS_LIST_FIELDS:
+            if field in area:
+                invalid = [os for os in area[field] if os not in SUPPORTED_RUNNER_OS]
+                if invalid:
+                    raise RuntimeError(
+                        f"area '{label}' field '{field}' names unsupported runner OS(es): "
+                        f"{invalid}; supported: {sorted(SUPPORTED_RUNNER_OS)}"
+                    )
+
+        for backend in area.get("backends", []):
+            if backend not in KNOWN_L2_BACKENDS:
+                raise RuntimeError(
+                    f"area '{label}' requires unknown L2 backend '{backend}'; "
+                    f"known backends: {sorted(KNOWN_L2_BACKENDS)}"
+                )
+
+        native = area.get("native", {})
+        if not isinstance(native, dict):
+            raise RuntimeError(f"area '{label}' field 'native' must be an OS->packages map")
+        for os_name, packages in native.items():
+            if os_name not in SUPPORTED_RUNNER_OS:
+                raise RuntimeError(
+                    f"area '{label}' field 'native' names unsupported OS '{os_name}'"
+                )
+            if not isinstance(packages, list) or not all(isinstance(p, str) for p in packages):
+                raise RuntimeError(
+                    f"area '{label}' field 'native.{os_name}' must be a list of package names"
+                )
+
+        for field in ("l2", "browser", "kache", "ai_provider_stubs", "canary"):
+            if field in area and not isinstance(area[field], bool):
+                raise RuntimeError(f"area '{label}' field '{field}' must be a boolean")
+
+
 def load_area_config(path: Path) -> list[dict[str, Any]]:
     with path.open(encoding="utf-8") as config_file:
         areas = json.load(config_file)
 
-    defaults = {
-        "full_os": ["ubuntu-latest", "windows-latest"],
-        "check_os": ["macos-latest"],
-        "shards": ["1/1"],
-        "soft_os": ["windows-latest"],
-        "l2": False,
-        "browser": False,
-        "kache": True,
-        "ai_provider_stubs": False,
-    }
-    return [{**defaults, **area} for area in areas]
+    validate_area_schema(areas)
+    return [{**AREA_DEFAULTS, **area} for area in areas]
+
+
+def global_trigger(files: list[str]) -> str | None:
+    """Return the first changed path that forces full workspace scope, if any."""
+    for raw_file in files:
+        normalized = raw_file.replace("\\", "/").removeprefix("./")
+        if normalized in GLOBAL_PATHS or normalized.startswith(GLOBAL_PREFIXES):
+            return normalized
+    return None
 
 
 def curated_areas(root: Path) -> list[str]:
@@ -190,11 +282,63 @@ def calculate_scope(
         area for area in area_config if area["area"] in affected_areas
     ]
     selected_packages = sorted(packages[package_id]["name"] for package_id in affected_ids)
+
+    change_class, preflight_os, preflight_reason = classify_preflight(
+        files, selected_areas, full_scope, force_all
+    )
+
     return {
         "areas": selected_areas,
         "packages": selected_packages,
         "full_scope": full_scope,
+        "change_class": change_class,
+        "preflight_os": preflight_os,
+        "preflight_reason": preflight_reason,
     }
+
+
+def classify_preflight(
+    files: list[str],
+    selected_areas: list[dict[str, Any]],
+    full_scope: bool,
+    force_all: bool,
+) -> tuple[str, list[str], str]:
+    """Classify the change and derive its bootstrap-preflight OS matrix (D3).
+
+    ## Returns
+
+    A ``(change_class, preflight_os, reason)`` triple. ``change_class`` is one
+    of ``"full"``, ``"package"``, or ``"documentation"``.
+    """
+    if full_scope:
+        if force_all:
+            reason = "explicit full-scope request selects every runner OS"
+        else:
+            trigger = global_trigger(files)
+            reason = (
+                f"global CI/tooling input changed ({trigger}); "
+                "preflight runs on every runner OS before fan-out"
+                if trigger is not None
+                else "workspace-global change selects full scope"
+            )
+        return "full", list(ALL_RUNNER_OS), reason
+
+    if selected_areas:
+        os_set = {SCOPE_HOST_OS}
+        for area in selected_areas:
+            os_set.update(area.get("full_os", AREA_DEFAULTS["full_os"]))
+            os_set.update(area.get("soft_os", AREA_DEFAULTS["soft_os"]))
+        reason = (
+            f"package-local change across {len(selected_areas)} area(s); "
+            "preflight covers the scope host plus each area's required OSes"
+        )
+        return "package", sorted(os_set), reason
+
+    return (
+        "documentation",
+        [SCOPE_HOST_OS],
+        "no build/test areas affected; preflight runs on the scope host only",
+    )
 
 
 def parse_args() -> argparse.Namespace:

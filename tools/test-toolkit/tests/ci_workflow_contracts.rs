@@ -1,0 +1,372 @@
+//! Durable CI/CD workflow contract tests.
+//!
+//! These guard the invariants established by the DevOps plan
+//! (`features/2026-07-24-devops/`): optional build acceleration is opt-in, kache
+//! has a single version authority, the primary workflow runs a bootstrap
+//! preflight that gates area fan-out, and release automation follows successful
+//! CI instead of racing it. They inspect the workflow/action source text so a
+//! regression fails locally without a live GitHub Actions run.
+
+use std::{fs, path::PathBuf};
+
+fn repo_root() -> PathBuf {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    manifest_dir
+        .parent()
+        .and_then(|path| path.parent())
+        .expect("test-toolkit must live under <repo>/tools/test-toolkit")
+        .to_path_buf()
+}
+
+fn read(relative: &str) -> String {
+    let path = repo_root().join(relative);
+    fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()))
+}
+
+fn workflow(name: &str) -> String {
+    read(&format!(".github/workflows/{name}"))
+}
+
+// --- D1/D2: optional acceleration is opt-in with one version authority --------
+
+#[test]
+fn repository_ships_no_global_rustc_wrapper() {
+    // A fresh checkout must run Cargo without kache. The repo must not commit a
+    // global `rustc-wrapper` that names the optional binary.
+    let config = repo_root().join(".cargo/config.toml");
+    if config.exists() {
+        let source = fs::read_to_string(&config).expect("read .cargo/config.toml");
+        assert!(
+            !source.contains("rustc-wrapper"),
+            ".cargo/config.toml must not pin a global rustc-wrapper (kache is opt-in)"
+        );
+    }
+}
+
+#[test]
+fn kache_has_a_single_version_authority() {
+    let version = read(".github/kache-version");
+    assert!(
+        !version.trim().is_empty(),
+        ".github/kache-version must hold the single pinned kache version"
+    );
+
+    // The justfile must consume that same file, not carry an independent literal.
+    let justfile = read("justfile");
+    assert!(
+        justfile.contains(".github/kache-version"),
+        "root justfile must read KACHE_VERSION from the single authority file"
+    );
+    assert!(
+        !justfile.contains(r#"KACHE_VERSION := ""#),
+        "root justfile must not hard-code a second kache version literal"
+    );
+}
+
+#[test]
+fn area_ci_activates_kache_through_the_verified_composite_action() {
+    let shared = workflow("_area-ci.yml");
+    assert!(
+        shared.contains("uses: ./.github/actions/enable-kache"),
+        "area CI must enable kache through the shared verifying composite action"
+    );
+    assert!(
+        !shared.contains("kunobi-ninja/kache-action"),
+        "area CI must not call the raw kache action directly (bypasses version verification)"
+    );
+    assert!(
+        !shared.contains("version: 0.8.0"),
+        "area CI must not carry a duplicate hard-coded kache version literal"
+    );
+    // Opt-in gating flows through the composite's `enabled` input, NOT an `if:`
+    // on the `uses:` step — a step that combines `if: ${{ inputs.kache }}` with a
+    // local composite `uses:` fails to load on the runner.
+    assert!(
+        shared.contains("enabled: ${{ inputs.kache && runner.os != 'Windows' }}"),
+        "kache must be opt-in AND Linux/macOS-only (kache-action@v1 rejects win32-x64)"
+    );
+
+    // The composite action is the single point that reads and verifies the pin,
+    // and gates itself on its declared `enabled` input.
+    let action = read(".github/actions/enable-kache/action.yml");
+    assert!(
+        action.contains("enabled:") && action.contains("inputs.enabled == 'true'"),
+        "enable-kache must gate on a declared `enabled` input, not a caller `if:`"
+    );
+    assert!(
+        action.contains(".github/kache-version"),
+        "enable-kache must resolve the pinned version from the single authority"
+    );
+    assert!(
+        action.contains("kache --version"),
+        "enable-kache must verify the active wrapper version before Cargo runs"
+    );
+    assert!(
+        action.contains("kache bootstrap"),
+        "a missing or mismatched kache must fail a named bootstrap step"
+    );
+}
+
+// --- D3: bootstrap preflight gates area fan-out ------------------------------
+
+#[test]
+fn primary_ci_runs_a_bootstrap_preflight_before_fan_out() {
+    let ci = workflow("ci.yml");
+    assert!(
+        ci.contains("preflight:"),
+        "ci.yml must define a bootstrap preflight job"
+    );
+    assert!(
+        ci.contains("fromJSON(needs.scope.outputs.preflight_os)"),
+        "preflight breadth must come from the scope-derived OS matrix"
+    );
+    assert!(
+        ci.contains(r#"RUSTC_WRAPPER: """#),
+        "preflight must prove Cargo works on a clean checkout with no wrapper"
+    );
+    assert!(
+        ci.contains("needs: [scope, preflight]"),
+        "area fan-out must depend on a successful preflight"
+    );
+}
+
+#[test]
+fn area_test_tiers_are_staged_after_build_and_lint() {
+    let shared = workflow("_area-ci.yml");
+    // L1 shards gate on the lint/build stage — a deterministic compile/lint
+    // failure must not spawn redundant shards that re-report the same error (D4).
+    assert!(
+        shared.contains("needs: lint"),
+        "the L1 test job must depend on the lint/build stage (D4)"
+    );
+    // The expensive L2 and browser tiers run only after L1.
+    assert!(
+        shared.matches("needs: test").count() >= 2,
+        "the L2 and browser tiers must each depend on L1 (D4)"
+    );
+}
+
+#[test]
+fn area_ci_selects_the_ci_nextest_profile_explicitly() {
+    let shared = workflow("_area-ci.yml");
+    assert!(
+        shared.contains("NEXTEST_PROFILE: ci"),
+        "area CI must explicitly select the `ci` nextest profile, not rely on detection (D6)"
+    );
+}
+
+#[test]
+fn area_ci_treats_rust_warnings_as_failures_and_runs_lint() {
+    let shared = workflow("_area-ci.yml");
+    assert!(
+        shared.contains(r#"RUSTFLAGS: "-D warnings""#),
+        "shared compile and test jobs must reject Rust warnings"
+    );
+    assert!(
+        shared.contains(r#"run: cd "${{ inputs.area }}" && just lint"#),
+        "shared area coverage must execute each area's lint and documentation guards"
+    );
+}
+
+// --- area policy source of truth (areas.json) --------------------------------
+
+#[test]
+fn area_policy_retains_native_and_heavy_area_coverage() {
+    let areas = read(".github/ci/areas.json");
+    assert!(
+        areas.contains(r#""full_os": ["ubuntu-latest", "windows-latest", "macos-latest"]"#),
+        "sniff must retain native macOS, Linux, and Windows evidence in area policy"
+    );
+    assert!(
+        areas.contains(r#""shards": ["1/4", "2/4", "3/4", "4/4"]"#),
+        "darkmatter must retain measured L1 sharding"
+    );
+    for area in ["claudine", "darkmatter", "sniff", "biscuit-file"] {
+        assert!(
+            areas.contains(&format!(r#""area": "{area}""#)),
+            "{area} must be an owned CI area"
+        );
+    }
+}
+
+#[test]
+fn l2_provisions_and_verifies_only_the_ci_capable_backend() {
+    let shared = workflow("_area-ci.yml");
+    // tmux/PTY is the only backend a headless runner can host; it is installed
+    // AND its runtime reachability is verified (D8).
+    assert!(
+        shared.contains("apt-get install -y tmux") && shared.contains("tmux -V"),
+        "the L2 job must provision AND verify the tmux backend"
+    );
+    // No global L2 hard-require: WezTerm/Kitty/Apple-backed tests must skip
+    // cleanly here, not panic on a runner that cannot host their GUI.
+    assert!(
+        !shared.contains("BISCUIT_TEST_LEVEL_REQUIRED:"),
+        "the L2 job must not SET a global L2 hard-require (would panic GUI-only tests)"
+    );
+    // Focus safety: CI must never run L3 or take foreground focus.
+    assert!(
+        !shared.contains("BISCUIT_L3_TAKE_FOCUS") && !shared.contains("test-l3"),
+        "CI must not run L3 or enable focus-taking"
+    );
+}
+
+#[test]
+fn areas_declaring_native_deps_are_provisioned() {
+    // Playa's Linux ALSA/PulseAudio headers must be declared as area policy and
+    // installed before build/test — a missing lib is a provisioning failure, not
+    // a product-test failure (D9).
+    let areas = read(".github/ci/areas.json");
+    assert!(
+        areas.contains("libasound2-dev"),
+        "playa must declare its Linux native audio prerequisites in areas.json"
+    );
+    let shared = workflow("_area-ci.yml");
+    assert!(
+        shared.contains("uses: ./.github/actions/install-native"),
+        "area jobs must provision declared native prerequisites via the shared action"
+    );
+    let action = read(".github/actions/install-native/action.yml");
+    assert!(
+        action.contains("apt-get install") && action.contains("brew install"),
+        "install-native must provision on Linux (apt) and macOS (brew)"
+    );
+}
+
+#[test]
+fn heavy_areas_shard_l1_and_surface_all_failures() {
+    // Both heavy areas (claudine ~3964 tests, darkmatter) declare 4-shard L1
+    // policy sized from measured cold-run durations (~7-8 min/shard).
+    let areas = read(".github/ci/areas.json");
+    assert!(
+        areas.matches(r#""shards": ["1/4", "2/4", "3/4", "4/4"]"#).count() >= 2,
+        "claudine and darkmatter must both declare measured 4-shard L1 policy"
+    );
+
+    let shared = workflow("_area-ci.yml");
+    assert!(
+        shared.contains("--no-fail-fast"),
+        "L1 shards must run --no-fail-fast so one failure cannot hide the shard's evidence (D7)"
+    );
+    assert!(
+        shared.contains("actions/upload-artifact") && shared.contains("junit-"),
+        "each test tier must publish collision-free per-shard JUnit artifacts (D7)"
+    );
+}
+
+// --- D5: controlled required toolchain + latest-stable advisory ---------------
+
+#[test]
+fn required_ci_pins_an_exact_rust_toolchain() {
+    let toolchain = read("rust-toolchain.toml");
+    assert!(
+        !toolchain.contains(r#"channel = "stable""#),
+        "rust-toolchain.toml must not float on `stable` (fmt/clippy drift hazard)"
+    );
+    assert!(
+        toolchain.contains(r#"channel = "1."#),
+        "rust-toolchain.toml must pin an exact 1.x version"
+    );
+    assert!(
+        toolchain.contains("clippy") && toolchain.contains("rustfmt"),
+        "the pinned toolchain must ship clippy (lint) and rustfmt (read-only fmt check)"
+    );
+}
+
+#[test]
+fn required_ci_honors_the_toolchain_file_without_stable_override() {
+    for name in ["ci.yml", "_area-ci.yml"] {
+        let source = workflow(name);
+        assert!(
+            !source.contains("dtolnay/rust-toolchain@stable"),
+            "{name} must honor rust-toolchain.toml, not override it with floating @stable"
+        );
+        assert!(
+            source.contains("rustup show"),
+            "{name} must materialize the pinned toolchain from rust-toolchain.toml"
+        );
+    }
+}
+
+#[test]
+fn latest_stable_advisory_is_separate_and_non_required() {
+    let advisory = workflow("rust-latest-stable.yml");
+    assert!(
+        advisory.contains("schedule:") && advisory.contains("workflow_dispatch"),
+        "latest-stable must be a scheduled/manual advisory, not part of required CI"
+    );
+    assert!(
+        advisory.contains("RUSTUP_TOOLCHAIN: stable"),
+        "advisory must override the pin with floating latest stable"
+    );
+    assert!(
+        advisory.contains("cargo fmt --all --check"),
+        "advisory must run a read-only formatting check, never write-mode"
+    );
+}
+
+// --- D13/OQ2/OQ3: release follows CI and stays hermetic -----------------------
+
+#[test]
+fn release_automation_follows_successful_ci() {
+    let release = workflow("release-plz.yml");
+    assert!(
+        release.contains("workflow_run:") && release.contains(r#"workflows: ["ci"]"#),
+        "release-plz must be triggered by the ci workflow, not race it"
+    );
+    assert!(
+        release.contains("github.event.workflow_run.conclusion == 'success'"),
+        "release-plz must run only after CI concludes successfully"
+    );
+    assert!(
+        release.contains("github.event.workflow_run.head_branch == 'main'"),
+        "release-plz must gate on main"
+    );
+    assert!(
+        !release.contains("\n  push:\n"),
+        "release-plz must not run release calculation on a bare push to main"
+    );
+}
+
+#[test]
+fn lockfiles_stay_gitignored_so_release_checkout_cannot_block() {
+    // The release-plz isolation (OQ3 Option C) depends on every Cargo.lock being
+    // gitignored: a regenerated schematic/Cargo.lock is then invisible to
+    // `git status`/`git checkout` and cannot block release-plz returning to
+    // `main`. If a lockfile is ever force-tracked, that premise breaks and the
+    // original checkout-overwrite failure can recur — fail loudly here instead.
+    let gitignore = read(".gitignore");
+    assert!(
+        gitignore.contains("**/Cargo.lock"),
+        ".gitignore must keep every Cargo.lock ignored (release-plz isolation premise)"
+    );
+}
+
+#[test]
+fn release_calculation_asserts_a_clean_tracked_worktree() {
+    let release = workflow("release-plz.yml");
+    assert!(
+        release.contains("git status --porcelain --untracked-files=no"),
+        "release-plz must assert a clean tracked worktree around release calculation"
+    );
+    assert!(
+        release.contains("gitignored"),
+        "release-plz must document why the ignored lockfile cannot block checkout"
+    );
+}
+
+// --- D12: specialized runtime evidence is preserved --------------------------
+
+#[test]
+fn claudine_preserves_native_windows_ctrl_c_evidence() {
+    let windows = workflow("claudine-windows-ctrl-c.yml");
+    assert!(
+        windows.contains("windows_ctrl_c_verification_record"),
+        "claudine must preserve the native Windows Ctrl+C runtime test"
+    );
+    assert!(
+        windows.contains(r#"RUSTFLAGS: "-D warnings""#),
+        "the specialized Windows runtime job must reject Rust warnings"
+    );
+}

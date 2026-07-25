@@ -1,0 +1,60 @@
+name: Enable kache
+description: >-
+  Install, activate, and verify the repository-pinned kache RUSTC_WRAPPER from
+  the single version authority at .github/kache-version. A missing executable or
+  version mismatch is a bootstrap failure; a cache miss or reservation collision
+  is not (kache falls through to real rustc).
+
+# Gating lives on the `enabled` input rather than on the caller's `uses:` step,
+# because a step that combines `if: ${{ inputs.kache }}` with a LOCAL composite
+# `uses:` fails to load ("Unrecognized named-value: 'inputs'"). Callers pass
+# `enabled: ${{ inputs.kache && runner.os != 'Windows' }}`; when it is not 'true'
+# every step no-ops, so non-cache jobs never require RUSTC_WRAPPER=kache. Windows
+# is excluded because kache-action@v1 rejects win32-x64 ("Unsupported platform").
+inputs:
+  enabled:
+    description: "Install and activate kache when 'true'; otherwise no-op."
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve pinned kache version
+      id: pinned
+      if: ${{ inputs.enabled == 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        version="$(tr -d '[:space:]' < "$GITHUB_WORKSPACE/.github/kache-version")"
+        if [ -z "$version" ]; then
+          echo "::error title=kache bootstrap::.github/kache-version is empty"
+          exit 1
+        fi
+        echo "version=$version" >>"$GITHUB_OUTPUT"
+
+    - name: Install and activate kache
+      if: ${{ inputs.enabled == 'true' }}
+      uses: kunobi-ninja/kache-action@v1
+      with:
+        version: ${{ steps.pinned.outputs.version }}
+
+    # Verify the active wrapper matches the single authority BEFORE any Cargo
+    # command runs in a later step. A mismatch fails this named bootstrap step
+    # rather than silently building through an unexpected wrapper.
+    - name: Verify kache executable and version
+      if: ${{ inputs.enabled == 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        expected="$(tr -d '[:space:]' < "$GITHUB_WORKSPACE/.github/kache-version")"
+        if ! command -v kache >/dev/null 2>&1; then
+          echo "::error title=kache bootstrap::kache executable not found after installation"
+          exit 1
+        fi
+        actual="$(kache --version | awk '{print $2}')"
+        if [ "$actual" != "$expected" ]; then
+          echo "::error title=kache bootstrap::pinned kache $expected but active wrapper is $actual"
+          exit 1
+        fi
+        echo "kache $actual verified against .github/kache-version"

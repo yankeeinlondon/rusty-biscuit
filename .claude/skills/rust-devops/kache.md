@@ -204,7 +204,11 @@ Adding an S3-compatible remote (AWS S3, Cloudflare R2, Ceph, MinIO) shares artif
 
 The remote is additive: local caching always works, and the daemon degrades gracefully if S3 is unreachable. The typical CI pattern is `kache sync --pull` before the build and `kache sync --push` after (with `if: always()` to preserve partial results).
 
-For GitHub Actions specifically, the `kunobi-ninja/kache-action@v1` action uses GitHub's built-in cache as the backend — no S3 bucket required.
+For GitHub Actions specifically, the `kunobi-ninja/kache-action@v1` action uses GitHub's built-in cache as the backend — no S3 bucket required. Note that `kache-action@v1` runs on **Linux and macOS only**: it rejects Windows runners with `Unsupported platform: win32-x64`, even though the standalone kache binary supports Windows. A Windows CI leg must therefore build without kache.
+
+### In this repo (rusty-biscuit)
+
+kache is **opt-in** here — there is no committed global `rustc-wrapper` (no `.cargo/config.toml`), so a plain `cargo build` never invokes kache. CI enables it deliberately per leg. There is a single version authority, `.github/kache-version` (e.g. `0.8.0`), consumed by both the root `justfile` (`KACHE_VERSION`) and the verifying `.github/actions/enable-kache` composite action. Because `kache-action@v1` rejects `win32-x64`, CI runs kache on Linux and macOS only; Windows legs build without it.
 
 ### Credential resolution
 
