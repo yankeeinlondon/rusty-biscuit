@@ -1552,21 +1552,52 @@ fn format_sample_rate_khz(rate_hz: f64) -> String {
 mod tests {
     use super::*;
     use sniff::programs::{
-        InstallInterviewDelegate, InstallInterviewEvent, InstallStatusKind, InstallationMethod,
+        ExecutableSource, InstallInterviewDelegate, InstallInterviewEvent, InstallStatusKind,
+        InstallationMethod,
     };
+
+    /// Builds a detector that reports exactly `players` as installed,
+    /// independent of what the host actually has.
+    fn detector_with(players: &[AudioPlayer]) -> InstalledHeadlessAudio {
+        players
+            .iter()
+            .fold(InstalledHeadlessAudio::default(), |detector, player| {
+                detector.with_program(
+                    player.as_headless_audio(),
+                    PathBuf::from("/test/bin"),
+                    ExecutableSource::Path,
+                )
+            })
+    }
 
     #[test]
     fn builds_meta_markdown_with_formatting_and_links() {
-        let installed = InstalledHeadlessAudio::new();
-        let markdown = build_metadata_markdown_table(&installed);
+        let markdown = build_metadata_markdown_table(&detector_with(&[AudioPlayer::Mpv]));
 
         assert!(markdown.contains("| I | Software | Codec Support | File Formats |"));
         assert!(markdown.contains("PCM"));
         assert!(markdown.contains("Vorbis"));
         assert!(markdown.contains(".wav"));
         assert!(markdown.contains(&link_for_player(AudioPlayer::Mpv)));
-        // Every row has an installed indicator
-        assert!(markdown.contains('\u{2705}') || markdown.contains('\u{274c}'));
+        assert!(markdown.contains('\u{2705}'));
+    }
+
+    #[test]
+    fn meta_markdown_leaves_uninstalled_players_unlinked() {
+        let markdown = build_metadata_markdown_table(&detector_with(&[]));
+
+        assert!(markdown.contains(&display_name_for_player(AudioPlayer::Mpv)));
+        assert!(!markdown.contains(&link_for_player(AudioPlayer::Mpv)));
+        assert!(!markdown.contains('\u{2705}'));
+        assert!(markdown.contains('\u{274c}'));
+    }
+
+    #[test]
+    fn missing_players_omits_the_installed_ones() {
+        let missing = collect_missing_players(&detector_with(&[AudioPlayer::Mpv]));
+
+        assert!(!missing.contains(&display_name_for_player(AudioPlayer::Mpv)));
+        assert!(missing.contains(&display_name_for_player(AudioPlayer::Vlc)));
     }
 
     #[test]
