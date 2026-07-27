@@ -286,7 +286,7 @@ provider client and its Wiremock test, bench, and example targets:
 ### Retired / folded workflows
 
 The bespoke single-behavior Windows workflows (`playa-windows`,
-`claudine-windows-ctrl-c`, `biscuit-tui-windows-captured-stdout`) remain
+`biscuit-tui-windows-captured-stdout`) remain
 separate until their tests fold into the shared area contract. `coverage`
 (nightly/manual, report-only), `bench-nightly` and `fuzz-nightly` (nightly),
 and `build-integrations` (on release) remain standalone by design.

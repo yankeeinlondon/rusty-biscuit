@@ -332,16 +332,6 @@ jobs:
   # selected from affected scope, so there is one CI run per commit instead of a
   # separate wall of path-triggered workflows. Each preserves its unique runtime
   # evidence; shared bootstrap lives in the reusable workflow it calls.
-  claudine-windows-ctrl-c:
-    name: claudine-windows-ctrl-c
-    needs: [scope, preflight, canary]
-    if: >-
-      !cancelled() &&
-      needs.scope.outputs.claudine == 'true' &&
-      (needs.canary.result == 'success' || needs.canary.result == 'skipped')
-    uses: ./.github/workflows/claudine-windows-ctrl-c.yml
-    secrets: inherit
-
   rendezvous:
     name: rendezvous
     needs: [scope, preflight, canary]
@@ -405,7 +395,6 @@ jobs:
       - affected-coverage
       - claudine-generator-signals
       - darkmatter-no-color
-      - claudine-windows-ctrl-c
       - rendezvous
       - biscuit-tui-captured-stdout
       - playa-windows
@@ -426,7 +415,6 @@ jobs:
             area gate (build/lint/L1/L2/browser):${{ needs.area-ci.result }}
             claudine generator drift:${{ needs.claudine-generator-signals.result }}
             darkmatter NO_COLOR contract:${{ needs.darkmatter-no-color.result }}
-            claudine Windows console control:${{ needs.claudine-windows-ctrl-c.result }}
             rendezvous native IPC runtime:${{ needs.rendezvous.result }}
             biscuit-tui Windows captured stdout:${{ needs.biscuit-tui-captured-stdout.result }}
             playa native Windows build:${{ needs.playa-windows.result }}

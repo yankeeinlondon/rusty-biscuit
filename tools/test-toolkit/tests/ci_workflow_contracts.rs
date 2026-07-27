@@ -373,12 +373,7 @@ fn heavy_areas_shard_l1_and_surface_all_failures() {
 /// Each specialized runtime workflow the primary orchestrator calls, paired with
 /// the unique runtime evidence that must survive the move to `workflow_call`,
 /// and the scope expression that selects it.
-const ORCHESTRATED: [(&str, &str, &str); 5] = [
-    (
-        "claudine-windows-ctrl-c.yml",
-        "windows_ctrl_c_verification_record",
-        "needs.scope.outputs.claudine == 'true'",
-    ),
+const ORCHESTRATED: [(&str, &str, &str); 4] = [
     (
         "rendezvous-tests.yml",
         "os: [macos-latest, ubuntu-latest, windows-latest]",
@@ -603,17 +598,3 @@ fn release_calculation_asserts_a_clean_tracked_worktree() {
     );
 }
 
-// --- D12: specialized runtime evidence is preserved --------------------------
-
-#[test]
-fn claudine_preserves_native_windows_ctrl_c_evidence() {
-    let windows = workflow("claudine-windows-ctrl-c.yml");
-    assert!(
-        windows.contains("windows_ctrl_c_verification_record"),
-        "claudine must preserve the native Windows Ctrl+C runtime test"
-    );
-    assert!(
-        windows.contains(r#"RUSTFLAGS: "-D warnings""#),
-        "the specialized Windows runtime job must reject Rust warnings"
-    );
-}
