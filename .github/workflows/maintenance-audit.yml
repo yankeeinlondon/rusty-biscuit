@@ -48,10 +48,16 @@ jobs:
           set -uo pipefail
 
           pinned_rust="$(grep '^channel' rust-toolchain.toml | cut -d'"' -f2)"
-          latest_rust="$(curl -fsSL https://static.rust-lang.org/dist/channel-rust-stable.toml \
+          # `grep -m1` closes the pipe early, which curl reports as exit 56; the
+          # value is complete by then, so read the whole file first instead.
+          channel="$(curl -fsSL https://static.rust-lang.org/dist/channel-rust-stable.toml || true)"
+          latest_rust="$(printf '%s\n' "$channel" \
             | grep -m1 -A2 '^\[pkg.rust\]' | grep -m1 '^version' | cut -d'"' -f2 | cut -d' ' -f1)"
           pinned_kache="$(tr -d '[:space:]' <.github/kache-version)"
-          pinned_nextest="$(cargo nextest --version 2>/dev/null | awk '{print $2}')"
+          # `cargo nextest --version` prints a multi-line build block; only the
+          # first line carries the version, and a stray newline here would break
+          # the markdown table row below.
+          pinned_nextest="$(cargo nextest --version 2>/dev/null | head -1 | awk '{print $2}')"
 
           {
             echo "## Maintenance audit"

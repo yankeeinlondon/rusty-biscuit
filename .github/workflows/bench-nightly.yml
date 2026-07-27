@@ -106,13 +106,19 @@ jobs:
           BENCH_RESULT: ${{ steps.bench.outcome }}
         run: |
           set -euo pipefail
+          # Unset when execution failed before it could report — say so rather
+          # than printing a bare "s".
+          duration="not measured"
+          if [ -n "${BENCH_SECONDS:-}" ]; then
+            duration="${BENCH_SECONDS}s"
+          fi
           {
             echo "## Nightly benchmark"
             echo ""
             echo "| field | value |"
             echo "|---|---|"
             echo "| execution | ${BENCH_RESULT} |"
-            echo "| measured duration | ${BENCH_SECONDS:-unknown}s (budget: 90 min) |"
+            echo "| measured duration | ${duration} (budget: 90 min) |"
             echo "| runner image | ${ImageOS:-unknown} / ${ImageVersion:-unknown} |"
             echo "| toolchain | $(rustc --version) |"
             echo ""
