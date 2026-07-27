@@ -29,11 +29,11 @@
   },
   {
     "package": "messenger",
-    "reason": "real area to be promoted; blocked on completing the canonical just recipe set (has only test/lint)"
+    "reason": "covered by the messenger-desktop specialized job (ci.yml -> messenger-desktop-tests.yml); promotion to a curated area is blocked on completing the canonical just recipe set (has only test/lint)"
   },
   {
     "package": "messenger-cli",
-    "reason": "real area to be promoted; blocked on completing the canonical just recipe set (has only test/lint)"
+    "reason": "covered by the messenger-desktop specialized job (ci.yml -> messenger-desktop-tests.yml); promotion to a curated area is blocked on completing the canonical just recipe set (has only test/lint)"
   },
   {
     "package": "visualizer",
