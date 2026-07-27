@@ -299,6 +299,23 @@ check-canonical *args="":
                 missing+=("$r")
             fi
         done
+        # A top-level ``VAR := `cmd` `` is evaluated whenever just LOADS the
+        # justfile, for every recipe. If `cmd` is a repo-built CLI, `just lint`
+        # in CI dies at parse time on a tool CI never installs -- which is how
+        # homelab's `sniff`-backed INTEGRATIONS broke its lint job. Only tools
+        # present on a bare runner may appear there; anything else belongs
+        # inside the recipe that needs it. (`--dry-run` does NOT evaluate these,
+        # so it cannot be used to test this.)
+        portable='^(cat|date|echo|printf|pwd|uname|basename|dirname|git)([ `]|$)'
+        while IFS= read -r assignment; do
+            command_word="${assignment#*\`}"
+            if ! grep -Eq "$portable" <<< "$command_word"; then
+                echo -e "  {{ RED }}❌ Load-time backtick runs a non-portable tool:{{ RESET }} ${assignment}"
+                echo    "     Move it into the recipe that needs it; every recipe pays this cost."
+                missing+=("<load-time-backtick>")
+            fi
+        done < <(grep -E '^[A-Za-z_]+ *:?=.*`' "$area/justfile" || true)
+
         if (( ${#missing[@]} > 0 )); then
             echo -e "  {{ RED }}❌ Missing canonical recipes:{{ RESET }} ${missing[*]}"
             failed_areas+=("$area")
