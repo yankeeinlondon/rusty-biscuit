@@ -1,6 +1,8 @@
 ---
-status: root cause CONFIRMED — awaiting design decision
-reviewed: false
+status: root cause confirmed — design approved
+reviewed: true
+reviewed_by: codex/default
+reviewed_on: 2026-07-27
 created: 2026-07-27
 area: darkmatter
 packages:
@@ -43,6 +45,15 @@ This is a product defect, not a test defect. Any user running `md compose` on a
 document containing a `::shell` directive hangs indefinitely whenever the process
 lands in a background process group of a terminal — backgrounding with `&`, a job
 that loses the foreground, or any tool that runs `md` in its own process group.
+
+> **Reader's note — reviewed design decision:** remove implicit shell-alias
+> resolution from composition. Darkmatter's established shell-expansion
+> contract executes a parsed executable and argument vector directly; consulting
+> interactive, machine-local shell state contradicts that contract and makes
+> composition depend on state outside `ComposeOptions`. A non-interactive
+> `alias` query is not a substitute because a fresh non-interactive shell
+> normally has no interactive aliases to report. Users who need reusable
+> commands can place an executable wrapper on `PATH`.
 
 ## Confirmed Evidence
 
@@ -160,108 +171,203 @@ Both are worth fixing even though neither causes the hang.
 
 ## Requirements
 
-### R1 — Compose must never block indefinitely on a child process
+### R1 — Alias lookup must not spawn a child process
 
-Every child spawn in the composition path must be bounded. A child that stops,
-wedges, or holds its pipes open must surface as a recoverable error, not an
-unbounded wait. `Command::output()` with no timeout is not acceptable on this
-path.
+Composition and preflight must not invoke a login or interactive shell to
+resolve a command name. If `which::which` cannot resolve an executable, preserve
+the existing typed `CommandNotFound` path.
 
-### R2 — Alias resolution must not be stoppable by terminal job control
+This specification fixes the only currently identified unbounded process spawn
+in alias lookup. It does not redefine the timeout contract for ordinary
+`::shell` execution, which already uses `ShellExpansionOptions::timeout`.
 
-The alias-query child must not be subject to SIGTTOU/SIGTTIN from the parent's
-controlling terminal. It has no need for a terminal: stdin is already
-`Stdio::null()` and only stdout is read.
+### R2 — Preflight and execution must resolve commands identically
+
+Remove alias expansion from both the condition-blind preflight collector and
+the execution preparation path. Approval, policy normalization, displayed
+commands, and execution must all use the executable and arguments authored in
+the directive.
 
 ### R3 — Composition must not execute interactive shell configuration
 
-Resolving an alias must not require sourcing the user's interactive rc files. If
-alias support cannot be provided without that, it must be opt-in and off by
-default, with the opt-in documented.
+No compose or preflight path may source `.bashrc`, `.zshrc`, or another
+interactive startup file merely to discover a command. This applies on macOS,
+Windows, and Linux.
 
-### R4 — Failure must be observable
+### R4 — Missing commands must remain observable
 
-A shell that is killed by timeout, stopped, or unreadable must produce a
-`tracing::warn!` naming the shell, the alias, and the reason. The current code
-discards every failure with `.ok()?`, so nothing is reported.
+An unresolved executable is not an internal warning condition; it is normal
+input to the existing `CommandNotFound` error contract. Do not add a warning for
+"not an alias." The CLI error must identify the authored executable and source
+origin without mentioning aliases.
 
-### R5 — Behavior must be identical with and without a controlling terminal
+### R5 — Behavior must not depend on terminal or shell configuration
 
-`md compose` on the same document must produce the same result and comparable
-timing whether run in a foreground terminal, backgrounded, piped, or under a test
-harness. This is the invariant the current code violates.
+The same document and captured `ComposeOptions` must produce the same command
+resolution, approval request, and result whether composition runs in a
+foreground terminal, a background process group, a pipe, or a test harness.
+Changing `$SHELL` or interactive rc contents must not change those results.
 
-## Design Options
+## Chosen Design
 
-### O1 — Do not use an interactive shell (recommended)
+### Remove automatic alias resolution
 
-Drop `-i`. Non-interactive shells do not run job-control setup, so SIGTTOU cannot
-occur, no rc files are sourced, and startup cost drops sharply. Satisfies R2 and
-R3 outright.
+Delete the alias-query process and all automatic alias rewriting. This includes:
 
-Cost: aliases defined only in interactive rc files stop resolving. **This needs a
-product decision** — see open question 1. If alias support must be kept, prefer
-reading a declared alias source rather than executing an interactive shell.
+1. `shell_expansion/alias.rs` and its `ResolvedAlias` / `resolve_alias`
+   re-exports;
+2. runtime alias rewriting in `resolve_or_passthrough`;
+3. preflight alias rewriting in `resolve_executable`;
+4. alias-only display and approval metadata, including
+   `ShellApprovalRequest::alias_name`; and
+5. alias-specific tests and documentation.
 
-### O2 — Detach the child from the controlling terminal
+After removal, command resolution is the direct-executable contract already
+used by the executor:
 
-Spawn the query shell in its own session (`setsid` via
-`CommandExt::pre_exec`, Unix-only) so it has no controlling terminal and job
-control becomes a no-op. Satisfies R2 while keeping `-i`.
+1. preserve the parsed executable and argv;
+2. resolve the executable with `which::which`;
+3. apply approval and policy checks to that same command; and
+4. execute it directly with the existing bounded executor.
 
-Keeps R3 unmet (rc files still execute) and adds a platform-specific spawn path.
-Windows is unaffected — `resolve_alias` should be a no-op there regardless.
+This intentionally removes support for aliases defined in interactive startup
+files. It is a breaking library API change because alias symbols and a public
+approval-request field currently exist. The repository has no established
+users, so removing the misleading surface now is preferable to retaining a
+permanently empty compatibility API. Before implementation, run GitNexus impact
+analysis on `resolve_alias`, `ResolvedAlias`,
+`ShellApprovalRequest::alias_name`, and `resolve_or_passthrough`; include every
+identified downstream package in verification.
 
-### O3 — Bounded wait (required regardless)
+#### Confirmed downstream consumer: claudine
 
-Replace `.output()` with a spawn plus a bounded wait, killing the child and
-returning `None` (with a `tracing::warn!`) on expiry. This is defense in depth for
-R1 and should land **whichever** of O1/O2 is chosen — it is the only option that
-protects against the general class of "child never closes its pipes".
+A grep-level blast-radius check already identifies one concrete out-of-area
+consumer, so the verification scope is **darkmatter + claudine**, not darkmatter
+alone:
 
-**Preliminary recommendation:** O1 + O3. O2 only if the product decision is that
-interactive-rc aliases must keep working.
+- `claudine/lib/src/harness/shell.rs:255` constructs
+  `darkmatter::markdown::compose::shell_expansion::ShellApprovalRequest` with an
+  explicit `alias_name: None` field. Removing the field breaks this build.
+- `claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/shell_approval.rs`
+  imports `ShellApprovalRequest` and the approval traits.
+
+Both must be updated in the same change, and claudine's `just build` / `just test`
+/ `just lint` must be part of the gate set.
+
+Two same-named symbols are **false positives** and must not be touched:
+`claudine/lib/src/model_catalog/families.rs::resolve_alias` (model-family alias
+resolution, unrelated) and the `resolve_alias_*` test names in
+`darkmatter/lib/src/markdown/language_grammar.rs` (language-grammar aliases).
+GitNexus impact analysis should confirm this split rather than a bare grep.
+
+### Rejected alternatives
+
+#### Query without `-i`
+
+- **Pros:** avoids interactive job control and startup files; small code change.
+- **Cons:** a new non-interactive shell normally knows none of the user's
+  aliases, so the feature becomes misleading and still adds a process spawn per
+  unresolved executable.
+
+#### Detach and bound the interactive query
+
+- **Pros:** retains aliases from interactive startup files and prevents an
+  indefinite wait.
+- **Cons:** still executes arbitrary startup code before approval, remains
+  machine-dependent, needs different Unix/Windows process handling, and adds
+  timeout and process-tree cleanup complexity.
+
+#### Explicit alias configuration in `ComposeOptions`
+
+- **Pros:** deterministic, testable, and does not source startup files.
+- **Cons:** adds configuration and policy semantics not needed to fix the hang;
+  executable wrapper scripts already provide a portable solution.
+
+The chosen removal is the smallest design that satisfies the direct-execution,
+security, determinism, and cross-platform contracts. Explicit aliases may be
+proposed later as a separate feature if a concrete use case justifies them.
+
+## Scope
+
+In scope:
+
+- remove automatic alias resolution from library execution and passive
+  preflight collection;
+- remove the associated public API and stale alias documentation;
+- preserve the existing `CommandNotFound` diagnostic for unresolved authored
+  executables;
+- verify policy/approval identity is unchanged between preflight and execution;
+  and
+- add regression coverage for terminal, `$SHELL`, and rc-file independence.
+
+Out of scope:
+
+- changing the existing timeout behavior of approved `::shell` commands;
+- adding an alias configuration format;
+- fixing repeated shell-expansion stage invocation or compose-cache
+  single-flight waits; and
+- changing shell pipeline, redirection, approval, or policy semantics.
 
 ## Testing Contract
 
 L1 unless noted. The critical property is that the regression test must fail
 against today's code.
 
-1. **Bounded-wait unit test (R1).** A stopped or non-exiting child must cause
-   `resolve_alias` to return within a small bound rather than block. Simulate
-   with a child that holds its stdout open.
-2. **Controlling-terminal regression (R2, R5).** This is the honest reproduction
+1. **No alias-query process (R1, R3).** With `$SHELL` set to a fixture program
+   that records invocation, compose and preflight an unresolved command and
+   assert the fixture was never invoked. Assert the operation returns the
+   existing `CommandNotFound` error.
+2. **Controlling-terminal regression (R1, R5).** This is the honest reproduction
    and it needs a real PTY plus a background process group, so it belongs in
    **L2** (`level2_` prefix, gated on harness availability per the `rust-testing`
    skill). Assert `md compose` on a `::shell` document completes in seconds when
-   run in a background process group of a PTY. It must fail against today's code.
-   Existing L1 tests cannot cover this — every current test runs without a
-   controlling terminal, which is exactly why the bug shipped.
+   run in a background process group of a PTY and reports `CommandNotFound`. It
+   must fail against today's code.
 
-   **Parameterize over `$SHELL`.** The test must cover a bash-family shell, since
-   zsh does not reproduce the failure and a zsh-only test would pass against the
-   broken code. Skip cleanly when the shell under test is unavailable rather than
-   assuming a fixed path.
-3. **No interactive rc execution (R3).** Assert the spawned command line contains
-   no `-i`, or that a sentinel written by a fixture rc file is absent.
-4. **Warning on failure (R4).** Capture the `tracing::warn!` on timeout.
-5. **Suites green.** `just test`, `just test-l2`, `just lint` for darkmatter —
-   **run at least once from a real terminal pane**, not only from a non-TTY
-   context, or the regression is not actually verified.
+   Use the shared `biscuit-test-harness` primitives and a bash-family shell when
+   available. Skip cleanly when the required PTY/job-control capability is
+   unavailable. The test must not focus or inject input into a host terminal.
+3. **Configuration independence (R3, R5).** Run the same L1 compose/preflight
+   cases with distinct `$SHELL` values and fixture rc files; assert identical
+   approval entries and errors and no rc sentinel side effect. Serialize
+   environment-mutating tests so parallel tests cannot race.
+4. **Preflight/runtime parity (R2).** For a missing executable in a single
+   command, pipeline, and chain, assert preflight records the authored
+   executable/argv and execution reports that same executable rather than a
+   rewritten alias target.
+5. **Public-surface cleanup.** Compile-time/API tests and generated documentation
+   must contain no `ResolvedAlias`, `resolve_alias`, or `alias_name` approval
+   field.
+6. **Gates.** After Sniff package-area discovery and GitNexus impact analysis,
+   run `just build`, `just test`, and `just lint` in each affected package area,
+   plus `just test-l2` for Darkmatter. The gate set is known to include **both
+   darkmatter and claudine** (see §"Confirmed downstream consumer"). Linux is the
+   available host; code review and CI must cover macOS and Windows branches
+   without OS-specific alias logic.
+
+   **Run the darkmatter gates at least once from a real terminal pane.** Every
+   pre-existing test passed while this bug was live precisely because the harness
+   had no controlling terminal; a non-TTY-only verification would repeat that
+   mistake.
 
 ## Acceptance Criteria
 
 - [ ] `md compose` on a `::shell` document cannot hang, in any process-group or
       terminal configuration (R1, R2, R5).
-- [ ] `test_compose_with_nonexistent_command_fails` passes when `just test` is run
-      from a terminal pane, in well under the 5 s `SLOW` marker.
-- [ ] Composition no longer sources interactive shell configuration, or does so
-      only behind a documented opt-in (R3).
-- [ ] Alias-resolution failures emit a `tracing::warn!` instead of a silent
-      `.ok()?` (R4).
+- [ ] `test_compose_with_nonexistent_command_fails` passes in well under the 5 s
+      `SLOW` marker, and the L2 equivalent passes under the PTY harness with a
+      background process group.
+- [ ] Composition and preflight never spawn `$SHELL` or source interactive shell
+      configuration (R1, R3).
+- [ ] Unresolved commands produce the existing typed `CommandNotFound`
+      diagnostic for the authored executable (R4).
+- [ ] Preflight approval identity and runtime execution identity agree for
+      single commands, pipelines, and chains (R2).
+- [ ] Public alias-resolution symbols and alias-only approval metadata are
+      removed, with downstream impact verified.
 - [ ] L2 regression test exists that fails against the current implementation.
-- [ ] Per-directive alias-resolution cost measured before/after; the four repeated
-      stage invocations are recorded (see open question 3).
+- [ ] A before/after measurement records removal of alias-query process spawns;
+      repeated stage invocation remains explicitly out of scope.
 
 ## Split Out: Compose-Cache Single-Flight Parks
 
@@ -293,15 +399,11 @@ Raising the ceiling only changed how long the suite waited before reporting.
 
 ## Open Questions
 
-1. **Must interactive-rc aliases keep working?** This determines O1 vs O2 and is
-   a product decision, not a technical one. If aliases in `~/.bashrc` must
-   resolve, O1 is off the table and R3 needs rewording.
-2. Should `resolve_alias` be a no-op on Windows? `$SHELL` is meaningless there and
-   the current code presumably no-ops by accident when the var is unset — that
-   should be explicit.
-3. Why does the compose pipeline run the shell-expansion stage four times over one
-   document? It multiplies this cost by four. Possibly its own fix topic.
-4. ~~Does macOS genuinely not reproduce?~~ **Answered.** It is a shell
+1. Why does the compose pipeline run the shell-expansion stage four times over one
+   document? It multiplies command-discovery cost even after alias lookup is
+   removed. Track this as a separate performance fix because changing stage
+   scheduling has a broader semantic blast radius.
+2. ~~Does macOS genuinely not reproduce?~~ **Answered.** It is a shell
    difference, not a platform one — bash and dash hang, zsh does not, measured on
    a single Linux host varying only `$SHELL` (see §"It is shell-dependent").
    macOS is affected whenever `$SHELL` is bash. Do not gate the fix on

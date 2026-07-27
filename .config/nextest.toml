@@ -27,11 +27,21 @@ tts-audio = { max-threads = 4 }
 [profile.default]
 # Retry failed tests up to 3 times to mitigate flakiness in PTY tests or timing issues
 retries = 3
-# Mark tests slower than 5s as slow; terminate after 6×5s = 30s. Many integration
-# tests spawn the claudine binary plus git/composition/system-prompt resolution
-# and finish in 5–10s isolated but get squeezed past 15s under heavy parallel
-# load. 30s catches real hangs without killing healthy-but-contended tests.
-slow-timeout = { period = "5s", terminate-after = 6 }
+# Mark tests slower than 5s as slow; terminate after 9×5s = 45s. Many
+# integration tests spawn a CLI binary plus git/composition/system-prompt
+# resolution and finish in 5–10s isolated.
+#
+# This is the LOCAL-DEV profile, where several worktrees routinely run their
+# own `cargo build` / `nextest run` at the same time. Those runs share nothing
+# — separate `target/` dirs, so no cargo lock serializes them — and each
+# nextest sizes its thread pool to `nproc` independently, so the box can sit
+# at several times oversubscription. 45s gives contended-but-healthy tests
+# headroom over the old 30s ceiling while still reporting a real hang quickly.
+#
+# `period` stays at 5s so genuinely slow tests still surface as SLOW; only the
+# kill ceiling moves. CI keeps a 30s ceiling below — its runners are dedicated
+# and have no competing worktrees.
+slow-timeout = { period = "5s", terminate-after = 9 }
 # Fail any test that leaves a child process holding its stdout/stderr open when
 # it exits (nextest's `LEAK` status). Keep the default 100ms grace period so
 # clean tests are not slowed — only an actual leak waits the window out. To
