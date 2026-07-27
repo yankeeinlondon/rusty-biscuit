@@ -28,6 +28,32 @@ fn workflow(name: &str) -> String {
     read(&format!(".github/workflows/{name}"))
 }
 
+/// Splits a workflow's `jobs:` section into one block per job. Everything above
+/// `jobs:` is dropped so an input's `description:` prose cannot be mistaken for a
+/// step that runs the command it describes.
+fn jobs(source: &str) -> Vec<String> {
+    let jobs_section = source
+        .split_once("\njobs:\n")
+        .expect("every workflow declares a jobs: section")
+        .1;
+
+    let mut blocks: Vec<String> = Vec::new();
+    for line in jobs_section.lines() {
+        let opens_block = line.starts_with("  ")
+            && !line.starts_with("   ")
+            && line.ends_with(':')
+            && !line.trim_start().starts_with(['#', '-']);
+        if opens_block {
+            blocks.push(String::new());
+        }
+        if let Some(block) = blocks.last_mut() {
+            block.push_str(line);
+            block.push('\n');
+        }
+    }
+    blocks
+}
+
 // --- D1/D2: optional acceleration is opt-in with one version authority --------
 
 #[test]
@@ -254,15 +280,70 @@ fn areas_declaring_native_deps_are_provisioned() {
         areas.contains("libasound2-dev"),
         "playa must declare its Linux native audio prerequisites in areas.json"
     );
-    let shared = workflow("_area-ci.yml");
+
+    // One installer, shared by developer hosts and CI: the root justfile recipe
+    // reads areas.json directly. A second CI-only implementation would drift
+    // from `just init`, so the retired composite must not come back.
     assert!(
-        shared.contains("uses: ./.github/actions/install-native"),
-        "area jobs must provision declared native prerequisites via the shared action"
+        !repo_root().join(".github/actions/install-native").exists(),
+        "the install-native composite must stay retired; `just _ensure-native-libs` is the one installer"
     );
-    let action = read(".github/actions/install-native/action.yml");
+    let justfile = read("justfile");
     assert!(
-        action.contains("apt-get install") && action.contains("brew install"),
-        "install-native must provision on Linux (apt) and macOS (brew)"
+        justfile.contains("_ensure-native-libs area=\"\":")
+            && justfile.contains(".github/ci/areas.json"),
+        "the native-libs recipe must be area-scopable and read areas.json as the source of truth"
+    );
+    assert!(
+        justfile.contains("init: ") && justfile.contains("_ensure-native-libs"),
+        "`just init` must depend on the same recipe CI runs"
+    );
+}
+
+#[test]
+fn native_prerequisites_are_installed_before_anything_is_built() {
+    // A `-sys` crate must never fail to compile for a missing system library, so
+    // every job that builds runs the install step first (D9 / 2026-07-25 spec
+    // decision "Native libraries: one isolated install step").
+    const BUILD_COMMANDS: [&str; 6] = [
+        "cargo check --all-targets",
+        "cargo llvm-cov",
+        "just test ",
+        "just lint",
+        "just test-l2",
+        "just test-browser",
+    ];
+    const PROVISION: &str = "just _ensure-native-libs";
+
+    let mut provisioning_jobs = 0;
+    for name in ["_area-ci.yml", "ci.yml"] {
+        let source = workflow(name);
+        for job in jobs(&source) {
+            let Some(provisioned_at) = job.find(PROVISION) else {
+                for command in BUILD_COMMANDS {
+                    assert!(
+                        !job.contains(command),
+                        "{name}: a job running `{command}` must first install native prerequisites"
+                    );
+                }
+                continue;
+            };
+            provisioning_jobs += 1;
+            for command in BUILD_COMMANDS {
+                if let Some(built_at) = job.find(command) {
+                    assert!(
+                        provisioned_at < built_at,
+                        "{name}: `{command}` must run after native prerequisites are installed"
+                    );
+                }
+            }
+        }
+    }
+    // check, test, lint, l2, browser in the reusable area workflow, plus the
+    // workspace-wide affected-coverage job in ci.yml.
+    assert_eq!(
+        provisioning_jobs, 6,
+        "every building CI job must provision native prerequisites"
     );
 }
 

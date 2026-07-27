@@ -15,14 +15,16 @@ configuration.
 
 The Linux packages are declared once, by the `native` policy in
 `.github/ci/areas.json` (`{"ubuntu-latest": ["libasound2-dev", "libpulse-dev"]}`),
-and provisioned from there by two consumers:
+and installed from there by one implementation — the root `justfile`'s
+`_ensure-native-libs`, which probes each declared library with pkg-config and
+installs only what is missing, translating the apt names to `dnf` / `pacman` /
+`apk` equivalents on non-Debian hosts. Both consumers run that same recipe:
 
-- CI — the shared `install-native` action, before build/test. A missing system
-  library fails that named provisioning step, not a product test (D9).
-- Developer hosts — the root `justfile`'s `_ensure-native-libs`, run as part of
-  `just init`. It probes each declared library with pkg-config and installs only
-  what is missing, translating the apt names to `dnf` / `pacman` / `apk`
-  equivalents on non-Debian hosts.
+- CI — `just _ensure-native-libs playa` before every build, test, and lint
+  command. A missing system library fails that named provisioning step, not a
+  product test (D9).
+- Developer hosts — `just init`, which runs it with no argument to cover every
+  area's declared libraries.
 
 ### Building without native audio
 

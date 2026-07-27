@@ -30,6 +30,14 @@ order must match the root `justfile` `areas :=` list.
 
 Supported runner OS values: `ubuntu-latest`, `windows-latest`, `macos-latest`.
 
+`native` has exactly one installer: the root `justfile`'s `_ensure-native-libs`.
+CI runs `just _ensure-native-libs <area>` before every build, test, and lint
+command so a `-sys` crate never fails to compile for a missing system library,
+and `just init` runs it with no argument to cover every area on a developer host.
+A new requirement is therefore declared once and installed by one implementation.
+Non-Debian Linux hosts need the apt name mapped to `dnf` / `pacman` / `apk` in
+that recipe's table.
+
 ## Choosing canaries
 
 A global change runs the `canary` areas before the rest fan out, and a canary
@@ -45,12 +53,6 @@ Current set: `biscuit-hash` (pure Rust, fast) and `playa` (native dependencies).
 - Do **not** use `homelab` or `research` as canaries.
 
 Keep the set small — it is a serial stage in front of everything else.
-
-`native` has a second consumer outside CI: the root `justfile`'s
-`_ensure-native-libs` (a `just init` prerequisite) provisions developer hosts
-from the same declaration, so a new requirement is declared once. Non-Debian
-Linux hosts need the apt name mapped to `dnf` / `pacman` / `apk` in that
-recipe's table.
 
 ## Ownership completeness (`exemptions.json`)
 
