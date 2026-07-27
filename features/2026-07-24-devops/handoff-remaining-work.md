@@ -1,89 +1,115 @@
-# DevOps CI/CD — handoff for remaining work
+# DevOps CI/CD — handoff (rewritten 2026-07-27)
 
-Source of truth: `features/2026-07-24-devops/{plan.md, spec.md, execution.md}`.
-Read all three first; `spec.md` → "Implementation Decisions (2026-07-25 session)"
-and `execution.md` capture the live decisions and learnings.
+Source of truth: `features/2026-07-24-devops/{spec.md, plan.md, execution.md,
+ci-failure-inventory.md}`. Read `ci-failure-inventory.md` first — it explains why
+CI looks catastrophic and isn't.
 
-## Already done and on `main`
-Phases 1–3 (bootstrap/kache/preflight/release-gating; pinned toolchain 1.97.1 +
-advisory; explicit `ci` nextest profile, retries=0, Claudine sharding,
-`--no-fail-fast`, per-shard JUnit; staged area gates; L2 tmux-only provisioning;
-native-prereq provisioning) and Phase 4 tasks 4.1–4.3, 4.5-scope, 4.6 + the
-`hooks-tests`→`pre-push-hook-tests` rename. Playa was fixed on `main`
-(feature-flag rationalization + `_ensure-native-libs` in `just init`).
+## THE ONE RULE THAT MATTERS
 
-## In progress (branch `devops-phase-4-orchestration`, PR #4 draft — needs rebase onto `main`)
-Task 4.4 pattern proven: `claudine-windows-ctrl-c.yml` and `rendezvous-tests.yml`
-are now reusable (`workflow_call`), no longer self-trigger, honor the pinned
-toolchain (`rustup show`), and are orchestrated by `ci.yml` gated on scope (via a
-new `area_names` scope output), canary-aware. Contract tests updated.
-**First step: rebase this branch onto the updated `main`.**
+**A full-scope CI run cannot be green, and could not before this work.** 31 jobs
+were already failing on `main` before any of it. Judge a branch by **diffing its
+failure set against the baseline**, never by counting reds:
 
-## Remaining work (do on a branch; verify each on a branch PR run)
+```bash
+BASE=/tmp/baseline.txt        # regenerate from any recent main run if lost
+gh pr checks <pr> --json name,state \
+  | jq -r '.[]|select(.state=="FAILURE")|.name' \
+  | sed 's/^canary \/ //' | sort -u > /tmp/f<pr>.txt
+comm -13 "$BASE" /tmp/f<pr>.txt        # ONLY the new failures
+```
 
-1. **Native libraries — single install implementation (spec: Native libraries).**
-   CI must run the isolated `_ensure-native-libs` recipe **before build/test**
-   (before check/test/lint/specialized build commands) so `-sys` crates never
-   fail on a missing system lib. Consolidate the duplicate
-   `.github/actions/install-native` composite into that one recipe (CI calls
-   `just _ensure-native-libs`; ensure `just` is available in the jobs that need
-   it). `areas.json` `native` stays the single source of truth.
+For each new failure, open the job's step list
+(`gh api repos/yankeeinlondon/rusty-biscuit/actions/jobs/<id>`). If the steps the
+branch changed passed and a product/test step failed, the branch is sound.
+Confirm with `gh run list --workflow=<wf> --branch main`.
 
-2. **Finish Task 4.4 — specialized-workflow consolidation (D12).** Apply the
-   proven pattern to the remaining workflows: make each reusable
-   (`workflow_call` + `workflow_dispatch`, drop standalone `push`/`pull_request`
-   path triggers, `dtolnay@stable`→`rustup show`, remove `concurrency`), and add
-   an orchestration job in `ci.yml` gated on scope + canary:
-   - `biscuit-tui-windows-captured-stdout.yml` → gate on `biscuit-tui` in
-     `area_names`.
-   - `playa-windows.yml` → gate on `playa` in `area_names`.
-   - `messenger-desktop-tests.yml` (matrix + WSL job) → `messenger` is an
-     EXEMPT package, so gate on `contains(fromJSON(needs.scope.outputs.packages),
-     'messenger')`; update its exemption reason in `.github/ci/exemptions.json`
-     to "covered by the messenger-desktop specialized job."
-   - LEAVE `build-integrations.yml` (release-triggered artifact build, different
-     lifecycle).
-   - Add the **failure-class summary** (D15 pt2): a final `ci.yml` job (`needs:`
-     all jobs, `if: always()`) that classifies the first actionable failure
-     (bootstrap/build/lint/L1/L2/browser/release/...) into `$GITHUB_STEP_SUMMARY`.
-   - Add contract tests asserting each is reusable + orchestrated + preserves its
-     unique runtime evidence.
+Fixing the 31 baseline failures is an **explicit spec non-goal** — they belong to
+their owning areas. `ci-failure-inventory.md` breaks all 34 down to ~14 root
+causes (mostly one-line lint fixes; `biscuit-terminal`'s three dead-code items
+alone account for six red jobs).
 
-3. **Canary refinement (spec: Canaries must be green).** In `areas.json`, DROP
-   `"canary": true` from `darkmatter` (keep `biscuit-hash` + `playa`) until
-   darkmatter's L1 tests are green. Document "avoid homelab/research as canaries"
-   in `.github/ci/README.md`'s canary note. A red canary currently blocks all
-   global-change fan-out.
+## Merged to `main`
 
-4. **Phase 5 — separate/harden scheduled automation.** Per plan Phase 5:
-   `bench-nightly` push-trigger removal + measured timeout budgets +
-   execution-vs-upload separation; coverage/fuzz distinct names/schedules/
-   summaries; a recurring maintenance audit (advisory). Update docs + skills.
+| PR | What |
+|---|---|
+| #6 | Canary set trimmed to green areas (dropped `darkmatter`) |
+| #5 | One native-library installer (`just _ensure-native-libs`), run before every build |
+| #10 | Removed three shadow workspaces (`schematic`/`unchained-ai`/`tree-hugger`) |
+| #11 | homelab justfile no longer needs `sniff` to load + `check-canonical` guard |
 
-5. **Optional QoL — CI-aware `just commit`.** When `CI` is set, do a plain,
-   deterministic, non-interactive `git commit` (no `claudine`/LLM, no `_speak`,
-   no network), message supplied by caller. Local behavior unchanged.
+## Open, merge in THIS order
 
-## Constraints & learnings (important)
-- **CI-only bugs are the norm here.** Local `actionlint` + text contract tests
-  passed on 4 bugs that only a real runner caught (composite `if:`+local-`uses:`
-  load error; `kache-action@v1` rejects `win32-x64`; `${VAR:-{}}` → jq `{}}`;
-  canary choice). **Verify every workflow change on a branch PR run.**
-- Local `actionlint` hangs via its shellcheck integration on `ci.yml` — use
-  `actionlint -shellcheck=` for native checks; run `shellcheck` on `run:`
-  scripts separately.
-- Toolchain = `rustup show` (honors pinned `rust-toolchain.toml` = 1.97.1). kache
-  is Linux/macOS-only. Area nextest uses `NEXTEST_PROFILE: ci`, retries=0, L1
-  shards `--no-fail-fast`.
-- Verify locally: `actionlint -shellcheck=`;
-  `cargo nextest run -p test-toolkit --test ci_workflow_contracts`;
-  `python3 scripts/ci/test_affected_scope.py`. Contract tests live in
-  `tools/test-toolkit/tests/ci_workflow_contracts.rs`.
-- Repo rules: never `cargo fmt`; commit/push only when asked; branch off `main`;
-  after editing a `.claude/skills/**` file with a `hash:`, regenerate it with
-  `md hash <file>`. Commits are GPG-signed (needs a host with `pinentry`).
-- **Pre-existing product failures** (biscuit-speaks/homelab/research/tree-hugger
-  lint; darkmatter tests) are the spec's explicit non-goal — do NOT fix them as
-  part of this work; they belong to their areas.
-- `spec.md` has an uncommitted "Implementation Decisions (2026-07-25 session)"
-  addition (and this handoff file) — commit them with the rest.
+1. **#7** `devops-phase-4-orchestration` — Task 4.4 + failure-class summary
+2. **#8** `devops-phase-5-scheduled` — Phase 5 scheduled automation
+3. **#9** `devops-ci-commit` — CI-aware `just commit` (+ plan/execution doc updates)
+4. **#13** `exempt-native-deps` — one-file area model
+
+#7→#8→#9 is a linear stack; each contains the ones below it, so the diffs shrink
+as they merge. **#13 must go last**: #7 edits `.github/ci/exemptions.json`, which
+#13 deletes. After #9 merges, rebase #13 onto main and drop the exemptions hunk.
+
+**Verified deltas (all measured, all acceptable):** #7/#8/#9 each show exactly
+**two** new failures vs baseline — `messenger-desktop / WSL2 ubuntu` and
+`rendezvous / native (windows-latest)`. Both are pre-existing failures that
+orchestration newly *reveals*: red on `main` continuously since 2026-06-17 and
+2026-07-23, failing in `Vampire/setup-wsl@v4` and the Rendezvous suite — steps
+this work never touched. #13 was still queuing at handoff; check its delta before
+merging.
+
+After merging, rebase each next branch onto the new main and re-verify
+(`actionlint -shellcheck=`, `cargo nextest run -p test-toolkit --test
+ci_workflow_contracts`, `python3 scripts/ci/test_affected_scope.py`,
+`just check-canonical`).
+
+## Then: remaining work
+
+- **Phase 4/5 validation checkpoints** in `plan.md` are still unticked. Dispatch
+  `maintenance-audit.yml` once #8 lands — it is new, so it cannot be dispatched
+  until it is on `main`.
+- **AC30 caveat (bench-nightly).** Budget is 90 min, provisional. Warm runs
+  measured 14–18 min; every cold run was truncated by the old 30-min ceiling, so
+  the cold duration has **never been observed**. The job now records its own
+  duration/runner/toolchain — tighten from the first cold run, or split the 16
+  bench targets.
+- **`messenger-desktop-tests.yml`** still installs `libdbus-1-dev` inline; after
+  #13 it can be declared instead.
+- **Windows work** — Ken has a Windows environment now and will do it in one go.
+  Ctrl+C tests were re-tiered to ordinary `#[cfg(windows)]` L1 tests
+  (`wrap_ctrl_c_windows.rs`, `sequence_ctrl_c_windows.rs`); they have **never
+  run**, because `claudine / test` is staged behind `claudine / lint (ubuntu)`,
+  which fails on one clippy hint in `messenger`.
+
+## Hard-won gotchas — do not relearn these
+
+- **CI-only bugs are the norm.** Five so far passed every local check: composite
+  `if:`+local-`uses:` load error; `kache-action@v1` rejects `win32-x64`;
+  `${VAR:-{}}` → jq `{}}`; a red canary blocking all fan-out; a Windows path
+  separator in an error message. **Verify every workflow change on a branch PR run.**
+- **`just --dry-run` does NOT evaluate top-level backticks.** It cannot reproduce
+  a `VAR := \`cmd\`` load-time failure. Use a real recipe run.
+- **A real `just <recipe>` run evaluates ALL top-level backticks**, even for
+  unrelated recipes. `check-canonical` now rejects non-portable ones.
+- **Local `actionlint` hangs on `ci.yml`** via its shellcheck integration. Use
+  `actionlint -shellcheck=`; run shellcheck on `run:` blocks separately.
+- **Scheduled workflows get no PR run**, and a *new* one cannot even be
+  dispatched until it is on `main`. Extract their `run:` blocks and execute them
+  locally with `GITHUB_STEP_SUMMARY` pointed at a temp file — that caught three
+  silent defects in `maintenance-audit`/`bench-nightly`.
+- **Contract tests substring-match `areas.json` formatting.** Reformatting the
+  file (e.g. `json.dumps`) breaks them.
+- **Matrix job outputs are last-writer-wins**, so a reusable workflow's legs
+  cannot report a failure class back to the caller. Hence the per-area
+  `classify` job writing to the shared run summary.
+- **A red canary blocks the entire fan-out.** Canary areas must be otherwise green.
+- Repo rules: never `cargo fmt`; **no AI attribution in commits or PR bodies**;
+  commit only when asked; regenerate a skill's `hash:` with `md hash <file>`
+  after editing it.
+
+## Local gates
+
+```bash
+actionlint -shellcheck=
+cargo nextest run -p test-toolkit --test ci_workflow_contracts
+python3 scripts/ci/test_affected_scope.py && rm -rf scripts/ci/__pycache__
+just check-canonical
+```
