@@ -233,16 +233,16 @@ roster, with structured facts in frontmatter validated by a `_schema.yaml` sidec
   (`local_runners[].integration`: first_class / base_url_override / proxy_required /
   unsupported), cross-cloud bridging (`cloud_bridge`), merge semantics, env overrides.
   Refreshed 2026-07-02 against local-runners ground truth (refresh notes:
-  `model-config-refresh.md`). For
-  configuration depth, prefer the **model-config** skill (distilled comparison tables);
-  the research docs remain the source of truth.
+  `claudine/features/_completed/2026-07-02-provider-metadata/model-config-refresh.md`).
+  For configuration depth, prefer the **model-config** skill (distilled comparison
+  tables); the research docs remain the source of truth.
 - `local_runners/` — the runner-side counterpart to `model-config`: local model
   runners (Ollama, LM Studio, oMLX, Llama.cpp, vLLM) as servers — per-OS binaries and
   installs, OpenAI/Anthropic API surfaces, detection probes, config, model-id grammar,
   traps. Roster: `claudine/docs/local-runners.yaml`; spike notes:
-  `spike-local-runners.md`. For
-  runner-specific depth, prefer the **local-runners** skill (distilled tables); the
-  research docs remain the source of truth.
+  `claudine/features/_completed/2026-07-02-provider-metadata/spike-local-runners.md`.
+  For runner-specific depth, prefer the **local-llm-runners** skill (distilled tables);
+  the research docs remain the source of truth.
 - `agent-cli/`, `non-interactive-sessions/`, `usage/` — earlier topics; sidecars
   authored (every live topic directory carries a `_schema.yaml` sidecar as of
   2026-07-03, including `mcp/`, `acp/`, `hooks/`, `resume/`, `skills/`,

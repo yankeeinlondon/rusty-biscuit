@@ -1,8 +1,8 @@
 ---
-name: local-runners
+name: local-llm-runners
 description: Detecting, configuring, and wiring local model runners into agentic CLIs. Use when working with Ollama, LM Studio, oMLX, llama.cpp (llama-server), or vLLM; probing which local runners are installed or running; hitting OpenAI-compatible local endpoints (/v1) or Anthropic-compatible /v1/messages; serving local models; or connecting a local model to OpenCode or Claude Code via base URL, ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN, or runner-native launch hooks.
 last_updated: 2026-07-02
-hash: 36cdc2cd15df026f-d34ddf8923ebe8ed
+hash: 446f55855b272ab2-d34ddf8923ebe8ed
 ---
 
 # Local Model Runners
