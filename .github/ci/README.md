@@ -30,6 +30,22 @@ order must match the root `justfile` `areas :=` list.
 
 Supported runner OS values: `ubuntu-latest`, `windows-latest`, `macos-latest`.
 
+## Choosing canaries
+
+A global change runs the `canary` areas before the rest fan out, and a canary
+failure blocks that fan-out (D11). That only produces signal if the canary area
+is **otherwise green**: the canary must fail because the shared change broke it,
+not because the area already had failing tests. A red canary is worse than no
+canary, because it hides every other area's result behind a known failure.
+
+Current set: `biscuit-hash` (pure Rust, fast) and `playa` (native dependencies).
+
+- `darkmatter` is the intended heavy/sharded canary and should be re-added once
+  its L1 suite is green.
+- Do **not** use `homelab` or `research` as canaries.
+
+Keep the set small — it is a serial stage in front of everything else.
+
 `native` has a second consumer outside CI: the root `justfile`'s
 `_ensure-native-libs` (a `just init` prerequisite) provisions developer hosts
 from the same declaration, so a new requirement is declared once. Non-Debian
