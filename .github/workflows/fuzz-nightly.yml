@@ -1,10 +1,15 @@
 name: fuzz-nightly
 
 # Nightly scheduled fuzz run for all targets.
-# Requires nightly Rust. Opens an issue on a NEW crash (presence of
-# fuzz/artifacts/** entries). Non-crash job failures (toolchain install,
-# cache, runner outage, …) upload diagnostic logs but do NOT file issues.
-# Not a PR gate — fuzzing is advisory only.
+# Opens an issue on a NEW crash (presence of fuzz/artifacts/** entries).
+# Non-crash job failures (toolchain install, cache, runner outage, …) upload
+# diagnostic logs but do NOT file issues. Not a PR gate — fuzzing is advisory
+# only, with its own workflow name, schedule slot (02:00 UTC), artifacts, and
+# summary so it cannot be confused with required L1 validation (D14).
+#
+# `cargo-fuzz` requires the nightly compiler (`-Z sanitizer`), so these jobs
+# deliberately override the pinned `rust-toolchain.toml`. That override is
+# scoped to fuzzing and never reaches required CI.
 
 on:
   schedule:
@@ -24,7 +29,7 @@ permissions:
 
 jobs:
   biscuit-file:
-    name: Fuzz biscuit-file targets
+    name: fuzz / biscuit-file / ubuntu
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -175,7 +180,7 @@ jobs:
             });
 
   darkmatter:
-    name: Fuzz darkmatter target
+    name: fuzz / darkmatter / ubuntu
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -305,3 +310,34 @@ jobs:
               body,
               labels: ['fuzz', 'bug'],
             });
+
+  # Failure class for the nightly fuzz run (D14/D15): a crash is a product
+  # finding that already filed an issue; anything else is scheduled-automation
+  # infrastructure and must not be read as one.
+  summary:
+    name: fuzz / summary
+    needs: [biscuit-file, darkmatter]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Summarize
+        shell: bash
+        env:
+          BISCUIT_FILE: ${{ needs.biscuit-file.result }}
+          DARKMATTER: ${{ needs.darkmatter.result }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Nightly fuzz"
+            echo ""
+            echo "| target set | result |"
+            echo "|---|---|"
+            echo "| biscuit-file | ${BISCUIT_FILE} |"
+            echo "| darkmatter | ${DARKMATTER} |"
+            echo ""
+            echo "Advisory only — never a pull-request gate. A NEW crash files an"
+            echo "issue and uploads a \`fuzz-crashes-*\` artifact; any other failure"
+            echo "uploads \`fuzz-failure-logs-*\` and is scheduled-automation"
+            echo "infrastructure, not a product finding."
+          } >>"$GITHUB_STEP_SUMMARY"
