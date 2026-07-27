@@ -352,3 +352,110 @@ jobs:
       (needs.canary.result == 'success' || needs.canary.result == 'skipped')
     uses: ./.github/workflows/rendezvous-tests.yml
     secrets: inherit
+
+  biscuit-tui-captured-stdout:
+    name: biscuit-tui-captured-stdout
+    needs: [scope, preflight, canary]
+    if: >-
+      !cancelled() &&
+      contains(fromJSON(needs.scope.outputs.area_names), 'biscuit-tui') &&
+      (needs.canary.result == 'success' || needs.canary.result == 'skipped')
+    uses: ./.github/workflows/biscuit-tui-windows-captured-stdout.yml
+    secrets: inherit
+
+  playa-windows:
+    name: playa-windows
+    needs: [scope, preflight, canary]
+    if: >-
+      !cancelled() &&
+      contains(fromJSON(needs.scope.outputs.area_names), 'playa') &&
+      (needs.canary.result == 'success' || needs.canary.result == 'skipped')
+    uses: ./.github/workflows/playa-windows.yml
+    secrets: inherit
+
+  # `messenger` is an EXEMPT package with no curated area, so it never appears in
+  # `area_names`. Select it from the affected PACKAGE list instead — this
+  # workflow is messenger's entire CI ownership.
+  messenger-desktop:
+    name: messenger-desktop
+    needs: [scope, preflight, canary]
+    if: >-
+      !cancelled() &&
+      contains(fromJSON(needs.scope.outputs.packages), 'messenger') &&
+      (needs.canary.result == 'success' || needs.canary.result == 'skipped')
+    uses: ./.github/workflows/messenger-desktop-tests.yml
+    secrets: inherit
+
+  # Failure-class summary (D15). Classifies the FIRST actionable failure from the
+  # job graph, so the run summary answers "what kind of failure is this?" without
+  # reading every matrix leg. It classifies by job RESULT, never by log text, so
+  # a Node deprecation warning or a cache-reservation collision inside a job that
+  # still succeeded can never be promoted over the real root cause. Each area
+  # additionally contributes its own gate-level line from `_area-ci.yml`.
+  #
+  # Advisory only: this job always succeeds. Required status comes from the gates
+  # themselves, so a reporting bug can never turn a red run green.
+  summary:
+    name: Failure-class summary
+    needs:
+      - scope
+      - preflight
+      - canary
+      - area-ci
+      - affected-coverage
+      - claudine-generator-signals
+      - darkmatter-no-color
+      - claudine-windows-ctrl-c
+      - rendezvous
+      - biscuit-tui-captured-stdout
+      - playa-windows
+      - messenger-desktop
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Classify the first actionable failure
+        shell: bash
+        env:
+          # Listed in dependency order: an earlier stage's failure is the root
+          # cause, and later stages were skipped or would only repeat it.
+          RESULTS: |
+            bootstrap (scope calculation):${{ needs.scope.result }}
+            bootstrap (preflight):${{ needs.preflight.result }}
+            canary (shared-change regression):${{ needs.canary.result }}
+            area gate (build/lint/L1/L2/browser):${{ needs.area-ci.result }}
+            claudine generator drift:${{ needs.claudine-generator-signals.result }}
+            darkmatter NO_COLOR contract:${{ needs.darkmatter-no-color.result }}
+            claudine Windows console control:${{ needs.claudine-windows-ctrl-c.result }}
+            rendezvous native IPC runtime:${{ needs.rendezvous.result }}
+            biscuit-tui Windows captured stdout:${{ needs.biscuit-tui-captured-stdout.result }}
+            playa native Windows build:${{ needs.playa-windows.result }}
+            messenger desktop helpers:${{ needs.messenger-desktop.result }}
+            coverage:${{ needs.affected-coverage.result }}
+        run: |
+          set -euo pipefail
+          {
+            echo ""
+            echo "## CI result"
+            echo ""
+          } >>"$GITHUB_STEP_SUMMARY"
+
+          first=""
+          while IFS= read -r entry; do
+            [ -n "$entry" ] || continue
+            if [ "${entry##*:}" = "failure" ]; then
+              first="${entry%:*}"
+              break
+            fi
+          done <<<"$RESULTS"
+
+          if [ -z "$first" ]; then
+            echo "No gate reported a failure. Skipped jobs were not selected by scope." >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          {
+            echo "**First actionable failure class: ${first}**"
+            echo ""
+            echo "Open that job first — later red jobs are usually the same root cause."
+          } >>"$GITHUB_STEP_SUMMARY"

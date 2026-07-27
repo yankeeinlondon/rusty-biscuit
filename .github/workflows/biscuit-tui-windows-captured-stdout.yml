@@ -1,6 +1,6 @@
 name: biscuit-tui-windows-captured-stdout
 
-# Opt-in Windows-host runtime verification for biscuit-tui F2: `question` with
+# Reusable Windows-host runtime verification for biscuit-tui F2: `question` with
 # stdout captured to a pipe while a console is attached must deliver ONLY the
 # submitted value (no TUI/ANSI bytes) to the captured stream. This runs the
 # ignored, deterministic console-boundary integration test that needs a Windows
@@ -11,44 +11,36 @@ name: biscuit-tui-windows-captured-stdout
 # captures stdout to a pipe, so the test cannot rely on an ambient console;
 # `--nocapture` is kept only so the `F2 precondition HELD` line is recorded in
 # the log.
+#
+# Orchestrated by `ci.yml` when biscuit-tui is in the affected scope (D12), so it
+# no longer self-triggers on pushes/PRs. Also dispatchable manually.
 
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/biscuit-tui-windows-captured-stdout.yml"
-      - "Cargo.lock"
-      - "Cargo.toml"
-      - "biscuit-tui/**"
-      - "just/**"
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/biscuit-tui-windows-captured-stdout.yml"
-      - "Cargo.lock"
-      - "Cargo.toml"
-      - "biscuit-tui/**"
-      - "just/**"
+  workflow_call: {}
   workflow_dispatch: {}
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   CARGO_TERM_COLOR: never
 
-concurrency:
-  group: biscuit-tui-windows-captured-stdout-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   verify:
-    name: Windows captured-stdout runtime verification
+    name: biscuit-tui / captured-stdout / windows
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      - name: Install native prerequisites
+        shell: bash
+        run: just _ensure-native-libs biscuit-tui
+
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
 
       - name: Cache Cargo artifacts
         uses: Swatinem/rust-cache@v2
