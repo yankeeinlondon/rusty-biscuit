@@ -55,8 +55,7 @@
     "soft_os": [],
     "l2": true,
     "browser": true,
-    "backends": ["tmux", "wezterm"],
-    "canary": true
+    "backends": ["tmux", "wezterm"]
   },
   {
     "area": "sniff",
