@@ -208,7 +208,22 @@ install-server:
 install-frontend:
     @cd server/frontend && pnpm install
 
-INTEGRATIONS := `sniff repo packages integration | tr -d ',' | tr ' ' '\n' | grep -- '-integration$' | tr '\n' ' '`
+# Discover the Unfolded Circle integration packages.
+#
+# Deliberately a recipe rather than a `VAR := \`sniff …\`` assignment: just
+# evaluates top-level backticks whenever it loads this justfile, so a variable
+# here would make EVERY recipe -- including the `just lint` that CI runs --
+# depend on the `sniff` CLI being installed. Only the two recipes that actually
+# need the list pay for it.
+_integrations:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v sniff &> /dev/null; then
+        echo "sniff is required to discover integration packages; run 'just init' from the repo root" >&2
+        exit 1
+    fi
+    sniff repo packages integration --plain | tr -d ',' | tr ' ' '\n' | grep -- '-integration$' | tr '\n' ' '
+
 
 build-local-integrations *args="":
     #!/usr/bin/env bash
@@ -221,7 +236,7 @@ build-local-integrations *args="":
     echo -e "Build all {{BOLD}}Unfolded Circle Integrations{{RESET}} for the UC Remote (aarch64-linux-musl)"
     echo -e "{{DIM}}using cargo-zigbuild for cross-compilation{{RESET}}"
     echo
-    for integration in {{INTEGRATIONS}}; do
+    for integration in $(just _integrations); do
         echo -e "- building {{BOLD}}${integration}{{RESET}}"
         echo
         cargo zigbuild -p "${integration}" --release --target aarch64-unknown-linux-musl {{args}}
@@ -233,7 +248,7 @@ build-local-integrations *args="":
 install-integrations args="":
     #!/usr/bin/env bash
     set -euo pipefail
-    for integration in {{INTEGRATIONS}}; do
+    for integration in $(just _integrations); do
         echo
         echo -e "Installing the {{BOLD}}{{BLUE}}${integration}{{RESET}} integration"
         echo
