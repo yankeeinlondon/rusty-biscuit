@@ -57,10 +57,13 @@ jobs:
           latest_rust="$(awk '/^\[pkg\.rust\]/ { in_pkg = 1; next }
                               in_pkg && /^version/ { split($0, q, "\""); split(q[2], v, " "); print v[1]; exit }' <<<"$channel")"
           pinned_kache="$(tr -d '[:space:]' <.github/kache-version)"
-          # `cargo nextest --version` prints a multi-line build block; only the
-          # first line carries the version, and a stray newline here would break
-          # the markdown table row below.
-          pinned_nextest="$(cargo nextest --version 2>/dev/null | head -1 | awk '{print $2}')"
+          # cargo-nextest is not on this runner image -- the audit only installs
+          # the toolchain -- so `cargo nextest` exits 101 and would abort the
+          # step under `bash -e -o pipefail`. The table reports "not installed"
+          # instead, so tolerate the failure. Only the first line of the version
+          # banner carries the version; a stray newline would break the row.
+          nextest_version="$(cargo nextest --version 2>/dev/null || true)"
+          pinned_nextest="$(awk 'NR == 1 { print $2 }' <<<"$nextest_version")"
 
           {
             echo "## Maintenance audit"
