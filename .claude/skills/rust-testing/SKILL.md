@@ -4,7 +4,7 @@ description: |-
   Monorepo testing guide: L1/L2/L3 taxonomy, canonical just recipes,
   `require_level!` gating, nextest filtersets, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 1acc7c1c76b11142-1abbdaf41ce89290
+hash: 1acc7c1c76b11142-17a554981d042fea
 last_updated: 2026-07-15
 ---
 # Rust Testing — Rusty Biscuit Monorepo
@@ -28,6 +28,46 @@ Does the test need a real terminal, browser, or device to verify behaviour?
 If the only meaningful coverage of a public API requires a real resource,
 document the exception in `docs/testing-strategy.md`; do not force it into
 `sanity`.
+
+### OS-specific tests are ordinary tests
+
+**Tier is about the resource a test needs, never about the operating system it
+targets.** An OS-specific test is a normal test gated by `#[cfg(...)]`; the
+matrix already runs the suite on each OS, so the `cfg` alone puts it on the right
+leg and nowhere else.
+
+```rust
+#[cfg(unix)]                    // runs on the Linux/macOS legs
+#[test]
+fn sigint_during_prep_exits_130() { … }
+
+#[cfg(windows)]                 // runs on the Windows leg
+#[test]
+fn ctrl_c_terminates_wrapped_child_on_windows() { … }
+```
+
+Both are L1: each synthesizes its signal with a plain API call (`kill`,
+`GenerateConsoleCtrlEvent`) and needs no terminal harness. Do **not** reach for
+`level2_`/`level3_` just because a test only runs on one platform, and do not
+`#[ignore]` it because the dev host cannot run it — that is what CI's other legs
+are for.
+
+Getting this wrong is expensive and silent. Claudine's Windows Ctrl+C tests
+carried `level3_`/`level2_` prefixes plus an `#[ignore]`, which made them
+unreachable by **every** canonical recipe — `just test` filters out `level3_`,
+`just test-l2` selects only `level2_`, `just test-l3` neither runs unattended nor
+runs ignored tests, and CI's L2 job is Linux-only. Someone then wrote a bespoke
+GitHub workflow to invoke one by exact name with `--ignored`. It never passed,
+nobody noticed for months, and the fix was to delete the workflow and drop the
+prefixes. See `features/2026-07-24-devops/ci-failure-inventory.md`.
+
+Symptoms that you have mis-tiered an OS-specific test:
+
+- it needs a bespoke CI workflow, a hand-written `just` recipe, or an exact-name
+  invocation to run at all;
+- it is `#[ignore]`d with a reason that names a *platform* rather than a
+  *resource*;
+- a tier prefix and a `#[cfg]` gate encode the same fact twice.
 
 ## Test Levels
 

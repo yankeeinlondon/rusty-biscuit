@@ -18,13 +18,21 @@
 //!
 //! ## Level
 //!
-//! Level 2. A real Claudine process runs a real sequence with real child
+//! **Level 1**, gated by `#[cfg(windows)]` so it runs on the Windows leg of the
+//! ordinary matrix and nowhere else — the same way `wrap_sigint.rs` is gated by
+//! `#[cfg(unix)]`. A real Claudine process runs a real sequence with real child
 //! processes, and the interrupt arrives through the real Win32 console-control
 //! path rather than by setting an `AtomicBool`. It is not Level 3 because the
 //! event is synthesized with `GenerateConsoleCtrlEvent` instead of an OS
 //! keyboard chord — it starts downstream of the keyboard and the terminal's
-//! input encoder. The separate `level3_windows_sequence_ctrl_c` fixture uses
-//! the harness's Windows input injector to cover that keyboard boundary.
+//! input encoder. It is not Level 2 either: it needs no terminal harness, only a
+//! console. The separate `level3_windows_sequence_ctrl_c` fixture uses the
+//! harness's Windows input injector to cover that keyboard boundary.
+//!
+//! It carried a `level2_` prefix until 2026-07-27, which excluded it from the
+//! Windows L1 leg while CI's L2 job runs only on Linux — so it never executed
+//! anywhere (`features/2026-07-11-sequence-plus/validation-matrix.md` recorded
+//! it as "type-checked, never executed").
 //!
 //! ## Why the marker file and the exit code carry the weight
 //!
@@ -154,7 +162,7 @@ fn await_all_tasks_running(workspace: &Path) {
 }
 
 #[test]
-fn level2_windows_sequence_ctrl_c_fans_out_to_parallel_children() {
+fn sequence_ctrl_c_fans_out_to_parallel_children_on_windows() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();

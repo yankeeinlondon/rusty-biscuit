@@ -130,18 +130,6 @@ test-l2 *args="":
 test-l3 *args="":
     @just _test_l3 claudine-cli {{ args }}
 
-# Windows-host runtime gate for console Ctrl+Break / Job-Object parity. This
-# intentionally runs the ignored Windows integration test by exact name; it must
-# execute on a Windows host with an attached console.
-test-windows-ctrl-c:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [ "${OS:-}" != "Windows_NT" ]; then
-        echo "test-windows-ctrl-c must run on a Windows host with an attached console" >&2
-        exit 1
-    fi
-    cargo test -p claudine-cli --test level3_wrap_ctrl_c -- --ignored windows_ctrl_c_verification_record
-
 # not applicable: claudine emits terminal/CLI output, not HTML
 test-browser:
     @echo "test-browser: not applicable for claudine"
@@ -240,7 +228,7 @@ check:
 # Type-check the library and CLI *including test targets* for Windows.
 #
 # The only gate that compiles the Windows-only suites (`termination/windows.rs`
-# and `level2_windows_sequence_ctrl_c.rs`). Without it they are unverifiable
+# and `sequence_ctrl_c_windows.rs`). Without it they are unverifiable
 # dead source that merely looks like coverage. Requires the mingw-w64 toolchain
 # and the `x86_64-pc-windows-gnu` rustup target.
 #

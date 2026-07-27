@@ -1,7 +1,7 @@
 ---
 plan_file: features/2026-07-24-devops/plan.md
 phases: 5
-status: "phase 1 + phase 2 COMPLETE (CI-verified); phases 3-5 pending"
+status: "phases 1-5 implemented; PRs #5/#7/#8/#9 stacked for review; #6 merged"
 stop_reason: ""
 started: 24 July 2026
 scope: Phase 1 — Restore Bootstrap and Release Signal
@@ -154,3 +154,192 @@ Decision confirmed with user (OQ1): pin **exactly `1.97.1`** (verified current l
 
 - `phase7_ci_workflows.rs` was already broken before this work: it reads per-area workflow files (`test.yml`, `darkmatter-tests.yml`, `biscuit-file-tests.yml`, `claudine-tests.yml`) deleted when CI moved to the matrix-driven `ci.yml` + `_area-ci.yml`. Task 1.5's rename/rewrite fixes this stale test.
 - kache/fan-out/release YAML behavior is asserted in the **Rust** contract test (it inspects YAML text); `test_affected_scope.py` covers only the pure `calculate_scope` function (Windows-path, package-local OS union, global 3-OS, doc-only). Allocation documented here since the plan listed them together.
+
+## Session 2026-07-26/27 — native libs, 4.4 completion, canaries, Phase 5
+
+Branch/PR map (stacked, each rebased onto the one below):
+
+| PR | Branch | Content |
+|---|---|---|
+| #5 | `devops-native-libs` | one native-library installer, run before every build |
+| #7 | `devops-phase-4-orchestration` | Task 4.4 remainder + failure-class summary |
+| #8 | `devops-phase-5-scheduled` | Phase 5 scheduled automation |
+| #9 | `devops-ci-commit` | CI-aware `just commit` |
+| #6 | `devops-canary-set` | **merged** — canary set trimmed to green areas |
+
+### Native libraries — one installer (spec "Native libraries", D9)
+
+`_ensure-native-libs` now takes an optional area: `just _ensure-native-libs <area>`
+scopes to one area (CI), no argument covers every area (`just init`, and the
+affected-coverage job, which instruments the whole workspace). An unknown area
+name fails loudly instead of silently installing nothing. The `install-native`
+composite and the now-dead `native` workflow input are deleted — which also
+retires the `${VAR:-{}}` jq-parse hazard the composite carried.
+
+Every building job provisions before it builds: check, test, lint, l2, browser,
+plus affected-coverage. Contract test `native_prerequisites_are_installed_before_
+anything_is_built` splits each workflow's `jobs:` section and asserts the install
+step precedes every build command; proven non-vacuous by reordering the lint job
+and observing red.
+
+**CI evidence (run 30230445139):** "Install native prerequisites" succeeded on
+ubuntu-latest, macos-latest, AND windows-latest. The bash-shebang recipe runs
+under Git Bash on Windows; `uname -s` there yields `MINGW64_NT-*`, which maps to
+the `windows-latest` key, where no area declares packages, so it no-ops cleanly.
+
+### Canaries must be green (merged, PR #6)
+
+`darkmatter` dropped from the canary set; `biscuit-hash` + `playa` retained.
+Directly observed on both sides:
+
+- **Before** (PR #5, run 30230445139): all 8 `canary / darkmatter / test` shards
+  failed and the entire fan-out was SKIPPED — no area result was visible at all.
+  The darkmatter failure is pre-existing product/test debt: `1573 tests run:
+  1567 passed, 6 timed out`.
+- **After** (PR #6): canaries green, fan-out started (41 jobs).
+
+Also confirmed: a `soft_os` leg failing does **not** block the canary gate.
+`canary / playa / test (windows-latest)` failed and fan-out proceeded. That
+failure is also pre-existing and NOT playa's: `biscuit-terminal` has three
+Windows-only dead-code items (`parse_cpr_response`, `parse_csi_14t_response`,
+`OSC_QUERY_ATTEMPT_TARGET`) that `RUSTFLAGS: -D warnings` turns into errors.
+Owned by biscuit-terminal; spec non-goal here.
+
+### Task 4.4 remainder + failure-class summary (D12/D15)
+
+All five specialized runtime workflows are now reusable and orchestrated:
+rendezvous, claudine-windows-ctrl-c, biscuit-tui-captured-stdout, playa-windows,
+messenger-desktop. `build-integrations` stays release-triggered.
+
+`messenger` is EXEMPT from area ownership so it never appears in `area_names`;
+it is selected from the affected PACKAGE list instead, and its exemption reason
+now records that this workflow IS its CI ownership.
+
+Failure-class summary is split across two levels because a reusable workflow's
+**matrix legs cannot report outputs back to the caller** (a matrix job's outputs
+are last-writer-wins). So `_area-ci.yml` gains an `if: failure()` classifier that
+writes its own gate-level line (build/lint/L1/L2/browser) to the shared run
+summary, and `ci.yml` classifies the stage. Classification reads job RESULTS, not
+log text, so a Node deprecation warning or cache collision can never outrank the
+real root cause (D15 explicitly requires this).
+
+Incidental fix: the messenger WSL job's last command was `cargo test -p
+messenger-cli"` — a stray quote making it unparseable.
+
+### Phase 5 — scheduled automation
+
+`bench-nightly`: push trigger removed; execution separated from Bencher upload
+(previously the whole step was `continue-on-error`, so a bench that failed to
+COMPILE was invisible — the inverse of the AC31 hazard); budget 30 → 90 min.
+
+**Measured evidence:** six consecutive warm scheduled runs took 14, 16, 17, 18,
+18, 18 min (run 29971775038: ~6 min compile + ~9 min Criterion). Four runs were
+cancelled at exactly 30 min — i.e. **the cold duration has never been observed,
+only bounded below**. AC30 asks for a budget above the measured *cold* duration;
+90 min is above the measured *warm* duration with margin and is explicitly
+provisional. The job now records its own duration, runner image, and toolchain,
+so the next cold run produces the number needed to tighten it (or to justify
+splitting the 16 bench targets). **This is the one acceptance criterion not fully
+satisfiable from existing evidence.**
+
+`coverage` moved 04:00 → 05:00 (it collided with `sniff-performance`), honors the
+pinned toolchain, provisions native libs. `fuzz-nightly` gained a summary job and
+a note on why it deliberately overrides the pin. No duplicated L1 work was found
+in either to remove (plan 5.3) — neither repeats area CI.
+
+New `maintenance-audit.yml`: weekly, advisory, read-only permissions, always
+succeeds. Reports upstream movement in Rust/kache/nextest/action versions/runner
+image. The Rust lookup was verified locally against
+`static.rust-lang.org/dist/channel-rust-stable.toml` (returns 1.97.1 = the pin).
+
+### Docs drift corrected
+
+`docs/topics/ci-cd.md` and `docs/testing-strategy.md` still described the
+pre-Phase-1 world: floating `stable` toolchain, release-plz on push to main,
+path-triggered specialized workflows, `dtolnay/rust-toolchain` as the house rule.
+Corrected, plus a written "Advancing a pinned value" procedure to pair with the
+maintenance audit.
+
+### Learnings
+
+- **A red canary hides everything.** Worth re-stating as an operational rule: the
+  canary stage is a serial gate, so canary membership costs the whole fan-out's
+  visibility when the area is not otherwise green.
+- **Text contract tests need job-boundary awareness.** The first version of the
+  before-build ordering test failed on an input's `description:` prose that
+  merely *quoted* `cargo check --all-targets`. Splitting at the `jobs:` section
+  fixed it — worth remembering for any future text-matching contract.
+- **`gh run list` + `gh api .../jobs/<id>` is the cheapest way to get real timing
+  evidence** for budget decisions, and it distinguishes "slow" from "truncated".
+
+### Failure-set baseline (measured 2026-07-27) — read this before judging a CI run
+
+A full-scope run cannot be green, and could not before this work either. Judge a
+CI branch by **diffing** its failure set against a baseline, never by counting
+reds:
+
+```bash
+gh pr checks <pr> --json name,state \
+  | jq -r '.[]|select(.state=="FAILURE")|.name' | sed 's/^canary \/ //' | sort -u
+comm -13 baseline.txt candidate.txt   # only NEW failures
+```
+
+Baseline = PR #6 (canary change only, no `_area-ci.yml` edits): **31 failures.**
+Lint: biscuit-speaks, biscuit-terminal, claudine, homelab, research, tree-hugger,
+worktree. Tests: darkmatter (8 shards), sniff (3 OSes), schematic (2), unchained-ai
+(2), and Windows legs of biscuit-file, biscuit-icon, biscuit-tui, model-citizen,
+queue, renderable. Plus claudine-generator drift and affected coverage.
+
+Measured deltas:
+
+- **PR #5 (native libs): 0 new failures.** The one-installer change broke nothing.
+- **PRs #7/#8/#9: exactly 3 new**, all inherited down the stack from #7:
+  `rendezvous / native (windows-latest)`, `claudine-windows-ctrl-c`, and
+  `messenger-desktop / WSL2 ubuntu`.
+
+Those three are **pre-existing failures newly made visible**, not regressions:
+
+- `gh run list --workflow=<wf> --branch main` shows all three red on `main`
+  continuously — claudine-windows-ctrl-c since 2026-06-25, messenger-desktop
+  since 2026-06-17, rendezvous since 2026-07-23.
+- Their failing steps are product/environment steps this work never touched: the
+  Ctrl+C test itself, the Rendezvous suite, and `Vampire/setup-wsl@v4`. Every
+  step the 4.4 conversion DID change — `rustup show`, `Install just`, `Install
+  native prerequisites`, protoc, cache, compile-check — passed.
+
+They were previously invisible because each self-triggered only on its own path
+filter, so a change to `.github/workflows/**` never selected them. Orchestration
+(D12) now selects them from affected scope, which is the intended behavior and
+also means **they now gate merges**. Each belongs to its owning area.
+
+Two visibility unlocks in one session therefore account for the entire apparent
+explosion of red: the canary fix let the fan-out run at all, and orchestration
+pulled in three more workflows. This is G1 working, not a regression.
+
+### Failure-class diagnostics verified on a real runner (PR #7)
+
+- `Failure-class summary` in `ci.yml`: **success** — hyphenated `needs.<job>.result`
+  references (`needs.area-ci`, `needs.claudine-generator-signals`, …) resolve
+  correctly in GitHub expressions.
+- Per-area `failure class` jobs behaved as designed: **success** (i.e. ran and
+  classified) for areas with a hard failure, **skipped** for areas that passed —
+  and also skipped for areas whose only failure was a `soft_os`
+  `continue-on-error` leg (biscuit-icon, biscuit-tui, model-citizen, queue,
+  renderable), because `failure()` does not fire for a tolerated leg. Correct: an
+  advisory leg is not an actionable failure class.
+
+### Scheduled-workflow shell blocks were dry-run locally
+
+Scheduled workflows get no run from a PR, and `maintenance-audit.yml` cannot even
+be dispatched until it is on `main`. Extracting and executing their `run:` blocks
+locally caught three defects that would have produced silently wrong output on an
+unwatched nightly run:
+
+1. `cargo nextest --version` prints a multi-line build block, so `awk '{print $2}'`
+   emitted one value per line and broke the audit's markdown table row.
+2. `grep -m1` closes curl's pipe early, which curl reports as exit 56 — making the
+   step's exit status meaningless.
+3. A benchmark that failed before recording its duration printed a bare `"s"`.
+
+Worth repeating for any future scheduled workflow: **extract the `run:` blocks and
+execute them with `GITHUB_STEP_SUMMARY` pointed at a temp file** before merging.
