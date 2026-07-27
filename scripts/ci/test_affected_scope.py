@@ -11,6 +11,7 @@ from affected_scope import (
     calculate_scope,
     load_exemptions,
     validate_area_schema,
+    validate_no_shadow_workspaces,
     validate_ownership,
 )
 
@@ -284,6 +285,45 @@ class OwnershipTests(unittest.TestCase):
         path.write_text('[{"package": "x", "reason": "  "}]')
         with self.assertRaisesRegex(RuntimeError, "non-empty reason"):
             load_exemptions(path)
+
+
+class ShadowWorkspaceTests(unittest.TestCase):
+    """A nested `[workspace]` must not re-declare a root workspace member."""
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        (self.root / "alpha" / "lib").mkdir(parents=True)
+        (self.root / "standalone").mkdir()
+        packages = [
+            {
+                "id": "alpha-core",
+                "name": "alpha-core",
+                "manifest_path": str(self.root / "alpha" / "lib" / "Cargo.toml"),
+            }
+        ]
+        self.metadata = {
+            "workspace_members": ["alpha-core"],
+            "packages": packages,
+            "resolve": {"nodes": []},
+        }
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def test_no_nested_workspace_passes(self) -> None:
+        validate_no_shadow_workspaces(self.metadata, self.root)
+
+    def test_nested_workspace_over_a_root_member_fails_by_path(self) -> None:
+        (self.root / "alpha" / "Cargo.toml").write_text('[workspace]\nmembers = ["lib"]\n')
+        with self.assertRaisesRegex(RuntimeError, r"shadow root workspace members.*alpha/Cargo.toml"):
+            validate_no_shadow_workspaces(self.metadata, self.root)
+
+    def test_genuinely_standalone_workspace_is_allowed(self) -> None:
+        # `scripts/` declares its own workspace and owns no root member, so it
+        # is a real separate workspace rather than a shadow.
+        (self.root / "standalone" / "Cargo.toml").write_text('[workspace]\nmembers = ["x"]\n')
+        validate_no_shadow_workspaces(self.metadata, self.root)
 
 
 if __name__ == "__main__":

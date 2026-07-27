@@ -210,6 +210,54 @@ def validate_ownership(
         )
 
 
+def validate_no_shadow_workspaces(metadata: dict[str, Any], root: Path) -> None:
+    """No directory may re-declare a root workspace member in its own workspace.
+
+    A nested ``[workspace]`` whose members are also root members makes the same
+    package resolve into two different workspaces depending on the current
+    directory. Cargo picks the nearest ancestor workspace root, so ``cd <area> &&
+    cargo test`` then gets a different target directory, a different lockfile
+    (hence different dependency versions than the root build ships), and
+    different config discovery — which is how ``.config/nextest.toml``'s ``ci``
+    profile became invisible to three areas.
+
+    A genuinely standalone workspace is fine; it is only a shadow when its
+    members overlap the root workspace.
+
+    ## Errors
+
+    Raises ``RuntimeError`` naming each shadowing manifest.
+    """
+    member_dirs = {
+        Path(package["manifest_path"]).parent.resolve()
+        for package in workspace_packages(metadata).values()
+    }
+
+    shadows: list[str] = []
+    for manifest in sorted(root.glob("*/Cargo.toml")):
+        if manifest.parent.resolve() == root.resolve():
+            continue
+        text = manifest.read_text(encoding="utf-8")
+        if "[workspace]" not in text:
+            continue
+        nested_root = manifest.parent.resolve()
+        if any(
+            member == nested_root or nested_root in member.parents
+            for member in member_dirs
+        ):
+            # POSIX separators so the message is identical on every runner
+            # OS and stays copy-pasteable (`global_trigger` normalizes likewise).
+            shadows.append(manifest.relative_to(root).as_posix())
+
+    if shadows:
+        raise RuntimeError(
+            "nested [workspace] manifests shadow root workspace members: "
+            f"{shadows}. Delete the nested [workspace] so the package resolves "
+            "to one workspace, one target directory, one lockfile, and one "
+            "`.config/nextest.toml`, regardless of the working directory."
+        )
+
+
 def global_trigger(files: list[str]) -> str | None:
     """Return the first changed path that forces full workspace scope, if any."""
     for raw_file in files:
@@ -432,6 +480,7 @@ def main() -> None:
     exemptions = load_exemptions(EXEMPTIONS_CONFIG)
     metadata = load_metadata(ROOT)
     validate_ownership(metadata, ROOT, area_config, exemptions)
+    validate_no_shadow_workspaces(metadata, ROOT)
     scope = calculate_scope(args.files, ROOT, metadata, area_config, args.all)
     print(json.dumps(scope, separators=(",", ":")))
 

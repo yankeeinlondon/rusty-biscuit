@@ -39,71 +39,8 @@ test *args="":
     @just _test tree-hugger-cli {{args}}
 
 # real-terminal (Level-2) tests for the `hug god-files` styled report.
-#
-# tree-hugger is a *nested* workspace: `tree-hugger/Cargo.toml` declares its own
-# `[workspace]` listing only `cli` and `lib`. The broker package
-# `biscuit-test-harness` is a member of the *root* workspace, so building it from
-# here requires an explicit `--manifest-path` (a bare `-p biscuit-test-harness`
-# makes cargo panic on the cross-workspace resolve). We therefore run the
-# canonical broker workflow ourselves — pointing the broker build + metadata at
-# the root manifest while the nextest run stays in the nested workspace — to
-# preserve the repository's required L2 invariants:
-#
-#   1. Spawn ONE shared pane per backend via `biscuit-harness-broker` so nextest
-#      children attach instead of spawning fresh panes per test.
-#   2. Run nextest with `-j 1` so the `#[serial]` L2 tests share that single pane
-#      without racing on GUI / global terminal state.
-#   3. Tear every spawned pane down in an EXIT trap (success or failure).
-#
-# Backends whose tooling is missing are skipped; their `BISCUIT_SHARED_*` var
-# stays unset and tests fall back to per-process spawning (which itself skips
-# cleanly via `require_level!`).
 test-l2 *args="":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo
-    echo -e "🖥  Level-2 tests for {{BOLD}}tree-hugger-cli{{RESET}}"
-    echo
-
-    # Build the broker and resolve its target dir through the ROOT manifest,
-    # since `biscuit-test-harness` is not a member of this nested workspace.
-    root_manifest="../Cargo.toml"
-    cargo build --manifest-path "${root_manifest}" -p biscuit-test-harness --bin biscuit-harness-broker --quiet
-    meta_file="$(mktemp "${TMPDIR:-/tmp}/tree-hugger-l2-meta.XXXXXX")"
-    cargo metadata --manifest-path "${root_manifest}" --no-deps --format-version 1 > "${meta_file}"
-    target_dir="$(jq -r '.target_directory' "${meta_file}")"
-    rm -f "${meta_file}"
-    broker="${target_dir}/debug/biscuit-harness-broker"
-    if [[ ! -x "${broker}" ]]; then
-        echo -e "{{DIM}}warning: ${broker} not executable; falling back to per-test spawning{{RESET}}"
-        cargo nextest run -p tree-hugger-cli -E 'test(/level2_/)' --no-tests=pass -j 1 {{args}}
-        exit $?
-    fi
-
-    # Registry of (backend id) pairs the trap consumes on EXIT to tear down the
-    # panes the broker spawned.
-    SHARED_REGISTRY="$(mktemp "${TMPDIR:-/tmp}/tree-hugger-l2-shared.XXXXXX")"
-    trap 'while read -r b i; do "${broker}" kill "${b}" "${i}" >/dev/null 2>&1 || true; done < "${SHARED_REGISTRY}"; rm -f "${SHARED_REGISTRY}"' EXIT
-
-    # Spawn one shared pane per backend the L2 tests attach to (wezterm, kitty,
-    # tmux). Missing tooling exits non-zero and is silently skipped.
-    if id="$("${broker}" spawn wezterm 2>/dev/null)" && [[ -n "${id}" ]]; then
-        export BISCUIT_SHARED_WEZTERM_PANE_ID="${id}"
-        echo "wezterm ${id}" >> "${SHARED_REGISTRY}"
-        echo -e "  {{DIM}}spawned wezterm pane ${id}{{RESET}}"
-    fi
-    if id="$("${broker}" spawn kitty 2>/dev/null)" && [[ -n "${id}" ]]; then
-        export BISCUIT_SHARED_KITTY_WINDOW_ID="${id}"
-        echo "kitty ${id}" >> "${SHARED_REGISTRY}"
-        echo -e "  {{DIM}}spawned kitty window ${id}{{RESET}}"
-    fi
-    if id="$("${broker}" spawn tmux 2>/dev/null)" && [[ -n "${id}" ]]; then
-        export BISCUIT_SHARED_TMUX_SESSION="${id}"
-        echo "tmux ${id}" >> "${SHARED_REGISTRY}"
-        echo -e "  {{DIM}}spawned tmux session ${id}{{RESET}}"
-    fi
-
-    cargo nextest run -p tree-hugger-cli -E 'test(/level2_/)' --no-tests=pass -j 1 {{args}}
+    @just _test_l2 tree-hugger-cli {{args}}
 
 # not applicable: tree-hugger has no OS-keyboard-injection (Level-3) tests
 test-l3:
