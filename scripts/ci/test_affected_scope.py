@@ -286,6 +286,25 @@ class OwnershipTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "non-empty reason"):
             load_exemptions(path)
 
+    def test_exemption_may_declare_native_prerequisites(self) -> None:
+        path = self.root / "exemptions.json"
+        path.write_text(
+            '[{"package": "x", "reason": "r", "native": {"ubuntu-latest": ["libgtk-3-dev"]}}]'
+        )
+        self.assertEqual(load_exemptions(path), {"x": "r"})
+
+    def test_exemption_native_rejects_unsupported_os(self) -> None:
+        path = self.root / "exemptions.json"
+        path.write_text('[{"package": "x", "reason": "r", "native": {"solaris": ["gtk"]}}]')
+        with self.assertRaisesRegex(RuntimeError, "unsupported OS 'solaris'"):
+            load_exemptions(path)
+
+    def test_exemption_rejects_unknown_field(self) -> None:
+        path = self.root / "exemptions.json"
+        path.write_text('[{"package": "x", "reason": "r", "canary": true}]')
+        with self.assertRaisesRegex(RuntimeError, "unknown field"):
+            load_exemptions(path)
+
 
 class ShadowWorkspaceTests(unittest.TestCase):
     """A nested `[workspace]` must not re-declare a root workspace member."""

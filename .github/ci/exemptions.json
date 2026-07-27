@@ -29,7 +29,12 @@
   },
   {
     "package": "messenger",
-    "reason": "covered by the messenger-desktop specialized job (ci.yml -> messenger-desktop-tests.yml); promotion to a curated area is blocked on completing the canonical just recipe set (has only test/lint)"
+    "reason": "covered by the messenger-desktop specialized job (ci.yml -> messenger-desktop-tests.yml); promotion to a curated area is blocked on completing the canonical just recipe set (has only test/lint)",
+    "native": {
+      "ubuntu-latest": [
+        "libdbus-1-dev"
+      ]
+    }
   },
   {
     "package": "messenger-cli",
@@ -37,7 +42,14 @@
   },
   {
     "package": "visualizer",
-    "reason": "not fully working/tested yet; CI deferred until stabilized"
+    "reason": "not fully working/tested yet; CI deferred until stabilized",
+    "native": {
+      "ubuntu-latest": [
+        "libgtk-3-dev",
+        "libwebkit2gtk-4.1-dev",
+        "libdbus-1-dev"
+      ]
+    }
   },
   {
     "package": "biscuit-clipboard",
