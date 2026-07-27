@@ -913,3 +913,48 @@ This feature is successful when a red required-CI run reliably means that an
 affected, required validation contract failed; a green run means that the
 dependency-derived scope passed on its required platforms; and release,
 benchmark, coverage, and fuzz failures remain independently understandable.
+
+## Implementation Decisions (2026-07-25 session)
+
+These refine D9 and D11 based on what implementation and live CI runs revealed.
+
+### Native libraries: one isolated install step, shared with `just init` (refines D9)
+
+`.github/ci/areas.json` `native` is the single source of truth for the OS system
+libraries an area needs (e.g. Playa's Linux ALSA/PulseAudio). The **install
+logic must have one implementation**, shared between developer hosts and CI:
+
+- The root `justfile` exposes an **isolated library-install recipe**
+  (`_ensure-native-libs`) that reads `areas.json` `native` for the current OS,
+  probes each library with `pkg-config`, installs only what is missing, and maps
+  the apt package names to `dnf`/`pacman`/`apk`/`brew` on other hosts. It is a
+  prerequisite of `just init` but is **isolated** so it can run on its own.
+- **CI must run that isolated library-install step before anything is built** —
+  i.e. before the area's `check`/`test`/`lint` (and any specialized) build
+  commands, so a `-sys` crate never fails to compile for a missing system lib.
+  Running the full `just init` in CI is out of scope (it also installs CLIs,
+  kache, GitNexus, etc.); only the isolated library-install step runs.
+- The current per-area `install-native` composite action duplicates this logic.
+  Consolidate to the single recipe so a new `native` requirement reaches both
+  developer hosts and CI from one declaration and one installer.
+
+### Canaries must be green areas (refines D11)
+
+Canaries only provide signal when the canary area is otherwise green — a canary
+must fail only because a *shared* change broke it, not because the area had
+pre-existing product failures. A red canary blocks all global-change fan-out
+(D11) and is worse than no canary.
+
+- Keep the canary **mechanism** and the per-area `canary` flag.
+- Initial canaries: **`biscuit-hash`** (pure-Rust) and **`playa`** (native-dep;
+  now green on `main`). **`darkmatter`** stays out of the canary set until its
+  L1 tests are green, then it can be re-added as the heavy/sharded canary.
+- **Do not** use `homelab` or `research` as canaries for now.
+
+### Quality-of-life: CI-aware `just commit` (new, optional)
+
+`just commit` uses an LLM (`claudine compose`), audio (`_speak`), and an
+interactive-ish flow that is inappropriate in CI. When `CI` is set it should
+instead perform a plain, deterministic, non-interactive `git commit` (no LLM, no
+audio, no network), with the message supplied by the caller. Local behavior is
+unchanged.
