@@ -194,7 +194,6 @@ jobs:
       browser: ${{ matrix.browser }}
       kache: ${{ matrix.kache }}
       ai-provider-stubs: ${{ matrix.ai_provider_stubs }}
-      native: ${{ toJSON(matrix.native) }}
     secrets: inherit
 
   area-ci:
@@ -221,7 +220,6 @@ jobs:
       browser: ${{ matrix.browser }}
       kache: ${{ matrix.kache }}
       ai-provider-stubs: ${{ matrix.ai_provider_stubs }}
-      native: ${{ toJSON(matrix.native) }}
     secrets: inherit
 
   affected-coverage:
@@ -239,6 +237,12 @@ jobs:
       FULL_SCOPE: ${{ needs.scope.outputs.full_scope }}
     steps:
       - uses: actions/checkout@v4
+      - uses: extractions/setup-just@v2
+      # No area scope here: a full-scope run instruments the whole workspace, so
+      # every area's declared libraries must be present before llvm-cov builds.
+      - name: Install native prerequisites
+        shell: bash
+        run: just _ensure-native-libs
       - name: Set up the pinned toolchain with coverage components
         run: |
           rustc --version

@@ -408,7 +408,9 @@ _ensure-build-deps:
     echo "Build dependencies installed."
 
 # ensure the system libraries areas declare in `.github/ci/areas.json` are present
-_ensure-native-libs:
+# (no argument = every area's libraries, for `just init`; an area name = only that
+# area's, which is what CI runs before an area's build/test/lint commands)
+_ensure-native-libs area="":
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -451,14 +453,23 @@ _ensure-native-libs:
     fi
 
     # `.github/ci/areas.json` is the single source of truth for native OS
-    # packages: CI provisions from it via `.github/actions/install-native`, and
-    # so does this recipe. A new area's requirement therefore reaches developer
-    # hosts without a second declaration to keep in sync.
-    declared=$(jq -r --arg k "$runner_key" \
-        '[.[] | (.native // {})[$k] // []] | add // [] | unique | .[]' \
-        "{{ justfile_directory() }}/.github/ci/areas.json")
+    # packages, and this recipe is the single installer: CI runs it before an
+    # area's build/test/lint commands and `just init` runs it for every area, so
+    # a new requirement is declared once and reaches both.
+    areas_json="{{ justfile_directory() }}/.github/ci/areas.json"
+    area="{{ area }}"
+
+    if [[ -n "$area" ]] && ! jq -e --arg a "$area" 'any(.[]; .area == $a)' "$areas_json" > /dev/null; then
+        echo "No area named '$area' in .github/ci/areas.json" >&2
+        exit 1
+    fi
+
+    declared=$(jq -r --arg k "$runner_key" --arg a "$area" \
+        '[.[] | select($a == "" or .area == $a) | (.native // {})[$k] // []] | add // [] | unique | .[]' \
+        "$areas_json")
 
     if [[ -z "$declared" ]]; then
+        echo "no native prerequisites declared for ${area:-all areas} on $runner_key"
         exit 0
     fi
 

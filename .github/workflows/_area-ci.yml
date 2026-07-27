@@ -8,6 +8,10 @@ name: area-ci
 # encodes: macOS compile-check only; full L1 on Linux + Windows; staged so a
 # build/lint failure skips the test tiers; kache on Linux/macOS runners
 # (kache-action@v1 rejects win32-x64); nextest sharding for heavy areas.
+#
+# Every building job first runs `just _ensure-native-libs <area>` — the same
+# recipe `just init` runs on a developer host — so an area's `native` libraries
+# from `.github/ci/areas.json` are present before any `-sys` crate compiles (D9).
 
 on:
   workflow_call:
@@ -52,10 +56,6 @@ on:
         description: "Install inert AI-provider CLI stubs for tests that require provider discovery."
         type: boolean
         default: false
-      native:
-        description: "JSON map of runner-OS (e.g. ubuntu-latest) -> native packages to install before build/test."
-        type: string
-        default: "{}"
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -81,10 +81,11 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Install just
+        uses: extractions/setup-just@v2
       - name: Install native prerequisites
-        uses: ./.github/actions/install-native
-        with:
-          native: ${{ inputs.native }}
+        shell: bash
+        run: just _ensure-native-libs "${{ inputs.area }}"
       - name: Set up the pinned Rust toolchain
         run: rustup show
       - name: Install protoc
@@ -128,10 +129,11 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Install just
+        uses: extractions/setup-just@v2
       - name: Install native prerequisites
-        uses: ./.github/actions/install-native
-        with:
-          native: ${{ inputs.native }}
+        shell: bash
+        run: just _ensure-native-libs "${{ inputs.area }}"
       - name: Set up the pinned Rust toolchain
         run: rustup show
       - name: Install protoc
@@ -149,8 +151,6 @@ jobs:
         with:
           workspaces: ". -> target"
           shared-key: area-ci-${{ inputs.area }}-test-${{ matrix.os }}
-      - name: Install just
-        uses: extractions/setup-just@v2
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
       - name: Install AI-provider CLI stubs
@@ -199,10 +199,11 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Install just
+        uses: extractions/setup-just@v2
       - name: Install native prerequisites
-        uses: ./.github/actions/install-native
-        with:
-          native: ${{ inputs.native }}
+        shell: bash
+        run: just _ensure-native-libs "${{ inputs.area }}"
       # clippy + rustfmt come from rust-toolchain.toml (the single authority).
       - name: Set up the pinned Rust toolchain
         run: rustup show
@@ -221,8 +222,6 @@ jobs:
         with:
           workspaces: ". -> target"
           shared-key: area-ci-${{ inputs.area }}-lint-ubuntu-latest
-      - name: Install just
-        uses: extractions/setup-just@v2
       - name: Lint and documentation guards
         run: cd "${{ inputs.area }}" && just lint
 
@@ -242,10 +241,11 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Install just
+        uses: extractions/setup-just@v2
       - name: Install native prerequisites
-        uses: ./.github/actions/install-native
-        with:
-          native: ${{ inputs.native }}
+        shell: bash
+        run: just _ensure-native-libs "${{ inputs.area }}"
       - name: Set up the pinned Rust toolchain
         run: rustup show
       - name: Install protoc
@@ -270,8 +270,6 @@ jobs:
         with:
           workspaces: ". -> target"
           shared-key: area-ci-${{ inputs.area }}-test-ubuntu-latest
-      - name: Install just
-        uses: extractions/setup-just@v2
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
       - name: L2 tests
@@ -295,10 +293,11 @@ jobs:
       BISCUIT_BROWSER_REQUIRED: "1"
     steps:
       - uses: actions/checkout@v4
+      - name: Install just
+        uses: extractions/setup-just@v2
       - name: Install native prerequisites
-        uses: ./.github/actions/install-native
-        with:
-          native: ${{ inputs.native }}
+        shell: bash
+        run: just _ensure-native-libs "${{ inputs.area }}"
       - name: Set up the pinned Rust toolchain
         run: rustup show
       - name: Install protoc
@@ -316,8 +315,6 @@ jobs:
         with:
           workspaces: ". -> target"
           shared-key: area-ci-${{ inputs.area }}-test-ubuntu-latest
-      - name: Install just
-        uses: extractions/setup-just@v2
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
       - name: Browser tests
