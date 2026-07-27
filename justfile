@@ -467,13 +467,16 @@ _ensure-native-libs:
         install_packages jq
     fi
 
-    # `.github/ci/areas.json` is the single source of truth for native OS
-    # packages: CI provisions from it via `.github/actions/install-native`, and
-    # so does this recipe. A new area's requirement therefore reaches developer
-    # hosts without a second declaration to keep in sync.
-    declared=$(jq -r --arg k "$runner_key" \
-        '[.[] | (.native // {})[$k] // []] | add // [] | unique | .[]' \
-        "{{ justfile_directory() }}/.github/ci/areas.json")
+    # `.github/ci/areas.json` (curated areas) and `.github/ci/exemptions.json`
+    # (packages with no curated area, e.g. the Tauri `visualizer`) are the single
+    # source of truth for native OS packages. A requirement is declared once, on
+    # the package that needs it, and reaches both developer hosts and CI from
+    # there. Declarations are per-OS, so a Linux-only dependency never touches a
+    # macOS or Windows host.
+    declared=$(jq -rs --arg k "$runner_key" \
+        '[.[][] | (.native // {})[$k] // []] | add // [] | unique | .[]' \
+        "{{ justfile_directory() }}/.github/ci/areas.json" \
+        "{{ justfile_directory() }}/.github/ci/exemptions.json")
 
     if [[ -z "$declared" ]]; then
         exit 0
@@ -487,6 +490,9 @@ _ensure-native-libs:
     native_map="
     libasound2-dev|alsa|alsa-lib-devel|alsa-lib|alsa-lib-dev
     libpulse-dev|libpulse|pulseaudio-libs-devel|libpulse|pulseaudio-dev
+    libgtk-3-dev|gtk+-3.0|gtk3-devel|gtk3|gtk+3.0-dev
+    libwebkit2gtk-4.1-dev|webkit2gtk-4.1|webkit2gtk4.1-devel|webkit2gtk-4.1|webkit2gtk-4.1-dev
+    libdbus-1-dev|dbus-1|dbus-devel|dbus|dbus-dev
     "
 
     row_for() {

@@ -60,8 +60,14 @@ in `.github/ci/exemptions.json`. `validate_ownership` fails the scope calculatio
 — naming the offending package — for an unmapped member, a package that is both
 owned and exempt, or an exemption for a package that no longer exists.
 
-`exemptions.json` is a list of `{ "package": "<name>", "reason": "<why>" }`.
-Reasons are required and non-empty. Exemptions cover shared test-infra crates
+`exemptions.json` is a list of `{ "package": "<name>", "reason": "<why>" }`, with
+an optional `native` map in the same shape as an area's. System libraries are a
+property of the *package*, not of its CI ownership, so an exempt package declares
+them the same way an owned one does — `_ensure-native-libs` reads both files.
+That is how `visualizer` declares the GTK/WebKit headers Tauri needs on Linux
+(and only on Linux: macOS uses WebKit.framework, Windows uses WebView2, so cargo
+pulls no `-sys` crate there). Reasons are required and non-empty; unknown fields
+are rejected. Exemptions cover shared test-infra crates
 (exercised transitively), experimental/unstable packages, and real areas whose
 justfiles do not yet define the full canonical recipe set (promote them by
 completing the recipes, adding them to the `areas` list + this file, and removing

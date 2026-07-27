@@ -75,6 +75,28 @@ def load_metadata(root: Path) -> dict[str, Any]:
     return json.loads(result.stdout)
 
 
+def validate_native_map(label: str, native: Any) -> None:
+    """Validate a `native` OS -> system-package declaration.
+
+    Shared by curated areas and by exempt packages: a package's system libraries
+    are a property of the package, so an exempt package declares them the same
+    way an owned one does. `_ensure-native-libs` reads both files.
+
+    ## Errors
+
+    Raises ``RuntimeError`` naming the offending declaration.
+    """
+    if not isinstance(native, dict):
+        raise RuntimeError(f"{label} field 'native' must be an OS->packages map")
+    for os_name, packages in native.items():
+        if os_name not in SUPPORTED_RUNNER_OS:
+            raise RuntimeError(f"{label} field 'native' names unsupported OS '{os_name}'")
+        if not isinstance(packages, list) or not all(isinstance(p, str) for p in packages):
+            raise RuntimeError(
+                f"{label} field 'native.{os_name}' must be a list of package names"
+            )
+
+
 def validate_area_schema(areas: list[dict[str, Any]]) -> None:
     """Validate each raw area record against the capability-policy schema (D10).
 
@@ -114,18 +136,7 @@ def validate_area_schema(areas: list[dict[str, Any]]) -> None:
                     f"known backends: {sorted(KNOWN_L2_BACKENDS)}"
                 )
 
-        native = area.get("native", {})
-        if not isinstance(native, dict):
-            raise RuntimeError(f"area '{label}' field 'native' must be an OS->packages map")
-        for os_name, packages in native.items():
-            if os_name not in SUPPORTED_RUNNER_OS:
-                raise RuntimeError(
-                    f"area '{label}' field 'native' names unsupported OS '{os_name}'"
-                )
-            if not isinstance(packages, list) or not all(isinstance(p, str) for p in packages):
-                raise RuntimeError(
-                    f"area '{label}' field 'native.{os_name}' must be a list of package names"
-                )
+        validate_native_map(f"area '{label}'", area.get("native", {}))
 
         for field in ("l2", "browser", "kache", "ai_provider_stubs", "canary"):
             if field in area and not isinstance(area[field], bool):
@@ -158,6 +169,12 @@ def load_exemptions(path: Path) -> dict[str, str]:
             raise RuntimeError(f"duplicate CI-ownership exemption for '{package}'")
         if not entry.get("reason", "").strip():
             raise RuntimeError(f"exemption for '{package}' must give a non-empty reason")
+        unknown = entry.keys() - {"package", "reason", "native"}
+        if unknown:
+            raise RuntimeError(
+                f"exemption for '{package}' has unknown field(s): {sorted(unknown)}"
+            )
+        validate_native_map(f"exemption for '{package}'", entry.get("native", {}))
         exemptions[package] = entry["reason"]
     return exemptions
 
