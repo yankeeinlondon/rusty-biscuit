@@ -271,3 +271,75 @@ maintenance audit.
   fixed it — worth remembering for any future text-matching contract.
 - **`gh run list` + `gh api .../jobs/<id>` is the cheapest way to get real timing
   evidence** for budget decisions, and it distinguishes "slow" from "truncated".
+
+### Failure-set baseline (measured 2026-07-27) — read this before judging a CI run
+
+A full-scope run cannot be green, and could not before this work either. Judge a
+CI branch by **diffing** its failure set against a baseline, never by counting
+reds:
+
+```bash
+gh pr checks <pr> --json name,state \
+  | jq -r '.[]|select(.state=="FAILURE")|.name' | sed 's/^canary \/ //' | sort -u
+comm -13 baseline.txt candidate.txt   # only NEW failures
+```
+
+Baseline = PR #6 (canary change only, no `_area-ci.yml` edits): **31 failures.**
+Lint: biscuit-speaks, biscuit-terminal, claudine, homelab, research, tree-hugger,
+worktree. Tests: darkmatter (8 shards), sniff (3 OSes), schematic (2), unchained-ai
+(2), and Windows legs of biscuit-file, biscuit-icon, biscuit-tui, model-citizen,
+queue, renderable. Plus claudine-generator drift and affected coverage.
+
+Measured deltas:
+
+- **PR #5 (native libs): 0 new failures.** The one-installer change broke nothing.
+- **PRs #7/#8/#9: exactly 3 new**, all inherited down the stack from #7:
+  `rendezvous / native (windows-latest)`, `claudine-windows-ctrl-c`, and
+  `messenger-desktop / WSL2 ubuntu`.
+
+Those three are **pre-existing failures newly made visible**, not regressions:
+
+- `gh run list --workflow=<wf> --branch main` shows all three red on `main`
+  continuously — claudine-windows-ctrl-c since 2026-06-25, messenger-desktop
+  since 2026-06-17, rendezvous since 2026-07-23.
+- Their failing steps are product/environment steps this work never touched: the
+  Ctrl+C test itself, the Rendezvous suite, and `Vampire/setup-wsl@v4`. Every
+  step the 4.4 conversion DID change — `rustup show`, `Install just`, `Install
+  native prerequisites`, protoc, cache, compile-check — passed.
+
+They were previously invisible because each self-triggered only on its own path
+filter, so a change to `.github/workflows/**` never selected them. Orchestration
+(D12) now selects them from affected scope, which is the intended behavior and
+also means **they now gate merges**. Each belongs to its owning area.
+
+Two visibility unlocks in one session therefore account for the entire apparent
+explosion of red: the canary fix let the fan-out run at all, and orchestration
+pulled in three more workflows. This is G1 working, not a regression.
+
+### Failure-class diagnostics verified on a real runner (PR #7)
+
+- `Failure-class summary` in `ci.yml`: **success** — hyphenated `needs.<job>.result`
+  references (`needs.area-ci`, `needs.claudine-generator-signals`, …) resolve
+  correctly in GitHub expressions.
+- Per-area `failure class` jobs behaved as designed: **success** (i.e. ran and
+  classified) for areas with a hard failure, **skipped** for areas that passed —
+  and also skipped for areas whose only failure was a `soft_os`
+  `continue-on-error` leg (biscuit-icon, biscuit-tui, model-citizen, queue,
+  renderable), because `failure()` does not fire for a tolerated leg. Correct: an
+  advisory leg is not an actionable failure class.
+
+### Scheduled-workflow shell blocks were dry-run locally
+
+Scheduled workflows get no run from a PR, and `maintenance-audit.yml` cannot even
+be dispatched until it is on `main`. Extracting and executing their `run:` blocks
+locally caught three defects that would have produced silently wrong output on an
+unwatched nightly run:
+
+1. `cargo nextest --version` prints a multi-line build block, so `awk '{print $2}'`
+   emitted one value per line and broke the audit's markdown table row.
+2. `grep -m1` closes curl's pipe early, which curl reports as exit 56 — making the
+   step's exit status meaningless.
+3. A benchmark that failed before recording its duration printed a bare `"s"`.
+
+Worth repeating for any future scheduled workflow: **extract the `run:` blocks and
+execute them with `GITHUB_STEP_SUMMARY` pointed at a temp file** before merging.
