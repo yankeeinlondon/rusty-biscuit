@@ -8,7 +8,7 @@
 <p>This library leverages the host to play audio natively or via a headless audio player installed on the host.</p>
 
 <ul>
-    <li>small library and CLI binaries (<i>you can opt-out of native playback to make more compact</i>)</li>
+    <li>small library (<i>native playback is off by default; opt in per feature</i>)</li>
     <li>audio format detection from files, URLs, or bytes</li>
     <li>capability-ranked player matching with automatic failover</li>
     <li>88 embedded sound effects across 6 categories</li>
@@ -31,33 +31,60 @@ You can build and install the CLI binary by running:
 just install
 ```
 
-This installs the portable default build. It works on macOS, Linux, and WSL without any platform-specific install-time feature detection.
-The Linux-specific native event-audio backend is opt-in.
+The CLI enables the native audio backend for the host platform. On macOS and
+Windows those are system frameworks and need no install step. On Linux the
+backend links ALSA and PulseAudio, so those development libraries must be present
+before the build.
 
-> **Linux native audio opt-in**: if you want the Linux `sfx-native-linux` backend, install ALSA and PulseAudio development libraries plus `pkg-config`:
-> 
+> **Linux prerequisites**: `just init` at the repo root installs these for you,
+> from the `native` declaration in `.github/ci/areas.json`. To install them by
+> hand:
+>
 > ```sh
 > # debian/ubuntu distros
 > sudo apt install just pkg-config libasound2-dev libpulse-dev
 > ```
 >
-> Then install with either:
+> Without them the build fails in the `alsa-sys` build script with
+> `Package alsa was not found in the pkg-config search path`.
 >
-> ```sh
-> just install-linux-native
-> ```
+> On WSL this installs a Linux binary, not a native Windows `.exe`. It needs the
+> same packages, plus a WSL environment with usable audio support.
 >
-> or:
->
-> ```sh
-> cargo install --path playa/cli --features sfx-native-linux
-> ```
->
-> On WSL this still installs a Linux binary, not a native Windows `.exe`. The default `just install` path avoids Linux-specific link requirements, while the explicit Linux-native install above works in WSL only if those Linux development packages are installed and your WSL environment has usable audio support.
->
-> On **all** platforms we expect you to have the [**just**]() runner installed.
+> On **all** platforms we expect you to have the
+> [**just**](https://github.com/casey/just) runner installed.
+
+The OS-native backends all sit behind one feature, `sfx-native-audio`, which the
+CLI enables by default; `target_os` decides which of them compiles in. To build
+without them — and without any ALSA / PulseAudio requirement — opt out:
+
+```sh
+cargo install --path playa/cli --no-default-features
+```
+
+Playback then delegates entirely to host players (`afplay`, `ffplay`, `mpv`, …).
 
 ### Using the CLI
+
+```sh
+# `play` is implied when the first argument is a file
+playa hi.wav
+playa play hi.wav --meta
+
+# built-in sound effects
+playa list-effects trombone
+playa effect sad-trombone --background
+
+# what can this host play with?
+playa players list
+playa players install
+```
+
+Speed and volume are `--fast` / `--slow` / `--speed <MULTIPLIER>` and `--quiet` /
+`--loud` / `--volume <LEVEL>`. `--channel <CHANNEL>` picks an output device and
+`--force-host` skips the native decoder in favor of a host player.
+
+Full flag and subcommand reference: [`playa/cli/README.md`](./cli/README.md).
 
 
 

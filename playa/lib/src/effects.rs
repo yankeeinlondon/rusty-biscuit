@@ -1332,7 +1332,7 @@ impl SoundEffect {
     /// need synchronous playback should use `tokio::task::spawn_blocking`.
     ///
     /// When the `sfx-native` feature is enabled, plays directly through the OS
-    /// audio subsystem via rodio. On macOS with `sfx-native-macos`, routes to
+    /// audio subsystem via rodio. On macOS with `sfx-native-audio`, routes to
     /// the system sound device (configurable in System Settings → Sound).
     /// Falls back to host player delegation if native playback fails.
     ///
@@ -1367,7 +1367,7 @@ impl SoundEffect {
     /// and this method falls back directly to host playback on later calls.
     ///
     /// This method blocks until playback completes or times out. On Linux with
-    /// `sfx-native-linux`, PulseAudio wait loops are bounded by deadlines.
+    /// `sfx-native-audio`, PulseAudio wait loops are bounded by deadlines.
     /// Async callers should use `tokio::task::spawn_blocking` to avoid
     /// blocking the async runtime.
     pub fn play_with_options(

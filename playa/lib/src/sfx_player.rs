@@ -4,9 +4,14 @@
 //! through the OS audio subsystem using rodio instead of spawning external player
 //! processes. This provides lower latency and enables OS audio channel routing.
 //!
+//! The `sfx-native-audio` feature adds the OS-native routing described below.
+//! It is one feature for every platform; which backend compiles in is decided
+//! by `target_os`, so enabling it on a host whose backend does not apply is
+//! harmless.
+//!
 //! ## macOS System Sound Device
 //!
-//! With the `sfx-native-macos` feature, sound effects are routed through the
+//! With `sfx-native-audio` on macOS, sound effects are routed through the
 //! macOS "system sound" output device. This is the device configured in
 //! System Settings → Sound → "Play sound effects through". It may differ from
 //! the default music output device (e.g., built-in speakers for alerts while
@@ -14,7 +19,7 @@
 //!
 //! ## Windows Sound Effects Category
 //!
-//! With the `sfx-native-windows` feature, sound effects are played through
+//! With `sfx-native-audio` on Windows, sound effects are played through
 //! WASAPI with `AudioCategory_SoundEffects`. This tags the audio stream so
 //! Windows routes it through the Sound Effects mixer category, which has its
 //! own volume slider in the Volume Mixer. Falls back to the default rodio
@@ -22,7 +27,7 @@
 //!
 //! ## Linux
 //!
-//! With the `sfx-native-linux` feature, sound effects are played through
+//! With `sfx-native-audio` on Linux, sound effects are played through
 //! PulseAudio (or PipeWire's PulseAudio compatibility layer) with
 //! `media.role=event` set on the stream. PipeWire's `module-role-ducking`
 //! and PulseAudio's equivalent use this property to optionally duck other
@@ -110,7 +115,7 @@ fn open_default_sfx_stream_with_timeout(
 }
 
 fn open_default_sfx_stream() -> Result<rodio::MixerDeviceSink, SfxPlaybackError> {
-    #[cfg(all(target_os = "macos", feature = "sfx-native-macos"))]
+    #[cfg(all(target_os = "macos", feature = "sfx-native-audio"))]
     {
         if let Ok(Some(device)) = macos::find_system_sound_device()
             && let Ok(stream) = DeviceSinkBuilder::from_device(device).and_then(|b| b.open_stream())
@@ -166,7 +171,7 @@ impl SfxPlaybackError {
 /// Play sound effect bytes using native audio (rodio).
 ///
 /// Supports volume and speed control via `PlaybackOptions`. On macOS with
-/// `sfx-native-macos`, routes audio to the system sound device (which the
+/// `sfx-native-audio`, routes audio to the system sound device (which the
 /// user can configure separately from the default output in System Settings
 /// → Sound). Falls back to the default output device if the system sound
 /// device can't be found or is the same as the default. A device-open timeout
@@ -185,7 +190,7 @@ pub fn play_sfx(bytes: &[u8], options: &PlaybackOptions) -> Result<(), SfxPlayba
     }
 
     // Windows: play through WASAPI with AudioCategory_SoundEffects.
-    #[cfg(all(target_os = "windows", feature = "sfx-native-windows"))]
+    #[cfg(all(target_os = "windows", feature = "sfx-native-audio"))]
     {
         if options.speed.is_none() {
             if windows_sfx::play_sfx_with_category(bytes, options).is_ok() {
@@ -195,7 +200,7 @@ pub fn play_sfx(bytes: &[u8], options: &PlaybackOptions) -> Result<(), SfxPlayba
     }
 
     // Linux: play through PulseAudio with media.role=event.
-    #[cfg(all(target_os = "linux", feature = "sfx-native-linux"))]
+    #[cfg(all(target_os = "linux", feature = "sfx-native-audio"))]
     {
         use linux::PulsePlaybackOutcome;
 
@@ -250,7 +255,7 @@ fn wait_with_timeout(player: &Player, timeout: Duration) -> Result<(), SfxPlayba
     Ok(())
 }
 
-#[cfg(all(target_os = "macos", feature = "sfx-native-macos"))]
+#[cfg(all(target_os = "macos", feature = "sfx-native-audio"))]
 pub(crate) mod macos {
     use std::ffi::CStr;
     use std::mem;
@@ -610,7 +615,7 @@ pub(crate) mod macos {
 // Windows: WASAPI sound effects category
 // ============================================================================
 
-#[cfg(all(target_os = "windows", feature = "sfx-native-windows"))]
+#[cfg(all(target_os = "windows", feature = "sfx-native-audio"))]
 mod windows_sfx {
     use std::io::Cursor;
 
@@ -830,7 +835,7 @@ mod windows_sfx {
 // Linux: PulseAudio media.role=event tagging
 // ============================================================================
 
-#[cfg(all(target_os = "linux", feature = "sfx-native-linux"))]
+#[cfg(all(target_os = "linux", feature = "sfx-native-audio"))]
 mod linux {
     use std::io::Cursor;
     use std::time::{Duration, Instant};

@@ -11,7 +11,7 @@ mod types;
 
 #[cfg(all(
     target_os = "windows",
-    any(feature = "sfx-native-windows", feature = "audio-ducking-windows")
+    any(feature = "sfx-native-audio", feature = "audio-ducking-windows")
 ))]
 mod windows_com;
 
@@ -55,7 +55,7 @@ pub use crate::channels::get_output_channels;
 /// Returns the name of the default sound-effects output device, when it can
 /// differ from the default audio output device.
 ///
-/// On macOS (with `sfx-native-macos`), this performs a cheap CoreAudio
+/// On macOS (with `sfx-native-audio`), this performs a cheap CoreAudio
 /// property lookup — no cpal enumeration. On other platforms, returns
 /// `None`, which callers should treat as "same as the default audio
 /// output device".
@@ -64,11 +64,11 @@ pub use crate::channels::get_output_channels;
 /// without paying the cost of full output-channel enumeration.
 #[cfg(feature = "sfx-native")]
 pub fn get_default_sfx_device_name() -> Option<String> {
-    #[cfg(all(target_os = "macos", feature = "sfx-native-macos"))]
+    #[cfg(all(target_os = "macos", feature = "sfx-native-audio"))]
     {
         crate::sfx_player::macos::get_system_sound_device_name()
     }
-    #[cfg(not(all(target_os = "macos", feature = "sfx-native-macos")))]
+    #[cfg(not(all(target_os = "macos", feature = "sfx-native-audio")))]
     {
         None
     }

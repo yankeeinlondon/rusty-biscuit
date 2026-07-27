@@ -356,7 +356,7 @@ cp:
     @echo
 
 # install rusty-biscuit and third-party CLIs used for development
-init: _ensure-build-deps _ensure-kache _ensure-gitnexus
+init: _ensure-build-deps _ensure-native-libs _ensure-kache _ensure-gitnexus
     #!/usr/bin/env bash
     set -euo pipefail
     # Source cargo env in case _ensure-build-deps just installed Rust
@@ -406,6 +406,147 @@ _ensure-build-deps:
         exit 1
     fi
     echo "Build dependencies installed."
+
+# ensure the system libraries areas declare in `.github/ci/areas.json` are present
+_ensure-native-libs:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    case "$(uname -s)" in
+        Linux)  runner_key="ubuntu-latest" ;;
+        Darwin) runner_key="macos-latest" ;;
+        *)      runner_key="windows-latest" ;;
+    esac
+
+    sudo_cmd=""
+    if [[ "$(id -u)" -ne 0 ]]; then
+        sudo_cmd="sudo"
+    fi
+
+    pm=""
+    for candidate in apt-get dnf pacman apk brew; do
+        if command -v "$candidate" &> /dev/null; then
+            pm="$candidate"
+            break
+        fi
+    done
+
+    install_packages() {
+        case "$pm" in
+            apt-get) $sudo_cmd apt-get update -qq && $sudo_cmd apt-get install -y -qq "$@" ;;
+            dnf)     $sudo_cmd dnf install -y "$@" ;;
+            pacman)  $sudo_cmd pacman -S --noconfirm "$@" ;;
+            apk)     $sudo_cmd apk add "$@" ;;
+            brew)    brew install "$@" ;;
+        esac
+    }
+
+    if ! command -v jq &> /dev/null; then
+        if [[ -z "$pm" ]]; then
+            echo "Could not detect a package manager; install jq, then run just init again." >&2
+            exit 1
+        fi
+        echo "Installing jq (needed to read .github/ci/areas.json)..."
+        install_packages jq
+    fi
+
+    # `.github/ci/areas.json` is the single source of truth for native OS
+    # packages: CI provisions from it via `.github/actions/install-native`, and
+    # so does this recipe. A new area's requirement therefore reaches developer
+    # hosts without a second declaration to keep in sync.
+    declared=$(jq -r --arg k "$runner_key" \
+        '[.[] | (.native // {})[$k] // []] | add // [] | unique | .[]' \
+        "{{ justfile_directory() }}/.github/ci/areas.json")
+
+    if [[ -z "$declared" ]]; then
+        exit 0
+    fi
+
+    # areas.json names packages the way the CI runner does (apt on Linux, brew on
+    # macOS). Each row adds the pkg-config module that proves the library is
+    # installed — the same check the failing `-sys` build scripts perform — plus
+    # the equivalent package name on the other Linux package managers.
+    #   ci-name|pkg-config module|dnf|pacman|apk
+    native_map="
+    libasound2-dev|alsa|alsa-lib-devel|alsa-lib|alsa-lib-dev
+    libpulse-dev|libpulse|pulseaudio-libs-devel|libpulse|pulseaudio-dev
+    "
+
+    row_for() {
+        awk -F'|' -v n="$1" '{ gsub(/[ \t]/, "") } $1 == n { print; exit }' <<< "$native_map"
+    }
+
+    is_installed() {
+        local pkg="$1" module="$2"
+        if [[ -n "$module" ]] && command -v pkg-config &> /dev/null; then
+            pkg-config --exists "$module"
+            return
+        fi
+        if command -v dpkg &> /dev/null; then
+            dpkg -s "$pkg" &> /dev/null
+            return
+        fi
+        if command -v brew &> /dev/null; then
+            brew list --versions "$pkg" &> /dev/null
+            return
+        fi
+        return 1
+    }
+
+    missing=()
+    for pkg in $declared; do
+        if ! is_installed "$pkg" "$(row_for "$pkg" | cut -d'|' -f2)"; then
+            missing+=("$pkg")
+        fi
+    done
+
+    if [[ ${#missing[@]} -eq 0 ]]; then
+        exit 0
+    fi
+
+    echo -e "{{ RED }}Missing native libraries{{ RESET }}: ${missing[*]}"
+
+    case "$pm" in
+        apt-get|brew) field=1 ;;
+        dnf)          field=3 ;;
+        pacman)       field=4 ;;
+        apk)          field=5 ;;
+        *)            field=0 ;;
+    esac
+
+    packages=()
+    unresolved=()
+    for pkg in "${missing[@]}"; do
+        name="$pkg"
+        if [[ "$field" -gt 1 ]]; then
+            name="$(row_for "$pkg" | cut -d'|' -f"$field")"
+        fi
+        if [[ "$field" -eq 0 || -z "$name" ]]; then
+            unresolved+=("$pkg")
+        else
+            packages+=("$name")
+        fi
+    done
+
+    if [[ ${#unresolved[@]} -gt 0 ]]; then
+        echo "No package name is known for this host: ${unresolved[*]}" >&2
+        echo "Install the equivalent development headers, then run just init again." >&2
+        echo "Add the mapping to _ensure-native-libs so the next host is handled." >&2
+        exit 1
+    fi
+
+    # The `-sys` build scripts locate these libraries through pkg-config, so a
+    # host that has the headers but not pkg-config still fails to build.
+    if ! command -v pkg-config &> /dev/null; then
+        case "$pm" in
+            pacman|apk) packages+=("pkgconf") ;;
+            *)          packages+=("pkg-config") ;;
+        esac
+    fi
+
+    echo "Installing native prerequisites: ${packages[*]}"
+    install_packages "${packages[@]}"
+    echo "Native libraries installed."
 
 # ensure the repository-pinned Rust compiler cache is available
 _ensure-kache:

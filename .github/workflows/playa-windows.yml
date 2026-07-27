@@ -60,7 +60,7 @@ jobs:
 
       - name: Check playa native SFX + native playback
         shell: cmd
-        run: cargo check -p playa --target x86_64-pc-windows-msvc --features sfx-native-windows,native-playback
+        run: cargo check -p playa --target x86_64-pc-windows-msvc --features sfx-native-audio,native-playback
 
       - name: Check playa Windows audio ducking
         shell: cmd

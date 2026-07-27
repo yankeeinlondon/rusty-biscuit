@@ -44,10 +44,11 @@ playa list-effects             # All 88 effects
 playa list-effects cartoon     # Filter by name, description, or category
 ```
 
-Show available players table:
+Show available players table, or install the missing ones:
 
 ```bash
-playa players
+playa players list
+playa players install   # interactive
 ```
 
 Display playback metadata during playback:
@@ -63,9 +64,13 @@ playa --meta audio.wav
 | `play <FILE>` | Play an audio file (also the default when no subcommand given) |
 | `effect <NAME>` | Play a built-in sound effect by name |
 | `list-effects [FILTER]` | List available sound effects, optionally filtered |
-| `players` | Show table of available players and their capabilities |
-| `output-channels` | Show output audio devices in the same grouped format as `sniff audio-devices` |
+| `players list` | Show table of available players and their capabilities |
+| `players install` | Interactively install missing headless audio players |
+| `output-channels` | Show output audio devices in the same grouped format as `sniff audio-devices` (requires `sfx-native` feature) |
 | `duck-info` | Show audio ducking backend info (requires `audio-ducking` feature) |
+
+`players` has no default subcommand — bare `playa players` prints the subcommand
+help.
 
 ## Playback Options
 
@@ -81,6 +86,8 @@ These options apply to `play` and `effect` subcommands, as well as the default m
 | `--loud` | Play at 150% volume |
 | `--speed <N>` | Custom playback speed (0.5 to 2.0) |
 | `--volume <N>` | Custom volume level (0.0 to 2.0) |
+| `--channel <CHANNEL>` | Output channel (audio device) to play through, by name |
+| `--force-host` | Force host player playback, skipping the native decoder |
 | `--no-duck` | Disable audio ducking (requires `audio-ducking` feature) |
 | `--duck-ramp-ms <MS>` | Ducking ramp duration in milliseconds (default: 1000) |
 | `--duck-floor <LEVEL>` | Ducking floor level, 0.0–1.0 (default: 0.2) |
@@ -104,16 +111,20 @@ Effect names autocomplete when typing `playa effect <TAB>`.
 
 ## Output (players)
 
-The `players` subcommand renders a markdown table with these columns:
+`players list` renders a markdown table with these columns:
 
+- `I` — whether the player is installed on this host
 - Software (markdown link to the official website)
 - Codec Support
 - File Formats
 
-Missing players are dimmed in grey with a note at the bottom.
+Rows for players that are not installed are dimmed in grey. When a native
+playback feature is enabled, a note below the table names the formats that
+bypass host players.
 
 ## Notes
 
 - Rendering uses the `darkmatter-lib` markdown terminal renderer for tables.
 - Playback uses the Playa library's detection and player matching.
-- This CLI enables the full `sound-effects` feature by default (~31MB binary).
+- This CLI enables the full `sound-effects` feature by default, embedding all 88
+  effects (~27MB of audio under `playa/effects`) into the binary.

@@ -30,6 +30,12 @@ order must match the root `justfile` `areas :=` list.
 
 Supported runner OS values: `ubuntu-latest`, `windows-latest`, `macos-latest`.
 
+`native` has a second consumer outside CI: the root `justfile`'s
+`_ensure-native-libs` (a `just init` prerequisite) provisions developer hosts
+from the same declaration, so a new requirement is declared once. Non-Debian
+Linux hosts need the apt name mapped to `dnf` / `pacman` / `apk` in that
+recipe's table.
+
 ## Ownership completeness (`exemptions.json`)
 
 Every Cargo workspace member (per `cargo metadata`) must be owned by exactly one

@@ -9,16 +9,14 @@ name = "playa"
 path = "src/main.rs"
 
 [features]
-default = ["sfx-native", "native-playback"]
+default = ["sfx-native", "sfx-native-audio", "native-playback"]
 native-playback = ["playa/native-playback"]
 audio-ducking = ["playa/audio-ducking", "tokio"]
 audio-ducking-macos = ["audio-ducking", "playa/audio-ducking-macos"]
 audio-ducking-linux = ["audio-ducking", "playa/audio-ducking-linux"]
 audio-ducking-windows = ["audio-ducking", "playa/audio-ducking-windows"]
 sfx-native = ["playa/sfx-native"]
-sfx-native-macos = ["sfx-native", "playa/sfx-native-macos"]
-sfx-native-windows = ["sfx-native", "playa/sfx-native-windows"]
-sfx-native-linux = ["sfx-native", "playa/sfx-native-linux"]
+sfx-native-audio = ["sfx-native", "playa/sfx-native-audio"]
 
 [dependencies]
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }
@@ -30,20 +28,6 @@ darkmatter = { path = "../../darkmatter/lib" }
 sniff = { path = "../../sniff/lib" }
 strum = { version = "0.28", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
-
-# Auto-enable the OS-specific SFX path when the base `sfx-native` feature is on.
-# Cargo unions features across dependency entries, so when the CLI's default
-# features include `sfx-native`, the right platform variant is picked up
-# without requiring users to pass `--features sfx-native-macos` (etc.) on
-# every install. Building with `--no-default-features` skips both.
-[target.'cfg(target_os = "macos")'.dependencies]
-playa = { path = "../lib", features = ["sfx-native-macos"] }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-playa = { path = "../lib", features = ["sfx-native-linux"] }
-
-[target.'cfg(target_os = "windows")'.dependencies]
-playa = { path = "../lib", features = ["sfx-native-windows"] }
 
 # Opt-out of benchmarking: thin CLI wrapper around the playa library.
 [package.metadata.benchmarks]

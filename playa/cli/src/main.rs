@@ -10,12 +10,14 @@ use clap_complete::CompleteEnv;
 use sniff::programs::{InstallInterviewOutcome, InstalledHeadlessAudio};
 use strum::IntoEnumIterator;
 
+#[cfg(feature = "sfx-native")]
 use biscuit_terminal::components::compose::Compose;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::terminal::Terminal;
 use playa::{AudioFileFormat, AudioPlayer, Codec, PLAYER_LOOKUP, Playa, SoundEffect, all_players};
+#[cfg(feature = "sfx-native")]
 use sniff::hardware::{AudioDeviceInfo, AudioDeviceKind, AudioDirection};
 
 use darkmatter::markdown::Markdown;
