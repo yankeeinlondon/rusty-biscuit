@@ -1,3 +1,0 @@
-[workspace]
-members = [ "cli","lib" ]
-resolver = "3"

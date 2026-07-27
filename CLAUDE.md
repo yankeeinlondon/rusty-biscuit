@@ -4,6 +4,13 @@
 
 - 72 workspace members. Source of truth is `cargo metadata --no-deps --format-version 1` — not directory names.
 - `schematic/schema` lives in the repo but is **excluded from the workspace**. Use `--manifest-path schematic/schema/Cargo.toml` to work on it.
+- **No nested `[workspace]` over a root member.** `schematic/`, `unchained-ai/`, and
+  `tree-hugger/` each declared their own workspace listing packages the root also
+  owns, so the same package resolved into a different workspace depending on your
+  cwd — different `target/`, different lockfile (and so different dependency
+  versions than the root build shipped), different `.config/nextest.toml`. Removed
+  2026-07-27; `scripts/` is a genuine standalone workspace and stays.
+  `affected_scope.py`'s `validate_no_shadow_workspaces` fails CI if one returns.
 
 ## Language 
 
