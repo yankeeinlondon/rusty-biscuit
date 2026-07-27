@@ -245,7 +245,9 @@ def validate_no_shadow_workspaces(metadata: dict[str, Any], root: Path) -> None:
             member == nested_root or nested_root in member.parents
             for member in member_dirs
         ):
-            shadows.append(str(manifest.relative_to(root)))
+            # POSIX separators so the message is identical on every runner
+            # OS and stays copy-pasteable (`global_trigger` normalizes likewise).
+            shadows.append(manifest.relative_to(root).as_posix())
 
     if shadows:
         raise RuntimeError(
