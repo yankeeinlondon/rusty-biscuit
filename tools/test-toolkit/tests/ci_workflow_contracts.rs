@@ -598,3 +598,134 @@ fn release_calculation_asserts_a_clean_tracked_worktree() {
     );
 }
 
+// --- D14: scheduled automation is separate and bounded ------------------------
+
+#[test]
+fn benchmarks_are_scheduled_only_and_carry_a_measured_budget() {
+    let bench = workflow("bench-nightly.yml");
+    assert!(
+        bench.contains("schedule:") && bench.contains("workflow_dispatch"),
+        "bench-nightly must be a scheduled/manual performance workflow"
+    );
+    assert!(
+        !bench.contains("\n  push:\n") && !bench.contains("\n  pull_request:\n"),
+        "bench-nightly must not run on push — a slow benchmark is not a test regression (D14)"
+    );
+    // The budget is a reviewed number backed by recorded durations, not a
+    // default. The comment block carries the measurement it was derived from.
+    assert!(
+        bench.contains("timeout-minutes: 90") && bench.contains("Timeout budget"),
+        "the benchmark job must document the measurement its timeout budget came from (AC30)"
+    );
+    assert!(
+        bench.contains("runner image") && bench.contains("toolchain"),
+        "benchmark results must record runner class and toolchain so comparisons stay valid"
+    );
+}
+
+#[test]
+fn benchmark_upload_failure_cannot_erase_a_successful_measurement() {
+    // AC31: execution and upload are separate steps. Execution gates the job;
+    // the Bencher upload is best-effort and reads the captured output rather
+    // than re-running the suite.
+    let bench = workflow("bench-nightly.yml");
+    let run_at = bench
+        .find("- name: Run benchmarks")
+        .expect("bench-nightly must have a benchmark execution step");
+    let upload_at = bench
+        .find("- name: Upload results to Bencher.dev")
+        .expect("bench-nightly must have a separate upload step");
+    assert!(run_at < upload_at, "execution must precede upload");
+
+    // Bound to the upload step alone, so a `continue-on-error` belonging to a
+    // later step cannot satisfy this.
+    let rest = &bench[upload_at + 1..];
+    let upload = &rest[..rest.find("- name: ").unwrap_or(rest.len())];
+    assert!(
+        upload.contains("continue-on-error: true"),
+        "the upload step must be best-effort so it cannot fail an otherwise good measurement"
+    );
+    assert!(
+        !bench[..upload_at].contains("continue-on-error: true"),
+        "benchmark EXECUTION must not be continue-on-error — a broken bench must be visible"
+    );
+    assert!(
+        upload.contains("steps.bench.outcome == 'success'"),
+        "the upload must be tied to a successful measurement, not run unconditionally"
+    );
+}
+
+#[test]
+fn scheduled_workflows_are_operationally_distinct() {
+    // AC32: coverage, fuzz, benchmark, and maintenance results must not be
+    // mistakable for one another — distinct workflow names and distinct
+    // schedule slots so they neither collide for runners nor blur together.
+    const SCHEDULED: [&str; 5] = [
+        "bench-nightly.yml",
+        "fuzz-nightly.yml",
+        "coverage.yml",
+        "sniff-performance.yml",
+        "maintenance-audit.yml",
+    ];
+
+    let mut names: Vec<String> = Vec::new();
+    let mut crons: Vec<String> = Vec::new();
+    for file in SCHEDULED {
+        let source = workflow(file);
+        let name = source
+            .lines()
+            .find_map(|line| line.strip_prefix("name: "))
+            .unwrap_or_else(|| panic!("{file} must declare a workflow name"))
+            .to_string();
+        assert!(
+            !names.contains(&name),
+            "{file}: workflow name `{name}` is not unique"
+        );
+        names.push(name);
+
+        for line in source.lines() {
+            if let Some(cron) = line.trim().strip_prefix("- cron: ") {
+                let cron = cron.split('#').next().unwrap_or(cron).trim().to_string();
+                assert!(
+                    !crons.contains(&cron),
+                    "{file}: schedule slot {cron} collides with another scheduled workflow"
+                );
+                crons.push(cron);
+            }
+        }
+    }
+    assert_eq!(
+        crons.len(),
+        SCHEDULED.len(),
+        "each scheduled workflow must own exactly one schedule slot"
+    );
+}
+
+#[test]
+fn maintenance_audit_reports_without_changing_anything() {
+    // Task 5.4: findings stay advisory until a reviewed change advances a
+    // pinned value. An audit that can red the Actions tab, or that bumps pins
+    // on its own, is worse than none.
+    let audit = workflow("maintenance-audit.yml");
+    assert!(
+        audit.contains("schedule:") && audit.contains("workflow_dispatch"),
+        "the maintenance audit must be scheduled and manually dispatchable"
+    );
+    assert!(
+        audit.contains("permissions:") && audit.contains("contents: read"),
+        "the audit must hold read-only permissions — it never writes to the repository"
+    );
+    for forbidden in ["git commit", "git push", "create-pull-request", "peter-evans"] {
+        assert!(
+            !audit.contains(forbidden),
+            "the maintenance audit must not change the repository (found `{forbidden}`)"
+        );
+    }
+    for authority in ["rust-toolchain.toml", ".github/kache-version", "nextest"] {
+        assert!(
+            audit.contains(authority),
+            "the audit must cover the pinned authority `{authority}`"
+        );
+    }
+}
+

@@ -1,6 +1,9 @@
 name: bench-nightly
 
-# Nightly benchmark run for darkmatter, pushing results to Bencher.dev.
+# Scheduled performance measurement for darkmatter, pushing results to
+# Bencher.dev. This is NOT part of per-commit validation: it is scheduled and
+# manually dispatchable only, so a slow benchmark run can never be mistaken for
+# a test regression (D14).
 #
 # Prerequisites:
 #   1. Create a project in Bencher Cloud (https://bencher.dev).
@@ -10,22 +13,23 @@ name: bench-nightly
 #      you switch back to a user token.
 #   3. Set the BENCHER_PROJECT variable (or hardcode the project slug below).
 #
-# The workflow runs benchmarks with Criterion and uploads the results using
-# the `rust_criterion` adapter so Bencher can track trends and alert on
-# regressions.
+# Timeout budget (D14 / AC30). Measured on `ubuntu-latest` with a warm
+# Swatinem cache: six consecutive scheduled runs took 14, 16, 17, 18, 18 and 18
+# minutes, of which ~6 min was the darkmatter bench-target compile and ~9 min was
+# Criterion execution (run 29971775038). Runs that started from a cold cache were
+# killed by the previous 30-minute ceiling, so the cold duration is known only to
+# EXCEED 30 minutes — it has never been measured. The budget is therefore set
+# provisionally to 90 minutes: comfortably above the warm figure with room for a
+# cold compile, and high enough that the first cold run completes and reports its
+# own duration instead of being truncated again. The job records its measured
+# execution time, runner image, and toolchain in the run summary; tighten this
+# budget (or split the 16 bench targets across parallel jobs) once a cold run has
+# actually been recorded.
 
 on:
   schedule:
     - cron: "0 0 * * *"
   workflow_dispatch: {}
-  push:
-    branches: [main]
-    paths:
-      - "darkmatter/**"
-      - "renderable/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - ".github/workflows/bench-nightly.yml"
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -36,17 +40,17 @@ concurrency:
 
 jobs:
   darkmatter:
-    name: Darkmatter benchmarks → Bencher.dev
+    name: benchmark / darkmatter / ubuntu
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 90
     permissions:
       checks: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
 
       - name: Cache Cargo artifacts
         uses: Swatinem/rust-cache@v2
@@ -60,12 +64,29 @@ jobs:
       - name: Install Bencher CLI
         uses: bencherdev/bencher@main
 
-      - name: Run benchmarks and push to Bencher.dev
-        # Non-fatal: benchmarks are the point, the Bencher upload is best-effort.
-        # Until the `darkmatter` project + BENCHER_API_KEY are provisioned the
-        # push 404s; don't let that red the nightly. Drop `--err` too so a
-        # regression alert reports without failing the job.
+      # Benchmark EXECUTION. This step gates the job: a bench that fails to
+      # compile or panics is a real failure and must be visible. Criterion output
+      # is captured so the upload step never has to re-run the suite.
+      - name: Run benchmarks
+        id: bench
+        shell: bash
+        run: |
+          set -euo pipefail
+          started=$SECONDS
+          mkdir -p "$RUNNER_TEMP/bench"
+          (cd darkmatter && just bench) 2>&1 \
+            | tee "$RUNNER_TEMP/bench/darkmatter-criterion.txt"
+          echo "seconds=$((SECONDS - started))" >>"$GITHUB_OUTPUT"
+
+      # Result UPLOAD, deliberately separated from execution (D14 / AC31). The
+      # Bencher project or API key may be unprovisioned, and a regression alert
+      # must not relabel a successful measurement as a failed one. `bencher run`
+      # is handed the captured output to parse, so this never re-benchmarks.
+      - name: Upload results to Bencher.dev
+        if: ${{ !cancelled() && steps.bench.outcome == 'success' }}
         continue-on-error: true
+        env:
+          BENCHER_API_KEY: ${{ secrets.BENCHER_API_KEY }}
         run: |
           bencher run \
             --project "${{ vars.BENCHER_PROJECT || 'darkmatter' }}" \
@@ -73,7 +94,42 @@ jobs:
             --testbed "ubuntu-latest" \
             --adapter rust_criterion \
             --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-            just bench
-        working-directory: darkmatter
+            cat "$RUNNER_TEMP/bench/darkmatter-criterion.txt"
+
+      # Runner class and toolchain travel with the numbers: a comparison across
+      # different runner images or compilers is not a comparison (D14).
+      - name: Record measurement context
+        if: ${{ !cancelled() }}
+        shell: bash
         env:
-          BENCHER_API_KEY: ${{ secrets.BENCHER_API_KEY }}
+          BENCH_SECONDS: ${{ steps.bench.outputs.seconds }}
+          BENCH_RESULT: ${{ steps.bench.outcome }}
+        run: |
+          set -euo pipefail
+          # Unset when execution failed before it could report — say so rather
+          # than printing a bare "s".
+          duration="not measured"
+          if [ -n "${BENCH_SECONDS:-}" ]; then
+            duration="${BENCH_SECONDS}s"
+          fi
+          {
+            echo "## Nightly benchmark"
+            echo ""
+            echo "| field | value |"
+            echo "|---|---|"
+            echo "| execution | ${BENCH_RESULT} |"
+            echo "| measured duration | ${duration} (budget: 90 min) |"
+            echo "| runner image | ${ImageOS:-unknown} / ${ImageVersion:-unknown} |"
+            echo "| toolchain | $(rustc --version) |"
+            echo ""
+            echo "Upload to Bencher.dev is best-effort and reported separately;"
+            echo "a failed upload does not invalidate the measurement above."
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Criterion output
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-darkmatter-criterion
+          path: ${{ runner.temp }}/bench/darkmatter-criterion.txt
+          if-no-files-found: ignore

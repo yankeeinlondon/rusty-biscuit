@@ -1,0 +1,101 @@
+name: maintenance-audit
+
+# Recurring, ADVISORY audit of the values this repository pins on purpose
+# (D14 / plan Task 5.4). It reports what has moved upstream and never changes
+# anything: no commits, no pull requests, no version bumps. A pin advances only
+# through a reviewed repository change, following the procedure in
+# `docs/topics/ci-cd.md` → "Advancing a pinned value".
+#
+# The job always succeeds. A finding is information, not a failure — an audit
+# that can red the Actions tab trains people to ignore it, and it must never be
+# mistaken for required validation.
+#
+# Audited authorities:
+#   - `rust-toolchain.toml`      the required Rust version (D5)
+#   - `.github/kache-version`    the pinned compiler cache (D2)
+#   - `cargo-nextest`            the test runner
+#   - `.github/workflows/**`     third-party GitHub Action major versions
+#   - runner images              the `*-latest` image this audit ran on
+
+on:
+  schedule:
+    - cron: "0 7 * * 1" # Mondays 07:00 UTC, after the latest-stable advisory
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  audit:
+    name: maintenance / audit / ubuntu
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
+
+      - name: Report available toolchain, tool, and action updates
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+
+          pinned_rust="$(grep '^channel' rust-toolchain.toml | cut -d'"' -f2)"
+          # `grep -m1` closes the pipe early, which curl reports as exit 56; the
+          # value is complete by then, so read the whole file first instead.
+          channel="$(curl -fsSL https://static.rust-lang.org/dist/channel-rust-stable.toml || true)"
+          latest_rust="$(printf '%s\n' "$channel" \
+            | grep -m1 -A2 '^\[pkg.rust\]' | grep -m1 '^version' | cut -d'"' -f2 | cut -d' ' -f1)"
+          pinned_kache="$(tr -d '[:space:]' <.github/kache-version)"
+          # `cargo nextest --version` prints a multi-line build block; only the
+          # first line carries the version, and a stray newline here would break
+          # the markdown table row below.
+          pinned_nextest="$(cargo nextest --version 2>/dev/null | head -1 | awk '{print $2}')"
+
+          {
+            echo "## Maintenance audit"
+            echo ""
+            echo "Advisory only. Nothing here has been changed."
+            echo ""
+            echo "| authority | pinned | latest upstream |"
+            echo "|---|---|---|"
+            echo "| Rust (rust-toolchain.toml) | ${pinned_rust} | ${latest_rust:-lookup failed} |"
+            echo "| kache (.github/kache-version) | ${pinned_kache} | see kunobi-ninja/kache releases |"
+            echo "| cargo-nextest (this runner) | ${pinned_nextest:-not installed} | see nextest-rs/nextest releases |"
+            echo "| runner image | ${ImageOS:-unknown} / ${ImageVersion:-unknown} | GitHub rolls \`*-latest\` automatically |"
+            echo ""
+          } >>"$GITHUB_STEP_SUMMARY"
+
+          if [ -n "${latest_rust:-}" ] && [ "$latest_rust" != "$pinned_rust" ]; then
+            {
+              echo "> Rust stable has moved to \`${latest_rust}\`. The"
+              echo "> \`rust-latest-stable\` advisory workflow already builds against it;"
+              echo "> check its most recent run before proposing a bump."
+              echo ""
+            } >>"$GITHUB_STEP_SUMMARY"
+          fi
+
+      # Action versions are read from the workflows themselves so a newly added
+      # action cannot silently escape the audit.
+      - name: Report third-party action versions in use
+        shell: bash
+        run: |
+          set -uo pipefail
+          {
+            echo "### Third-party actions in use"
+            echo ""
+            echo "Review these against their release notes; upgrades are separate"
+            echo "maintenance changes, never folded into a behavior change (D15)."
+            echo ""
+            echo '```'
+            grep -rhoE 'uses: [a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+' .github/workflows .github/actions \
+              | sed 's/^uses: //' | sort -u
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
