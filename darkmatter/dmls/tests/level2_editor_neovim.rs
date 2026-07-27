@@ -128,6 +128,8 @@ struct ProbeReport {
     #[serde(default)]
     offset_encoding: Option<String>,
     #[serde(default)]
+    advertised_encodings: Vec<String>,
+    #[serde(default)]
     errors: Vec<String>,
     #[serde(default)]
     probes: HashMap<String, ProbeSite>,
@@ -240,12 +242,27 @@ fn level2_neovim_decodes_semantic_token_families_and_positions() {
     let (_dir, root) = stage_workspace();
     let report = run_probe("tokens", &root);
 
-    // docs/editors/neovim.md: "Modern Neovim advertises UTF-8, so dmls
-    // negotiates UTF-8 there."
+    // docs/editors/neovim.md: `dmls` takes the client's first supported
+    // offer. Which encoding that is depends on the Neovim release — 0.11+
+    // advertises utf-8 ahead of utf-16, 0.10 advertises only utf-16 — so the
+    // expectation is derived from what this client actually offered. Every
+    // column assertion below is in *bytes* either way, which is the real
+    // subject: the decode must land on source bytes under either encoding.
+    assert!(
+        !report.advertised_encodings.is_empty(),
+        "probe could not read the client's advertised encodings; without them the \
+         expectation below would silently default and stop testing negotiation"
+    );
+    let expected_encoding = if report.advertised_encodings.iter().any(|e| e == "utf-8") {
+        "utf-8"
+    } else {
+        "utf-16"
+    };
     assert_eq!(
         report.offset_encoding.as_deref(),
-        Some("utf-8"),
-        "negotiated encoding drifted from the documented claim"
+        Some(expected_encoding),
+        "dmls must negotiate the client's first supported advertised encoding, offered {:?}",
+        report.advertised_encodings
     );
 
     // F1 interpolation: whole `{{ … }}` span, not inert.

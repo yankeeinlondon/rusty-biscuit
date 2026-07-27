@@ -7,6 +7,7 @@ mod tests {
         output::{ColorDepth, TerminalImageMode, TerminalOptions},
     };
     use darkmatter::style::{HrStyleOverrides, apply_hr_style, from_frontmatter};
+    use test_toolkit::EnvGuard;
 
     fn terminal_text_options() -> TerminalOptions {
         let mut options = TerminalOptions::default();
@@ -271,9 +272,18 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(locale_env)]
     fn test_custom_weight_thick_differs_from_thin() {
         // Phase 5 sanity check: thick and thin must produce different bytes
         // in terminal output now that weight is honored.
+        //
+        // Only the Unicode tier has a heavy variant (`╍` vs `╌`); the ASCII
+        // fallback is weight-insensitive by contract. Pin `LC_ALL` so a host
+        // running under `LANG=C` (common on Linux) still exercises the tier
+        // this assertion is about. `env_says_utf8` reads `LC_ALL` first, so
+        // this one variable outranks any ambient `LC_CTYPE`/`LANG`.
+        let _locale = EnvGuard::set_safe("LC_ALL", "en_US.UTF-8");
+
         let thin: Markdown = "--- { style: dashes, weight: thin }\n".into();
         let thick: Markdown = "--- { style: dashes, weight: thick }\n".into();
         let thin_out = thin.as_terminal(terminal_text_options()).unwrap();

@@ -44,6 +44,15 @@ end
 
 local client = client_id and vim.lsp.get_clients({ id = client_id })[1] or nil
 out.offset_encoding = client and client.offset_encoding or nil
+-- What this Neovim actually offered in `general.positionEncodings`. 0.11+
+-- advertises utf-8 first; 0.10 advertises only utf-16. Reporting the offer
+-- lets the test assert the negotiated result against the real client instead
+-- of against one Neovim release.
+-- `client.capabilities` is the table sent in `initialize` (0.10 and 0.11+);
+-- `client.config.capabilities` is not populated on 0.10.
+out.advertised_encodings = client
+    and vim.tbl_get(client.capabilities or {}, 'general', 'positionEncodings')
+  or nil
 
 -- `client:notify` on 0.11+, dot-call on 0.10 (where methods took no self).
 local function notify_client(method, params)
