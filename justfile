@@ -505,24 +505,12 @@ _ensure-native-libs area="":
         exit 1
     fi
 
-    # No area given -> every area's libraries (`just init`, workspace coverage).
+    # An empty area selects every record, which is what `just init` and the
+    # workspace-wide coverage job need: non-gating areas carry declarations too
+    # and have no area name to scope to.
     declared=$(jq -r --arg k "$runner_key" --arg a "$area" \
         '[.[] | select($a == "" or .area == $a) | (.native // {})[$k] // []] | add // [] | unique | .[]' \
         "$areas_json")
-
-    if [[ -n "$area" ]]; then
-        # Scoped to one area, which is what CI runs before that area's build.
-        declared=$(jq -r --arg k "$runner_key" --arg a "$area" \
-            '[.[] | select(.area == $a) | (.native // {})[$k] // []] | add // [] | unique | .[]' \
-            "$areas_json")
-    else
-        # Unscoped: every declaration from both files. Exempt packages have no
-        # area to scope to, so this is the only path that reaches them — which
-        # is exactly what `just init` and the workspace-wide coverage job need.
-        declared=$(jq -rs --arg k "$runner_key" \
-            '[.[][] | (.native // {})[$k] // []] | add // [] | unique | .[]' \
-            "$areas_json" "$exemptions_json")
-    fi
 
     if [[ -z "$declared" ]]; then
         echo "no native prerequisites declared for ${area:-all areas} on $runner_key"
