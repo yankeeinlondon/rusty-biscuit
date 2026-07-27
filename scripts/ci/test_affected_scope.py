@@ -9,7 +9,6 @@ from pathlib import Path
 
 from affected_scope import (
     calculate_scope,
-    load_exemptions,
     validate_area_schema,
     validate_no_shadow_workspaces,
     validate_ownership,
@@ -189,8 +188,10 @@ class AreaSchemaTests(unittest.TestCase):
         )
 
     def test_missing_required_field_is_rejected(self) -> None:
+        # `area` is the only unconditionally required field; `check_args` and
+        # `reason` are required by the `ci` flag and covered in OwnershipTests.
         with self.assertRaisesRegex(RuntimeError, "missing required"):
-            validate_area_schema([{"area": "alpha"}])
+            validate_area_schema([{"check_args": "-p alpha"}])
 
     def test_unknown_field_is_rejected(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "unknown field"):
@@ -220,17 +221,21 @@ class AreaSchemaTests(unittest.TestCase):
 
 
 class OwnershipTests(unittest.TestCase):
+    """Every package's directory must map to a declared area (gating or not)."""
+
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
-        self.area_config = [{"area": "alpha", "check_args": "-p alpha-core"}]
+        self.area_config = [
+            {"area": "alpha", "check_args": "-p alpha-core", "ci": True},
+            {"area": "tools", "reason": "test infrastructure", "ci": False},
+        ]
 
         def package(name: str, relative_manifest: str) -> dict[str, object]:
             return {"id": name, "name": name, "manifest_path": str(self.root / relative_manifest)}
 
         packages = [
             package("alpha-core", "alpha/lib/Cargo.toml"),
-            package("beta-app", "beta/app/Cargo.toml"),
             package("shared-tests", "tools/shared-tests/Cargo.toml"),
         ]
         self.metadata = {
@@ -242,68 +247,27 @@ class OwnershipTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
 
-    def test_all_members_owned_or_exempt_passes(self) -> None:
-        validate_ownership(
-            self.metadata,
-            self.root,
-            self.area_config,
-            {"beta-app": "reason", "shared-tests": "reason"},
+    def test_gating_and_non_gating_areas_both_confer_ownership(self) -> None:
+        validate_ownership(self.metadata, self.root, self.area_config)
+
+    def test_package_under_no_declared_area_fails_by_name(self) -> None:
+        self.metadata["packages"].append(
+            {"id": "orphan", "name": "orphan", "manifest_path": str(self.root / "beta/app/Cargo.toml")}
         )
+        self.metadata["workspace_members"].append("orphan")
+        with self.assertRaisesRegex(RuntimeError, "fall under no declared area.*orphan"):
+            validate_ownership(self.metadata, self.root, self.area_config)
 
-    def test_unmapped_member_fails_with_package_name(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "no CI owner or exemption.*beta-app"):
-            validate_ownership(
-                self.metadata, self.root, self.area_config, {"shared-tests": "reason"}
-            )
+    def test_gating_area_must_define_check_args(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "must define 'check_args'"):
+            validate_area_schema([{"area": "alpha"}])
 
-    def test_owned_and_exempt_is_a_contradiction(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "both owned"):
-            validate_ownership(
-                self.metadata,
-                self.root,
-                self.area_config,
-                {"alpha-core": "r", "beta-app": "r", "shared-tests": "r"},
-            )
+    def test_non_gating_area_must_give_a_reason(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "must give a non-empty 'reason'"):
+            validate_area_schema([{"area": "tabby", "ci": False}])
 
-    def test_stale_exemption_for_missing_package_fails(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "not in the workspace"):
-            validate_ownership(
-                self.metadata,
-                self.root,
-                self.area_config,
-                {"beta-app": "r", "shared-tests": "r", "ghost": "r"},
-            )
-
-    def test_load_exemptions_rejects_duplicates(self) -> None:
-        path = self.root / "exemptions.json"
-        path.write_text('[{"package": "x", "reason": "a"}, {"package": "x", "reason": "b"}]')
-        with self.assertRaisesRegex(RuntimeError, "duplicate"):
-            load_exemptions(path)
-
-    def test_load_exemptions_requires_reason(self) -> None:
-        path = self.root / "exemptions.json"
-        path.write_text('[{"package": "x", "reason": "  "}]')
-        with self.assertRaisesRegex(RuntimeError, "non-empty reason"):
-            load_exemptions(path)
-
-    def test_exemption_may_declare_native_prerequisites(self) -> None:
-        path = self.root / "exemptions.json"
-        path.write_text(
-            '[{"package": "x", "reason": "r", "native": {"ubuntu-latest": ["libgtk-3-dev"]}}]'
-        )
-        self.assertEqual(load_exemptions(path), {"x": "r"})
-
-    def test_exemption_native_rejects_unsupported_os(self) -> None:
-        path = self.root / "exemptions.json"
-        path.write_text('[{"package": "x", "reason": "r", "native": {"solaris": ["gtk"]}}]')
-        with self.assertRaisesRegex(RuntimeError, "unsupported OS 'solaris'"):
-            load_exemptions(path)
-
-    def test_exemption_rejects_unknown_field(self) -> None:
-        path = self.root / "exemptions.json"
-        path.write_text('[{"package": "x", "reason": "r", "canary": true}]')
-        with self.assertRaisesRegex(RuntimeError, "unknown field"):
-            load_exemptions(path)
+    def test_non_gating_area_needs_no_check_args(self) -> None:
+        validate_area_schema([{"area": "tabby", "ci": False, "reason": "a stub"}])
 
 
 class ShadowWorkspaceTests(unittest.TestCase):

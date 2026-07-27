@@ -492,20 +492,23 @@ _ensure-native-libs area="":
         install_packages jq
     fi
 
-    # `.github/ci/areas.json` (curated areas) and `.github/ci/exemptions.json`
-    # (packages no area owns, e.g. the Tauri `visualizer`) are the single source
-    # of truth for native OS packages, and this recipe is the single installer.
-    # A requirement is declared once, on the package that needs it, and reaches
-    # both developer hosts and CI from there. Declarations are per-OS, so a
-    # Linux-only dependency never touches a macOS or Windows host.
+    # `.github/ci/areas.json` declares EVERY area -- gating or not -- and is the
+    # single source of truth for native OS packages; this recipe is the single
+    # installer. A requirement is declared once, on the area that needs it, and
+    # reaches both developer hosts and CI from there. Declarations are per-OS, so
+    # a Linux-only dependency never touches a macOS or Windows host.
     areas_json="{{ justfile_directory() }}/.github/ci/areas.json"
-    exemptions_json="{{ justfile_directory() }}/.github/ci/exemptions.json"
     area="{{ area }}"
 
     if [[ -n "$area" ]] && ! jq -e --arg a "$area" 'any(.[]; .area == $a)' "$areas_json" > /dev/null; then
         echo "No area named '$area' in .github/ci/areas.json" >&2
         exit 1
     fi
+
+    # No area given -> every area's libraries (`just init`, workspace coverage).
+    declared=$(jq -r --arg k "$runner_key" --arg a "$area" \
+        '[.[] | select($a == "" or .area == $a) | (.native // {})[$k] // []] | add // [] | unique | .[]' \
+        "$areas_json")
 
     if [[ -n "$area" ]]; then
         # Scoped to one area, which is what CI runs before that area's build.

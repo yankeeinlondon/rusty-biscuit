@@ -13,11 +13,9 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 AREA_CONFIG = ROOT / ".github" / "ci" / "areas.json"
-EXEMPTIONS_CONFIG = ROOT / ".github" / "ci" / "exemptions.json"
 GLOBAL_PATHS = {
     ".config/nextest.toml",
     ".github/ci/areas.json",
-    ".github/ci/exemptions.json",
     ".github/kache-version",
     ".github/workflows/_area-ci.yml",
     ".github/workflows/ci.yml",
@@ -38,6 +36,7 @@ SCOPE_HOST_OS = "ubuntu-latest"
 # Per-area policy defaults, shared by config loading and preflight OS derivation
 # so a test that passes minimal area records still resolves OS policy.
 AREA_DEFAULTS: dict[str, Any] = {
+    "ci": True,
     "full_os": ["ubuntu-latest", "windows-latest"],
     "check_os": ["macos-latest"],
     "shards": ["1/1"],
@@ -59,9 +58,10 @@ AREA_DEFAULTS: dict[str, Any] = {
 # instead of silently mis-scoping CI.
 SUPPORTED_RUNNER_OS = {"ubuntu-latest", "windows-latest", "macos-latest"}
 KNOWN_L2_BACKENDS = {"tmux", "wezterm", "kitty", "apple-terminal"}
-REQUIRED_AREA_FIELDS = {"area", "check_args"}
+REQUIRED_AREA_FIELDS = {"area"}
+OPTIONAL_AREA_FIELDS = {"check_args", "reason"}
 OS_LIST_FIELDS = ("full_os", "check_os", "soft_os")
-ALLOWED_AREA_FIELDS = REQUIRED_AREA_FIELDS | set(AREA_DEFAULTS)
+ALLOWED_AREA_FIELDS = REQUIRED_AREA_FIELDS | OPTIONAL_AREA_FIELDS | set(AREA_DEFAULTS)
 
 
 def load_metadata(root: Path) -> dict[str, Any]:
@@ -113,6 +113,17 @@ def validate_area_schema(areas: list[dict[str, Any]]) -> None:
         if missing:
             raise RuntimeError(f"area '{label}' is missing required field(s): {sorted(missing)}")
 
+        # An area either gates in the fan-out matrix (and needs the compile-check
+        # arguments) or explicitly does not (and must say why). Both are declared
+        # here so every area sniff discovers has exactly one record.
+        in_matrix = area.get("ci", AREA_DEFAULTS["ci"])
+        if in_matrix and not area.get("check_args", "").strip():
+            raise RuntimeError(f"area '{label}' is in the CI matrix and must define 'check_args'")
+        if not in_matrix and not area.get("reason", "").strip():
+            raise RuntimeError(
+                f"area '{label}' sets \"ci\": false and must give a non-empty 'reason'"
+            )
+
         unknown = area.keys() - ALLOWED_AREA_FIELDS
         if unknown:
             raise RuntimeError(
@@ -138,7 +149,7 @@ def validate_area_schema(areas: list[dict[str, Any]]) -> None:
 
         validate_native_map(f"area '{label}'", area.get("native", {}))
 
-        for field in ("l2", "browser", "kache", "ai_provider_stubs", "canary"):
+        for field in ("l2", "browser", "kache", "ai_provider_stubs", "canary", "ci"):
             if field in area and not isinstance(area[field], bool):
                 raise RuntimeError(f"area '{label}' field '{field}' must be a boolean")
 
@@ -151,79 +162,37 @@ def load_area_config(path: Path) -> list[dict[str, Any]]:
     return [{**AREA_DEFAULTS, **area} for area in areas]
 
 
-def load_exemptions(path: Path) -> dict[str, str]:
-    """Load the package -> reason CI-ownership exemption map.
-
-    ## Errors
-
-    Raises ``RuntimeError`` for a duplicate exemption or an empty reason.
-    """
-    if not path.exists():
-        return {}
-    with path.open(encoding="utf-8") as config_file:
-        entries = json.load(config_file)
-    exemptions: dict[str, str] = {}
-    for entry in entries:
-        package = entry["package"]
-        if package in exemptions:
-            raise RuntimeError(f"duplicate CI-ownership exemption for '{package}'")
-        if not entry.get("reason", "").strip():
-            raise RuntimeError(f"exemption for '{package}' must give a non-empty reason")
-        unknown = entry.keys() - {"package", "reason", "native"}
-        if unknown:
-            raise RuntimeError(
-                f"exemption for '{package}' has unknown field(s): {sorted(unknown)}"
-            )
-        validate_native_map(f"exemption for '{package}'", entry.get("native", {}))
-        exemptions[package] = entry["reason"]
-    return exemptions
-
-
 def validate_ownership(
     metadata: dict[str, Any],
     root: Path,
     area_config: list[dict[str, Any]],
-    exemptions: dict[str, str],
 ) -> None:
-    """Every Cargo workspace member must have exactly one CI owner (D10).
+    """Every Cargo workspace member must fall under exactly one declared area (D10).
 
-    A member is owned when it lives under a curated area directory or is listed
-    in the exemption map. Cargo metadata is the source of truth for membership.
+    Every area has a record in `areas.json`, whether or not it gates in the CI
+    matrix — a `"ci": false` record declares the area and states why it is not
+    gated. So ownership is simply: the package's directory maps to a declared
+    area. A package in a brand-new directory fails here until someone decides
+    what that area is and whether it should gate.
 
     ## Errors
 
-    Raises ``RuntimeError`` naming the offending packages for an unmapped member,
-    a package that is both owned and exempt, or an exemption for a package that
-    no longer exists.
+    Raises ``RuntimeError`` naming the offending packages.
     """
     packages = workspace_packages(metadata)
     area_names = {area["area"] for area in area_config}
-    all_names = {package["name"] for package in packages.values()}
-    owned_names = {
+
+    unmapped = sorted(
         package["name"]
         for package in packages.values()
-        if owner_area(package, root, area_names) is not None
-    }
-
-    unmapped = sorted(all_names - owned_names - exemptions.keys())
+        if owner_area(package, root, area_names) is None
+    )
     if unmapped:
         raise RuntimeError(
-            "workspace packages have no CI owner or exemption: "
-            f"{unmapped}. Add each to a curated area in .github/ci/areas.json "
-            "(the area's justfile must define all canonical recipes) or to "
-            ".github/ci/exemptions.json with a reason."
-        )
-
-    contradictory = sorted(exemptions.keys() & owned_names)
-    if contradictory:
-        raise RuntimeError(
-            f"packages are both owned by a curated area and exempted: {contradictory}"
-        )
-
-    stale = sorted(exemptions.keys() - all_names)
-    if stale:
-        raise RuntimeError(
-            f"exemptions reference packages not in the workspace: {stale}"
+            "workspace packages fall under no declared area: "
+            f"{unmapped}. Add the area to .github/ci/areas.json — with "
+            'the full policy if it should gate, or with "ci": false and a '
+            "reason if it should not."
         )
 
 
@@ -293,7 +262,9 @@ def curated_areas(root: Path) -> list[str]:
 
 
 def validate_area_config(root: Path, areas: list[dict[str, Any]]) -> None:
-    configured = [area["area"] for area in areas]
+    # Only gating areas appear in the justfile's `areas :=` list; `ci: false`
+    # records declare an area without adding it to the fan-out.
+    configured = [area["area"] for area in areas if area.get("ci", True)]
     expected = curated_areas(root)
     if configured != expected:
         raise RuntimeError(
@@ -415,8 +386,13 @@ def calculate_scope(
             if area is not None:
                 affected_areas.add(area)
 
+    # `ci: false` areas are declared for ownership but never fan out. A change
+    # inside one still selects its packages (so reverse-dependency closure and
+    # coverage see it) -- it just launches no area job.
     selected_areas = [
-        area for area in area_config if area["area"] in affected_areas
+        area
+        for area in area_config
+        if area["area"] in affected_areas and area.get("ci", True)
     ]
     selected_packages = sorted(packages[package_id]["name"] for package_id in affected_ids)
 
@@ -494,9 +470,8 @@ def main() -> None:
     args = parse_args()
     area_config = load_area_config(AREA_CONFIG)
     validate_area_config(ROOT, area_config)
-    exemptions = load_exemptions(EXEMPTIONS_CONFIG)
     metadata = load_metadata(ROOT)
-    validate_ownership(metadata, ROOT, area_config, exemptions)
+    validate_ownership(metadata, ROOT, area_config)
     validate_no_shadow_workspaces(metadata, ROOT)
     scope = calculate_scope(args.files, ROOT, metadata, area_config, args.all)
     print(json.dumps(scope, separators=(",", ":")))
