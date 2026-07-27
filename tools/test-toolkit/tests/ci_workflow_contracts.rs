@@ -729,3 +729,52 @@ fn maintenance_audit_reports_without_changing_anything() {
     }
 }
 
+// --- shared recipes must stay usable from a runner ---------------------------
+
+#[test]
+fn just_commit_is_deterministic_under_ci() {
+    // The local flow writes its message with an LLM, speaks a completion sound,
+    // and needs credentials — none of which exist on a runner. Under CI the
+    // recipe must be a plain `git commit` with a caller-supplied message.
+    let justfile = read("justfile");
+    // Recipe bodies are indented, so the recipe ends at the next line with
+    // column-zero content. A blank line does NOT end it — the body has several.
+    let recipe: String = justfile
+        .lines()
+        .skip_while(|line| !line.starts_with("commit *args="))
+        .take_while(|line| {
+            line.starts_with("commit *args=") || line.is_empty() || line.starts_with(' ')
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        recipe.starts_with("commit *args="),
+        "root justfile must define a `commit` recipe"
+    );
+
+    let ci_branch = recipe
+        .find(r#"if [[ -n "${CI:-}" ]]; then"#)
+        .expect("`just commit` must branch on CI");
+    let ci_exit = recipe[ci_branch..]
+        .find("exit 0")
+        .expect("the CI branch must return before the interactive flow");
+    let ci_path = &recipe[ci_branch..ci_branch + ci_exit];
+
+    assert!(
+        ci_path.contains("git commit -m"),
+        "the CI branch must perform a plain git commit"
+    );
+    for interactive in ["claudine", "_speak", "COMMIT_MODEL"] {
+        assert!(
+            !ci_path.contains(interactive),
+            "the CI branch must not reach `{interactive}` — no LLM, audio, or network on a runner"
+        );
+    }
+    // `quote()` shell-escapes the message, so a commit subject containing quotes
+    // or apostrophes cannot break out of the generated script.
+    assert!(
+        recipe.contains("{{ quote(args) }}"),
+        "the CI message must be shell-quoted rather than interpolated raw"
+    );
+}
+

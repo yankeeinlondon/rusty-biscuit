@@ -343,17 +343,40 @@ check-canonical *args="":
     fi
 
 # commits all the staged changes using model from COMMIT_MODEL or MODEL in OpenCode
+# (under CI: a plain `git commit` with the message passed as the argument)
 commit *args="":
-    @echo ""
-    @echo -e "Committing staged changes in the {{ BOLD }}Rusty Biscuit{{ RESET }} monorepo to git"
-    @echo -e "{{ DIM }}{{ ITALIC }}- using the {{ RESET }}{{ ITALIC }}${COMMIT_MODEL:-${MODEL:-minimax-coding-plan/MiniMax-M3}} {{ DIM }}model{{ RESET }}"
-    @echo ""
-    @echo -e "{{ BOLD }}{{ BLUE }}Staged Files:{{ RESET }}"
-    @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
-    @claudine compose "@prompts/commit.md" --opencode --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax-coding-plan/MiniMax-M3}}" -y {{ args }}
-    @just _speak "git commits completed in rusty-biscuit monorepo"
-    @sniff repo git-status 2>/dev/null || exit 0
-    @echo
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # A runner has no TTY, no model credentials, and no audio device, and CI must
+    # not depend on a network round-trip to write a commit message. Under CI this
+    # is therefore a plain, deterministic commit whose message the caller supplies
+    # — no LLM, no `_speak`, no network. Local behavior is unchanged.
+    if [[ -n "${CI:-}" ]]; then
+        message={{ quote(args) }}
+        if [[ -z "$message" ]]; then
+            echo "just commit: under CI the commit message must be passed as the argument" >&2
+            echo "  e.g. just commit \"chore(ci): regenerate catalog\"" >&2
+            exit 1
+        fi
+        if git diff --cached --quiet; then
+            echo "No Staged Files! Nothing to do ..."
+            exit 1
+        fi
+        git commit -m "$message"
+        exit 0
+    fi
+
+    echo ""
+    echo -e "Committing staged changes in the {{ BOLD }}Rusty Biscuit{{ RESET }} monorepo to git"
+    echo -e "{{ DIM }}{{ ITALIC }}- using the {{ RESET }}{{ ITALIC }}${COMMIT_MODEL:-${MODEL:-minimax-coding-plan/MiniMax-M3}} {{ DIM }}model{{ RESET }}"
+    echo ""
+    echo -e "{{ BOLD }}{{ BLUE }}Staged Files:{{ RESET }}"
+    sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
+    claudine compose "@prompts/commit.md" --opencode --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax-coding-plan/MiniMax-M3}}" -y {{ args }}
+    just _speak "git commits completed in rusty-biscuit monorepo"
+    sniff repo git-status 2>/dev/null || exit 0
+    echo
 
 # stages all files in package area and then commits and pushes
 cp:
