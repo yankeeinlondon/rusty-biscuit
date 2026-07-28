@@ -343,3 +343,105 @@ unwatched nightly run:
 
 Worth repeating for any future scheduled workflow: **extract the `run:` blocks and
 execute them with `GITHUB_STEP_SUMMARY` pointed at a temp file** before merging.
+
+## Validation checkpoints 4 and 5 closed (2026-07-28)
+
+Both checkpoints were satisfied after #7, #8, #9, and #13 landed on `main`.
+
+### Checkpoint 4 — scope and orchestration
+
+- `python3 scripts/ci/test_affected_scope.py` — 26 tests, all passing.
+- `cargo nextest run -p test-toolkit --test ci_workflow_contracts` — 28 passing.
+- `just check-canonical` — 21 areas, 0 failures.
+- Named scenarios map to fixtures: package-local
+  (`test_package_local_change_derives_area_preflight_os`), shared dependency
+  (`test_shared_test_change_includes_consuming_areas`), documentation-only
+  (`test_unrelated_documentation_change_has_empty_scope`), unmapped package
+  (`test_package_under_no_declared_area_fails_by_name`), invalid policy (the
+  six `*_is_rejected` cases). Global canary success and failure were observed
+  live rather than as fixtures: the canary gates fan-out on every global-scope
+  run in this session.
+- **Duplicate ownership is no longer a reachable state.** `owner_area` maps a
+  manifest's top-level directory to one declared area or `None`, and a package
+  lives in exactly one directory, so nothing can be claimed twice. The old
+  `areas + exemptions` pair could double-claim a package; #13 removed the
+  class rather than adding a test for it. This checkpoint predates #13.
+- Specialized contracts run only when selected: on the workflow-only PRs #14 and
+  #15 every specialized job reported `SKIPPED`, while full-scope runs selected
+  and ran them.
+
+### Checkpoint 5 — independent scheduled signals
+
+All four dispatched from `main`:
+
+| workflow | run | result |
+|---|---|---|
+| `maintenance-audit` | 30315637796 | success |
+| `bench-nightly` | 30318777650 | success, 34.7 min |
+| `fuzz-nightly` | 30318779675 | success |
+| `coverage` | 30318778635 | failure — product test, infrastructure green |
+
+Each reports under a distinct name with its own summary and artifacts, and
+`coverage`'s failure did not affect the other three.
+
+The "successful benchmark, failed upload" requirement is held by contract test
+`benchmark_upload_failure_cannot_erase_a_successful_measurement` (AC31), which
+is stronger than a one-off simulation: it asserts execution precedes upload,
+that `continue-on-error: true` is bound to the upload step alone, that benchmark
+*execution* is not `continue-on-error`, and that the upload is gated on
+`steps.bench.outcome == 'success'`.
+
+### AC30 resolved — the cold bench duration has now been observed
+
+The first cold `bench-nightly` run took **34.7 min against the 90-min budget**.
+That also explains the truncations: every earlier cold run died under the old
+30-min ceiling, which 34.7 min exceeds. Warm runs measured 14–18 min. The budget
+has ~2.6x headroom on a cold run and can be tightened without splitting the 16
+bench targets.
+
+### A local dry-run is necessary but not sufficient
+
+The three defects caught by dry-running the scheduled `run:` blocks (above) were
+real, but two more survived that method and only a live dispatch found them:
+
+1. **#14** — `grep -m1` closed the pipe and `printf` took an EPIPE, fatal under
+   GitHub's `bash -e -o pipefail`. The dry-run missed it because the earlier
+   `curl` fix had been read as closing the whole class; the early-closing reader
+   simply moved to the next writer.
+2. **#15** — `cargo nextest --version` exits 101 on the audit runner, which
+   installs only the toolchain. Every local check passed because a developer
+   host has cargo-nextest installed.
+
+Both had to wait for #8 to merge: a new scheduled workflow gets no PR run and
+cannot be dispatched until it is on `main`. The third dispatch was green end to
+end, including `Report third-party action versions in use`, which had never
+executed on a runner before.
+
+When dry-running a scheduled block, also run it with the tool under test removed
+from `PATH` — that is the runner's real state.
+
+### A3 fixed: workspace coverage can build again
+
+`_ensure-native-libs` was left half-migrated when `exemptions.json` was deleted:
+the unscoped branch still passed the now-undefined `$exemptions_json` to `jq`, so
+under `set -u` the assignment aborted and `declared` came back empty. `just init`
+and the workspace coverage job silently installed nothing on Linux.
+
+**A baseline failure-set diff could not have caught this.** The only job that
+exercises the unscoped path is "Coverage for affected packages", already red for
+an unrelated reason, so #13's clean zero-new-failures delta was consistent with
+the bug. Two red jobs can hide each other; a delta of zero proves no *new* job
+broke, not that a changed code path works.
+
+After the fix, `gdk-sys` compiles on the coverage runner instead of failing its
+build script, which closes root cause A3 in `ci-failure-inventory.md`. Coverage
+now fails much later on genuine product tests.
+
+### Coverage runs L2 tests that `just test` excludes
+
+Both coverage runs failed on `level2_*` targets (`biscuit-icon-cli --test
+level2_terminal`, and a `biscuit-clipboard-service` failure in the ci.yml job).
+`cargo llvm-cov --workspace` invokes `cargo test --tests --workspace` directly,
+bypassing the nextest filterset the `just test` recipes use to exclude `level2_`.
+So real-terminal tests run headless under coverage. Not addressed here; it
+belongs with the L2-on-Linux work in #16.
