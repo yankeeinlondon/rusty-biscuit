@@ -99,18 +99,6 @@ fn write_prompt<W: Write>(
     w(output, format_args!("\n  {header}\n"))?;
     w(output, format_args!("  {source_label}  {source_value}\n"))?;
 
-    // Show alias resolution info when the command was resolved from an alias
-    if let Some(ref alias_name) = request.alias_name {
-        let alias_label = Prose::new("<dim>Alias:</dim>").render_optimistic(None);
-        let alias_value = Prose::new(format!(
-            "<bold>{}</bold> <dim>\u{2192}</dim> <bold><cyan>{}</cyan></bold>",
-            escape_prose(alias_name),
-            escape_prose(&request.raw_command)
-        ))
-        .render_optimistic(None);
-        w(output, format_args!("  {alias_label}   {alias_value}\n"))?;
-    }
-
     w(output, format_args!("  {cmd_label} {cmd_value}\n\n"))?;
 
     // Options with color-coded numbers and dim descriptions
@@ -208,7 +196,6 @@ mod tests {
             normalized_exact: "echo hello".to_string(),
             whitelist_path: PathBuf::from("/tmp/.darkmatter-shell-whitelist"),
             blacklist_path: PathBuf::from("/tmp/.darkmatter-shell-blacklist"),
-            alias_name: None,
             chain_executables: Vec::new(),
         }
     }

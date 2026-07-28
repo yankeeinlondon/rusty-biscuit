@@ -21,6 +21,11 @@ extension.
 - Treat composition as effectful and validation as passive. Schema parsing,
   trigger matching, completion, hover, and validation must not perform I/O,
   execute expressions, fetch remotes, or mutate documents.
+- Execute the authored executable and argv. `::shell` resolves an executable
+  with `which::which` and runs it directly; composition must never spawn
+  `$SHELL`, source interactive startup files, or rewrite a command from
+  machine-local shell state. An unresolved executable is the typed
+  `CommandNotFound` path, naming what the document authored.
 - Keep network access deny-all by default. Route every allowed remote read or
   write through `biscuit_file::FetchPolicy` and exact-host consent.
 - Render terminal output with `TerminalRenderable` components. The browser tier

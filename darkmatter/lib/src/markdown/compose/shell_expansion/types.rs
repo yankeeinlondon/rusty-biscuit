@@ -492,8 +492,6 @@ pub struct ShellApprovalRequest {
     pub normalized_exact: String,
     pub whitelist_path: PathBuf,
     pub blacklist_path: PathBuf,
-    /// If the command was resolved from a shell alias, the original alias name.
-    pub alias_name: Option<String>,
     /// When the request covers a chained command (e.g. `a && b`), this lists
     /// the unique executables in the chain in the order they first appear.
     /// For non-chained requests this is empty; the CLI prompt should fall

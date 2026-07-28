@@ -350,6 +350,14 @@ Shell approval and shell execution are separate concerns:
 - A body/`::shell-block` command embedding a frontmatter value still pending
   frontmatter-shell expansion is rejected up front as
   `ShellExpansionError::DynamicCommandShape` (never a late `NotPreApproved`).
+- **Both paths resolve commands identically**, which is what makes
+  `execution_set ⊆ approval_set` hold as written. Neither rewrites an
+  executable: the authored executable and argv are what gets approved,
+  normalized, displayed, and run. Shell-alias resolution used to break this
+  invariant — preflight and runtime could approve one command and execute
+  another — and was removed
+  (`darkmatter/fixes/2026-07-27-alias-resolution-hang`).
+  Do not reintroduce any resolution step on one path without the other.
 
 ### Interactive approval: the stage policy snapshot
 

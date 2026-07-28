@@ -160,7 +160,6 @@ impl Markdown {
                 normalized_exact: entry.normalized.clone(),
                 whitelist_path: policy_paths.whitelist.clone(),
                 blacklist_path: policy_paths.blacklist.clone(),
-                alias_name: None,
                 chain_executables: Vec::new(),
             };
 

@@ -29,6 +29,22 @@ When the Darkmatter compose pipeline reaches the Shell Expansion stage, it will 
     - If the shell command's exit code is _not_ 0 (aka, there was an error when running the command) then we will exit the pipeline with an error:
         - `<red><b>ERROR:</b></red> the shell command '{command}' in {file} exited with an error code of {error_code}. The Darkmatter pipeline has exited.\n\n<b>STDOUT:</b> {stdout}\n\n<b>STDERR:</b>{stderr}`
 
+### Command Resolution
+
+The executable and its arguments are used exactly as authored in the directive.
+The executable is resolved against `PATH`; the line is never handed to a shell to
+interpret, so shell aliases, shell functions, and other interactive shell state
+play no part in resolution. Pre-flight approval, error messages, and execution
+all name the same command you wrote in the document.
+
+> **Removed — shell aliases.** Darkmatter previously resolved an executable it
+> could not find on `PATH` against the aliases defined in your interactive shell
+> (via `$SHELL -ic "alias <name>"`). That lookup is gone: it executed your shell
+> startup files during composition, made results depend on machine-local shell
+> state, and could hang the pipeline indefinitely. An alias name now fails the
+> "command does not exist" check above — put an executable wrapper script on
+> `PATH` to keep a short, reusable name.
+
 ## Frontmatter Variant
 
 Darkmatter also supports shell expansion in top-level frontmatter string values using `$(...)`.

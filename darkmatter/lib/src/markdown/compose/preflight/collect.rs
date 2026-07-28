@@ -27,7 +27,6 @@ use crate::markdown::compose::frontmatter_shell_expansion::{
     directive_reachable_pipelines, parse_shell_value, scan_frontmatter,
 };
 use crate::markdown::compose::prepare_frontmatter_for_compose;
-use crate::markdown::compose::shell_expansion::alias::resolve_alias;
 use crate::markdown::compose::shell_expansion::parser::parse_directives;
 use crate::markdown::compose::expression::ExpressionFinder;
 use crate::markdown::compose::shell_expansion::policy::normalize_command;
@@ -85,19 +84,6 @@ fn directive_action_iter(directive: &ShellDirective) -> Vec<(String, String, Vec
         directive.executable.clone(),
         directive.args.clone(),
     )]
-}
-
-/// Resolves an executable through alias expansion, mirroring the runtime path.
-fn resolve_executable(exe_raw: &str, args_raw: &[String]) -> (String, Vec<String>) {
-    if which::which(exe_raw).is_ok() {
-        (exe_raw.to_string(), args_raw.to_vec())
-    } else if let Some(resolved) = resolve_alias(exe_raw) {
-        let mut merged_args = resolved.args;
-        merged_args.extend_from_slice(args_raw);
-        (resolved.executable, merged_args)
-    } else {
-        (exe_raw.to_string(), args_raw.to_vec())
-    }
 }
 
 /// Walks the full document graph and returns every shell command that *could*
@@ -254,8 +240,7 @@ fn collect_recursive(
     let directives = parse_directives(prepared.content(), prepared_ctx.clone(), line_offset)?;
     for directive in directives {
         let line = directive.origin.line_number();
-        for (raw_action, exe_raw, args_raw) in directive_action_iter(&directive) {
-            let (executable, args) = resolve_executable(&exe_raw, &args_raw);
+        for (raw_action, executable, args) in directive_action_iter(&directive) {
             let normalized = normalize_command(&executable, &args);
             if seen.insert(normalized.clone()) {
                 let entry = ShellCommandEntry {
@@ -289,10 +274,9 @@ fn collect_recursive(
             .map_err(|e| crate::markdown::types::MarkdownError::Transform(e.to_string()))?;
         for command in commands {
             for action in &command.pipeline.actions {
-                let exe_raw = action.command.executable.clone();
-                let args_raw = action.command.args.clone();
-                let raw_command = render_action(&exe_raw, &args_raw);
-                let (executable, args) = resolve_executable(&exe_raw, &args_raw);
+                let executable = action.command.executable.clone();
+                let args = action.command.args.clone();
+                let raw_command = render_action(&executable, &args);
                 let normalized = normalize_command(&executable, &args);
                 if !seen.insert(normalized.clone()) {
                     continue;
@@ -603,8 +587,7 @@ fn scan_one_frontmatter(
                 ctx: scan_ctx.clone(),
             };
 
-            for (raw_action, exe_raw, args_raw) in directive_action_iter(&directive) {
-                let (executable, args) = resolve_executable(&exe_raw, &args_raw);
+            for (raw_action, executable, args) in directive_action_iter(&directive) {
                 let normalized = normalize_command(&executable, &args);
                 if seen.insert(normalized.clone()) {
                     let entry = ShellCommandEntry {

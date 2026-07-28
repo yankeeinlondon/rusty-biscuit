@@ -25,7 +25,6 @@
 //! ::shell ls -la
 //! ```
 
-pub mod alias;
 pub mod discovery;
 pub mod executor;
 pub mod parser;
@@ -34,7 +33,6 @@ pub mod store;
 pub mod tokenize;
 pub mod types;
 
-pub use alias::{ResolvedAlias, resolve_alias};
 pub use discovery::collect_shell_commands;
 pub use executor::{execute_command, resolve_working_directory};
 pub use parser::parse_directives;
@@ -109,7 +107,7 @@ impl Drop for ReservationGuard<'_> {
     }
 }
 
-/// A directive that has passed alias resolution, policy checks, and approval.
+/// A directive that has passed policy checks and approval.
 #[derive(Debug, Clone)]
 pub(crate) struct PreparedShellDirective {
     pub effective: ShellDirective,
@@ -205,8 +203,8 @@ pub(crate) fn execute_directive_detailed(
     execute_prepared_directive(&prepared, options, shell_runtime)
 }
 
-/// Resolves aliases, applies policy checks, and records approval decisions
-/// without executing the command yet.
+/// Applies policy checks and records approval decisions without executing the
+/// command yet.
 ///
 /// ## Notes
 ///
@@ -229,8 +227,8 @@ pub(crate) fn prepare_directive(
     policy_paths: &ShellPolicyPaths,
     shell_runtime: &mut ShellExpansionRuntime,
 ) -> Result<PreparedShellDirective, ShellExpansionError> {
-    let (effective, alias_name) = resolve_or_passthrough(directive);
-    let display_command = display_command(directive, alias_name.as_deref());
+    let effective = directive.clone();
+    let display_command = directive.raw_command.clone();
 
     // Collect all normalized commands from the pipeline (or single command)
     let normalized_commands = collect_normalized_commands(&effective);
@@ -375,7 +373,6 @@ pub(crate) fn prepare_directive(
             normalized_exact: normalized_commands.join(" && "),
             whitelist_path: policy_paths.whitelist.clone(),
             blacklist_path: policy_paths.blacklist.clone(),
-            alias_name: alias_name.clone(),
             chain_executables,
         };
 
@@ -663,111 +660,6 @@ fn execute_and_handle_errors(
         }
         // Non-ExecutionFailed errors (Timeout, CommandNotFound, etc.) are not handled
         _ => result,
-    }
-}
-
-/// Resolves a directive's executable, returning the effective directive and
-/// an optional alias name if resolution occurred.
-///
-/// If the executable is already on PATH, returns the original directive.
-/// If it resolves as a shell alias, returns a new directive with the resolved
-/// command and merged arguments.
-fn resolve_or_passthrough(directive: &ShellDirective) -> (ShellDirective, Option<String>) {
-    // For pipeline chains, resolve each action's executable independently
-    if let Some(ref pipeline) = directive.pipeline
-        && (pipeline.actions.len() > 1
-            || (pipeline.actions.len() == 1
-                && pipeline.actions[0].command.redirection != types::RedirectionConfig::default()))
-    {
-        let mut any_resolved = false;
-        let mut alias_name: Option<String> = None;
-        let mut new_pipeline = pipeline.clone();
-
-        for action in &mut new_pipeline.actions {
-            if which::which(&action.command.executable).is_ok() {
-                continue;
-            }
-            if let Some(resolved) = alias::resolve_alias(&action.command.executable) {
-                let mut merged_args = resolved.args;
-                merged_args.extend_from_slice(&action.command.args);
-                action.command.executable = resolved.executable;
-                action.command.args = merged_args;
-                if alias_name.is_none() {
-                    alias_name = Some(resolved.alias_name);
-                }
-                any_resolved = true;
-            }
-        }
-
-        if any_resolved || alias_name.is_some() {
-            let raw = new_pipeline.display_string();
-            let exe = new_pipeline.actions[0].command.executable.clone();
-            let args = new_pipeline.actions[0].command.args.clone();
-            let effective = ShellDirective {
-                raw_command: raw,
-                executable: exe,
-                args,
-                span: directive.span.clone(),
-                indent: directive.indent.clone(),
-                origin: directive.origin.clone(),
-                error_handling: directive.error_handling.clone(),
-                timeout_override: directive.timeout_override,
-                no_cache: directive.no_cache,
-                pipeline: Some(new_pipeline),
-                ctx: directive.ctx.clone(),
-            };
-            return (effective, alias_name);
-        }
-    }
-
-    // Standard single-command path
-    if which::which(&directive.executable).is_ok() {
-        return (directive.clone(), None);
-    }
-
-    if let Some(resolved) = alias::resolve_alias(&directive.executable) {
-        let mut merged_args = resolved.args;
-        merged_args.extend_from_slice(&directive.args);
-
-        let raw = if directive.args.is_empty() {
-            resolved.definition.clone()
-        } else {
-            format!("{} {}", resolved.definition, directive.args.join(" "))
-        };
-
-        let mut new_pipeline = None;
-        if let Some(ref pipeline) = directive.pipeline {
-            let mut p = pipeline.clone();
-            p.actions[0].command.executable = resolved.executable.clone();
-            p.actions[0].command.args = merged_args.clone();
-            new_pipeline = Some(p);
-        }
-
-        let effective = ShellDirective {
-            raw_command: raw,
-            executable: resolved.executable,
-            args: merged_args,
-            span: directive.span.clone(),
-            indent: directive.indent.clone(),
-            origin: directive.origin.clone(),
-            error_handling: directive.error_handling.clone(),
-            timeout_override: directive.timeout_override,
-            no_cache: directive.no_cache,
-            pipeline: new_pipeline,
-            ctx: directive.ctx.clone(),
-        };
-
-        return (effective, Some(resolved.alias_name));
-    }
-
-    (directive.clone(), None)
-}
-
-/// Formats a command for display in error messages, including alias info.
-fn display_command(directive: &ShellDirective, alias_name: Option<&str>) -> String {
-    match alias_name {
-        Some(name) => format!("{} (alias: {})", directive.raw_command, name),
-        None => directive.raw_command.clone(),
     }
 }
 
