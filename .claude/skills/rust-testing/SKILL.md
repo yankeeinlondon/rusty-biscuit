@@ -34,7 +34,7 @@ document the exception in `docs/testing-strategy.md`; do not force it into
 | Level   | Prefix     | Resource            | Skip when absent     | Hard-fail env                   |
 |---------|------------|---------------------|----------------------|---------------------------------|
 | L1      | (none)     | In-process only     | Never                | —                               |
-| L2      | `level2_`  | Real terminal / PTY | Harness missing      | `BISCUIT_TEST_LEVEL_REQUIRED=2` |
+| L2      | `level2_`  | Real terminal / PTY | Harness missing      | `BISCUIT_REQUIRED_BACKENDS`, `BISCUIT_TEST_LEVEL_REQUIRED=2` |
 | L3      | `level3_`  | OS keyboard/mouse   | `RUN_LEVEL3` unset   | `BISCUIT_TEST_LEVEL_REQUIRED=3` |
 | Browser | `browser_` | Chrome/Chromium     | Browser missing      | `BISCUIT_BROWSER_REQUIRED=1`    |
 | Real    | `real_`    | External device/API | Resource missing     | Per-package env vars            |
@@ -66,6 +66,37 @@ async fn browser_computed_style_matches() {
 }
 ```
 
+### A skipped test is reported as a PASSING test
+
+`require_level!` skips by `return`ing from the test function. nextest cannot
+tell that from a test that ran and asserted nothing, so **every silent skip is
+counted as a pass**. Same test, same host, varying only whether `tmux` is on
+`PATH`:
+
+| `tmux` | nextest result | Wall clock |
+|---|---|---|
+| hidden  | `1 passed`, exit 0 | **0.004 s** |
+| present | `1 passed`, exit 0 | **7.981 s** |
+
+Whole tiers behave the same way — darkmatter's L2 reports `18 tests run: 18
+passed` in 0.138 s with no backend, and `18 passed` in 13.28 s with one. There
+is no `0 run` and no warning; only elapsed time distinguishes them.
+
+Consequences when you write or review an L2/L3 test:
+
+- **A green tier is not evidence the tier ran.** Check elapsed time, or set
+  `BISCUIT_REQUIRED_BACKENDS`. This is not hypothetical: a `::shell` hang in
+  darkmatter shipped behind a green L2 tier for exactly this reason
+  (`fixes/2026-07-28-l2-silent-skip-gap`).
+- **Asserting "run count > 0" does not catch it.** For a per-package recipe,
+  `0 tests run` means the package has no `level2_*` tests — the legitimate
+  case. `just test-l2` therefore gates on a *census × backend-reachability*
+  cross instead, and exports `BISCUIT_REQUIRED_BACKENDS` for backends it can
+  prove are present.
+- **A new L2 test must be observed failing before you trust it.** Write the
+  test, watch it fail against the unfixed code, then fix. A test that has only
+  ever been green may never have executed.
+
 ## Canonical Just Recipes
 
 Every curated package area defines these 12 recipes:
@@ -74,7 +105,7 @@ Every curated package area defines these 12 recipes:
 |----------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `sanity`       | Fast confidence (≤15 s). `cargo nextest run --lib --bins -E '!set:slow'`.                                                                                                                                                                                                                                                                    |
 | `test`         | Full L1 suite.                                                                                                                                                                                                                                                                                                                               |
-| `test-l2`      | Real-terminal tests. **Default (serial):** pre-spawns one shared pane per backend via `biscuit-harness-broker`, exports `BISCUIT_SHARED_*_ID`, runs nextest `-j 1`, tears panes down in a trap; tests `<Backend>Harness::shared_or_spawn()` attach to that pane. **Parallel self-spawn mode (`BISCUIT_L2_THREADS=N`):** skips the broker, exports no `BISCUIT_SHARED_*`, runs `-j N`; every `shared_or_spawn()` then takes its owned-pane fallback, so there is no shared resource. See "Running L2 Tests" below. |
+| `test-l2`      | Real-terminal tests. **Gate (both modes):** counts the package's `level2_*` tests; zero → "nothing to run", exit 0. Otherwise it probes for a reachable backend and **fails** if none is, since every test would silently skip and score as a pass — waive with `BISCUIT_L2_ALLOW_NO_BACKEND=1`. Detected backends are exported as `BISCUIT_REQUIRED_BACKENDS` (an explicit value wins). **Default (serial):** pre-spawns one shared pane per backend via `biscuit-harness-broker`, exports `BISCUIT_SHARED_*_ID`, runs nextest `-j 1`, tears panes down in a trap; tests `<Backend>Harness::shared_or_spawn()` attach to that pane. **Parallel self-spawn mode (`BISCUIT_L2_THREADS=N`):** skips the broker, exports no `BISCUIT_SHARED_*`, runs `-j N`; every `shared_or_spawn()` then takes its owned-pane fallback, so there is no shared resource. See "Running L2 Tests" below. |
 | `test-l3`      | OS keyboard/mouse tests.                                                                                                                                                                                                                                                                                                                     |
 | `test-browser` | Headless browser tests. Runs `-j 1` (one Chrome at a time); the tier gets a 5s `leak-timeout` override for Chrome teardown.                                                                                                                                                                                                                                                                                                                      |
 | `test-real`    | External resource tests.                                                                                                                                                                                                                                                                                                                     |
@@ -259,9 +290,17 @@ reap them:
 | Variable                          | Purpose                                      |
 |-----------------------------------|----------------------------------------------|
 | `BISCUIT_TEST_LEVEL=1\|2\|3`        | Max level to run; higher tiers skip cleanly. |
-| `BISCUIT_TEST_LEVEL_REQUIRED=2\|3` | Missing harness panics instead of skipping.  |
+| `BISCUIT_REQUIRED_BACKENDS=tmux[,kitty]` | Per-backend hard-fail. A missing backend named here panics; every other label still skips. Case-insensitive, exact match on the `require_level!` label. |
+| `BISCUIT_TEST_LEVEL_REQUIRED=2\|3` | Missing harness panics instead of skipping — for the **whole level**, GUI backends included. |
+| `BISCUIT_L2_ALLOW_NO_BACKEND=1`   | Waive `just test-l2`'s backend gate for a package whose L2 tests need no terminal. |
 | `BISCUIT_BROWSER_REQUIRED=1`      | Missing Chrome panics instead of skipping.   |
 | `RUN_LEVEL3=1`                    | Opt-in for OS-keyboard-injection tests.      |
+
+Prefer `BISCUIT_REQUIRED_BACKENDS` over `BISCUIT_TEST_LEVEL_REQUIRED`. The
+level-wide switch cannot express "require tmux but let WezTerm skip", which is
+the only shape headless CI can satisfy — so it went unused in every workflow
+for as long as it existed. CI derives the per-backend set from each area's
+`backends` in `.github/ci/areas.json`, intersected with what the runner hosts.
 
 ## Fixtures and Env Guards
 

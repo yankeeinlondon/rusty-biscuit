@@ -63,6 +63,23 @@ REQUIRED_AREA_FIELDS = {"area", "check_args"}
 OS_LIST_FIELDS = ("full_os", "check_os", "soft_os")
 ALLOWED_AREA_FIELDS = REQUIRED_AREA_FIELDS | set(AREA_DEFAULTS)
 
+# Backends a CI runner both provisions and can actually host, by runner OS
+# (fixes/2026-07-28-l2-silent-skip-gap R3). Intersecting an area's declared
+# `backends` with this yields the set whose skips must become failures.
+#
+# tmux is hostable headless: it needs no display, and `TmuxHarness::available()`
+# is exactly `which("tmux")` — the same predicate the L2 job's `tmux -V` step
+# verifies. WezTerm/Kitty/Apple Terminal probe for a live session
+# (WEZTERM_UNIX_SOCKET / KITTY_LISTEN_ON / Terminal.app), so they must stay
+# skip-clean and are never required. Non-Linux entries are empty because no job
+# provisions a backend there; requiring a backend the runner never installed
+# would fail tests that are correctly skipping.
+HOSTABLE_L2_BACKENDS: dict[str, set[str]] = {
+    "ubuntu-latest": {"tmux"},
+    "windows-latest": set(),
+    "macos-latest": set(),
+}
+
 
 def load_metadata(root: Path) -> dict[str, Any]:
     result = subprocess.run(
@@ -82,7 +99,7 @@ def validate_area_schema(areas: list[dict[str, Any]]) -> None:
 
     Raises ``RuntimeError`` naming the offending area and field for a missing
     required field, an unknown field, an unsupported runner OS, an unknown L2
-    backend, or a mistyped value.
+    backend, an L2 area that declares no backend, or a mistyped value.
     """
     for index, area in enumerate(areas):
         label = area.get("area", f"<record {index}>")
@@ -130,6 +147,15 @@ def validate_area_schema(areas: list[dict[str, Any]]) -> None:
         for field in ("l2", "browser", "kache", "ai_provider_stubs", "canary"):
             if field in area and not isinstance(area[field], bool):
                 raise RuntimeError(f"area '{label}' field '{field}' must be a boolean")
+
+        # Checked after the type guards so a mistyped `l2` reports as a type
+        # error rather than as a missing backend.
+        if area.get("l2", AREA_DEFAULTS["l2"]) and not area.get("backends"):
+            raise RuntimeError(
+                f"area '{label}' enables 'l2' but declares no 'backends'; CI's "
+                "required-backend set is derived from that list, so an empty one "
+                "would run the L2 tier while enforcing nothing"
+            )
 
 
 def load_area_config(path: Path) -> list[dict[str, Any]]:
@@ -466,16 +492,75 @@ def classify_preflight(
     )
 
 
+def required_backends(
+    areas: list[dict[str, Any]], area_name: str, runner_os: str
+) -> list[str]:
+    """Derive the L2 backends whose skips must become failures on ``runner_os``.
+
+    The set is the area's declared ``backends`` intersected with
+    ``HOSTABLE_L2_BACKENDS``, so a backend added to ``areas.json`` — or a runner
+    taught to host one — reaches CI without editing a workflow
+    (fixes/2026-07-28-l2-silent-skip-gap R3).
+
+    ## Returns
+
+    Sorted backend names for ``BISCUIT_REQUIRED_BACKENDS``. Empty means "enforce
+    nothing": the runner hosts none of the declared backends, so every L2 skip
+    stays a skip, which is the pre-existing behavior (R4).
+
+    ## Errors
+
+    Raises ``RuntimeError`` for an unknown area or an unsupported runner OS.
+    """
+    if runner_os not in HOSTABLE_L2_BACKENDS:
+        raise RuntimeError(
+            f"unsupported runner OS '{runner_os}'; "
+            f"supported: {sorted(HOSTABLE_L2_BACKENDS)}"
+        )
+
+    matched = [area for area in areas if area["area"] == area_name]
+    if not matched:
+        raise RuntimeError(
+            f"unknown area '{area_name}'; configured areas: "
+            f"{sorted(area['area'] for area in areas)}"
+        )
+
+    declared = set(matched[0].get("backends", AREA_DEFAULTS["backends"]))
+    return sorted(declared & HOSTABLE_L2_BACKENDS[runner_os])
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--all", action="store_true", help="select the full workspace")
+    parser.add_argument(
+        "--required-backends",
+        metavar="AREA",
+        help="print AREA's comma-separated BISCUIT_REQUIRED_BACKENDS value and exit",
+    )
+    parser.add_argument(
+        "--runner-os",
+        metavar="OS",
+        help="runner OS label whose hostable backends --required-backends intersects",
+    )
     parser.add_argument("files", nargs="*", help="changed repository-relative paths")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.required_backends is not None and args.runner_os is None:
+        parser.error("--required-backends requires --runner-os")
+    return args
 
 
 def main() -> None:
     args = parse_args()
     area_config = load_area_config(AREA_CONFIG)
+
+    # Backend query short-circuit: the CI job asking this runs inside one area's
+    # L2 tier and has no `cargo metadata`, so it must not pay for — or fail on —
+    # the workspace-wide ownership and shadow-workspace guards.
+    if args.required_backends is not None:
+        selected = required_backends(area_config, args.required_backends, args.runner_os)
+        print(",".join(selected))
+        return
+
     validate_area_config(ROOT, area_config)
     exemptions = load_exemptions(EXEMPTIONS_CONFIG)
     metadata = load_metadata(ROOT)

@@ -8,8 +8,13 @@ import unittest
 from pathlib import Path
 
 from affected_scope import (
+    AREA_CONFIG,
+    HOSTABLE_L2_BACKENDS,
+    SUPPORTED_RUNNER_OS,
     calculate_scope,
+    load_area_config,
     load_exemptions,
+    required_backends,
     validate_area_schema,
     validate_no_shadow_workspaces,
     validate_ownership,
@@ -217,6 +222,84 @@ class AreaSchemaTests(unittest.TestCase):
     def test_non_boolean_flag_is_rejected(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "must be a boolean"):
             validate_area_schema([{"area": "alpha", "check_args": "-p alpha", "l2": "yes"}])
+
+    def test_l2_area_without_backends_is_rejected(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "enables 'l2' but declares no"):
+            validate_area_schema([{"area": "alpha", "check_args": "-p alpha", "l2": True}])
+
+
+class RequiredBackendsTests(unittest.TestCase):
+    """`BISCUIT_REQUIRED_BACKENDS` = declared backends ∩ runner-hostable ones."""
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        self.areas = [
+            {
+                "area": "mixed",
+                "check_args": "-p mixed",
+                "l2": True,
+                "backends": ["tmux", "wezterm"],
+            },
+            {
+                "area": "gui-only",
+                "check_args": "-p gui",
+                "l2": True,
+                "backends": ["wezterm", "kitty"],
+            },
+            {"area": "no-l2", "check_args": "-p plain"},
+        ]
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def test_headless_linux_requires_only_the_provisioned_backend(self) -> None:
+        self.assertEqual(["tmux"], required_backends(self.areas, "mixed", "ubuntu-latest"))
+
+    def test_gui_only_area_requires_nothing_on_a_headless_runner(self) -> None:
+        # R4: WezTerm/Kitty tests must keep skipping, so the required set stays
+        # empty rather than falling back to the declared list.
+        self.assertEqual([], required_backends(self.areas, "gui-only", "ubuntu-latest"))
+
+    def test_area_without_declared_backends_requires_nothing(self) -> None:
+        self.assertEqual([], required_backends(self.areas, "no-l2", "ubuntu-latest"))
+
+    def test_runner_that_provisions_nothing_requires_nothing(self) -> None:
+        self.assertEqual([], required_backends(self.areas, "mixed", "windows-latest"))
+
+    def test_unsupported_runner_os_is_rejected(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "unsupported runner OS"):
+            required_backends(self.areas, "mixed", "freebsd-latest")
+
+    def test_unknown_area_is_rejected(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "unknown area 'ghost'"):
+            required_backends(self.areas, "ghost", "ubuntu-latest")
+
+    def test_unknown_backend_never_reaches_the_derivation(self) -> None:
+        # The vocabulary guard runs in `load_area_config`, which the CLI path
+        # calls before deriving, so a typo fails loudly instead of quietly
+        # narrowing the required set to nothing.
+        path = self.root / "areas.json"
+        path.write_text('[{"area": "alpha", "check_args": "-p alpha", "backends": ["ghostty"]}]')
+        with self.assertRaisesRegex(RuntimeError, "unknown L2 backend"):
+            load_area_config(path)
+
+    def test_hostable_map_covers_every_supported_runner(self) -> None:
+        self.assertEqual(SUPPORTED_RUNNER_OS, set(HOSTABLE_L2_BACKENDS))
+
+    def test_every_l2_area_in_areas_json_derives_a_required_backend(self) -> None:
+        # The derivation must stay in sync with the shipped policy: an L2 area
+        # whose declared backends the Linux runner cannot host would run the
+        # tier while enforcing nothing.
+        areas = load_area_config(AREA_CONFIG)
+        l2_areas = [area["area"] for area in areas if area["l2"]]
+        self.assertTrue(l2_areas, "areas.json must still declare L2 areas")
+        for name in l2_areas:
+            self.assertEqual(
+                ["tmux"],
+                required_backends(areas, name, "ubuntu-latest"),
+                f"area '{name}' must require the one backend CI provisions",
+            )
 
 
 class OwnershipTests(unittest.TestCase):

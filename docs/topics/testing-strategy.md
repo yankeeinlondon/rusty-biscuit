@@ -76,11 +76,17 @@ Though not really a form of testing, formatting Rust code often gets lumped into
 
 > **A Note on CLI Testing:**
 > 
-> - a lot of packages in **Rusty Biscuit** are CLI applications and for these we have adopted a terminology for three levels of integration testing:
+> - a lot of packages in **Rusty Biscuit** are CLI applications and for these we have adopted a terminology for three levels of integration testing, plus two further tiers for browser and external-resource work:
 > 
 >     - **Level 1 [in-process / PTY]** Unit tests, plus tests that spawn the binary in a pseudo-TTY and feed it manufactured input bytes. Useful and necessary, but does NOT verify the terminal emulator's encoder/decoder behaviour — *we* generate those bytes. Cannot catch bugs like "WezTerm does not emit bare-modifier press events because we forgot to push `REPORT_ALL_KEYS_AS_ESCAPE_CODES`.
 >     - **Level 2 (run-in-real-terminal with IPC).** Spawn the binary inside an actual terminal emulator (WezTerm, Kitty) or multiplexer (tmux), capture the rendered pane text via the terminal's CLI (`wezterm cli get-text`, `kitty @ get-text`, `tmux capture-pane`). Verifies that glyphs, widths, SGR styling, and scrolling render correctly through the real terminal. Input is still byte-level injected via the terminal's CLI, so the terminal's input encoder is NOT exercised.
 >     - **Level 3 (OS keyboard injection).** Real OS keyboard events (`cliclick` on macOS, `xdotool` on Linux) injected into the spawned terminal window. The terminal's input encoder fires — this is the only level that can verify "what bytes does the terminal actually emit when the user presses bare Ctrl?" Required for any UX requirement of the form "when the user holds/presses key X, Y happens." Currently env-gated behind `RUN_LEVEL3=1` because focus stability is platform-specific.
+>     - **Browser.** Headless Chrome/Chromium tests via `biscuit-browser-harness`. Assert on computed CSS styles, not source substrings or screenshots. Skips cleanly when Chrome is absent; hard-fails under `BISCUIT_BROWSER_REQUIRED=1`.
+>     - **Real.** Tests against real external resources (devices, networks, APIs). Always opt-in via per-package env vars.
+> 
+> **A green Level-2 tier is not evidence that Level 2 ran.** `require_level!` skips by returning from the test function, and nextest cannot distinguish that from a test that ran and asserted nothing — so every silent skip is counted as a **pass**. A tier with no available backend reports `18 tests run: 18 passed` in 0.138s; the same tier with a backend reports `18 passed` in 13.28s. Set `BISCUIT_REQUIRED_BACKENDS=tmux` to turn a named backend's absence into a hard failure (prefer it over `BISCUIT_TEST_LEVEL_REQUIRED`, which cannot express "require tmux but let WezTerm skip"), and treat elapsed time as the tell. `just test-l2` now refuses to run a tier whose backends are all unreachable.
+> 
+> This taxonomy is maintained in `prompts/snippets/test-rigor.md` and `.claude/skills/rust-testing/SKILL.md`; keep them in step until `md publish` lets this page transclude it.
 
 ## Coverage Tests
 

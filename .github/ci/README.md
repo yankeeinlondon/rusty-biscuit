@@ -24,7 +24,7 @@ order must match the root `justfile` `areas :=` list.
 | `browser` | bool | no | `false` | Run the headless-browser tier on Linux. |
 | `kache` | bool | no | `true` | Enable the kache `RUSTC_WRAPPER` (Linux/macOS only — `kache-action@v1` rejects `win32-x64`). |
 | `ai_provider_stubs` | bool | no | `false` | Install inert AI-provider CLI stubs for tests needing provider discovery. |
-| `backends` | string[] | no | `[]` | L2 terminal backends this area's tests require. One of: `tmux`, `wezterm`, `kitty`, `apple-terminal`. |
+| `backends` | string[] | no | `[]` | L2 terminal backends this area's tests require. One of: `tmux`, `wezterm`, `kitty`, `apple-terminal`. Required (non-empty) when `l2` is set: the L2 job exports `BISCUIT_REQUIRED_BACKENDS` as this list intersected with `affected_scope.py`'s `HOSTABLE_L2_BACKENDS`, turning those backends' skips into failures. |
 | `native` | object | no | `{}` | Map of runner OS → system packages needed to build/test (e.g. `{"ubuntu-latest": ["libasound2-dev"]}`). |
 | `canary` | bool | no | `false` | Whether this area is a global-change canary (Phase 4). |
 

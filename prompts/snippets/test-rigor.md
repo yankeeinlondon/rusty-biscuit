@@ -41,8 +41,23 @@ classify the verification level present and call out any mismatch:
   Level-2 capture verifying real-terminal rendering.
 
 Use `test_toolkit::require_level!(Level::L2, harness_available(), "label")` to gate Level-2+ tests
-so they skip cleanly when the harness is unavailable and hard-fail under `BISCUIT_TEST_LEVEL_REQUIRED`.
-See `.claude/skills/rust-testing/SKILL.md` for the full decision tree and canonical `just` recipes.
+so they skip cleanly when the harness is unavailable, and `BISCUIT_REQUIRED_BACKENDS=tmux` to make a
+named backend's absence a hard failure. Prefer it over `BISCUIT_TEST_LEVEL_REQUIRED`, which cannot
+express "require tmux but let WezTerm skip". See `.claude/skills/rust-testing/SKILL.md` for the full
+decision tree and canonical `just` recipes.
+
+### A passing Level-2 test may never have run
+
+`require_level!` skips by `return`ing, and nextest cannot distinguish that from a test that ran and
+asserted nothing — so **every silent skip is counted as a pass**. A tier with no available backend
+reports `18 tests run: 18 passed` in 0.138s; the same tier with a backend reports `18 passed` in
+13.28s. There is no `0 run`, no warning, and no failure.
+
+Reviewers MUST NOT accept "the Level-2 suite is green" as evidence that Level-2 verification exists.
+Require one of: elapsed time consistent with real terminal work, a run under
+`BISCUIT_REQUIRED_BACKENDS`, or evidence the test was observed **failing** against the unfixed code.
+A test that has only ever been green may never have executed. This is not hypothetical — a `::shell`
+hang shipped in darkmatter behind a green Level-2 tier for exactly this reason.
 
 A feature MAY be marked production-ready only when each user-observable requirement has at minimum
 the level of verification appropriate for it. Reviewers MUST list any requirement whose strongest

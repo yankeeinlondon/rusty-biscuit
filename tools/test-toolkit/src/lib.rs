@@ -24,8 +24,16 @@
 //! - `BISCUIT_TEST_LEVEL_REQUIRED=2|3` — CI use. When set and the harness
 //!   for the matching level is unavailable, [`require_level!`] panics
 //!   instead of skipping.
+//! - `BISCUIT_REQUIRED_BACKENDS=tmux,kitty` — CI and local use. A
+//!   comma-separated, case-insensitive list of terminal backends whose
+//!   absence is a hard failure. Enforcement is per backend, so a host that
+//!   can provide `tmux` but not a GUI terminal can require the former while
+//!   the latter keeps skipping.
 //! - `RUN_LEVEL3=1` — explicit opt-in for Level 3 tests, on top of the
 //!   normal availability probe. Level 3 tests skip when this is unset.
+//!
+//! `BISCUIT_TEST_LEVEL_REQUIRED` and `BISCUIT_REQUIRED_BACKENDS` are
+//! independent; either may turn a skip into a panic.
 
 use std::env;
 use std::ffi::{OsStr, OsString};
@@ -47,6 +55,27 @@ pub const BISCUIT_TEST_LEVEL: &str = "BISCUIT_TEST_LEVEL";
 /// unavailable, [`require_level!`] panics instead of skipping. Intended
 /// for CI jobs that provision the relevant tooling.
 pub const BISCUIT_TEST_LEVEL_REQUIRED: &str = "BISCUIT_TEST_LEVEL_REQUIRED";
+
+/// Environment variable naming the terminal backends whose absence must be
+/// a hard failure rather than a clean skip.
+///
+/// A comma-separated, case-insensitive list of backend names, e.g. `tmux`
+/// or `tmux,kitty`. Surrounding whitespace and empty entries are ignored.
+/// When unset or empty, no backend is enforced.
+///
+/// ## Notes
+///
+/// Enforcement is per backend rather than per level because a level holds
+/// tests on heterogeneous backends: a headless runner can host `tmux` but
+/// not a GUI terminal, and requiring the level as a whole would fail tests
+/// that are correctly skipping.
+///
+/// A test's `harness_label` is matched against the list case-insensitively
+/// and in full. Labels that describe a capability rather than a backend
+/// (`PTY (/dev/ptmx)`, `bash-family shell`) therefore match nothing and keep
+/// skipping; substring matching would let those collide with short backend
+/// names.
+pub const BISCUIT_REQUIRED_BACKENDS: &str = "BISCUIT_REQUIRED_BACKENDS";
 
 /// Environment variable that opts in to Level 3 OS-keyboard-injection
 /// tests. Set to `1` to enable.
@@ -100,9 +129,18 @@ pub enum LevelDecision {
 /// 2. If `level == L3` and `RUN_LEVEL3` is not `1`, return
 ///    `Skip("set RUN_LEVEL3=1")`.
 /// 3. If `available == false`:
+///     - If `BISCUIT_REQUIRED_BACKENDS` lists `harness_label`, return
+///       `Panic(...)`.
 ///     - If `BISCUIT_TEST_LEVEL_REQUIRED == level`, return `Panic(...)`.
 ///     - Otherwise return `Skip("harness unavailable")`.
 /// 4. Otherwise return `Run`.
+///
+/// ## Notes
+///
+/// The two enforcement variables are independent and both produce a panic,
+/// so their order only decides which message the developer reads.
+/// `BISCUIT_REQUIRED_BACKENDS` is checked first because it names the exact
+/// missing backend, which is more actionable than a level number.
 #[must_use]
 pub fn evaluate_level(level: Level, available: bool, harness_label: &str) -> LevelDecision {
     if let Some(max) = read_level_env(BISCUIT_TEST_LEVEL)
@@ -121,6 +159,14 @@ pub fn evaluate_level(level: Level, available: bool, harness_label: &str) -> Lev
     }
 
     if !available {
+        if is_required_backend(harness_label) {
+            return LevelDecision::Panic(format!(
+                "{BISCUIT_REQUIRED_BACKENDS} requires {harness_label} but it is unavailable. \
+                 Provision {harness_label} in this environment, or drop it from \
+                 {BISCUIT_REQUIRED_BACKENDS} (unset the variable to require nothing)."
+            ));
+        }
+
         if let Some(required) = read_level_env(BISCUIT_TEST_LEVEL_REQUIRED)
             && required == level.as_u8()
         {
@@ -133,6 +179,18 @@ pub fn evaluate_level(level: Level, available: bool, harness_label: &str) -> Lev
     }
 
     LevelDecision::Run
+}
+
+fn is_required_backend(harness_label: &str) -> bool {
+    let Ok(raw) = env::var(BISCUIT_REQUIRED_BACKENDS) else {
+        return false;
+    };
+    let label = harness_label.trim();
+
+    raw.split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .any(|entry| entry.eq_ignore_ascii_case(label))
 }
 
 fn read_level_env(key: &str) -> Option<u8> {
@@ -412,8 +470,8 @@ fn previous_value(key: &OsStr) -> PreviousEnvValue {
 #[cfg(test)]
 mod tests {
     use super::{
-        BISCUIT_TEST_LEVEL, BISCUIT_TEST_LEVEL_REQUIRED, EnvGuard, Level, LevelDecision, RUN_LEVEL3,
-        evaluate_level, init_test_tracing,
+        BISCUIT_REQUIRED_BACKENDS, BISCUIT_TEST_LEVEL, BISCUIT_TEST_LEVEL_REQUIRED, EnvGuard, Level,
+        LevelDecision, RUN_LEVEL3, evaluate_level, init_test_tracing,
     };
     use std::env;
     use std::sync::{Arc, Mutex};
@@ -591,6 +649,7 @@ mod tests {
         let _g1 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL);
         let _g2 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL_REQUIRED);
         let _g3 = EnvGuard::remove_safe(RUN_LEVEL3);
+        let _g4 = EnvGuard::remove_safe(BISCUIT_REQUIRED_BACKENDS);
 
         assert_eq!(
             evaluate_level(Level::L2, true, "WezTerm"),
@@ -604,6 +663,7 @@ mod tests {
         let _g1 = EnvGuard::set_safe(BISCUIT_TEST_LEVEL, "1");
         let _g2 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL_REQUIRED);
         let _g3 = EnvGuard::remove_safe(RUN_LEVEL3);
+        let _g4 = EnvGuard::remove_safe(BISCUIT_REQUIRED_BACKENDS);
 
         match evaluate_level(Level::L2, true, "WezTerm") {
             LevelDecision::Skip(msg) => assert!(msg.contains("BISCUIT_TEST_LEVEL=1")),
@@ -617,6 +677,7 @@ mod tests {
         let _g1 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL);
         let _g2 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL_REQUIRED);
         let _g3 = EnvGuard::remove_safe(RUN_LEVEL3);
+        let _g4 = EnvGuard::remove_safe(BISCUIT_REQUIRED_BACKENDS);
 
         match evaluate_level(Level::L2, false, "WezTerm") {
             LevelDecision::Skip(msg) => assert!(msg.contains("WezTerm")),
@@ -630,6 +691,7 @@ mod tests {
         let _g1 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL);
         let _g2 = EnvGuard::set_safe(BISCUIT_TEST_LEVEL_REQUIRED, "2");
         let _g3 = EnvGuard::remove_safe(RUN_LEVEL3);
+        let _g4 = EnvGuard::remove_safe(BISCUIT_REQUIRED_BACKENDS);
 
         match evaluate_level(Level::L2, false, "WezTerm") {
             LevelDecision::Panic(msg) => {
@@ -646,6 +708,7 @@ mod tests {
         let _g1 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL);
         let _g2 = EnvGuard::set_safe(BISCUIT_TEST_LEVEL_REQUIRED, "3");
         let _g3 = EnvGuard::set_safe(RUN_LEVEL3, "1");
+        let _g4 = EnvGuard::remove_safe(BISCUIT_REQUIRED_BACKENDS);
 
         // Level 2 unavailable, but REQUIRED=3 → should skip, not panic.
         match evaluate_level(Level::L2, false, "WezTerm") {
@@ -660,6 +723,7 @@ mod tests {
         let _g1 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL);
         let _g2 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL_REQUIRED);
         let _g3 = EnvGuard::remove_safe(RUN_LEVEL3);
+        let _g4 = EnvGuard::remove_safe(BISCUIT_REQUIRED_BACKENDS);
 
         match evaluate_level(Level::L3, true, "cliclick") {
             LevelDecision::Skip(msg) => assert!(msg.contains("RUN_LEVEL3")),
@@ -673,6 +737,7 @@ mod tests {
         let _g1 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL);
         let _g2 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL_REQUIRED);
         let _g3 = EnvGuard::set_safe(RUN_LEVEL3, "1");
+        let _g4 = EnvGuard::remove_safe(BISCUIT_REQUIRED_BACKENDS);
 
         assert_eq!(
             evaluate_level(Level::L3, true, "cliclick"),
@@ -687,8 +752,181 @@ mod tests {
         let _g1 = EnvGuard::set_safe(BISCUIT_TEST_LEVEL, "1");
         let _g2 = EnvGuard::set_safe(BISCUIT_TEST_LEVEL_REQUIRED, "2");
         let _g3 = EnvGuard::remove_safe(RUN_LEVEL3);
+        let _g4 = EnvGuard::remove_safe(BISCUIT_REQUIRED_BACKENDS);
 
         match evaluate_level(Level::L2, false, "WezTerm") {
+            LevelDecision::Skip(_) => {}
+            other => panic!("expected Skip (max wins), got {other:?}"),
+        }
+    }
+
+    /// Clear every gate except `BISCUIT_REQUIRED_BACKENDS`, which each
+    /// required-backend test sets for itself.
+    fn clear_level_gates() -> (EnvGuard, EnvGuard, EnvGuard) {
+        (
+            EnvGuard::remove_safe(BISCUIT_TEST_LEVEL),
+            EnvGuard::remove_safe(BISCUIT_TEST_LEVEL_REQUIRED),
+            EnvGuard::remove_safe(RUN_LEVEL3),
+        )
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn required_backend_panics_when_unavailable() {
+        let _gates = clear_level_gates();
+        let _g = EnvGuard::set_safe(BISCUIT_REQUIRED_BACKENDS, "tmux");
+
+        match evaluate_level(Level::L2, false, "tmux") {
+            LevelDecision::Panic(msg) => {
+                assert!(msg.contains(BISCUIT_REQUIRED_BACKENDS));
+                assert!(msg.contains("tmux"));
+            }
+            other => panic!("expected Panic, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn required_backend_runs_when_available() {
+        let _gates = clear_level_gates();
+        let _g = EnvGuard::set_safe(BISCUIT_REQUIRED_BACKENDS, "tmux");
+
+        assert_eq!(evaluate_level(Level::L2, true, "tmux"), LevelDecision::Run);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn unrequired_backend_still_skips_when_unavailable() {
+        // R4: a headless runner requires tmux but cannot host WezTerm, so
+        // WezTerm-labelled tests must keep skipping. Enforcing the whole
+        // level instead of the named backend is exactly what made
+        // BISCUIT_TEST_LEVEL_REQUIRED unusable.
+        let _gates = clear_level_gates();
+        let _g = EnvGuard::set_safe(BISCUIT_REQUIRED_BACKENDS, "tmux");
+
+        match evaluate_level(Level::L2, false, "WezTerm") {
+            LevelDecision::Skip(msg) => assert!(msg.contains("WezTerm")),
+            other => panic!("expected Skip, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn non_backend_capability_label_still_skips() {
+        let _gates = clear_level_gates();
+        let _g = EnvGuard::set_safe(BISCUIT_REQUIRED_BACKENDS, "tmux,wezterm,kitty");
+
+        match evaluate_level(Level::L2, false, "PTY (/dev/ptmx)") {
+            LevelDecision::Skip(_) => {}
+            other => panic!("expected Skip, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn required_backend_match_is_case_insensitive() {
+        let _gates = clear_level_gates();
+        let _g = EnvGuard::set_safe(BISCUIT_REQUIRED_BACKENDS, "wezterm");
+
+        match evaluate_level(Level::L2, false, "WezTerm") {
+            LevelDecision::Panic(msg) => assert!(msg.contains("WezTerm")),
+            other => panic!("expected Panic, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn required_backend_match_is_exact_not_substring() {
+        // "sh" must not enforce "bash-family shell".
+        let _gates = clear_level_gates();
+        let _g = EnvGuard::set_safe(BISCUIT_REQUIRED_BACKENDS, "sh");
+
+        match evaluate_level(Level::L2, false, "bash-family shell") {
+            LevelDecision::Skip(_) => {}
+            other => panic!("expected Skip, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn unset_required_backends_skips_as_before() {
+        let _gates = clear_level_gates();
+        let _g = EnvGuard::remove_safe(BISCUIT_REQUIRED_BACKENDS);
+
+        match evaluate_level(Level::L2, false, "tmux") {
+            LevelDecision::Skip(msg) => assert!(msg.contains("tmux")),
+            other => panic!("expected Skip, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn empty_required_backends_skips_as_before() {
+        let _gates = clear_level_gates();
+        let _g = EnvGuard::set_safe(BISCUIT_REQUIRED_BACKENDS, "");
+
+        match evaluate_level(Level::L2, false, "tmux") {
+            LevelDecision::Skip(msg) => assert!(msg.contains("tmux")),
+            other => panic!("expected Skip, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn required_backends_tolerates_whitespace_and_empty_entries() {
+        let _gates = clear_level_gates();
+        let _g = EnvGuard::set_safe(BISCUIT_REQUIRED_BACKENDS, " tmux, ,kitty ");
+
+        for backend in ["tmux", "kitty"] {
+            match evaluate_level(Level::L2, false, backend) {
+                LevelDecision::Panic(_) => {}
+                other => panic!("expected Panic for {backend}, got {other:?}"),
+            }
+        }
+
+        match evaluate_level(Level::L2, false, "WezTerm") {
+            LevelDecision::Skip(_) => {}
+            other => panic!("expected Skip, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn required_backend_message_wins_over_required_level() {
+        let _g1 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL);
+        let _g2 = EnvGuard::set_safe(BISCUIT_TEST_LEVEL_REQUIRED, "2");
+        let _g3 = EnvGuard::remove_safe(RUN_LEVEL3);
+        let _g4 = EnvGuard::set_safe(BISCUIT_REQUIRED_BACKENDS, "tmux");
+
+        match evaluate_level(Level::L2, false, "tmux") {
+            LevelDecision::Panic(msg) => assert!(msg.contains(BISCUIT_REQUIRED_BACKENDS)),
+            other => panic!("expected Panic, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn required_level_still_fires_for_unrequired_backend() {
+        let _g1 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL);
+        let _g2 = EnvGuard::set_safe(BISCUIT_TEST_LEVEL_REQUIRED, "2");
+        let _g3 = EnvGuard::remove_safe(RUN_LEVEL3);
+        let _g4 = EnvGuard::set_safe(BISCUIT_REQUIRED_BACKENDS, "tmux");
+
+        match evaluate_level(Level::L2, false, "WezTerm") {
+            LevelDecision::Panic(msg) => assert!(msg.contains(BISCUIT_TEST_LEVEL_REQUIRED)),
+            other => panic!("expected Panic, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_level_max_takes_precedence_over_required_backend() {
+        let _g1 = EnvGuard::set_safe(BISCUIT_TEST_LEVEL, "1");
+        let _g2 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL_REQUIRED);
+        let _g3 = EnvGuard::remove_safe(RUN_LEVEL3);
+        let _g4 = EnvGuard::set_safe(BISCUIT_REQUIRED_BACKENDS, "tmux");
+
+        match evaluate_level(Level::L2, false, "tmux") {
             LevelDecision::Skip(_) => {}
             other => panic!("expected Skip (max wins), got {other:?}"),
         }

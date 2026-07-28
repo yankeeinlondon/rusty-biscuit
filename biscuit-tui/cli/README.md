@@ -342,6 +342,11 @@ levels:
 | **2** | Spawn binary in real terminal (`wezterm cli` / `kitty @` / `tmux`); capture rendered pane text via the terminal's own CLI | Glyphs, widths, SGR styling, scroll, cursor position render correctly through a real terminal. Input is still byte-injected, so the terminal's input encoder isn't exercised. |
 | **3** | Real OS keyboard injection (`cliclick` on macOS, `xdotool` on Linux) into the spawned terminal window | The terminal's *input encoder* fires. The only level that can verify "what bytes does the terminal emit when key X is pressed?" |
 
+The repo-wide taxonomy adds Browser and Real tiers; neither applies to this
+package. It is maintained in `prompts/snippets/test-rigor.md` and
+`.claude/skills/rust-testing/SKILL.md`; keep them in step until `md publish`
+lets this page transclude it.
+
 The harness implementations live in the shared
 [`biscuit-test-harness`](../../biscuit-test-harness/README.md) crate and
 include `WezTermHarness`, `KittyHarness`, `TmuxHarness`, `AppleTerminalHarness`,
@@ -354,6 +359,19 @@ binary on `$PATH` plus any required env (`WEZTERM_UNIX_SOCKET`,
 `KITTY_LISTEN_ON`). If the host lacks the tooling, the test prints
 `skipping: requires <X>` to stderr and returns `ok` — no `#[ignore]` markers,
 no spurious failures.
+
+**The cost of that convenience: a skipped test is reported as a passing test.**
+`require_level!` skips by returning, which nextest cannot distinguish from a
+test that ran and asserted nothing. A tier with no reachable backend is green
+and fast; the same tier with a backend is green and slow. Only elapsed time
+tells them apart, so **a green Level-2 run is not evidence Level 2 executed**.
+
+Two things close this. `BISCUIT_REQUIRED_BACKENDS=tmux` makes a named backend's
+absence a hard failure — prefer it over `BISCUIT_TEST_LEVEL_REQUIRED=2`, which
+applies to the whole level and so panics the GUI-backed tests a headless host
+legitimately cannot run. And `just test-l2` now refuses to run a package whose
+`level2_*` tests exist but whose backends are all unreachable, rather than
+reporting a green tier over work that never happened.
 
 ```sh
 # All levels at once — Level 2 auto-skips when tooling is missing, Level 3 skips

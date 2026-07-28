@@ -501,6 +501,103 @@ _test_l2 pkg *args="":
     echo -e "🖥  Level-2 tests for {{ bold }}{{ pkg }}{{ reset }}"
     echo
 
+    # ---- Zero-run / silent-skip guard --------------------------------------
+    #
+    # `require_level!` skips a test by `return`ing from its body, which nextest
+    # scores as PASS. A tier in which every test skipped therefore reports
+    # "N tests run: N passed" and exits 0 — the same shape a real run produces,
+    # which is how a tmux-less host kept this tier green while executing
+    # nothing (fixes/2026-07-28-l2-silent-skip-gap). Run counts alone cannot
+    # tell those apart, so the guard has two parts:
+    #
+    #   1. Census. `nextest list` reports how many `level2_*` tests this
+    #      package actually has. Zero is legitimate — not every package has an
+    #      L2 tier — and exits 0 with an explicit "nothing to run" note rather
+    #      than anything that reads as a passing tier.
+    #
+    #   2. Backend gate. When the package DOES have L2 tests, at least one
+    #      enforceable backend must be reachable, and that set is exported as
+    #      BISCUIT_REQUIRED_BACKENDS so `evaluate_level` PANICS rather than
+    #      silently skipping a test labelled with a backend we know is present.
+    #
+    # Only tmux and kitty are auto-required. Their `available()` probes are
+    # exactly `which("tmux")` and `which("kitty") && $KITTY_LISTEN_ON`, which
+    # this shell reproduces verbatim, so requiring them cannot manufacture a
+    # panic in a test that would otherwise have run for real. WezTerm
+    # additionally probes a live GUI socket under a timeout shell cannot
+    # mirror, and Apple Terminal has no `require_level!` call sites, so neither
+    # is auto-required — GUI-backed tests keep skipping cleanly on a headless
+    # host.
+    #
+    # An explicit BISCUIT_REQUIRED_BACKENDS in the environment wins verbatim.
+    # BISCUIT_L2_ALLOW_NO_BACKEND=1 waives the gate for a host whose L2 tests
+    # genuinely need no terminal backend (e.g. a PTY-only suite).
+    #
+    # The census tolerates its own failure: an empty count means the listing
+    # did not complete (most often a compile error), and the recipe falls
+    # through to the run so the real error surfaces there rather than being
+    # reported as "no Level-2 tests".
+    l2_census="$(mktemp "${TMPDIR:-/tmp}/biscuit-test-l2-census.XXXXXX")"
+    l2_count=""
+    if cargo nextest list -p {{ pkg }} -E 'test(/level2_/)' \
+        --message-format json > "${l2_census}" 2>/dev/null; then
+        # `-E` does NOT filter the JSON: every test in the package is emitted,
+        # each tagged with its own `filter-match`. Counting `test-count`, or the
+        # testcases without this `select`, yields the package total (643 rather
+        # than 3) — the gate would then never fire.
+        l2_count="$(jq '[."rust-suites"[]?.testcases[]? | select(."filter-match".status == "matches")] | length' \
+            "${l2_census}" 2>/dev/null || echo "")"
+    fi
+    rm -f "${l2_census}"
+
+    if [[ "${l2_count}" == "0" ]]; then
+        echo -e "  {{ dim }}no level2_* tests in {{ pkg }} — nothing to run{{ reset }}"
+        echo
+        exit 0
+    fi
+
+    # Probe only the backends whose `available()` this shell reproduces
+    # exactly. `command -v` is the shell equivalent of the harnesses'
+    # `which(..)`. Written as `if` blocks rather than `cmd && acc=...` because
+    # a trailing failed `&&` chain would trip `set -e`.
+    l2_backends=""
+    if command -v tmux >/dev/null 2>&1; then
+        l2_backends="tmux"
+    fi
+    if command -v kitty >/dev/null 2>&1 && [[ -n "${KITTY_LISTEN_ON:-}" ]]; then
+        l2_backends="${l2_backends:+${l2_backends},}kitty"
+    fi
+
+    l2_required="${BISCUIT_REQUIRED_BACKENDS:-${l2_backends}}"
+    if [[ -z "${l2_required}" && "${BISCUIT_L2_ALLOW_NO_BACKEND:-0}" != "1" ]]; then
+        echo -e "⛔ {{ bold }}{{ red }}Level-2 tier for {{ pkg }} would run no tests{{ reset }}" >&2
+        echo >&2
+        echo "   ${l2_count} level2_* tests are present, but no enforceable terminal" >&2
+        echo "   backend is reachable on this host, so every one of them would skip" >&2
+        echo "   via require_level! and be scored as a PASS. That is a green tier" >&2
+        echo "   over work that never happened, so it is a failure instead." >&2
+        echo >&2
+        echo "   Most likely cause: tmux is not installed or not on PATH." >&2
+        echo "   Install tmux (the backend the great majority of this repo's L2" >&2
+        echo "   tests declare), or:" >&2
+        echo >&2
+        echo -e "     {{ bold }}BISCUIT_REQUIRED_BACKENDS{{ reset }}=tmux[,kitty]  name the backends whose" >&2
+        echo "         absence must panic rather than skip (overrides this probe)." >&2
+        echo -e "     {{ bold }}BISCUIT_TEST_LEVEL_REQUIRED{{ reset }}=2         panic on ANY missing L2" >&2
+        echo "         harness, including GUI backends a headless host cannot host." >&2
+        echo -e "     {{ bold }}BISCUIT_L2_ALLOW_NO_BACKEND{{ reset }}=1         waive this gate when the" >&2
+        echo "         package's L2 tests genuinely need no terminal backend." >&2
+        echo >&2
+        exit 1
+    fi
+    if [[ -n "${l2_required}" ]]; then
+        export BISCUIT_REQUIRED_BACKENDS="${l2_required}"
+        echo -e "  {{ dim }}${l2_count} level2_ tests; required backends: ${l2_required}{{ reset }}"
+    else
+        echo -e "  {{ yellow }}no terminal backend reachable; BISCUIT_L2_ALLOW_NO_BACKEND=1 waived the gate{{ reset }}"
+    fi
+    echo
+
     # Parallel self-spawn mode: no shared pane, no broker, `-j N`. Every
     # test self-isolates via `shared_or_spawn()`'s owned fallback, so
     # there is nothing to contend for. See the recipe comment above.
@@ -608,6 +705,35 @@ _test_l3 pkg *args="":
     echo
     echo -e "🎹 Level-3 tests for {{ bold }}{{ pkg }}{{ reset }} {{ dim }}(RUN_LEVEL3=1){{ reset }}"
     echo
+
+    # Census, for the same reason `_test_l2` takes one: `require_level!` skips
+    # by returning, so nextest scores a skipped Level-3 test as a PASS and a
+    # tier that executed nothing still exits 0. A package with no `level3_*`
+    # tests is legitimate and says so explicitly instead of reporting a tier
+    # that passed. See the guard comment on `_test_l2`.
+    #
+    # Unlike L2 there is no backend gate here: Level-3 harness labels
+    # (cliclick, xdotool, window capture) are OS-input capability probes, not
+    # members of the backend vocabulary BISCUIT_REQUIRED_BACKENDS governs, and
+    # the fix spec puts enforcing them out of scope. Use
+    # BISCUIT_TEST_LEVEL_REQUIRED=3 to make a missing L3 harness hard-fail.
+    l3_census="$(mktemp "${TMPDIR:-/tmp}/biscuit-test-l3-census.XXXXXX")"
+    l3_count=""
+    if cargo nextest list -p {{ pkg }} -E 'test(/level3_/)' \
+        --message-format json > "${l3_census}" 2>/dev/null; then
+        # `-E` does not filter the JSON; see the L2 census above for why the
+        # `filter-match` select is load-bearing.
+        l3_count="$(jq '[."rust-suites"[]?.testcases[]? | select(."filter-match".status == "matches")] | length' \
+            "${l3_census}" 2>/dev/null || echo "")"
+    fi
+    rm -f "${l3_census}"
+
+    if [[ "${l3_count}" == "0" ]]; then
+        echo -e "  {{ dim }}no level3_* tests in {{ pkg }} — nothing to run{{ reset }}"
+        echo
+        exit 0
+    fi
+
     # Run one test at a time (`-j 1`). These tests inject real OS keyboard/pointer
     # events and so compete for the single global frontmost window + pointer;
     # `#[serial]` cannot serialize them because nextest runs each test in a

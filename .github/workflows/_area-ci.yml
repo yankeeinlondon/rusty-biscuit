@@ -229,9 +229,11 @@ jobs:
   # CI (D8): WezTerm/Kitty/Apple Terminal require running INSIDE that GUI (their
   # `available()` gates need WEZTERM_UNIX_SOCKET / KITTY_LISTEN_ON / a live
   # Terminal.app session), so those tests skip cleanly here via require_level!.
-  # We hard-require the provisioned backend by VERIFYING tmux is reachable rather
-  # than setting a global BISCUIT_TEST_LEVEL_REQUIRED, which would panic the
-  # GUI-backed tests this runner cannot host.
+  # Enforcement is therefore per backend, never per level: a global
+  # BISCUIT_TEST_LEVEL_REQUIRED would panic the GUI-backed tests this runner
+  # cannot host. The tmux binary is hard-required by VERIFYING it is reachable;
+  # which backends' skips become failures is DERIVED from areas.json below
+  # (fixes/2026-07-28-l2-silent-skip-gap R3).
   l2:
     name: test-l2 (ubuntu)
     # Expensive optional tier runs only after L1 passes (D4).
@@ -259,6 +261,26 @@ jobs:
           # provisioning step — the hard-require for the one L2 backend CI hosts.
           # `tmux -V` needs no server or display, so it takes no focus.
           tmux -V
+      - name: Derive the required L2 backend set
+        shell: bash
+        run: |
+          set -euo pipefail
+          # areas.json stays the single policy surface (D10): the script owns
+          # both this area's declared `backends` and the per-runner hostable map,
+          # so adding a backend there reaches CI without editing this workflow.
+          # The runner-OS label must match this job's `runs-on` — the L2 tier is
+          # Linux-only by design.
+          required="$(python3 scripts/ci/affected_scope.py \
+            --required-backends "${{ inputs.area }}" --runner-os ubuntu-latest)"
+          if [ -n "$required" ]; then
+            echo "L2 skips are failures for: $required"
+          else
+            # Not fatal — an area whose backends are all GUI-only is a valid
+            # configuration. But a tier enforcing nothing must say so rather than
+            # look identical to a passing one.
+            echo "::warning title=No enforceable L2 backend::Area '${{ inputs.area }}' declares no backend this runner can host; every L2 skip stays a skip."
+          fi
+          echo "BISCUIT_REQUIRED_BACKENDS=$required" >>"$GITHUB_ENV"
       - name: Enable and verify kache
         uses: ./.github/actions/enable-kache
         with:
