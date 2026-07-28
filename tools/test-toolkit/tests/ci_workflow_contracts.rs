@@ -1231,3 +1231,51 @@ fn just_commit_is_deterministic_under_ci() {
     );
 }
 
+
+// --- a PR that schedules no run at all ----------------------------------------
+
+/// A conflicted PR must be reported, not merely fail to schedule anything.
+///
+/// `pull_request` workflows run against `refs/pull/N/merge`. GitHub cannot
+/// create that ref while the PR conflicts, so it creates no workflow run --
+/// silently, with no check suite and no annotation. `ci-verdict` therefore never
+/// reports, and the PR is indistinguishable from one whose CI has not started.
+/// Measured on PR #19, where the entire matrix was suppressed undetected.
+#[test]
+fn a_conflicted_pr_is_reported_rather_than_silently_unscheduled() {
+    let health = read(".github/workflows/pr-health.yml");
+
+    // `pull_request` is exactly the trigger that cannot fire here, so relying on
+    // it would reintroduce the blind spot this guard exists to close.
+    assert!(
+        health.contains("pull_request_target:"),
+        "the guard must use `pull_request_target`, which runs against the base \
+         branch and needs no merge commit"
+    );
+    assert!(
+        health.contains("branches-ignore: [main]"),
+        "a push to a branch with an existing PR must also be covered, for the \
+         case where a later push introduces the conflict"
+    );
+
+    // `pull_request_target` runs with a privileged token against the base ref.
+    // Checking out head-branch code under it is the well-known escalation path.
+    // Comments are stripped first: the workflow's own security note names the
+    // action it forbids, and matching that would assert on prose, not on steps.
+    let steps: String = health
+        .lines()
+        .filter(|line| !line.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        !steps.contains("actions/checkout"),
+        "pr-health must never check out pull-request code under \
+         `pull_request_target`"
+    );
+
+    assert!(
+        health.contains("exit 1"),
+        "a conflicted PR must fail the check, not emit a warning -- a warning \
+         is as invisible as the missing run it is reporting"
+    );
+}
