@@ -59,11 +59,7 @@ install *args="":
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity claudine-catalog-types
-    @just _sanity claudine
-    @just _sanity claudine-contract
-    @just _sanity claudine-cli
-    @just _sanity claudine-gen
+    @just _sanity_all "claudine-catalog-types claudine claudine-contract claudine-cli claudine-gen"
 
 # test just the CLI in Claudine
 test-cli *args="":
@@ -81,11 +77,7 @@ test-rendezvous *args:
 
 # Test the catalog types, library, contract adapter, CLI, and generator.
 test *args="":
-    @just _test claudine-catalog-types {{ args }}
-    @just _test claudine {{ args }}
-    @just _test claudine-contract {{ args }}
-    @just _test claudine-cli {{ args }}
-    @just _test claudine-gen {{ args }}
+    @just _test_all "claudine-catalog-types claudine claudine-contract claudine-cli claudine-gen" {{ args }}
 
 # test just the contract adapter library
 test-contract *args="":

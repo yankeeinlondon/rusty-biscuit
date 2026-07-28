@@ -57,13 +57,11 @@ build *args="":
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity biscuit-file
-    @just _sanity biscuit-file-cli
+    @just _sanity_all "biscuit-file biscuit-file-cli"
 
 # run tests for biscuit-file packages
 test *args="":
-    @just _test biscuit-file {{ args }}
-    @just _test biscuit-file-cli {{ args }}
+    @just _test_all "biscuit-file biscuit-file-cli" {{args}}
 
 # not applicable: biscuit-file has no real-terminal (Level-2) tests
 test-l2:

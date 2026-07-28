@@ -53,27 +53,22 @@ build *args="":
 
 # Fast confidence subset (<=15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity {{ LIBRARY }}
-    @just _sanity {{ CLI }}
+    @just _sanity_all "{{ LIBRARY }} {{ CLI }}"
 
 # Test both library and CLI (Level-1 only -- `test-l2` runs real-terminal tests).
 # `perf_` tests are excluded here: their wall-clock SLAs only hold under the
 # contention-free `-j 1` run in `test-perf`, which `all` invokes separately.
 test *args="":
     #!/usr/bin/env bash
-    set -euo pipefail
-    filter='!(test(/level2_/) + test(/level3_/) + test(/browser_/) + test(/real_/) + test(/perf_/))'
-    echo
-    echo -e "Testing {{ BOLD }}{{ LIBRARY }}{{ RESET }} package"
-    echo
-    cargo nextest run -p {{ LIBRARY }} -E "$filter" {{ args }}
-    echo
-    echo -e "Testing {{ BOLD }}{{ CLI }}{{ RESET }} package"
-    echo
-    cargo nextest run -p {{ CLI }} -E "$filter" --no-tests=pass {{ args }}
-    echo
-    echo -e "{{ GREEN }} all tests passing in {{ BOLD }}{{ PACKAGE }}{{ RESET }}{{ GREEN }} (Level-1){{ RESET }}"
+    set -uo pipefail
+    export BISCUIT_TEST_FILTER='!(test(/level2_/) + test(/level3_/) + test(/browser_/) + test(/real_/) + test(/perf_/))'
+    exit_code=0
+    just _test_all "{{ LIBRARY }} {{ CLI }}" {{ args }} || exit_code=$?
+    if (( exit_code == 130 )); then
+        exit 130
+    fi
     echo -e "{{ DIM }}use {{ RESET }}just test-l2{{ DIM }} for real-terminal (Level-2) tests{{ RESET }}"
+    exit "${exit_code}"
 
 # Level-2 real-terminal tests for the CLI. Skips cleanly if the harness is
 # unavailable unless `BISCUIT_TEST_LEVEL_REQUIRED=2` is set in the environment.

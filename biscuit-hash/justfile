@@ -35,15 +35,20 @@ build *args="":
 
 # --- Canonical lifecycle recipe set (testing-best-practices Phase 3) -------
 
+# `--all-features` on the library throughout: `default = ["xx_hash"]`, so the
+# `blake3` and `argon2id` algorithms — and the 20 tests that cover them — are
+# invisible to a default-feature run (26 of 46). Nobody ships the default set:
+# biscuit-hash-cli enables all three, claudine/tree-hugger/rendezvous-core
+# enable `blake3`. Same reasoning as biscuit-visualized's `--all-features`.
+# The CLI has no features of its own, so it takes no flag.
+
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity biscuit-hash
-    @just _sanity biscuit-hash-cli
+    @just _sanity_all "biscuit-hash --all-features; biscuit-hash-cli"
 
 # test library and CLI
 test *args="":
-    @just _test biscuit-hash {{args}}
-    @just _test biscuit-hash-cli {{args}}
+    @just _test_all "biscuit-hash --all-features; biscuit-hash-cli" {{args}}
 
 # not applicable: biscuit-hash has no real-terminal (Level-2) tests
 test-l2:
@@ -72,12 +77,12 @@ bench *args="":
 
 # Per-package LCOV coverage for the library and CLI.
 coverage *args="":
-    @just _coverage biscuit-hash {{args}}
+    @just _coverage biscuit-hash --all-features {{args}}
     @just _coverage biscuit-hash-cli {{args}}
 
 # Doctests for the library and CLI.
 doctest *args="":
-    @just _doctest biscuit-hash {{args}}
+    @just _doctest biscuit-hash --all-features {{args}}
     @just _doctest biscuit-hash-cli {{args}}
 
 # not applicable: biscuit-hash has no cargo-fuzz targets

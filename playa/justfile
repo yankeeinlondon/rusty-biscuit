@@ -59,13 +59,11 @@ install *args="":
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity playa
-    @just _sanity playa-cli
+    @just _sanity_all "playa playa-cli"
 
 # Test both library and CLI.
 test *args="":
-    @just _test playa {{args}}
-    @just _test playa-cli {{args}}
+    @just _test_all "playa playa-cli" {{args}}
 
 # not applicable: playa has no real-terminal (Level-2) tests
 test-l2:

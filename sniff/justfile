@@ -47,17 +47,19 @@ build *args="":
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity sniff
-    @just _sanity sniff-cli
+    @just _sanity_all "sniff --features remote; sniff-cli --features test-fixtures"
 
 # test library and CLI
 #
 # `remote` transitively enables `network`. Selecting `network` alone would
 # cfg-out the whole `sniff::remote` module and silently reduce its Wiremock
 # suites to empty binaries instead of failing.
+#
+# `test-fixtures` on the CLI for the same reason `test-l2` passes it: it gates
+# the `render_*_fixture` helper bins and 2 L1 tests, so a default-feature L1 run
+# reported 788 of 790 as the whole suite.
 test *args="":
-    @just _test sniff --features remote {{ args }}
-    @just _test sniff-cli {{ args }}
+    @just _test_all "sniff --features remote; sniff-cli --features test-fixtures" {{ args }}
 
 # Real-terminal (Level-2) tests: CI/CD status-cell styling in sniff-cli.
 # `--features test-fixtures` builds the `render_cicd_fixture` helper the test spawns.
@@ -86,13 +88,13 @@ lint *args="":
 
 # Per-package LCOV coverage.
 coverage *args="":
-    @just _coverage sniff {{ args }}
-    @just _coverage sniff-cli {{ args }}
+    @just _coverage sniff --features remote {{ args }}
+    @just _coverage sniff-cli --features test-fixtures {{ args }}
 
 # Doctests.
 doctest *args="":
-    @just _doctest sniff {{ args }}
-    @just _doctest sniff-cli {{ args }}
+    @just _doctest sniff --features remote {{ args }}
+    @just _doctest sniff-cli --features test-fixtures {{ args }}
 
 # not applicable: sniff has no cargo-fuzz targets
 fuzz:

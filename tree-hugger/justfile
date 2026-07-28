@@ -30,13 +30,11 @@ build *args="":
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity tree-hugger
-    @just _sanity tree-hugger-cli
+    @just _sanity_all "tree-hugger tree-hugger-cli"
 
 # test library and CLI
 test *args="":
-    @just _test tree-hugger {{args}}
-    @just _test tree-hugger-cli {{args}}
+    @just _test_all "tree-hugger tree-hugger-cli" {{args}}
 
 # real-terminal (Level-2) tests for the `hug god-files` styled report.
 test-l2 *args="":

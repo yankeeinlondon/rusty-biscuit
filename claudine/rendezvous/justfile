@@ -42,9 +42,7 @@ build *args="":
 
 # Test all three rendezvous crates.
 test *args="":
-    @just _test {{ CORE }} {{ args }}
-    @just _test {{ DAEMON }} {{ args }}
-    @just _test {{ CLIENT }} {{ args }}
+    @just _test_all "{{ CORE }} {{ DAEMON }} {{ CLIENT }}" {{ args }}
 
 # Level-2 (real-terminal) tests are not applicable to rendezvous.
 test-l2 *args="":

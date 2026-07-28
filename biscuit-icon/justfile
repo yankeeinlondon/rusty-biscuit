@@ -31,13 +31,16 @@ build *args="":
     @just _build biscuit-icon "Biscuit Icon Library" {{ args }}
     @just _build biscuit-icon-cli "Biscuit Icon CLI" {{ args }}
 
+# `--features image` throughout: both crates declare `default = []`, and the
+# feature gates 2 tests in each. `install` and `cli` below already pass it
+# unconditionally ("Always include it"), and `test-l2` does too — so the
+# no-feature build is a configuration this area never ships, and only the L1
+# tier was still measuring it.
 sanity:
-    @just _sanity biscuit-icon
-    @just _sanity biscuit-icon-cli
+    @just _sanity_all "biscuit-icon --features image; biscuit-icon-cli --features image"
 
 test *args="":
-    @just _test biscuit-icon {{ args }}
-    @just _test biscuit-icon-cli {{ args }}
+    @just _test_all "biscuit-icon --features image; biscuit-icon-cli --features image" {{ args }}
 
 test-l2 *args="":
     @just _test_l2 biscuit-icon-cli --features image {{ args }}
@@ -56,12 +59,12 @@ lint:
     @just _lint biscuit-icon-cli
 
 coverage *args="":
-    @just _coverage biscuit-icon {{ args }}
-    @just _coverage biscuit-icon-cli {{ args }}
+    @just _coverage biscuit-icon --features image {{ args }}
+    @just _coverage biscuit-icon-cli --features image {{ args }}
 
 doctest *args="":
-    @just _doctest biscuit-icon {{ args }}
-    @just _doctest biscuit-icon-cli {{ args }}
+    @just _doctest biscuit-icon --features image {{ args }}
+    @just _doctest biscuit-icon-cli --features image {{ args }}
 
 bench *args="":
     @just _bench biscuit-icon {{ args }}

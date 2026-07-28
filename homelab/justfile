@@ -58,24 +58,22 @@ build *args="":
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity homelab
-    @just _sanity homelab-cli
-    @just _sanity homelab-server
-    @just _sanity unfolded-integration-helper
-    @just _sanity arcam-amp-integration
-    @just _sanity eversolo-integration
-    @just _sanity sony-receiver-integration
+    @just _sanity_all "homelab homelab-cli homelab-server unfolded-integration-helper arcam-amp-integration eversolo-integration sony-receiver-integration"
 
 # run tests for Homelab packages
+#
+# The frontend suite runs even when a Rust package failed, so one red crate
+# cannot hide a red frontend; the recipe returns the combined status.
 test *args="":
-    @just _test homelab {{ args }}
-    @just _test homelab-cli {{ args }}
-    @just _test homelab-server {{ args }}
-    @just _test unfolded-integration-helper {{ args }}
-    @just _test arcam-amp-integration {{ args }}
-    @just _test eversolo-integration {{ args }}
-    @just _test sony-receiver-integration {{ args }}
-    @just test-frontend
+    #!/usr/bin/env bash
+    set -uo pipefail
+    exit_code=0
+    just _test_all "homelab homelab-cli homelab-server unfolded-integration-helper arcam-amp-integration eversolo-integration sony-receiver-integration" {{ args }} || exit_code=$?
+    if (( exit_code == 130 )); then
+        exit 130
+    fi
+    just test-frontend || exit_code=1
+    exit "${exit_code}"
 
 # not applicable: homelab has no real-terminal (Level-2) tests
 test-l2:

@@ -13,9 +13,22 @@ import "./just/ai.just"
 import "./just/devops.just"
 import "./just/spec.just"
 
-# List of areas in this monorepo
-
-areas := "biscuit-hash biscuit-location biscuit-speaks biscuit-terminal biscuit-tui schematic biscuit-file unchained-ai playa tree-hugger darkmatter sniff model-citizen claudine research queue homelab biscuit-contract biscuit-icon renderable worktree"
+# Every package area in this monorepo that owns tests.
+#
+# This list is what `check-canonical` validates and what `_orchestrate`,
+# `changed-areas`, and `install` iterate. It used to be a verbatim copy of the
+# 21 `ci: true` records in `.github/ci/areas.json`, which made the canonical
+# recipe guard structurally blind to every excluded area — so the six areas
+# below could sit at `ci: false` with "blocked on the canonical recipe set" as
+# the recorded reason and nothing ever reported the gap. An area is listed here
+# because it has tests worth gating, NOT because it is already promoted to CI;
+# promotion remains a separate, deliberate decision in `areas.json`.
+#
+# Deliberately absent: `visualizer`, `reaper`, `agent-sandbox`, and `tabby`.
+# Those four carry zero or one test, so a canonical recipe set would gate
+# nothing (`agent-sandbox` and `tabby` have no justfile at all). Add each one
+# here at the same time it gains a suite worth running.
+areas := "biscuit-hash biscuit-location biscuit-speaks biscuit-terminal biscuit-tui schematic biscuit-file unchained-ai playa tree-hugger darkmatter sniff model-citizen claudine research queue homelab biscuit-contract biscuit-icon renderable worktree tools biscuit-test-harness biscuit-browser-harness messenger biscuit-visualized biscuit-clipboard"
 BOLD := '\033[1m'
 DIM := '\033[2m'
 ITALIC := '\033[3m'

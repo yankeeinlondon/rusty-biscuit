@@ -53,19 +53,11 @@ build *args="":
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity unchained-ai
-    @just _sanity unchained-ai-contract
-    @just _sanity unchained-ai-cli
-    @just _sanity unchained-ai-gen
-    @just _sanity model_id
+    @just _sanity_all "unchained-ai unchained-ai-contract unchained-ai-cli unchained-ai-gen model_id"
 
 # Test both library and CLI.
 test *args="":
-    @just _test unchained-ai {{ args }}
-    @just _test unchained-ai-contract {{ args }}
-    @just _test unchained-ai-cli {{ args }}
-    @just _test unchained-ai-gen {{ args }}
-    @just _test model_id {{ args }}
+    @just _test_all "unchained-ai unchained-ai-contract unchained-ai-cli unchained-ai-gen model_id" {{ args }}
 
 # not applicable: unchained-ai has no real-terminal (Level-2) tests
 test-l2:

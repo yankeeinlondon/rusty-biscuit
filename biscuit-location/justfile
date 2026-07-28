@@ -37,13 +37,11 @@ build *args="":
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity biscuit-location
-    @just _sanity biscuit-location-cli
+    @just _sanity_all "biscuit-location biscuit-location-cli"
 
 # Test both library and CLI.
 test *args="":
-    @just _test biscuit-location {{args}}
-    @just _test biscuit-location-cli {{args}}
+    @just _test_all "biscuit-location biscuit-location-cli" {{args}}
 
 # not applicable: biscuit-location has no real-terminal (Level-2) tests
 test-l2:
