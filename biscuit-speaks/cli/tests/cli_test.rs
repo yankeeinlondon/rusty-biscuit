@@ -1,5 +1,5 @@
 use std::io::Write;
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
 
 /// Invoke the pre-built `so-you-say` binary directly.
 ///
@@ -11,14 +11,40 @@ fn cli() -> Command {
     Command::new(env!("CARGO_BIN_EXE_so-you-say"))
 }
 
+/// Asserts the CLI accepted its arguments and synthesized successfully.
+///
+/// These cases reach real synthesis, so they need an installed TTS provider.
+/// macOS and Windows always have one (`say`, SAPI); Linux does not, which is
+/// why `biscuit-speaks` declares `espeak-ng` in `.github/ci/areas.json` and
+/// `just _ensure-native-libs` installs it for both `just init` and CI.
+///
+/// A missing provider is therefore a **broken environment, not a skip** — it
+/// means provisioning did not run. Failing here with that message is the point;
+/// tolerating it would hide the provisioning break and leave these tests
+/// passing without ever exercising a flag.
+fn assert_args_accepted(output: &Output, what: &str) {
+    if output.status.success() {
+        return;
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("NoProvidersAvailable"),
+        "{what}: no TTS provider installed, so nothing was exercised. \
+         Run `just init` (or `just _ensure-native-libs biscuit-speaks`) to \
+         install one."
+    );
+    panic!(
+        "{what}: exited {:?} — {stderr}",
+        output.status.code()
+    );
+}
+
 #[test]
 fn test_cli_with_arguments() {
     let output = cli().arg("test").output().expect("Failed to execute");
 
-    assert!(
-        output.status.success(),
-        "CLI should exit with code 0 when given arguments"
-    );
+    assert_args_accepted(&output, "CLI should exit with code 0 when given arguments");
 }
 
 #[test]
@@ -70,10 +96,7 @@ fn test_cli_stdin_input() {
     }
 
     let output = child.wait_with_output().expect("Failed to wait");
-    assert!(
-        output.status.success(),
-        "CLI should exit with code 0 when reading from stdin"
-    );
+    assert_args_accepted(&output, "CLI should exit with code 0 when reading from stdin");
 }
 
 #[test]
@@ -108,10 +131,7 @@ fn test_cli_multi_word_args() {
         .output()
         .expect("Failed to execute");
 
-    assert!(
-        output.status.success(),
-        "CLI should handle multiple arguments correctly"
-    );
+    assert_args_accepted(&output, "CLI should handle multiple arguments correctly");
 }
 
 #[test]
@@ -147,10 +167,7 @@ fn test_cli_unicode_args() {
         .output()
         .expect("Failed to execute");
 
-    assert!(
-        output.status.success(),
-        "CLI should handle unicode arguments correctly"
-    );
+    assert_args_accepted(&output, "CLI should handle unicode arguments correctly");
 }
 
 #[test]
@@ -160,10 +177,7 @@ fn test_cli_special_chars_args() {
         .output()
         .expect("Failed to execute");
 
-    assert!(
-        output.status.success(),
-        "CLI should handle special characters in arguments correctly"
-    );
+    assert_args_accepted(&output, "CLI should handle special characters in arguments correctly");
 }
 
 #[test]
@@ -173,10 +187,7 @@ fn test_cli_gender_flag_male() {
         .output()
         .expect("Failed to execute");
 
-    assert!(
-        output.status.success(),
-        "CLI should accept --gender male flag"
-    );
+    assert_args_accepted(&output, "CLI should accept --gender male flag");
 }
 
 #[test]
@@ -186,10 +197,7 @@ fn test_cli_gender_flag_female() {
         .output()
         .expect("Failed to execute");
 
-    assert!(
-        output.status.success(),
-        "CLI should accept --gender female flag"
-    );
+    assert_args_accepted(&output, "CLI should accept --gender female flag");
 }
 
 #[test]
@@ -199,7 +207,7 @@ fn test_cli_gender_flag_short() {
         .output()
         .expect("Failed to execute");
 
-    assert!(output.status.success(), "CLI should accept -g short flag");
+    assert_args_accepted(&output, "CLI should accept -g short flag");
 }
 
 #[test]
@@ -344,7 +352,7 @@ fn test_cli_loud_flag() {
         .output()
         .expect("Failed to execute");
 
-    assert!(output.status.success(), "CLI should accept --loud flag");
+    assert_args_accepted(&output, "CLI should accept --loud flag");
 }
 
 #[test]
@@ -354,7 +362,7 @@ fn test_cli_soft_flag() {
         .output()
         .expect("Failed to execute");
 
-    assert!(output.status.success(), "CLI should accept --soft flag");
+    assert_args_accepted(&output, "CLI should accept --soft flag");
 }
 
 #[test]
@@ -398,7 +406,7 @@ fn test_cli_fast_flag() {
         .output()
         .expect("Failed to execute");
 
-    assert!(output.status.success(), "CLI should accept --fast flag");
+    assert_args_accepted(&output, "CLI should accept --fast flag");
 }
 
 #[test]
@@ -408,7 +416,7 @@ fn test_cli_slow_flag() {
         .output()
         .expect("Failed to execute");
 
-    assert!(output.status.success(), "CLI should accept --slow flag");
+    assert_args_accepted(&output, "CLI should accept --slow flag");
 }
 
 #[test]

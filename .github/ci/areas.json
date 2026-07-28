@@ -10,14 +10,24 @@
   },
   {
     "area": "biscuit-speaks",
-    "check_args": "-p biscuit-speaks -p biscuit-speaks-cli"
+    "check_args": "-p biscuit-speaks -p biscuit-speaks-cli",
+    "native": {
+      "ubuntu-latest": [
+        "espeak-ng"
+      ]
+    }
   },
   {
     "area": "biscuit-terminal",
     "check_args": "-p biscuit-terminal -p biscuit-terminal-cli",
     "l2": true,
     "browser": true,
-    "backends": ["tmux", "wezterm", "kitty", "apple-terminal"]
+    "backends": [
+      "tmux",
+      "wezterm",
+      "kitty",
+      "apple-terminal"
+    ]
   },
   {
     "area": "biscuit-tui",
@@ -41,7 +51,10 @@
     "check_args": "-p playa -p playa-cli",
     "canary": true,
     "native": {
-      "ubuntu-latest": ["libasound2-dev", "libpulse-dev"]
+      "ubuntu-latest": [
+        "libasound2-dev",
+        "libpulse-dev"
+      ]
     }
   },
   {
@@ -51,16 +64,28 @@
   {
     "area": "darkmatter",
     "check_args": "-p darkmatter -p darkmatter-cli -p dmls",
-    "shards": ["1/4", "2/4", "3/4", "4/4"],
+    "shards": [
+      "1/4",
+      "2/4",
+      "3/4",
+      "4/4"
+    ],
     "soft_os": [],
     "l2": true,
     "browser": true,
-    "backends": ["tmux", "wezterm"]
+    "backends": [
+      "tmux",
+      "wezterm"
+    ]
   },
   {
     "area": "sniff",
     "check_args": "-p sniff -p sniff-cli --features sniff/remote",
-    "full_os": ["ubuntu-latest", "windows-latest", "macos-latest"]
+    "full_os": [
+      "ubuntu-latest",
+      "windows-latest",
+      "macos-latest"
+    ]
   },
   {
     "area": "model-citizen",
@@ -69,11 +94,19 @@
   {
     "area": "claudine",
     "check_args": "-p claudine-catalog-types -p claudine -p claudine-contract -p claudine-cli -p claudine-gen",
-    "shards": ["1/4", "2/4", "3/4", "4/4"],
+    "shards": [
+      "1/4",
+      "2/4",
+      "3/4",
+      "4/4"
+    ],
     "soft_os": [],
     "l2": true,
     "ai_provider_stubs": true,
-    "backends": ["tmux", "wezterm"]
+    "backends": [
+      "tmux",
+      "wezterm"
+    ]
   },
   {
     "area": "research",
@@ -95,7 +128,10 @@
     "area": "biscuit-icon",
     "check_args": "-p biscuit-icon -p biscuit-icon-cli",
     "l2": true,
-    "backends": ["tmux", "wezterm"]
+    "backends": [
+      "tmux",
+      "wezterm"
+    ]
   },
   {
     "area": "renderable",
@@ -105,6 +141,9 @@
     "area": "worktree",
     "check_args": "-p worktree -p worktree-cli",
     "l2": true,
-    "backends": ["tmux", "kitty"]
+    "backends": [
+      "tmux",
+      "kitty"
+    ]
   }
 ]
