@@ -1,0 +1,457 @@
+# CI baseline — known-red legs and the approved skip budget.
+#
+# Replaces `baseline-failures.txt`, which listed 31 GitHub *display names* and
+# had zero consumers. Entries here are keyed by stable identity
+# (`area`, `environment`, `tier`, `shard`) and are enforced by
+# `ci-rollup verdict`, which is the single required branch-protection check.
+#
+# Why TOML: this file is hand-edited policy. An owner adds an entry, explains
+# why, and dates its expiry — all of which want comments and readable
+# multi-line strings. The machine-generated rollup (`results.json`) goes the
+# other way, for the same reason: nothing hand-edits it.
+#
+# Rules enforced by `ci-rollup verdict`:
+#
+#   - a failure NOT listed here blocks
+#   - a listed entry that is scheduled and PASSES blocks, forcing cleanup
+#   - an entry outside the run's affected scope is ignored — never counted as
+#     a pass
+#   - a scheduled entry that is cancelled, missing, or emits no result stays
+#     blocking; it cannot be accepted as a known test failure
+#   - an entry past its `expiry` blocks
+#
+# Every entry needs `owner`, `reason`, and `source_run`. `expiry` is optional
+# but strongly encouraged.
+#
+# POLICY GAPS ARE NOT BASELINED HERE. A tier an area owns tests for that an
+# environment cannot host is declared in `areas.json` under `policy_gaps`, and
+# `ci-rollup verdict` applies the same shape of rule to it: an owned, unexpired
+# gap is accepted as a `note` and does not block, while an undeclared, unowned,
+# undated, expired, or now-executing one blocks. Do not add a `[[failure]]`
+# entry to paper over a POLICY GAP cell — it would not work anyway, because a
+# baselined entry is only accepted against a `FAIL`.
+#
+# ---------------------------------------------------------------------------
+# MIGRATION STATUS — READ BEFORE TRUSTING THIS FILE
+# ---------------------------------------------------------------------------
+# Every `failure` entry below was carried over mechanically from
+# `baseline-failures.txt` and is **unverified**. That file was measured to be
+# stale in both directions (see `fixes/2026-07-27-refactor/measurement-2026-07-27.md`):
+#
+#   - `biscuit-speaks / lint` and `biscuit-terminal / lint` both PASS in run
+#     30323254931 despite being listed. They are carried across anyway rather
+#     than silently dropped; the verdict will report `baseline-now-passing` and
+#     block, which is the intended way to retire them.
+#   - the old file listed 7 lint blockers; only 5 areas were actually blocked.
+#   - it recorded nothing about `sniff`'s per-shard behaviour, and `darkmatter`
+#     is not uniformly red across its 4 shards.
+#
+# Counts in the old file were per *job*, never per *test*. This file cannot be
+# trusted until it is re-measured against a full-scope run whose rollup was
+# produced by `ci-rollup rollup`.
+#
+# `tier` values: `L1`, `L2`, `browser` (JUnit-producing test tiers) and `lint`
+# (a producer-status job that emits no JUnit; its cell comes from the
+# `status-<area>-lint` artifact).
+
+schema_version = 1
+
+# ---------------------------------------------------------------------------
+# Windows L1 failures
+# ---------------------------------------------------------------------------
+
+[[failure]]
+area = "biscuit-file"
+environment = "windows-latest"
+tier = "L1"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt, unverified"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+[[failure]]
+area = "biscuit-icon"
+environment = "windows-latest"
+tier = "L1"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt, unverified"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+[[failure]]
+area = "biscuit-tui"
+environment = "windows-latest"
+tier = "L1"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt, unverified"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+[[failure]]
+area = "model-citizen"
+environment = "windows-latest"
+tier = "L1"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt, unverified"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+[[failure]]
+area = "playa"
+environment = "windows-latest"
+tier = "L1"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt, unverified"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+[[failure]]
+area = "queue"
+environment = "windows-latest"
+tier = "L1"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt, unverified"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+[[failure]]
+area = "renderable"
+environment = "windows-latest"
+tier = "L1"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt, unverified"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+[[failure]]
+area = "schematic"
+environment = "windows-latest"
+tier = "L1"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt, unverified"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+[[failure]]
+area = "sniff"
+environment = "windows-latest"
+tier = "L1"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt, unverified"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+[[failure]]
+area = "unchained-ai"
+environment = "windows-latest"
+tier = "L1"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt, unverified"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+# `darkmatter` shards independently; the old file listed all four Windows
+# shards, but the measurement shows a sharded area is not uniformly red.
+# Re-measure before assuming any of these four is still needed.
+
+[[failure]]
+area = "darkmatter"
+environment = "windows-latest"
+tier = "L1"
+shard = "1/4"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt, unverified"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+[[failure]]
+area = "darkmatter"
+environment = "windows-latest"
+tier = "L1"
+shard = "2/4"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt, unverified"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+[[failure]]
+area = "darkmatter"
+environment = "windows-latest"
+tier = "L1"
+shard = "3/4"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt, unverified"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+[[failure]]
+area = "darkmatter"
+environment = "windows-latest"
+tier = "L1"
+shard = "4/4"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt, unverified"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+# ---------------------------------------------------------------------------
+# Linux L1 failures
+# ---------------------------------------------------------------------------
+
+[[failure]]
+area = "darkmatter"
+environment = "ubuntu-latest"
+tier = "L1"
+shard = "1/4"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt, unverified"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+[[failure]]
+area = "darkmatter"
+environment = "ubuntu-latest"
+tier = "L1"
+shard = "2/4"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt, unverified"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+# Listed in the old file, but shard 3/4 PASSES in run 30323254931. Carried
+# across unverified; the verdict will report `baseline-now-passing` and block
+# until it is removed.
+[[failure]]
+area = "darkmatter"
+environment = "ubuntu-latest"
+tier = "L1"
+shard = "3/4"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt, unverified — measured PASSING in run 30323254931"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+[[failure]]
+area = "darkmatter"
+environment = "ubuntu-latest"
+tier = "L1"
+shard = "4/4"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt, unverified"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+[[failure]]
+area = "schematic"
+environment = "ubuntu-latest"
+tier = "L1"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt, unverified"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+[[failure]]
+area = "sniff"
+environment = "ubuntu-latest"
+tier = "L1"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt, unverified"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+[[failure]]
+area = "unchained-ai"
+environment = "ubuntu-latest"
+tier = "L1"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt, unverified"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+# ---------------------------------------------------------------------------
+# macOS L1 failures
+# ---------------------------------------------------------------------------
+
+[[failure]]
+area = "sniff"
+environment = "macos-latest"
+tier = "L1"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt, unverified. `sniff` is the only area with a macOS `full_os` override, so this is the only measured macOS evidence in the repo"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+# ---------------------------------------------------------------------------
+# Lint failures
+#
+# `lint` emits no JUnit. Its cell comes from the `status-<area>-lint` artifact
+# uploaded by the lint job, which is why it can be baselined at all.
+# ---------------------------------------------------------------------------
+
+# KNOWN STALE — lint PASSES for this area in run 30323254931. Carried across
+# rather than dropped, per the migration rule; expect `baseline-now-passing`.
+[[failure]]
+area = "biscuit-speaks"
+environment = "ubuntu-latest"
+tier = "lint"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt, unverified — measured PASSING in run 30323254931"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+# KNOWN STALE — lint PASSES for this area in run 30323254931.
+[[failure]]
+area = "biscuit-terminal"
+environment = "ubuntu-latest"
+tier = "lint"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt, unverified — measured PASSING in run 30323254931"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+# Measured as *cancelled*, not failed. A cancelled job emits no result, so the
+# verdict blocks on it rather than accepting it — deliberately.
+[[failure]]
+area = "claudine"
+environment = "ubuntu-latest"
+tier = "lint"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt, unverified — measured CANCELLED in run 30323254931"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+[[failure]]
+area = "homelab"
+environment = "ubuntu-latest"
+tier = "lint"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt, unverified"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+[[failure]]
+area = "research"
+environment = "ubuntu-latest"
+tier = "lint"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt, unverified"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+[[failure]]
+area = "tree-hugger"
+environment = "ubuntu-latest"
+tier = "lint"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt, unverified"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+[[failure]]
+area = "worktree"
+environment = "ubuntu-latest"
+tier = "lint"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt, unverified"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+# ---------------------------------------------------------------------------
+# Specialized workflows — NOT YET WIRED
+#
+# The old file carried two entries that are not areas at all:
+#
+#     Claudine generator and signals drift
+#     Coverage for affected packages
+#
+# Neither appears in `areas.json`, so neither feeds the rollup and neither can
+# be in an affected scope. They are recorded here so the migration is lossless
+# and so they are not forgotten, but until plan §3.5 makes those workflows emit
+# the same result schema, `ci-rollup verdict` reports them as
+# `baseline-out-of-scope` and IGNORES them — they neither block nor pass.
+#
+# Two further specialized workflows were measured red in run 30323254931 and
+# are equally outside the verdict:
+#
+#     messenger-desktop / messenger / desktop / WSL2 ubuntu   failure
+#     rendezvous / rendezvous / native (windows-latest)       failure
+# ---------------------------------------------------------------------------
+
+[[failure]]
+area = "claudine-gen-drift"
+environment = "ubuntu-latest"
+tier = "lint"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt (`Claudine generator and signals drift`), unverified. Not an areas.json area — ignored by the verdict until plan §3.5 wires the specialized workflow into the same result schema"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+[[failure]]
+area = "coverage"
+environment = "ubuntu-latest"
+tier = "lint"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "migrated from baseline-failures.txt (`Coverage for affected packages`), unverified. Not an areas.json area — ignored by the verdict until plan §3.5 wires it in"
+source_run = "30323254931"
+expiry = "2026-10-31"
+
+# ---------------------------------------------------------------------------
+# Approved skip budget
+#
+# Keyed by area, environment, tier, and backend. `tests` carries EXACT test
+# identities (`<testsuite>::<testcase>`), not a count: comparing counts cannot
+# see a one-for-one swap where an approved skip is resolved and a different
+# test starts skipping in the same run.
+#
+# A skip identity comes from two places:
+#   1. an explicit `<skipped/>` in the JUnit report, and
+#   2. a test present in that environment's expected-test manifest that
+#      produced no result at all.
+#
+# (2) requires `--expected-manifest`, generated ON the target environment. No
+# producer for it is wired yet (see `fixes/2026-07-27-refactor/ci-verdict-job.md`),
+# so today only (1) is observed and the verdict records
+# `skip-evidence-degraded` for every cell with a budget entry.
+#
+# EMPTY ON PURPOSE. `baseline-failures.txt` recorded no skips, and inventing
+# entries from an un-measured guess would defeat the mechanism. Populate it
+# from the first full-scope run whose rollup was produced by `ci-rollup`.
+#
+# Shape:
+#
+#   [[skip]]
+#   area = "biscuit-terminal"
+#   environment = "ubuntu-latest"
+#   tier = "L2"
+#   backend = "wezterm"
+#   tests = [
+#     "biscuit-terminal-cli::level2_renders_table_in_wezterm",
+#   ]
+#   owner = "@yankeeinlondon"
+#   reason = "WezTerm needs WEZTERM_UNIX_SOCKET, i.e. a live GUI session; a headless runner cannot host it"
+#   source_run = "30323254931"
+#   expiry = "2026-10-31"
+# ---------------------------------------------------------------------------
