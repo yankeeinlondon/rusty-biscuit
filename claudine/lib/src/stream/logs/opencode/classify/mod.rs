@@ -13,7 +13,9 @@ use std::sync::LazyLock;
 use chrono::{DateTime, Utc};
 use regex::Regex;
 
-use crate::stream::logs::opencode::events::{AssetType, LogClassification, OpenCodeLogRecord};
+use crate::stream::logs::opencode::events::{
+    AssetType, LogClassification, LogLevel, OpenCodeLogRecord,
+};
 use crate::stream::summary::RateLimitInfo;
 
 use asset::classify_malformed_asset;
@@ -53,6 +55,28 @@ pub fn classify(record: &OpenCodeLogRecord) -> LogClassification {
     if looks_like_uncaught_error(record) {
         return LogClassification::UncaughtError {
             raw_text: record.raw.clone(),
+        };
+    }
+
+    // Backstop: an ERROR record carrying an error payload must never vanish.
+    // OpenCode renames its failure records between releases (`stream error` in
+    // 1.17.8, `failed` in 1.18.4), and every rename so far fell through to
+    // `Unclassified` and was dropped — leaving the operator with only the
+    // generic `UnknownError` that the stdout NDJSON carries. Surfacing an
+    // unrecognized payload beats losing a recognized one, so this runs last:
+    // every dedicated classifier above still wins, including the terminal
+    // usage-cap and uncaught-error paths.
+    if matches!(record.level, LogLevel::Error)
+        && let Some(error) = error_context(record)
+        // `error=Aborted` is OpenCode's Ctrl+C / cancellation sentinel, not a
+        // failure. It fires on every interrupt and carries no diagnostic value.
+        && error != "Aborted"
+        && let headline = error_headline(&error)
+        && !headline.is_empty()
+    {
+        return LogClassification::UnclassifiedError {
+            error: headline,
+            reference: record.tags.get("ref").cloned(),
         };
     }
 
@@ -127,6 +151,32 @@ pub(super) fn error_context(record: &OpenCodeLogRecord) -> Option<String> {
         trimmed
     };
     Some(value.to_string())
+}
+
+/// Reduce a backstop error payload to the one sentence an operator needs.
+///
+/// The body parser does not split `cause=` out of a quoted `error=` value, so
+/// these records arrive as the headline followed by an escaped JS stack trace
+/// and a `cause=` restatement of the same message — hundreds of frames burying
+/// the sentence that identifies the failure. Cut at whichever marker comes
+/// first, then apply the same char-boundary-safe cap the JSON summarizer uses.
+fn error_headline(error: &str) -> String {
+    let error = error.trim();
+    let error = error.strip_prefix('"').unwrap_or(error);
+    // `\n` here is the two-character escape OpenCode writes into the log line,
+    // not a real newline — the stack always starts at the first one.
+    let end = [error.find("\\n"), error.find("\" cause=")]
+        .into_iter()
+        .flatten()
+        .min()
+        .unwrap_or(error.len());
+    let headline = error[..end].trim().trim_end_matches('"').trim();
+
+    if headline.chars().count() > 300 {
+        let truncated: String = headline.chars().take(297).collect();
+        return format!("{truncated}...");
+    }
+    headline.to_string()
 }
 
 pub(super) fn strip_ansi(line: &str) -> String {

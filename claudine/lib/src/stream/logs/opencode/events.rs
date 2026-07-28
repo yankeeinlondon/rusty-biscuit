@@ -159,6 +159,21 @@ pub enum LogClassification {
         /// every other level to [`crate::stream::semantic::SemanticEvent::Info`].
         level: LogLevel,
     },
+    /// An `ERROR`-level record carrying an error payload that no dedicated
+    /// classifier claimed.
+    ///
+    /// OpenCode renames its failure records between releases (`stream error`
+    /// in 1.17.8, `failed` in 1.18.4) and its stdout NDJSON reports many of
+    /// them as a bare `UnknownError`. Without this backstop each rename
+    /// silently degraded to [`Self::Unclassified`] and the operator lost the
+    /// only copy of the actionable text.
+    UnclassifiedError {
+        /// Text from the record's `error` / `error.error` / `err` tag.
+        error: String,
+        /// OpenCode's support reference (`ref=`), when present. Correlates the
+        /// record with the `data.ref` on the NDJSON error event.
+        reference: Option<String>,
+    },
     Unclassified,
 }
 
@@ -339,6 +354,13 @@ impl LogClassification {
                             LogLevel::Error => "error",
                         })),
                     ),
+                ],
+            ),
+            Self::UnclassifiedError { error, reference } => payload(
+                "UnclassifiedError",
+                vec![
+                    ("error", Some(json!(error))),
+                    ("reference", reference.as_ref().map(|value| json!(value))),
                 ],
             ),
             Self::Unclassified => payload("Unclassified", Vec::new()),

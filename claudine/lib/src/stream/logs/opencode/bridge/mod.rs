@@ -646,6 +646,9 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
             LogClassification::Snapshot { message, level } => {
                 self.on_snapshot(&record, message, level)
             }
+            LogClassification::UnclassifiedError { error, reference } => {
+                self.on_unclassified_error(&record, error, reference)
+            }
             // An Unclassified line still parsed as a well-formed OpenCode
             // structured log record (level + timestamp + tags + message).
             // We have already counted it and refreshed the byte heartbeat;
@@ -1074,6 +1077,36 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         let rendered_message = format_snapshot_message(&message, &tag_summary);
         self.sink.on_semantic_event(SemanticEvent::Warning {
             message: rendered_message,
+            extra: Value::Object(extra_map),
+        });
+        StderrIngestOutcome::Consumed
+    }
+
+    /// Surface an unrecognized `ERROR`-level record's payload.
+    ///
+    /// Deliberately non-terminal: the shape is unknown, so whether the run can
+    /// continue is unknown too. When it cannot, the stdout NDJSON `type=error`
+    /// event still fires the terminal error — this only supplies the "why"
+    /// that event lacks.
+    fn on_unclassified_error(
+        &mut self,
+        record: &OpenCodeLogRecord,
+        error: String,
+        reference: Option<String>,
+    ) -> StderrIngestOutcome {
+        let mut extra_map = base_extra(record, "unclassified_error");
+        extra_map.insert("error".into(), Value::String(error.clone()));
+        if let Some(reference) = &reference {
+            extra_map.insert("ref".into(), Value::String(reference.clone()));
+        }
+
+        let rendered = match &reference {
+            Some(reference) => format!("{error} (ref {reference})"),
+            None => error,
+        };
+
+        self.sink.on_semantic_event(SemanticEvent::Warning {
+            message: rendered,
             extra: Value::Object(extra_map),
         });
         StderrIngestOutcome::Consumed
