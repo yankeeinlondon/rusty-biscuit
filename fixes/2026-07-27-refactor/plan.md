@@ -3,7 +3,7 @@ title: Cross-platform CI refactor — every supported environment runs every app
 status: draft
 created: 2026-07-27
 supersedes:
-  - features/2026-06-07-matrix-testing (WSL1 premise)
+  - features/2026-06-07-matrix-testing (deleted 2026-07-27; last at 7d4125fa0)
 builds_on:
   - features/2026-07-24-devops
 source_code:
@@ -68,9 +68,11 @@ under constraints that no longer hold:
 - **`features/2026-07-24-devops/ci-failure-inventory.md`** — 34 failing jobs
   reduced to ~14 root causes. Phase 4 below is the burn-down of that inventory,
   which the devops feature declared an explicit non-goal.
-- **`features/2026-06-07-matrix-testing/`** — the original multi-OS spec,
-  superseded by this plan and expected to be deleted. Its salvageable content is
-  carried below so nothing is lost with it.
+- **`features/2026-06-07-matrix-testing/`** — the original multi-OS spec.
+  Superseded by this plan and **deleted 2026-07-27**; its last living copy is at
+  commit `7d4125fa0` (`git show 7d4125fa0:features/2026-06-07-matrix-testing/spec.md`).
+  Its salvageable content is carried below, so this section — not git history —
+  is the reference.
 
 ### Salvaged from the superseded matrix-testing spec
 
