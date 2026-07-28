@@ -14,7 +14,7 @@ use serial_test::serial;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 mod common;
 use common::{
@@ -163,7 +163,7 @@ fn assert_malformed_fence_diagnostic(frame: &CapturedFrame, subcommand: &str) {
 #[test]
 #[serial(level2_terminal)]
 fn level2_malformed_frontmatter_renders_highlighted_diagnostic_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
 

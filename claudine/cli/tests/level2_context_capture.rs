@@ -67,7 +67,7 @@ use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serial_test::serial;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
-use test_toolkit::{require_level, Level};
+use test_toolkit::{Backend, Level, require_level};
 
 mod common;
 use common::clear_no_color;
@@ -374,7 +374,7 @@ fn has_wrapped_continuation(frame: &CapturedFrame) -> bool {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_default_styled_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&[], 120, 320);
 
     assert_box_glyphs_and_left_margin(&frame);
@@ -414,7 +414,7 @@ fn level2_context_default_styled_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_default_narrow_preserves_type_and_wraps_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&[], 78, 400);
 
     for header in ["Property", "Type", "Description"] {
@@ -446,7 +446,7 @@ fn level2_context_default_narrow_preserves_type_and_wraps_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_default_at_140_fills_cap_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&[], 140, 320);
 
     assert_box_glyphs_and_left_margin(&frame);
@@ -464,7 +464,7 @@ fn level2_context_default_at_140_fills_cap_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_default_caps_at_140_in_wide_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&[], 160, 320);
 
     assert_box_glyphs_and_left_margin(&frame);
@@ -487,7 +487,7 @@ fn level2_context_default_caps_at_140_in_wide_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_values_narrow_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&["--values"], 120, 400);
 
     assert_box_glyphs_and_left_margin(&frame);
@@ -520,7 +520,7 @@ fn level2_context_values_narrow_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_values_at_140_fills_cap_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&["--values"], 140, 400);
 
     assert_box_glyphs_and_left_margin(&frame);
@@ -543,7 +543,7 @@ fn level2_context_values_at_140_fills_cap_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_values_caps_at_140_in_wide_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&["--values"], 160, 400);
 
     assert_box_glyphs_and_left_margin(&frame);
@@ -572,7 +572,7 @@ fn level2_context_values_caps_at_140_in_wide_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_expressions_narrow_inline_code_and_list_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&["--expressions"], 100, 700);
     let report_plain = context_report_plain(&frame);
 
@@ -632,7 +632,7 @@ fn level2_context_expressions_narrow_inline_code_and_list_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_expressions_at_140_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&["--expressions"], 140, 320);
 
     assert_box_glyphs_and_left_margin(&frame);
@@ -653,7 +653,7 @@ fn level2_context_expressions_at_140_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_expressions_caps_at_140_in_wide_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&["--expressions"], 160, 320);
 
     assert!(
@@ -679,7 +679,7 @@ fn level2_context_expressions_caps_at_140_in_wide_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_expressions_list_reserves_right_margin_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     // At 65 columns the `--expressions` report wraps to ~772 lines. The only
     // `- ` list is the modes consequence list, the 7th of 9 sections; the
     // Functions catalog below it must not push that list above the captured
@@ -700,7 +700,7 @@ fn level2_context_expressions_list_reserves_right_margin_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_side_effects_narrow_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&["--side-effects"], 128, 200);
 
     assert_box_glyphs_and_left_margin(&frame);
@@ -728,7 +728,7 @@ fn level2_context_side_effects_narrow_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_side_effects_at_140_fills_cap_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&["--side-effects"], 140, 200);
 
     assert_box_glyphs_and_left_margin(&frame);
@@ -747,7 +747,7 @@ fn level2_context_side_effects_at_140_fills_cap_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_side_effects_caps_at_140_in_wide_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&["--side-effects"], 160, 200);
 
     assert_box_glyphs_and_left_margin(&frame);
@@ -764,7 +764,7 @@ fn level2_context_side_effects_caps_at_140_in_wide_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_side_effects_list_reserves_right_margin_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&["--side-effects"], 60, 200);
 
     assert_list_lines_reserve_right_margin(&frame, 60);
@@ -815,7 +815,7 @@ fn assert_headers_present(frame: &CapturedFrame, headers: &[&str]) {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_default_preserves_columns_at_min_width_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&[], MIN_SUPPORTED_WIDTH, 400);
 
     assert_box_glyphs_and_left_margin(&frame);
@@ -847,7 +847,7 @@ fn level2_context_default_preserves_columns_at_min_width_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_values_preserves_columns_at_min_width_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&["--values"], MIN_SUPPORTED_WIDTH, 400);
 
     assert_box_glyphs_and_left_margin(&frame);
@@ -873,7 +873,7 @@ fn level2_context_values_preserves_columns_at_min_width_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_expressions_constrained_50_wraps_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&["--expressions"], 50, 400);
 
     assert_box_glyphs_and_left_margin(&frame);
@@ -897,7 +897,7 @@ fn level2_context_expressions_constrained_50_wraps_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_side_effects_preserves_columns_at_min_width_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&["--side-effects"], MIN_SUPPORTED_WIDTH, 200);
 
     assert_box_glyphs_and_left_margin(&frame);

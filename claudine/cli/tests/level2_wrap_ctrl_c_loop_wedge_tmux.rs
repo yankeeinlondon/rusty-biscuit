@@ -51,7 +51,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 /// A fake `opencode` provider for a looping compose: each agent run emits one
 /// init event, **arms** the wedge by creating `armed`, then exits `0` so the
@@ -249,7 +249,7 @@ fn double_ctrl_c_force_exits(deadline: Duration) -> (bool, String) {
 #[test]
 #[serial(level2_tmux_ctrlc)]
 fn level2_double_ctrl_c_force_exits_loop_wedged_between_iterations() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let (returned, plain) = double_ctrl_c_force_exits(Duration::from_secs(15));
     assert!(

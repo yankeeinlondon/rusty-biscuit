@@ -46,7 +46,7 @@ use serial_test::serial;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 mod common;
 use common::{TestWorkspace, augmented_path, clear_no_color, write, write_executable};
@@ -497,7 +497,7 @@ fn unset_and_prove_color_overrides_absent<H: TerminalHarness>(harness: &mut H) {
 #[test]
 #[serial(level2_terminal)]
 fn level2_initialize_proxy_renders_status_block_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let staged = stage("claudine-l2-init-proxy", INITIALIZE_PROXY_DOC, 0);
@@ -552,7 +552,7 @@ fn level2_initialize_proxy_renders_status_block_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_initialize_proxy_block_carries_red_sgr_and_osc8_link_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let staged = stage("claudine-l2-init-proxy-styled", INITIALIZE_PROXY_DOC, 0);
@@ -579,7 +579,7 @@ fn level2_initialize_proxy_block_carries_red_sgr_and_osc8_link_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_initialize_proxy_block_is_plain_under_no_color_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let staged = stage("claudine-l2-init-proxy-plain", INITIALIZE_PROXY_DOC, 0);
@@ -624,7 +624,7 @@ fn level2_initialize_proxy_block_is_plain_under_no_color_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_initialize_proxy_block_auto_detects_tty_color_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     unset_and_prove_color_overrides_absent(&mut harness);
@@ -673,11 +673,7 @@ fn level2_initialize_proxy_block_auto_detects_tty_color_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_initialize_proxy_block_auto_detects_osc8_in_wezterm() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut harness = WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm");
     unset_and_prove_color_overrides_absent(&mut harness);
@@ -722,7 +718,7 @@ fn level2_initialize_proxy_block_auto_detects_osc8_in_wezterm() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_terminal_proxy_renders_status_block_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let staged = stage("claudine-l2-term-proxy", TERMINAL_PROXY_DOC, 3);
@@ -789,7 +785,7 @@ fn level2_terminal_proxy_renders_status_block_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_proxy_routes_share_identity_across_routes_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
 
@@ -913,7 +909,7 @@ fn level2_proxy_routes_share_identity_across_routes_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_composition_source_lookup_renders_status_block_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let mut staged = stage("claudine-l2-source-lookup", TRIVIAL_DOC, 0);
@@ -969,7 +965,7 @@ fn level2_composition_source_lookup_renders_status_block_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_schema_failure_renders_status_block_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let staged = stage("claudine-l2-schema", SCHEMA_FAILURE_DOC, 0);
@@ -1016,7 +1012,7 @@ fn level2_schema_failure_renders_status_block_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_transclusion_failure_renders_darkmatter_block_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let staged = stage("claudine-l2-transclusion", TRANSCLUSION_DOC, 0);
@@ -1060,7 +1056,7 @@ fn level2_transclusion_failure_renders_darkmatter_block_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_preflight_shell_denial_renders_status_block_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let staged = stage("claudine-l2-preflight", PREFLIGHT_SHELL_DOC, 0);
@@ -1113,7 +1109,7 @@ fn level2_preflight_shell_denial_renders_status_block_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_unstructured_failure_still_uses_the_generic_fallback_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let staged = stage("claudine-l2-unstructured", TRIVIAL_DOC, 0);

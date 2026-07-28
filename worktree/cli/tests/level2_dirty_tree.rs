@@ -10,7 +10,7 @@ use biscuit_test_harness::TerminalHarness;
 use serial_test::serial;
 use std::fs;
 use std::process::Command;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 /// The tree should contain these box-drawing characters.
 const TREE_NEEDLE: &str = "src";
@@ -56,7 +56,7 @@ fn run_git(repo: &std::path::Path, args: &[&str]) {
 #[test]
 #[serial(level2_terminal)]
 fn level2_dirty_tree_renders_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
@@ -100,7 +100,7 @@ fn level2_dirty_tree_renders_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_remove_dirty_worktree_shows_tree_and_prompt() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let repo = temp_repo_with_dirty_worktree();
     let repo_path = repo.path().display().to_string();

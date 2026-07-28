@@ -17,13 +17,20 @@ sysinfo = { version = "0.38", default-features = false, features = ["system"], o
 [features]
 # Enables the cross-platform `leak-sweep` post-run orphan detector binary.
 leak-sweep = ["dep:clap", "dep:sysinfo"]
+# Enables the `backend-proof` post-run L2 execution-evidence checker binary.
+backend-proof = ["dep:clap"]
 
 [[bin]]
 name = "leak-sweep"
 required-features = ["leak-sweep"]
 
+[[bin]]
+name = "backend-proof"
+required-features = ["backend-proof"]
+
 [dev-dependencies]
 serial_test = "3"
+tempfile = "3"
 
 # Opt-out of benchmarking: this crate has no algorithmic hot paths.
 [package.metadata.benchmarks]

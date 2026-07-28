@@ -51,7 +51,7 @@ use std::time::Duration;
 
 use biscuit_test_harness::wezterm::WezTermHarness;
 use biscuit_test_harness::{TerminalHarness, strip_ansi};
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 /// Foreground this test writes into the pane before probing, and the exact value
 /// the library must report back.
@@ -275,7 +275,7 @@ fn shared_pane() -> Option<WezTermHarness> {
 #[test]
 #[serial_test::serial(level2_terminal)]
 fn level2_wezterm_answers_osc10_once_across_repeated_terminal_construction() {
-    require_level!(Level::L2, WezTermHarness::available(), "WezTerm");
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
     let Some(mut harness) = shared_pane() else {
         eprintln!("skipping: requires WezTerm (shared pane unavailable)");
         return;
@@ -350,7 +350,7 @@ fn level2_wezterm_answers_osc10_once_across_repeated_terminal_construction() {
 #[test]
 #[serial_test::serial(level2_terminal)]
 fn level2_wezterm_repeated_terminal_construction_latency() {
-    require_level!(Level::L2, WezTermHarness::available(), "WezTerm");
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
     let Some(mut harness) = shared_pane() else {
         eprintln!("skipping: requires WezTerm (shared pane unavailable)");
         return;

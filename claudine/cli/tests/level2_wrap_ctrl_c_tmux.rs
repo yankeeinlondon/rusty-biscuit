@@ -46,7 +46,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 /// A fake `opencode` provider that emits one init event then runs forever.
 ///
@@ -206,7 +206,7 @@ fn ctrl_c_terminates(extra_env: &[(&str, &str)], deadline: Duration) -> (bool, S
 #[test]
 #[serial(level2_tmux_ctrlc)]
 fn level2_ctrl_c_terminates_wrapped_child() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let (returned, plain) = ctrl_c_terminates(&[], Duration::from_secs(15));
     assert!(
@@ -225,7 +225,7 @@ fn level2_ctrl_c_terminates_wrapped_child() {
 #[test]
 #[serial(level2_tmux_ctrlc)]
 fn level2_ctrl_c_terminates_wrapped_child_with_timeout_configured() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let (returned, plain) = ctrl_c_terminates(
         &[

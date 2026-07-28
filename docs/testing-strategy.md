@@ -19,7 +19,7 @@ For the short, agent-facing summary see `.claude/skills/rust-testing/SKILL.md`
 | Level | Identifier | What it covers | Default behavior |
 | ----- | ---------- | -------------- | ---------------- |
 | L1    | (default)  | Fast in-process unit and integration tests. No external resources. | Always runs. |
-| L2    | `level2_`  | Real terminal / PTY / local harness tests. | Skips cleanly when harness is unavailable; hard-fails when `BISCUIT_TEST_LEVEL_REQUIRED=2`. |
+| L2    | `level2_`  | Real terminal / PTY / local harness tests. | Skips cleanly when harness is unavailable; hard-fails for the backends named in `BISCUIT_TEST_REQUIRED_BACKENDS`, or for every backend when `BISCUIT_TEST_LEVEL_REQUIRED=2`. |
 | L3    | `level3_`  | OS keyboard or mouse injection (cliclick / WezTerm window focus). | Always skipped unless `RUN_LEVEL3=1`. |
 | Browser | `browser_` | Headless browser tests via `biscuit-browser-harness`. | Skips cleanly when Chrome is absent; hard-fails when `BISCUIT_BROWSER_REQUIRED=1`. |
 | Real  | `real_`    | Tests against real devices, networks, or provider APIs. | Always `--ignored` unless explicitly opted-in via the relevant env vars. |
@@ -123,9 +123,24 @@ Doctests are excluded; they run via `doctest`.
 
 ### `test-l2`, `test-l3`, `test-browser`
 These select tests via stable name prefixes (`level2_`, `level3_`,
-`browser_`). The runtime `require_level!(Level::L2, harness_check)` macro from
-`test-toolkit` decides whether a selected test should skip cleanly or panic
-based on `BISCUIT_TEST_LEVEL_REQUIRED` and `BISCUIT_BROWSER_REQUIRED`.
+`browser_`). The runtime `require_level!(Level::L2, harness_check, Backend::Tmux)`
+macro from `test-toolkit` decides whether a selected test should skip cleanly or
+panic based on `BISCUIT_TEST_REQUIRED_BACKENDS`, `BISCUIT_TEST_LEVEL_REQUIRED`,
+and `BISCUIT_BROWSER_REQUIRED`. The third argument may instead be a plain string
+label (`"PTY (/dev/ptmx)"`, `"WezTerm + cliclick"`) for composite or
+non-backend requirements that no single backend identity describes.
+
+`BISCUIT_TEST_REQUIRED_BACKENDS` also turns on execution recording: each gate
+appends a `{backend, test, decision}` line to
+`$BISCUIT_JUNIT_STAGE_DIR/backend-executions.jsonl`, and `test-l2` brackets the
+whole tier with `backend-proof reset` before the run and `backend-proof verify`
+after it. This closes the availability-is-not-execution gap — an installed
+`tmux` plus zero tmux tests is not evidence, and `verify` fails the tier when a
+required backend produced no executed test. The bracket is per tier, not per
+package: `_test_l2_all` claims ownership for multi-package areas via
+`BISCUIT_BACKEND_PROOF_OWNER` so a per-package `reset` cannot erase earlier
+packages' evidence. Nothing runs and nothing is written when the variable is
+unset.
 
 `test-l2` additionally pre-spawns one shared terminal pane per backend
 (WezTerm, kitty, tmux, Apple Terminal) via `biscuit-harness-broker`
@@ -164,9 +179,11 @@ or any PR-blocking gate.
 | Variable | Purpose |
 | -------- | ------- |
 | `BISCUIT_TEST_LEVEL=1\|2\|3` | Runtime gate; tests above this level skip cleanly. |
-| `BISCUIT_TEST_LEVEL_REQUIRED=2` | CI use; missing L2 harness panics instead of skipping. |
+| `BISCUIT_TEST_LEVEL_REQUIRED=2` | CI use; missing L2 harness panics instead of skipping. All-or-nothing — prefer `BISCUIT_TEST_REQUIRED_BACKENDS`. |
+| `BISCUIT_TEST_REQUIRED_BACKENDS` | CI use; comma-separated `tmux,wezterm,kitty,apple-terminal`. The named backends panic when unavailable while the rest still skip. Also enables execution recording for `backend-proof verify`. |
 | `BISCUIT_BROWSER_REQUIRED=1` | CI use; missing Chrome panics instead of skipping. |
 | `RUN_LEVEL3=1` | Explicit opt-in for OS-keyboard-injection tests. |
+| `BISCUIT_JUNIT_STAGE_DIR` | Staging root for JUnit reports and `backend-executions.jsonl`. Defaults to `target/nextest/ci-reports`. |
 
 Per-package legacy variables such as `DARKMATTER_LEVEL2_REQUIRED` are
 deprecated and removed as of Phase 6. Use the unified `BISCUIT_*` contract
@@ -183,11 +200,12 @@ jobs for unrelated areas.
 
 A bootstrap `preflight` job runs first (3 OSes for global CI/tooling changes, a
 scoped OS set for package-local changes) and gates the area fan-out via
-`needs: [scope, preflight]`. Within each area, `_area-ci.yml` jobs are staged:
-`lint` (build + clippy) → `test` (L1 shards) → optional `l2`/`browser`. A
-deterministic build/lint failure therefore skips the test tiers instead of
-re-reporting the same error, while independent areas still run in parallel
-(`fail-fast: false`).
+`needs: [scope, preflight]`. Within each area, `check` (macOS compile), `lint`
+(build + clippy), and `test` (L1 shards) are **independent** gates; only the
+expensive `l2`/`browser` tiers stage behind `test`. Lint deliberately does not
+gate L1 — one clippy hint used to delete every L1 leg's evidence for the whole
+area, which is how Claudine's Windows tests never ran. Independent areas run in
+parallel (`fail-fast: false`).
 
 ### Toolchain
 
@@ -241,21 +259,21 @@ the latest stable toolchain (`RUSTUP_TOOLCHAIN=stable`) and runs
   cache backend on Linux and macOS **only**. `kunobi-ninja/kache-action@v1`
   rejects `win32-x64` (`Unsupported platform`), so Windows CI builds without
   kache.
-- **Soft legs report but do not gate**: `_area-ci.yml`'s `soft-os` input
-  (default `["windows-latest"]`) marks a test leg `continue-on-error`. This is
-  how a platform is lit up before its latent cross-platform backlog is burned
-  down. Read Windows *test* results accordingly — they are evidence, not a gate,
-  until the leg is deliberately promoted to a required check.
-- **Integration candidates use required native legs**: a caller that supplies
-  `soft-os: '[]'` makes every configured L1 host blocking. Biscuit File,
-  Darkmatter, and Claudine use this strict mode. Darkmatter also enables the
-  reusable Linux L2 and browser jobs; Claudine enables Linux L2 and installs
-  portable inert provider stubs for discovery-dependent tests.
-- **Warnings and lint are gates**: the reusable workflow exports
-  `RUSTFLAGS=-D warnings` for native compilation and tests, and its Linux lint
-  job runs the package area's `just lint` recipe. Area-specific documentation,
-  generated-artifact, and typed-error guards wired into that recipe therefore
-  remain blocking CI checks.
+- **Every configured L1 leg gates**: there is no `continue-on-error` on any area
+  gate. The retired `soft-os` input did not merely make a leg non-blocking — it
+  removed the leg from the run's verdict, so 14 permanently red Windows areas
+  read as a normal run. A known failure is recorded in the results baseline
+  instead, which keeps it counted and visible.
+- **Optional tiers**: Darkmatter enables the reusable Linux L2 and browser jobs;
+  Claudine enables Linux L2 and installs portable inert provider stubs for
+  discovery-dependent tests.
+- **Warnings and lint are gates**: `RUSTFLAGS=-D warnings` is scoped to the
+  `check` and `lint` jobs — the two whose job is to reject warnings. It is
+  deliberately **not** set for the test tiers, where it made a plain rustc
+  warning fail the build so no test ran. The lint job's real authority is the
+  recipe: `_lint` passes `-D warnings` to clippy directly, so the same bar
+  applies locally. Area-specific documentation, generated-artifact, and
+  typed-error guards wired into `just lint` remain blocking CI checks.
 - **Coverage uses the same dependency scope on PRs**: one `cargo llvm-cov`
   invocation selects every affected workspace package. A nightly/manual
   workflow makes one workspace-wide pass; coverage is not repeated after the

@@ -42,7 +42,7 @@ use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serial_test::serial;
 use std::fs;
 use std::time::{Duration, Instant};
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 mod common;
 use common::{TestWorkspace, augmented_path, clear_no_color, write_executable};
@@ -214,7 +214,7 @@ fn capture_prompt_in_mode(harness: &mut TmuxHarness, staged: &Staged, dry_run: b
 #[test]
 #[serial(level2_terminal)]
 fn level2_dry_run_approval_prompt_matches_normal_mode_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let staged = stage();

@@ -26,12 +26,12 @@ use assert_cmd::cargo::cargo_bin;
 use biscuit_test_harness::TerminalHarness;
 use biscuit_test_harness::tmux::TmuxHarness;
 use serial_test::serial;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 #[test]
 #[serial(level2_terminal)]
 fn level2_git_status_headers_and_links_render_styled_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
 

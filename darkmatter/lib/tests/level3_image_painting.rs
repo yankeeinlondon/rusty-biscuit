@@ -43,7 +43,7 @@ use darkmatter::markdown::render_tree::{TerminalCodeRenderer, fold_markdown_to_d
 use renderable::tree::{GraphicsMode, RenderStrictness, SourceDescriptor};
 use serial_test::serial;
 use tempfile::tempdir;
-use test_toolkit::{require_level, Level};
+use test_toolkit::{Backend, Level, require_level};
 
 /// Magenta (`#ff00ff`) does not occur in terminal chrome, text, or theme
 /// backgrounds — its presence proves the image was decoded and painted, not
@@ -53,11 +53,7 @@ const MAGENTA: [u8; 3] = [255, 0, 255];
 #[test]
 #[serial(level3_terminal)]
 fn level3_rich_image_node_paints_distinctive_pixels() {
-    require_level!(
-        Level::L3,
-        WezTermHarness::available(),
-        "WezTerm (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L3, WezTermHarness::available(), Backend::WezTerm);
 
     let dir = tempdir().unwrap();
     let png_path = dir.path().join("probe.png");

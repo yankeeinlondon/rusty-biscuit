@@ -16,7 +16,7 @@ use std::fs;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
-use test_toolkit::{Level, LevelDecision, evaluate_level};
+use test_toolkit::{Backend, Level, LevelDecision, decide_harness};
 
 static SHARED_HARNESS: SharedHarness<WezTermHarness> = SharedHarness::new();
 static SENTINEL_COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -76,7 +76,7 @@ fn run_md_compose_named(
     file_name: &str,
     file_body: &str,
 ) -> Option<(CapturedFrame, std::path::PathBuf)> {
-    match evaluate_level(Level::L2, WezTermHarness::available(), "WezTerm") {
+    match decide_harness!(Level::L2, WezTermHarness::available(), Backend::WezTerm) {
         LevelDecision::Run => {}
         LevelDecision::Skip(msg) => {
             eprintln!("{msg}");
@@ -114,7 +114,7 @@ fn run_md_compose_with_sibling(
     file_body: &str,
     sibling_name: &str,
 ) -> Option<(CapturedFrame, std::path::PathBuf)> {
-    match evaluate_level(Level::L2, WezTermHarness::available(), "WezTerm") {
+    match decide_harness!(Level::L2, WezTermHarness::available(), Backend::WezTerm) {
         LevelDecision::Run => {}
         LevelDecision::Skip(msg) => {
             eprintln!("{msg}");
@@ -153,7 +153,7 @@ fn run_md_compose_with_nested_siblings(
     file_body: &str,
     siblings: &[(&str, &str)],
 ) -> Option<(CapturedFrame, std::path::PathBuf)> {
-    match evaluate_level(Level::L2, WezTermHarness::available(), "WezTerm") {
+    match decide_harness!(Level::L2, WezTermHarness::available(), Backend::WezTerm) {
         LevelDecision::Run => {}
         LevelDecision::Skip(msg) => {
             eprintln!("{msg}");

@@ -21,11 +21,11 @@ pub(super) use std::rc::Rc;
 pub(super) use std::sync::atomic::{AtomicU32, Ordering};
 pub(super) use std::time::{Duration, Instant};
 pub(super) use tempfile::tempdir;
-pub(super) use test_toolkit::{Level, LevelDecision, evaluate_level};
+pub(super) use test_toolkit::{Backend, Level, LevelDecision, decide_harness};
 
 /// Gating decision for Level-2 WezTerm tests.
 pub(super) fn wezterm_decision() -> LevelDecision {
-    evaluate_level(Level::L2, WezTermHarness::available(), "WezTerm")
+    decide_harness!(Level::L2, WezTermHarness::available(), Backend::WezTerm)
 }
 
 pub(super) static SHARED_HARNESS: SharedHarness<WezTermHarness> = SharedHarness::new();

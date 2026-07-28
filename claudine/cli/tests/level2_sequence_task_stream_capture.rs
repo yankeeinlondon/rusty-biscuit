@@ -68,7 +68,7 @@ use serial_test::serial;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 mod common;
 use common::{TestWorkspace, augmented_path, clear_no_color, write, write_executable};
@@ -551,7 +551,7 @@ fn sole_line_with<'a>(lines: &[&'a str], marker: &str) -> &'a str {
 #[test]
 #[serial(level2_terminal)]
 fn level2_interleaved_shell_streams_arrive_live_and_attributed_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let staged = stage("claudine-l2-taskstream-interleaved", INTERLEAVED_DOC);
@@ -612,7 +612,7 @@ fn level2_interleaved_shell_streams_arrive_live_and_attributed_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_interleaved_shell_streams_keep_order_and_names_without_color_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let staged = stage("claudine-l2-taskstream-interleaved-nocolor", INTERLEAVED_DOC);
@@ -684,7 +684,7 @@ fn level2_interleaved_shell_streams_keep_order_and_names_without_color_in_tmux()
 #[test]
 #[serial(level2_terminal)]
 fn level2_parallel_task_bodies_carry_their_own_bar_color_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let staged = stage("claudine-l2-taskstream-color", PARALLEL_DOC);
@@ -746,7 +746,7 @@ fn level2_parallel_task_bodies_carry_their_own_bar_color_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_parallel_prompt_streams_keep_task_attribution_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let staged = stage_prompt(
@@ -835,7 +835,7 @@ fn level2_parallel_prompt_streams_keep_task_attribution_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_mega_merge_s10_parallel_proxy_failure_task_integrity() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let staged = stage_prompt(
@@ -932,7 +932,7 @@ fn level2_mega_merge_s10_parallel_proxy_failure_task_integrity() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_prompt_idle_flush_keeps_the_task_bar_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let staged = stage_prompt(
@@ -1007,7 +1007,7 @@ fn level2_prompt_idle_flush_keeps_the_task_bar_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_serial_and_parallel_share_one_left_edge_at_narrow_width_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     const COLS: usize = 44;
 
@@ -1095,7 +1095,7 @@ fn level2_serial_and_parallel_share_one_left_edge_at_narrow_width_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_no_color_pane_keeps_textual_attribution_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let staged = stage("claudine-l2-taskstream-nocolor", PARALLEL_DOC);
@@ -1162,7 +1162,7 @@ fn level2_no_color_pane_keeps_textual_attribution_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_non_utf8_locale_uses_the_ascii_header_glyph_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let staged = stage("claudine-l2-taskstream-ascii", PARALLEL_DOC);
@@ -1209,7 +1209,7 @@ fn level2_non_utf8_locale_uses_the_ascii_header_glyph_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_zero_step_sequence_renders_a_styled_notice_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let staged = stage("claudine-l2-taskstream-zerostep", ZERO_STEP_DOC);

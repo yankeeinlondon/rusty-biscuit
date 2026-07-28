@@ -23,7 +23,7 @@ use biscuit_test_harness::TerminalHarness;
 use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
 use serial_test::serial;
-use test_toolkit::{Level, LevelDecision, evaluate_level};
+use test_toolkit::{Backend, Level, LevelDecision, decide_harness};
 
 /// Process-shared WezTerm pane reused across every test in this file.
 ///
@@ -46,11 +46,7 @@ fn run_bt(args: &str) -> Option<Vec<String>> {
     // Evaluate at the helper boundary so callers stay `let Some(lines) = …`;
     // mirrors the `require_level!` macro but returns `None` on skip so the
     // `Option`-returning helper signature can stand.
-    match evaluate_level(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    ) {
+    match decide_harness!(Level::L2, WezTermHarness::available(), Backend::WezTerm) {
         LevelDecision::Run => {}
         LevelDecision::Skip(msg) => {
             eprintln!("{msg}");

@@ -6,7 +6,7 @@ use common::level2::{
 };
 use biscuit_test_harness::tmux::TmuxHarness;
 use serial_test::serial;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 #[test]
 #[serial(level2_terminal)]
@@ -71,7 +71,7 @@ fn level2_code_block_max_fill_constrains_body_width() {
 #[serial(level2_terminal)]
 fn level2_align_code_block_center_indents_more_than_left() {
     let body = "```rust\nfn main() {}\n```\n";
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     // Left-aligned baseline.
     let left_frame = run_md_in_tmux(
@@ -119,7 +119,7 @@ fn level2_align_code_block_center_indents_more_than_left() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_code_block_inverts_to_light_in_dark_terminal() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = run_md_in_tmux(
         CODE_DOC,
         None,
@@ -144,7 +144,7 @@ fn level2_code_block_inverts_to_light_in_dark_terminal() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_default_code_block_inverts_background_and_foreground() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let mut captured = None;
     let mut bg: Option<f32> = None;
     let mut min_fg: Option<f32> = None;
@@ -210,7 +210,7 @@ fn level2_default_code_block_inverts_background_and_foreground() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_code_block_clears_inherited_dim_before_theme_colors() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let mut captured = None;
     let mut bg = None;
     for _ in 0..3 {

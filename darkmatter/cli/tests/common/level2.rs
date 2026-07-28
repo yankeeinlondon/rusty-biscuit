@@ -8,11 +8,11 @@ use std::fs;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
-use test_toolkit::{Level, LevelDecision, evaluate_level};
+use test_toolkit::{Backend, Level, LevelDecision, decide_harness};
 
 /// Gating decision for Level-2 WezTerm tests.
 pub fn wezterm_decision() -> LevelDecision {
-    evaluate_level(Level::L2, WezTermHarness::available(), "WezTerm")
+    decide_harness!(Level::L2, WezTermHarness::available(), Backend::WezTerm)
 }
 
 /// Process-wide shared WezTerm pane reused across every test in this file.

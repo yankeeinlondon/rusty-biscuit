@@ -18,7 +18,7 @@ use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
 use biscuit_test_harness::TerminalHarness;
 use serial_test::serial;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 static SHARED_TMUX: SharedHarness<TmuxHarness> = SharedHarness::new();
 static SHARED_WEZTERM: SharedHarness<WezTermHarness> = SharedHarness::new();
@@ -51,7 +51,7 @@ fn capture_status_block<H: TerminalHarness>(harness: &mut H) -> biscuit_test_har
 #[test]
 #[serial(level2_terminal)]
 fn level2_status_block_body_hint_layout_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
@@ -116,11 +116,7 @@ fn level2_status_block_body_hint_layout_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_status_block_hint_carries_italic_sgr_in_wezterm() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));

@@ -23,7 +23,7 @@ use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
 use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serial_test::serial;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 /// Process-shared WezTerm pane reused across the WezTerm tests in this
 /// file. A `clear` is sent before each test's first interaction so
@@ -115,11 +115,7 @@ fn assert_styled_border<H: TerminalHarness>(harness: &mut H) {
 #[test]
 #[serial(level2_terminal)]
 fn level2_block_quote_style_border_in_wezterm() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
@@ -132,11 +128,7 @@ fn level2_block_quote_style_border_in_wezterm() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_block_quote_style_border_in_kitty() {
-    require_level!(
-        Level::L2,
-        KittyHarness::available(),
-        "Kitty remote control (set KITTY_LISTEN_ON)",
-    );
+    require_level!(Level::L2, KittyHarness::available(), Backend::Kitty);
 
     let mut guard = SHARED_KITTY
         .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
@@ -149,7 +141,7 @@ fn level2_block_quote_style_border_in_kitty() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_block_quote_style_border_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
@@ -250,11 +242,7 @@ fn assert_styled_inline_content<H: TerminalHarness>(harness: &mut H) {
 #[test]
 #[serial(level2_terminal)]
 fn level2_block_quote_styled_inline_content_in_wezterm() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
@@ -267,11 +255,7 @@ fn level2_block_quote_styled_inline_content_in_wezterm() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_block_quote_styled_inline_content_in_kitty() {
-    require_level!(
-        Level::L2,
-        KittyHarness::available(),
-        "Kitty remote control (set KITTY_LISTEN_ON)",
-    );
+    require_level!(Level::L2, KittyHarness::available(), Backend::Kitty);
 
     let mut guard = SHARED_KITTY
         .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
@@ -1060,11 +1044,7 @@ fn assert_block_painted_padding_and_transparent_margin<H: TerminalHarness>(harne
 #[test]
 #[serial(level2_terminal)]
 fn level2_render_tree_style_in_wezterm() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
@@ -1095,11 +1075,7 @@ fn level2_render_tree_style_in_wezterm() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_render_tree_style_in_kitty() {
-    require_level!(
-        Level::L2,
-        KittyHarness::available(),
-        "Kitty remote control (set KITTY_LISTEN_ON)",
-    );
+    require_level!(Level::L2, KittyHarness::available(), Backend::Kitty);
 
     let mut guard = SHARED_KITTY
         .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
@@ -1130,7 +1106,7 @@ fn level2_render_tree_style_in_kitty() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_render_tree_style_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));

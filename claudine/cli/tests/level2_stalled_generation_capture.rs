@@ -79,7 +79,7 @@ use std::fs;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 /// Whether `raw` selects the basic or bright red foreground (`31`/`91`),
 /// matching both the bare `\x1b[31m` form and the combined `\x1b[1;31m`
@@ -100,7 +100,7 @@ fn has_3bit_red(raw: &str) -> bool {
 #[test]
 #[serial(level2_terminal)]
 fn level2_stalled_generation_renders_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     static SEQ: AtomicU32 = AtomicU32::new(0);
 

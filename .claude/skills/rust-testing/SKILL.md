@@ -4,8 +4,8 @@ description: |-
   Monorepo testing guide: L1/L2/L3 taxonomy, canonical just recipes,
   `require_level!` gating, nextest filtersets, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 1acc7c1c76b11142-17a554981d042fea
-last_updated: 2026-07-15
+hash: 1acc7c1c76b11142-0d65568fb3670d31
+last_updated: 2026-07-28
 ---
 # Rust Testing — Rusty Biscuit Monorepo
 
@@ -71,29 +71,85 @@ Symptoms that you have mis-tiered an OS-specific test:
 
 ## Test Levels
 
-| Level   | Prefix     | Resource            | Skip when absent     | Hard-fail env                   |
-|---------|------------|---------------------|----------------------|---------------------------------|
-| L1      | (none)     | In-process only     | Never                | —                               |
-| L2      | `level2_`  | Real terminal / PTY | Harness missing      | `BISCUIT_TEST_LEVEL_REQUIRED=2` |
-| L3      | `level3_`  | OS keyboard/mouse   | `RUN_LEVEL3` unset   | `BISCUIT_TEST_LEVEL_REQUIRED=3` |
-| Browser | `browser_` | Chrome/Chromium     | Browser missing      | `BISCUIT_BROWSER_REQUIRED=1`    |
-| Real    | `real_`    | External device/API | Resource missing     | Per-package env vars            |
-| Slow    | `slow_`    | None (slow L1)      | Excluded from sanity | —                               |
+| Level   | Prefix     | Resource            | Skip when absent     | Hard-fail env                                              |
+|---------|------------|---------------------|----------------------|------------------------------------------------------------|
+| L1      | (none)     | In-process only     | Never                | —                                                          |
+| L2      | `level2_`  | Real terminal / PTY | Harness missing      | `BISCUIT_TEST_REQUIRED_BACKENDS` (per-backend, preferred); `BISCUIT_TEST_LEVEL_REQUIRED=2` (all-or-nothing) |
+| L3      | `level3_`  | OS keyboard/mouse   | `RUN_LEVEL3` unset   | `BISCUIT_TEST_LEVEL_REQUIRED=3`                            |
+| Browser | `browser_` | Chrome/Chromium     | Browser missing      | `BISCUIT_BROWSER_REQUIRED=1`                               |
+| Real    | `real_`    | External device/API | Resource missing     | Per-package env vars                                       |
+| Slow    | `slow_`    | None (slow L1)      | Excluded from sanity | —                                                          |
+
+### Requiring L2 backends individually
+
+`BISCUIT_TEST_LEVEL_REQUIRED=2` is all-or-nothing: it panics *every* L2 gate,
+including the GUI-backed ones a headless runner cannot host, which is why CI
+used to check `tmux -V` as a proxy instead of demanding anything.
+
+`BISCUIT_TEST_REQUIRED_BACKENDS` names the backends whose absence must be fatal
+while every other backend still skips cleanly. It is a comma-separated,
+case-insensitive list of the stable identifiers `tmux`, `wezterm`, `kitty`,
+`apple-terminal` — matched **exactly**, so `wez` and `tmux2` are errors rather
+than near-misses. Unset or all-whitespace means "no backend is required" and
+every gate keeps its skip behavior. The same vocabulary appears in
+`.github/ci/areas.json` and `scripts/ci/affected_scope.py`, and CI passes it
+through unmodified.
+
+```bash
+BISCUIT_TEST_REQUIRED_BACKENDS=tmux just test-l2        # tmux fatal, GUI backends skip
+```
+
+**Availability is not execution.** A leg can install `tmux`, run a tier that
+happens to select no tmux-backed tests, and exit 0 — a green cell that verified
+nothing, indistinguishable from a real pass. An installed `tmux` plus zero tmux
+tests is not evidence. So when the variable is set, every gate appends one
+`{backend, test, decision}` record to `$STAGE/backend-executions.jsonl`
+(`$STAGE` = `$BISCUIT_JUNIT_STAGE_DIR`, else `target/nextest/ci-reports`), and
+the tier is bracketed by the `backend-proof` binary
+(`tools/test-toolkit`, `--features backend-proof`):
+
+- `backend-proof reset` before the run, discarding the previous run's records —
+  without it, stale evidence satisfies the check and the mechanism silently
+  degrades to a no-op;
+- `backend-proof verify` after it, failing when a required backend produced no
+  `run` record. Exit `0` proved (or nothing required), `1` unproven, `2` bad
+  config / unreadable evidence.
+
+`just/devops.just` wires both in, **once per tier rather than per package**:
+`_test_l2` brackets itself, except when `_test_l2_all` (the multi-package
+`_run_all` path) has claimed ownership via `BISCUIT_BACKEND_PROOF_OWNER`. A
+per-package `reset` would erase earlier packages' evidence. An unproven backend
+fails the tier without masking a genuine test failure, and the whole mechanism
+is inert — no output, no file I/O, no added latency — when the variable is
+unset.
 
 ## Gating Tests
 
-Use `test_toolkit::require_level!` at the top of a test body:
+Use `test_toolkit::require_level!` at the top of a test body. Pass a `Backend`
+so the gate carries a machine identity, not just a diagnostic label:
 
 ```rust
-use test_toolkit::{require_level, Level};
+use test_toolkit::{require_level, Backend, Level};
 
 #[test]
 #[serial_test::serial]
 fn level2_renders_in_real_terminal() {
-    require_level!(Level::L2, WezTermHarness::available(), "WezTerm");
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
     // ... test body
 }
 ```
+
+A plain string label still works and is the right choice for composite or
+non-backend requirements — `"PTY (/dev/ptmx)"`, `"WezTerm + cliclick"` — where
+no single backend identity applies. Such gates deliberately contribute no
+execution evidence: they can neither satisfy nor block
+`BISCUIT_TEST_REQUIRED_BACKENDS`. A gate that *does* correspond to one backend
+must name it, or its tests run without ever proving that backend.
+
+Where the gate lives in a helper that cannot `return` — an `-> Option<T>`
+fixture builder, say — use `decide_harness!`, which records evidence and yields
+the `LevelDecision`. Calling `evaluate_harness` directly skips the recording and
+leaves the backend unproven even though its tests ran.
 
 For browser tests:
 
@@ -145,13 +201,16 @@ For durable native CI, register curated package-area policy in
 caller calculates changed workspace packages plus their reverse Cargo
 dependencies, maps them to that policy, and fans the resulting matrix into
 `.github/workflows/_area-ci.yml`. A bootstrap `preflight` job gates that fan-out
-(`needs: [scope, preflight]`), and within each area the jobs are staged —
-`lint` (build + clippy) → `test` (L1 shards) → optional `l2`/`browser` — so a
-deterministic build/lint failure skips the test tiers rather than re-reporting
-it. Integration candidates that require native Windows evidence set `soft_os` to
-an empty array; enabling `l2` or `browser` makes the Linux harness tier
-hard-required. The shared workflow runs each selected area's lint/docs guards and
-compiles with warnings denied. Heavy areas shard their L1 run via nextest
+(`needs: [scope, preflight]`). Within each area, `check`, `lint` (build +
+clippy), and `test` (L1 shards) are independent gates; only the expensive
+`l2`/`browser` tiers stage behind `test`. Lint does not gate L1 — one clippy hint
+must not delete an area's entire test evidence. Every configured L1 leg blocks:
+the `soft_os` policy is retired, because `continue-on-error` removed a leg from
+the run's verdict rather than merely making it non-blocking. Enabling `l2` or
+`browser` makes the Linux harness tier hard-required. The shared workflow runs
+each selected area's lint/docs guards and denies warnings in the `check` and
+`lint` jobs (`_lint` passes `-D warnings` to clippy directly, so the same bar
+applies locally). Heavy areas shard their L1 run via nextest
 `--partition count:i/N` with `--no-fail-fast` (darkmatter and claudine both use
 4 shards); CI selects the `ci` nextest profile explicitly.
 
@@ -296,12 +355,14 @@ reap them:
 
 ## Environment Contract
 
-| Variable                          | Purpose                                      |
-|-----------------------------------|----------------------------------------------|
-| `BISCUIT_TEST_LEVEL=1\|2\|3`        | Max level to run; higher tiers skip cleanly. |
-| `BISCUIT_TEST_LEVEL_REQUIRED=2\|3` | Missing harness panics instead of skipping.  |
-| `BISCUIT_BROWSER_REQUIRED=1`      | Missing Chrome panics instead of skipping.   |
-| `RUN_LEVEL3=1`                    | Opt-in for OS-keyboard-injection tests.      |
+| Variable                             | Purpose                                                                                                        |
+|--------------------------------------|----------------------------------------------------------------------------------------------------------------|
+| `BISCUIT_TEST_LEVEL=1\|2\|3`           | Max level to run; higher tiers skip cleanly.                                                                   |
+| `BISCUIT_TEST_LEVEL_REQUIRED=2\|3`    | Missing harness panics instead of skipping. All-or-nothing; for L2 prefer `BISCUIT_TEST_REQUIRED_BACKENDS`.     |
+| `BISCUIT_TEST_REQUIRED_BACKENDS`     | Comma-separated `tmux,wezterm,kitty,apple-terminal`. Named backends hard-fail; others still skip. Also turns on execution recording, which `backend-proof verify` checks. See "Requiring L2 backends individually". |
+| `BISCUIT_BROWSER_REQUIRED=1`         | Missing Chrome panics instead of skipping.                                                                     |
+| `RUN_LEVEL3=1`                       | Opt-in for OS-keyboard-injection tests.                                                                        |
+| `BISCUIT_JUNIT_STAGE_DIR`            | Staging root for JUnit reports and the backend-execution evidence file. Defaults to `target/nextest/ci-reports`.|
 
 ## Fixtures and Env Guards
 

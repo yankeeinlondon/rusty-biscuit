@@ -32,7 +32,7 @@ use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serial_test::serial;
 use std::fs;
 use std::time::{Duration, Instant};
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 mod common;
 use common::{
@@ -114,7 +114,7 @@ fn wait_for_pane_marker(harness: &mut TmuxHarness, marker: &str, deadline: Durat
 #[test]
 #[serial(level2_terminal)]
 fn level2_tmux_removed_key_renders_styled_diagnostic_with_yaml() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     // This fixture asserts a *colored* surface under `FORCE_COLOR=1`, which an
@@ -195,11 +195,7 @@ fn level2_tmux_removed_key_renders_styled_diagnostic_with_yaml() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_wezterm_removed_key_renders_yaml_codeblock() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut harness = WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm");
     // This fixture asserts a *colored* surface under `FORCE_COLOR=1`, which an

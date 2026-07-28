@@ -101,7 +101,7 @@ use std::time::{Duration, Instant};
 use rendezvous_core::local_endpoint::LocalEndpoint;
 use rendezvous_core::local_endpoint::test_support::{endpoint_env_value, private_endpoint};
 use tempfile::tempdir;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 struct Staged {
     workspace: tempfile::TempDir,
@@ -713,7 +713,7 @@ fn run_compose_await_exit_redirected(
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_initialize_proxy_compose_error_renders_styled_block() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let source_doc = "---\ninitialize:\n  stack:\n    \
          - action: {proxy: '@target.md'}\n---\nsource body\n";
@@ -749,7 +749,7 @@ fn level2_lifecycle_initialize_proxy_compose_error_renders_styled_block() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_failure_retry_reinvokes_provider_until_budget_exhausted() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let doc = r#"---
 title: lifecycle retry
@@ -983,7 +983,7 @@ fn launched_binaries(staged: &Staged) -> Vec<String> {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_retry_launches_the_refreshed_provider_binary() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let doc = r#"---
 title: retry switches provider
@@ -1094,7 +1094,7 @@ fn write_gemini_system_prompt_reader(bin_dir: &Path, events_log: &Path) {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_retry_delivers_a_readable_system_prompt_file_after_a_switch() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     const SENTINEL: &str = "SYSPROMPT-SURVIVED-THE-SWITCH";
 
@@ -1178,7 +1178,7 @@ fn direct_system_prompt_doc(agent: &str) -> String {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_direct_compose_delivers_a_readable_system_prompt_file() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     const SENTINEL: &str = "SYSPROMPT-SURVIVED-TO-FIRST-SPAWN";
 
@@ -1238,7 +1238,7 @@ fn level2_lifecycle_direct_compose_delivers_a_readable_system_prompt_file() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_retry_re_renders_output_and_sandbox_for_the_refreshed_provider() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let staged = stage_provider_switch(
         &provider_switch_retry_doc("goose", "codex", ""),
@@ -1308,7 +1308,7 @@ fn selection_diagnostic(pane: &str, staged: &Staged) -> Vec<String> {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_retry_to_an_unavailable_provider_matches_direct_selection() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     // Retry arm. `goose` is the only provider on PATH; it fails, the `failure`
     // stack rewrites `agent: gemini`, and the retry must refuse.
@@ -1379,7 +1379,7 @@ fn level2_lifecycle_retry_to_an_unavailable_provider_matches_direct_selection() 
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_retry_drops_the_opening_providers_flag_encoding() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let staged = stage_provider_switch(
         &provider_switch_retry_doc("gemini", "goose", ""),
@@ -1419,7 +1419,7 @@ fn level2_lifecycle_retry_drops_the_opening_providers_flag_encoding() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_retry_clears_model_when_the_refresh_drops_it() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     // A namespaced local-runner id is catalog-valid by construction, so the row
     // does not depend on the host's live model listings.
@@ -1478,7 +1478,7 @@ fn level2_lifecycle_retry_clears_model_when_the_refresh_drops_it() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_retry_clears_the_opening_providers_environment() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let staged = stage_provider_switch(
         // OpenCode refuses to launch without a resolved model, so the document
@@ -1518,7 +1518,7 @@ const FIXTURE_OPENAI_KEY: &str = "fixture-openai-not-a-real-key";
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_retry_readmits_credentials_the_refreshed_provider_admits() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let staged = stage_provider_switch(
         &provider_switch_retry_doc("goose", "codex", ""),
@@ -1556,7 +1556,7 @@ fn level2_lifecycle_retry_readmits_credentials_the_refreshed_provider_admits() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_retry_strips_credentials_the_refreshed_provider_rejects() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let staged = stage_provider_switch(
         &provider_switch_retry_doc("codex", "goose", ""),
@@ -1644,7 +1644,7 @@ fn warnings_from_switch_and_direct(
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_switch_surfaces_unsupported_system_prompt_warning() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let sysprompt_flags = |staged: &Staged| {
         let sysprompt = staged.workspace.path().join("sysprompt.txt");
@@ -1681,7 +1681,7 @@ fn level2_lifecycle_switch_surfaces_unsupported_system_prompt_warning() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_switch_surfaces_unsupported_sandbox_warning() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let (switch_warnings, direct_warnings) =
         warnings_from_switch_and_direct("codex", "goose", &|_| "--sandbox".to_string());
@@ -1715,7 +1715,7 @@ fn level2_lifecycle_switch_surfaces_unsupported_sandbox_warning() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_retry_rebuilds_mcp_injection_from_the_refreshed_body() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let doc = r#"---
 title: retry gains an mcp tag
@@ -1776,7 +1776,7 @@ Body with no tag
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_retry_keeps_an_interpolated_mcp_tag_at_child_launch() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let doc = format!(
         r#"---
@@ -1834,7 +1834,7 @@ Body whose server is named only after composition #{{{{ probe }}}} here
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_retry_launches_the_refreshed_mode_and_permission() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let doc = r#"---
 title: retry flips session mode
@@ -1966,7 +1966,7 @@ fn stage_fail_once_recorder(staged: &Staged, slug: &str) {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_retry_refreshes_interactivity_markers_into_interactive() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let staged = stage_launch_recording(&interactivity_retry_doc("", true));
     stage_fail_once_recorder(&staged, "goose");
@@ -1987,7 +1987,7 @@ fn level2_lifecycle_retry_refreshes_interactivity_markers_into_interactive() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_retry_refreshes_interactivity_markers_into_non_interactive() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let staged = stage_launch_recording(&interactivity_retry_doc("interactive: true\n", false));
     stage_fail_once_recorder(&staged, "goose");
@@ -2129,7 +2129,7 @@ fn dispatched_models(staged: &Staged) -> Vec<String> {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_retry_into_codex_rebuilds_the_execution_adapters() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let doc = r#"---
 title: retry switches into codex
@@ -2210,7 +2210,7 @@ Body
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_retry_out_of_codex_drops_the_codex_adapters() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let doc = r#"---
 title: retry leaves codex
@@ -2307,7 +2307,7 @@ fn switch_then_resume_doc(from: &str, to: &str, follow_up: &str) -> String {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_switch_into_codex_resumes_under_codexs_encoding() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let follow_up = "finish the switched work";
     let session_id = "switch-into-codex-session";
@@ -2351,7 +2351,7 @@ fn level2_lifecycle_switch_into_codex_resumes_under_codexs_encoding() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_switch_out_of_codex_refuses_a_session_less_resume() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let follow_up = "finish the switched work";
     let session_id = "switch-out-of-codex-session";
@@ -2442,7 +2442,7 @@ exit 0
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_finalize_retry_recovers_success_verification_failure() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let doc = r#"---
 title: verify in success, recover in finalize
@@ -2519,7 +2519,7 @@ Body
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_failure_resume_without_session_surfaces_typed_error() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let doc = r#"---
 title: lifecycle resume
@@ -2562,7 +2562,7 @@ Body
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_failure_resume_with_session_reinvokes_provider_with_follow_up() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let follow_up = "please finish the resumed work";
     let doc = format!(
@@ -2665,7 +2665,7 @@ Original body
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_resume_with_dropped_launch_flag_stays_compatible() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let follow_up = "please finish the resumed work";
     let doc = format!(
@@ -2794,7 +2794,7 @@ fn flattened(pane: &str) -> String {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_resume_refuses_when_refresh_changes_model() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let follow_up = "please finish the resumed work";
     let doc = format!(
@@ -3015,7 +3015,7 @@ fn assert_resume_refused(staged: &Staged, pane: &str, expected_facets: &[&str]) 
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_resume_refuses_when_refresh_changes_provider() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let follow_up = "please finish the resumed work";
     let doc = format!(
@@ -3068,7 +3068,7 @@ Original body
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_resume_refuses_when_refresh_changes_interactivity() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let follow_up = "please finish the resumed work";
     let doc = format!(
@@ -3120,7 +3120,7 @@ Original body
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_resume_refuses_when_refresh_changes_permission_mode() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let follow_up = "please finish the resumed work";
     let doc = format!(
@@ -3161,7 +3161,7 @@ Original body
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_resume_refuses_when_refresh_changes_mcp_server_set() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let follow_up = "please finish the resumed work";
     let doc = format!(
@@ -3221,7 +3221,7 @@ Original body
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_resume_refuses_when_refresh_changes_an_interpolated_mcp_tag() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let follow_up = "please finish the resumed work";
     let doc = format!(
@@ -3279,7 +3279,7 @@ Original body naming its server only after composition #{{{{ probe }}}} here
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_failure_defer_returns_not_implemented() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let doc = r#"---
 title: lifecycle defer
@@ -3342,7 +3342,7 @@ fn write_proxy_goose(bin_dir: &Path, events_log: &Path, target_sentinel: &str) {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_failure_proxy_runs_target_document_no_loop() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let workspace = tempdir().unwrap();
     let bin_dir = workspace.path().join("bin");
@@ -3536,7 +3536,7 @@ fn run_compose_settle(staged: &Staged, marker: &str, expected: usize) -> String 
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_failure_proxy_to_looping_target_matches_direct_iterations() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     // The target's body carries this sentinel so the gated goose exits 0 on
     // every iteration; the source body omits it, so the source fails and
@@ -3605,7 +3605,7 @@ fn level2_lifecycle_failure_proxy_to_looping_target_matches_direct_iterations() 
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_success_top_level_communication_fires_before_stack() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let doc = r#"---
 title: success ordering
@@ -3646,7 +3646,7 @@ Body
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_success_stack_error_downgrades_to_failure_preserving_top_level() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let doc = r#"---
 title: success downgrade
@@ -3699,7 +3699,7 @@ Body
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_blocked_top_level_communication_fires_before_stack() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let doc = r#"---
 title: blocked ordering
@@ -3744,7 +3744,7 @@ Body
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_initialize_proxy_runs_target_initialize() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let source_doc = "---\ntitle: proxy source\ninitialize:\n  stack:\n    \
          - action: {append_line: ['events.log', 'source-init']}\n    \
@@ -3806,7 +3806,7 @@ fn level2_lifecycle_initialize_proxy_runs_target_initialize() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_initialize_proxy_forwards_set_params_to_target_schema() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let source_doc = "---\n$schema:\n    spec: file(required;eager)\ninitialize:\n  stack:\n    \
          - action: {proxy: '@target.md'}\n---\nsource body\n";
@@ -3848,7 +3848,7 @@ fn level2_lifecycle_initialize_proxy_forwards_set_params_to_target_schema() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_proxy_with_overlay_loses_to_a_caller_set_and_beats_the_target() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let source_doc = "---\ntitle: router\ninitialize:\n  stack:\n    \
          - action: {action: proxy, target: '@target.md', with: {phase: 2, note: from-router}}\n\
@@ -3900,7 +3900,7 @@ fn level2_lifecycle_proxy_with_overlay_loses_to_a_caller_set_and_beats_the_targe
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_initialize_proxy_reports_redirect_and_target_prompt() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let source_doc = "---\ninitialize:\n  stack:\n    \
          - action: {proxy: '@target.md'}\nsuccess:\n  stack:\n    \
@@ -3932,7 +3932,7 @@ fn level2_lifecycle_initialize_proxy_reports_redirect_and_target_prompt() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_initialize_proxy_target_preserves_line_structure() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let source_doc = "---\ninitialize:\n  stack:\n    \
          - action: {proxy: '@target.md'}\n---\nsource body\n";
@@ -3970,7 +3970,7 @@ fn level2_lifecycle_initialize_proxy_target_preserves_line_structure() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_initialize_proxy_target_resolves_ctx_not_in_source() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let source_doc = "---\ninitialize:\n  stack:\n    \
          - action: {proxy: '@target.md'}\n---\nsource body\n";
@@ -3999,7 +3999,7 @@ fn level2_lifecycle_initialize_proxy_target_resolves_ctx_not_in_source() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_initialize_proxy_respects_target_skip() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let source_doc = "---\ntitle: proxy source\ninitialize:\n  stack:\n    \
          - action: {proxy: '@target.md'}\nstart:\n  stack:\n    \
@@ -4033,7 +4033,7 @@ fn level2_lifecycle_initialize_proxy_respects_target_skip() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_initialize_proxy_respects_target_error() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let source_doc = "---\ntitle: proxy source\ninitialize:\n  stack:\n    \
          - action: {proxy: '@target.md'}\n---\nsource body\n";
@@ -4079,7 +4079,7 @@ fn level2_lifecycle_initialize_proxy_respects_target_error() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_initialize_proxy_cycle_guarded() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let source_doc = "---\ntitle: proxy source\ninitialize:\n  stack:\n    \
          - action: {proxy: '@target.md'}\n---\nsource body\n";
@@ -4174,7 +4174,7 @@ fn assert_ac29_source_catch(lines: &[String], pane: &str) {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_initialize_proxy_missing_target_routes_source_blocked_finalize() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let source_doc = format!(
         "---\ntitle: refuse source\ninitialize:\n  stack:\n    \
@@ -4201,7 +4201,7 @@ fn level2_lifecycle_initialize_proxy_missing_target_routes_source_blocked_finali
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_initialize_proxy_cycle_routes_source_blocked_finalize() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let source_doc = format!(
         "---\ntitle: cycle source\ninitialize:\n  stack:\n    \
@@ -4232,7 +4232,7 @@ fn level2_lifecycle_initialize_proxy_cycle_routes_source_blocked_finalize() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_initialize_proxy_hop_limit_routes_source_blocked_finalize() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     // `doc.md` proxies into the chain; its `source-init` marker doubles as the
     // shared assertion's "exactly one source-init" anchor.
@@ -4297,7 +4297,7 @@ fn level2_lifecycle_initialize_proxy_hop_limit_routes_source_blocked_finalize() 
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_proxy_target_harness_plan_failure_routes_blocked_finalize_with_err() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let source_doc = "---\ntitle: proxy source\ninitialize:\n  stack:\n    \
          - action: {proxy: '@target.md'}\n---\nsource body\n";
@@ -4372,7 +4372,7 @@ fn level2_lifecycle_proxy_target_harness_plan_failure_routes_blocked_finalize_wi
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_proxy_target_lifecycle_parse_failure_fires_no_catch_events() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let source_doc = "---\ntitle: proxy source\ninitialize:\n  stack:\n    \
          - action: {append_line: ['events.log', 'source-init']}\n    \
@@ -4455,7 +4455,7 @@ fn level2_lifecycle_proxy_target_lifecycle_parse_failure_fires_no_catch_events()
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_post_start_setup_failure_routes_failure_finalize_with_err() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     // `exit_expressions` with a malformed regex (`[` = unterminated character
     // class) validates-and-aborts inside `execute_harness_attempt`, after
@@ -4752,7 +4752,7 @@ router body phase {{phase}}
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_initialize_proxy_to_looping_target_matches_direct_run() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     // 1 target-init + 3 provider-ran + 3 target-finalize = 7 markers per run.
     const EXPECTED_MARKERS: usize = 7;
@@ -4826,7 +4826,7 @@ fn level2_lifecycle_initialize_proxy_to_looping_target_matches_direct_run() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_loop_router_initialize_proxy_is_honored() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     // 1 target-init + 3 provider-ran + 3 target-finalize = 7 markers.
     const EXPECTED_MARKERS: usize = 7;
@@ -5005,7 +5005,7 @@ fn stage_shipped_implement_route(entry: &str, total_phases: usize) -> Staged {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_shipped_implement_route_matches_direct_run() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     const TOTAL_PHASES: usize = 3;
     // Each provider invocation records `provider-ran` + `phase:N-of-3`.
@@ -5184,7 +5184,7 @@ fn run_in_tmux_until_exit(staged: &Staged) -> String {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_proxy_target_initialize_shell_is_gated_before_dispatch() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let source_doc = "---\ntitle: gate source\ninitialize:\n  stack:\n    \
          - action: {append_line: ['events.log', 'source-init']}\n    \
@@ -5229,7 +5229,7 @@ fn level2_lifecycle_proxy_target_initialize_shell_is_gated_before_dispatch() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_proxy_target_later_event_shell_is_audited_after_stabilization() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let source_doc = "---\ntitle: audit source\ninitialize:\n  stack:\n    \
          - action: {append_line: ['events.log', 'source-init']}\n    \
@@ -5268,7 +5268,7 @@ fn level2_lifecycle_proxy_target_later_event_shell_is_audited_after_stabilizatio
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_proxy_target_rereads_after_initialize_mutation() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let source_doc = "---\ntitle: reread source\ninitialize:\n  stack:\n    \
          - action: {proxy: '@target.md'}\n---\nsource body\n";
@@ -5431,7 +5431,7 @@ probe body note={{ note }}
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_equivalence_probe_matches_direct_run() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     // sig=initialize, provider-ran, sig=success, 4 stamped facets, sig=finalize.
     const EXPECTED_MARKERS: usize = 8;
@@ -5537,7 +5537,7 @@ pinned probe body
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_equivalence_target_pinned_model_matches_direct_run() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     // sig=initialize, provider-ran, sig=success, env.MODEL, sig=finalize.
     const EXPECTED_MARKERS: usize = 5;
@@ -5670,7 +5670,7 @@ fn body_facets(lines: &[String]) -> Vec<String> {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_equivalence_ac9_context_facets_match_direct_run() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     // sig=initialize, prompt, provider-ran, sig=success, 10 stamps, sig=finalize.
     const EXPECTED_MARKERS: usize = 15;
@@ -5790,7 +5790,7 @@ const AC30_OVERLAY_SECRET: &str = "SEKRIToverlayVALUExyz";
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_proxy_overlay_value_is_not_disclosed_in_rendered_status() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let source_doc = format!(
         "---\ntitle: overlay redaction router\ninitialize:\n  stack:\n    \
@@ -5844,7 +5844,7 @@ fn level2_lifecycle_proxy_overlay_value_is_not_disclosed_in_rendered_status() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_proxy_three_document_chain_forwards_only_explicit_keys() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let source_doc = "---\ntitle: chain source\ninitialize:\n  stack:\n    \
          - action: {action: proxy, target: '@mid.md', with: {token: from-source, extra: source-extra}}\n\
@@ -5969,7 +5969,7 @@ fn stage_cross_repo_arm(routed: bool) -> Staged {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_equivalence_cross_repo_file_resolution_matches_direct_run() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let assert_resolved = |lines: &[String], pane: &str, arm: &str| {
         assert!(
@@ -6084,7 +6084,7 @@ fn stage_routing_arm(routed: bool) -> Staged {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_equivalence_stdout_stderr_routing_matches_direct_run() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let assert_routing = |pane: &str, stdout: &str, arm: &str| {
         assert!(
@@ -6122,7 +6122,7 @@ fn level2_lifecycle_equivalence_stdout_stderr_routing_matches_direct_run() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_proxy_inside_sequence_step_is_contained() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let sequence_doc = "---\ntitle: sequence with a proxy step\nsequence:\n  - alpha\n  - beta\n\
          initialize:\n  stack:\n    - action: {proxy: '@target.md'}\n---\nsequence body {{ state }}\n";
@@ -6310,7 +6310,7 @@ fn run_sequence_until_settled(staged: &Staged, expected_lines: usize) -> String 
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_sequence_step_proxy_to_looping_target_owns_the_loop() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let count = |lines: &[String], needle: &str| lines.iter().filter(|l| *l == needle).count();
 
@@ -6369,7 +6369,7 @@ fn level2_lifecycle_sequence_step_proxy_to_looping_target_owns_the_loop() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_sequence_step_proxy_rebuilds_target_launch_bundle() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     // Direct contract: the target composed directly (goose pinned) resolves its
     // own `model:` into env.MODEL. 5 markers.
@@ -6503,7 +6503,7 @@ fn run_inline_compose_await_exit(staged: &Staged) -> String {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_inline_compose_proxy_closure_rewrites_only_final_target() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     // Every document is an inline-compose document (has `prompt:`); the first two
     // hand off at `initialize` before their own prompt is ever used.
@@ -6590,7 +6590,7 @@ fn write_bytes_recorder(bin_dir: &Path, executed_log: &Path) {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_proxy_shell_approved_bytes_equal_executed_bytes() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     // The router installs the overlay value the command interpolates; the target
     // authors a different default so a template re-evaluation would be visible.
@@ -6645,7 +6645,7 @@ fn level2_lifecycle_proxy_shell_approved_bytes_equal_executed_bytes() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_overlay_installed_initialize_shell_is_denied_by_target_policy() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let source_doc = "---\ntitle: overlay-installed denial router\ninitialize:\n  stack:\n    \
          - action: {action: proxy, target: '@target.md', with: \
@@ -6701,7 +6701,7 @@ fn level2_lifecycle_overlay_installed_initialize_shell_is_denied_by_target_polic
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_overlay_installed_initialize_shell_runs_the_approved_bytes() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let source_doc = "---\ntitle: overlay-installed approval router\ninitialize:\n  stack:\n    \
          - action: {action: proxy, target: '@target.md', with: \
@@ -6750,7 +6750,7 @@ fn level2_lifecycle_overlay_installed_initialize_shell_runs_the_approved_bytes()
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_proxy_with_overlay_survives_a_retry() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let source_doc = "---\ntitle: overlay retry router\ninitialize:\n  stack:\n    \
          - action: {action: proxy, target: '@target.md', with: {token: OVL26retry}}\n\
@@ -6791,7 +6791,7 @@ fn level2_lifecycle_proxy_with_overlay_survives_a_retry() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_proxy_with_overlay_survives_a_loop_refresh() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let source_doc = "---\ntitle: overlay loop router\ninitialize:\n  stack:\n    \
          - action: {action: proxy, target: '@target.md', with: {token: OVL26loop}}\n\
@@ -6827,7 +6827,7 @@ fn level2_lifecycle_proxy_with_overlay_survives_a_loop_refresh() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_proxy_with_overlay_survives_a_resume() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let follow_up = "please finish the resumed work";
     let source_doc = "---\ntitle: overlay resume router\ninitialize:\n  stack:\n    \
@@ -6915,7 +6915,7 @@ const LAUNCH_FACET_PROBE_TARGET: &str = "---\ntitle: launch facet probe\nsuccess
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_equivalence_child_cwd_matches_direct_run() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let child_cwd = |staged: &Staged, pane: &str, arm: &str| -> String {
         let lines = event_lines(staged);
@@ -6990,7 +6990,7 @@ fn write_sysprompt_recording_goose(bin_dir: &Path, events_log: &Path, sentinel: 
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_equivalence_cli_system_prompt_survives_the_proxy() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     const SYSPROMPT_SENTINEL: &str = "SYSPROMPTsentinelXYZ";
 
@@ -7045,7 +7045,7 @@ fn write_named_provider(bin_dir: &Path, slug: &str, events_log: &Path) {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_equivalence_target_authored_provider_matches_direct_run() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     // Router pins `goose` (so its pre-proxy resolution is unambiguous), proxies at
     // initialize; the target authors a *different* provider, `codex`.
@@ -7191,7 +7191,7 @@ launch bundle target body
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_equivalence_target_launch_bundle_matches_direct_run() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     // 10 recorder lines + provider-ran + sig=success.
     const EXPECTED_MARKERS: usize = 12;
@@ -7386,7 +7386,7 @@ mcp target body #proxyprobeserver
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_equivalence_target_mcp_injection_matches_direct_run() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     // launched-binary, mcp-allowed, provider-ran, sig=success.
     const EXPECTED_MARKERS: usize = 4;
@@ -7835,7 +7835,7 @@ fn assert_route_equivalent_diagnostic(fixture: &DiagnosticFixture) {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_diagnostic_matrix_schema_failure_is_route_equivalent() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     assert_route_equivalent_diagnostic(&DIAG_SCHEMA_FAILURE);
 }
@@ -7847,7 +7847,7 @@ fn level2_lifecycle_diagnostic_matrix_schema_failure_is_route_equivalent() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_diagnostic_matrix_invalid_overlay_is_route_equivalent() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     assert_route_equivalent_diagnostic(&DIAG_INVALID_OVERLAY);
 
@@ -7871,7 +7871,7 @@ fn level2_lifecycle_diagnostic_matrix_invalid_overlay_is_route_equivalent() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_diagnostic_matrix_preparation_failure_is_route_equivalent() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     assert_route_equivalent_diagnostic(&DIAG_PREPARATION_FAILURE);
 }
@@ -8100,7 +8100,7 @@ fn assert_initialize_precedes_schema(route: DiagnosticRoute, target_doc: &str) {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_initialize_precedes_schema_verdict_direct() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     assert_initialize_precedes_schema(DiagnosticRoute::Direct, INIT_REPAIRS_SCHEMA_TARGET);
 }
@@ -8110,7 +8110,7 @@ fn level2_lifecycle_initialize_precedes_schema_verdict_direct() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_initialize_precedes_schema_verdict_initialize_proxy() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     assert_initialize_precedes_schema(DiagnosticRoute::InitializeProxy, INIT_REPAIRS_SCHEMA_TARGET);
 }
@@ -8120,7 +8120,7 @@ fn level2_lifecycle_initialize_precedes_schema_verdict_initialize_proxy() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_initialize_precedes_schema_verdict_recovery_proxy() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     assert_initialize_precedes_schema(
         DiagnosticRoute::TerminalRecoveryProxy,
@@ -8138,7 +8138,7 @@ fn level2_lifecycle_initialize_precedes_schema_verdict_recovery_proxy() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_initialize_precedes_schema_verdict_loop_direct() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     assert_initialize_precedes_schema(DiagnosticRoute::Direct, INIT_REPAIRS_SCHEMA_LOOP_TARGET);
 }
@@ -8147,7 +8147,7 @@ fn level2_lifecycle_initialize_precedes_schema_verdict_loop_direct() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_initialize_precedes_schema_verdict_loop_initialize_proxy() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     assert_initialize_precedes_schema(
         DiagnosticRoute::InitializeProxy,
@@ -8159,7 +8159,7 @@ fn level2_lifecycle_initialize_precedes_schema_verdict_loop_initialize_proxy() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_initialize_precedes_schema_verdict_loop_recovery_proxy() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     assert_initialize_precedes_schema(
         DiagnosticRoute::TerminalRecoveryProxy,
@@ -8177,7 +8177,7 @@ fn level2_lifecycle_initialize_precedes_schema_verdict_loop_recovery_proxy() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_still_invalid_target_runs_initialize_and_closure_first() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     assert_still_invalid_target_pays_its_closure(INIT_CANNOT_REPAIR_SCHEMA_TARGET);
 }
@@ -8190,7 +8190,7 @@ fn level2_lifecycle_still_invalid_target_runs_initialize_and_closure_first() {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_still_invalid_loop_target_runs_initialize_and_closure_first() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     assert_still_invalid_target_pays_its_closure(INIT_CANNOT_REPAIR_SCHEMA_LOOP_TARGET);
 }
@@ -8430,7 +8430,7 @@ fn run_wrapper_in_tmux(staged: &Staged, done_marker: &str) -> String {
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_wrapper_passthrough_raises_no_proxy_handoff() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let staged = stage_wrapper_memory_file(
         WRAPPER_MEMORY_FILE_WITH_LIFECYCLE,
