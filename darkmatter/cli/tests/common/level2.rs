@@ -3,7 +3,7 @@
 use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
-use biscuit_test_harness::{CapturedFrame, TerminalHarness};
+use biscuit_test_harness::{CapturedFrame, TerminalHarness, strip_ansi};
 use std::fs;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
@@ -190,13 +190,47 @@ fn run_tmux_command(
         .send_command_with_env(&wrapped, env)
         .expect("send_command_with_env failed");
     match wait_for_tmux_sentinel(harness, &sentinel) {
-        Ok(frame) => frame,
+        Ok(frame) => output_region(frame, &sentinel),
         Err(last) => panic!(
             "timed out waiting for sentinel {sentinel} after {SENTINEL_TIMEOUT:?}. \
              last plain capture:\n{}",
             last.plain
         ),
     }
+}
+
+/// Narrows a captured pane to only the output of the command just run.
+///
+/// A shared pane also carries the shell prompt and the echoed command above
+/// that output and a fresh prompt below it, and these tests locate content by
+/// substring. That combination is actively hostile in this repository: the
+/// developer prompt renders the working directory, so `rusty-biscuit` supplies
+/// a `rust` match and a `contains("rust")` probe for a Rust code-block label
+/// silently binds to the prompt line instead of the render. Both failures that
+/// motivated this helper reported values read off the prompt.
+///
+/// Two markers bound the real output. The echoed command always carries the
+/// sentinel inline, because the command is wrapped as
+/// `<cmd>; printf '\n<sentinel>\n'` — and it may wrap across several pane
+/// lines. Completion is that same sentinel alone on a line. Everything
+/// strictly between the last line carrying it and that final marker is what
+/// the command itself printed.
+///
+/// Returns the frame untouched when the completion marker is absent, leaving
+/// the caller's own diagnostics to report the real problem.
+fn output_region(frame: CapturedFrame, sentinel: &str) -> CapturedFrame {
+    let lines: Vec<&str> = frame.raw.split('\n').collect();
+    let stripped: Vec<String> = lines.iter().map(|line| strip_ansi(line)).collect();
+
+    let Some(end) = stripped.iter().rposition(|line| line.trim() == sentinel) else {
+        return frame;
+    };
+    let start = stripped[..end]
+        .iter()
+        .rposition(|line| line.contains(sentinel))
+        .map_or(0, |echo| echo + 1);
+
+    CapturedFrame::from_raw(lines[start..end].join("\n"))
 }
 
 /// Runs the Cargo-built `md` in a headless tmux pane.
