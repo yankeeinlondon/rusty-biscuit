@@ -372,16 +372,33 @@ mod partial_completion {
         }
     }
 
+    /// The home root the resolver reports while `guard_home` is installed as
+    /// `$HOME`.
+    ///
+    /// POSIX home discovery honors `$HOME`, so the guard's directory is what
+    /// appears. Native Windows resolves the profile directory through the OS
+    /// known-folder API and ignores `HOME` outright (D11), so the guard cannot
+    /// redirect it and the native profile is the only home leg there.
+    #[cfg(not(windows))]
+    fn expected_home(guard_home: &Path) -> std::path::PathBuf {
+        guard_home.to_path_buf()
+    }
+
+    #[cfg(windows)]
+    fn expected_home(_guard_home: &Path) -> std::path::PathBuf {
+        biscuit_file::home_dir().expect("native Windows profile directory")
+    }
+
     #[test]
     #[serial]
     fn magic_bare_sigil_includes_repo_and_home_roots() {
         let tmp_repo = TempDir::new().unwrap();
         let repo_root = tmp_repo.path();
         git_init(repo_root);
-        let repo_root_canon = repo_root.canonicalize().unwrap();
+        let repo_root_canon = canonical(repo_root);
 
         let tmp_home = TempDir::new().unwrap();
-        let home_canon = tmp_home.path().canonicalize().unwrap();
+        let home_canon = canonical(tmp_home.path());
         let _home_guard = HomeGuard::set(&home_canon);
 
         let completion = FileReference::complete_partial("@", &repo_root_canon)
@@ -393,7 +410,7 @@ mod partial_completion {
         assert_eq!(completion.active_segment(), "");
         assert_eq!(
             completion.roots(),
-            &[repo_root_canon.clone(), home_canon.clone()],
+            &[repo_root_canon.clone(), expected_home(&home_canon)],
             "repo root must precede home root for @",
         );
     }
@@ -419,7 +436,10 @@ mod partial_completion {
         assert_eq!(completion.active_segment(), "ab");
         assert_eq!(
             completion.roots(),
-            &[repo_root_canon.join("prompts"), home_canon.join("prompts"),],
+            &[
+                repo_root_canon.join("prompts"),
+                expected_home(&home_canon).join("prompts"),
+            ],
         );
     }
 
@@ -443,8 +463,8 @@ mod partial_completion {
         assert_eq!(completion.active_segment(), "pr");
         assert_eq!(
             completion.roots(),
-            &[home_canon],
-            "only HOME contributes when base is not inside a git repo",
+            &[expected_home(&home_canon)],
+            "only the home leg contributes when base is not inside a git repo",
         );
     }
 

@@ -555,9 +555,15 @@ mod tests {
 
     #[test]
     fn from_base_absolute_path_is_preserved() {
+        // Windows has no drive-less absolute path: `/tmp` is *rooted* there but
+        // `is_absolute()` is false, so the literal must be selected per platform.
+        #[cfg(windows)]
+        let abs = Path::new(r"C:\tmp");
+        #[cfg(not(windows))]
         let abs = Path::new("/tmp");
+
         let ctx = ResolutionContext::from_base(abs).unwrap();
-        assert_eq!(ctx.cwd, PathBuf::from("/tmp"));
+        assert_eq!(ctx.cwd, abs);
     }
 
     #[test]
@@ -576,8 +582,11 @@ mod tests {
 
     #[test]
     fn find_git_root_outside_repo() {
-        // /tmp is unlikely to be in a git repo
-        let root = find_git_root(Path::new("/tmp")).unwrap();
+        // The OS temp directory is the portable stand-in for a real directory
+        // that is unlikely to sit inside a git repository. A POSIX `/tmp`
+        // literal does not exist on Windows, where discovery would fail on an
+        // inaccessible directory rather than report "no repository".
+        let root = find_git_root(&std::env::temp_dir()).unwrap();
         assert!(root.is_none());
     }
 }

@@ -1267,27 +1267,40 @@ fn append_scope(root: &Path, scope: &str) -> PathBuf {
 mod tests {
     use super::*;
 
+    /// An absolute host path built from POSIX-style `tail`.
+    ///
+    /// `diff_paths` requires both operands to be absolute, and Windows has no
+    /// drive-less absolute path: `/a/b` is *rooted* there but `is_absolute()`
+    /// is false, so a single literal cannot serve both platforms.
+    fn abs(tail: &str) -> PathBuf {
+        #[cfg(windows)]
+        let root = Path::new(r"C:\");
+        #[cfg(not(windows))]
+        let root = Path::new("/");
+        root.join(tail)
+    }
+
     #[test]
     fn diff_paths_same_dir() {
-        let result = diff_paths(Path::new("/a/b/file.txt"), Path::new("/a/b")).unwrap();
+        let result = diff_paths(&abs("a/b/file.txt"), &abs("a/b")).unwrap();
         assert_eq!(result, PathBuf::from("file.txt"));
     }
 
     #[test]
     fn diff_paths_sibling_dir() {
-        let result = diff_paths(Path::new("/a/b/file.txt"), Path::new("/a/c")).unwrap();
+        let result = diff_paths(&abs("a/b/file.txt"), &abs("a/c")).unwrap();
         assert_eq!(result, PathBuf::from("../b/file.txt"));
     }
 
     #[test]
     fn diff_paths_parent() {
-        let result = diff_paths(Path::new("/a/file.txt"), Path::new("/a/b/c")).unwrap();
+        let result = diff_paths(&abs("a/file.txt"), &abs("a/b/c")).unwrap();
         assert_eq!(result, PathBuf::from("../../file.txt"));
     }
 
     #[test]
     fn diff_paths_same_path() {
-        let result = diff_paths(Path::new("/a/b"), Path::new("/a/b")).unwrap();
+        let result = diff_paths(&abs("a/b"), &abs("a/b")).unwrap();
         assert_eq!(result, PathBuf::from("."));
     }
 
@@ -1598,30 +1611,33 @@ mod tests {
 
     #[test]
     fn complete_partial_magic_bare_sigil_outside_repo() {
-        // /tmp is not inside a git repo on most systems.
-        let base = Path::new("/tmp");
-        let result = complete_partial("@", base).unwrap().expect("supported");
+        // The OS temp directory is the portable stand-in for a real directory
+        // outside any git repository; a POSIX `/tmp` literal is not absolute on
+        // Windows and would be joined onto the ambient CWD instead.
+        let base = std::env::temp_dir();
+        let result = complete_partial("@", &base).unwrap().expect("supported");
         assert_eq!(result.entry_form(), CompletionEntryForm::Magic);
         assert_eq!(result.active_segment(), "");
         assert_eq!(result.rendered_prefix(), "@");
         // Roots include at most HOME; no git root.
         assert!(
             result.roots().len() <= 1,
-            "no git root expected under /tmp, got {:?}",
+            "no git root expected under the temp directory, got {:?}",
             result.roots()
         );
     }
 
     #[test]
     fn complete_partial_implicit_relative_outside_repo() {
-        let base = Path::new("/tmp");
-        let result = complete_partial("prompts/p", base)
+        let base = std::env::temp_dir();
+        let result = complete_partial("prompts/p", &base)
             .unwrap()
             .expect("supported");
         assert_eq!(result.entry_form(), CompletionEntryForm::ImplicitRelative);
         assert_eq!(result.active_segment(), "p");
         assert_eq!(result.rendered_prefix(), "prompts/");
-        // No git root under /tmp, so only the base-derived root is present.
-        assert_eq!(result.roots(), &[PathBuf::from("/tmp/prompts")]);
+        // No git root above the temp directory, so only the base-derived root
+        // is present.
+        assert_eq!(result.roots(), &[base.join("prompts")]);
     }
 }
