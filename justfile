@@ -373,7 +373,7 @@ cp:
     @echo
 
 # install rusty-biscuit and third-party CLIs used for development
-init: _ensure-build-deps _ensure-native-libs _ensure-kache _ensure-gitnexus
+init: _ensure-build-deps _ensure-native-libs _ensure-kache _ensure-nextest _ensure-gitnexus
     #!/usr/bin/env bash
     set -euo pipefail
     # Source cargo env in case _ensure-build-deps just installed Rust
@@ -605,6 +605,31 @@ _ensure-kache:
     fi
 
     kache --version
+
+# ensure the test runner every tier above L1 depends on is available
+#
+# Only `_test` (L1) degrades to `cargo test` when nextest is absent. `_test_l2`,
+# `_test_l3`, `_test_browser`, `_test_real`, and `_sanity` invoke `cargo nextest
+# run` unconditionally — they need its `-E` filtersets to select a tier — and
+# `.config/nextest.toml` carries the retry, slow-timeout, and leak-timeout policy
+# that `cargo test` has no equivalent for. A host missing nextest therefore fails
+# every tier above L1 outright rather than running them unprotected.
+_ensure-nextest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [[ -f "$HOME/.cargo/env" ]] && source "$HOME/.cargo/env"
+
+    if cargo nextest --version &> /dev/null; then
+        exit 0
+    fi
+
+    if command -v cargo-binstall &> /dev/null; then
+        RUSTC_WRAPPER="" cargo binstall --no-confirm cargo-nextest
+    else
+        RUSTC_WRAPPER="" cargo install --locked cargo-nextest
+    fi
+
+    cargo nextest --version
 
 # ensure GitNexus and its native parser are available for this host
 _ensure-gitnexus:
