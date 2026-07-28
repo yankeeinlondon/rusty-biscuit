@@ -1,7 +1,8 @@
 # CI area policy — `areas.json`
 
-`areas.json` is the single policy surface for the curated CI package areas. Each
-record describes one area; `scripts/ci/affected_scope.py` validates every record
+`areas.json` is the single policy surface for **every** package area in the repo.
+Each area `sniff repo package-areas` discovers has exactly one record, whether or
+not it gates in CI. Each record describes one area; `scripts/ci/affected_scope.py` validates every record
 against the schema below (via `validate_area_schema`) and fails loudly on a
 missing required field, an unknown field, an unsupported runner OS, an unknown L2
 backend, or a mistyped value.
@@ -15,7 +16,9 @@ order must match the root `justfile` `areas :=` list.
 | Field | Type | Required | Default | Meaning |
 |-------|------|----------|---------|---------|
 | `area` | string | yes | — | Area directory; used for `cd`, cache keys, and ownership. |
-| `check_args` | string | yes | — | Args for the macOS compile-check `cargo check --all-targets` (e.g. `-p foo -p foo-cli`). |
+| `ci` | bool | no | `true` | Whether the area gates in the fan-out matrix. |
+| `check_args` | string | when `ci` | — | Args for the macOS compile-check `cargo check --all-targets` (e.g. `-p foo -p foo-cli`). |
+| `reason` | string | when not `ci` | — | Why the area does not gate, and what would unblock it. |
 | `full_os` | string[] | no | `["ubuntu-latest","windows-latest"]` | Runner OSes that run the full L1 suite. |
 | `check_os` | string[] | no | `["macos-latest"]` | Runner OSes that only compile-check. |
 | `soft_os` | string[] | no | `["windows-latest"]` | Test-leg OSes whose failures are advisory (`continue-on-error`). Must not list an OS the area's cross-platform contract requires to gate. |
@@ -54,20 +57,30 @@ Current set: `biscuit-hash` (pure Rust, fast) and `playa` (native dependencies).
 
 Keep the set small — it is a serial stage in front of everything else.
 
-## Ownership completeness (`exemptions.json`)
+## Ownership completeness
 
-Every Cargo workspace member (per `cargo metadata`) must be owned by exactly one
-of: a curated area (it lives under an `area` directory), or an explicit exemption
-in `.github/ci/exemptions.json`. `validate_ownership` fails the scope calculation
-— naming the offending package — for an unmapped member, a package that is both
-owned and exempt, or an exemption for a package that no longer exists.
+Every Cargo workspace member (per `cargo metadata`) must live under an area that
+has a record here. `validate_ownership` fails the scope calculation — naming the
+package — when one does not, so a package in a brand-new directory cannot land
+without someone deciding what its area is and whether it should gate.
 
-`exemptions.json` is a list of `{ "package": "<name>", "reason": "<why>" }`.
-Reasons are required and non-empty. Exemptions cover shared test-infra crates
-(exercised transitively), experimental/unstable packages, and real areas whose
-justfiles do not yet define the full canonical recipe set (promote them by
-completing the recipes, adding them to the `areas` list + this file, and removing
-the exemption).
+Areas that do not gate set `"ci": false` and give a `reason`. They still declare
+`native`, still confer ownership, and still appear to `just _ensure-native-libs`;
+they simply launch no area job. Current non-gating areas fall into three groups:
+
+- **Internal test infrastructure** — `tools` (test-toolkit),
+  `biscuit-test-harness`, `biscuit-browser-harness`. Not public-facing; exercised
+  transitively by every consumer that dev-depends on them. These are not expected
+  to gain their own matrix entry.
+- **Real areas awaiting promotion** — `messenger`, `biscuit-visualized`. The
+  blocker is the canonical `just` recipe set (they define only `test`/`lint`),
+  which `check-canonical` requires. Complete the recipes, flip `ci` to `true`,
+  and add the area to the root justfile's `areas :=` list.
+- **Not ready** — `visualizer`, `biscuit-clipboard`, `reaper` (not stabilized),
+  `agent-sandbox` (experimental), `tabby` (a stub).
+
+Only gating areas appear in the root justfile's `areas :=` list;
+`validate_area_config` keeps the two in step.
 
 ## Adding or changing an area
 

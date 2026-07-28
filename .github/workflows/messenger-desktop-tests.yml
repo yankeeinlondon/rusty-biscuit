@@ -5,15 +5,14 @@ name: messenger-desktop-tests
 # macOS to ensure helper election, fallback, and platform-specific edge cases
 # remain green on every supported OS.
 #
-# `messenger` is not yet a curated CI area (see `.github/ci/exemptions.json`), so
+# `messenger` is a non-gating area (`ci: false` in `.github/ci/areas.json`), so
 # this workflow IS its CI ownership. Orchestrated by `ci.yml` when a messenger
 # package is in the affected scope (D12); no longer self-triggers on pushes/PRs.
 # Also dispatchable manually.
 #
-# Its Linux system packages are installed inline rather than through
-# `just _ensure-native-libs`, because that recipe provisions from `areas.json`
-# and messenger has no area record to declare them in. Promoting messenger to a
-# curated area should move them there.
+# Its Linux system packages are still installed inline even though the area
+# record now declares them, because this workflow does not run
+# `just _ensure-native-libs`. Switching it over is deliberate follow-up work.
 
 on:
   workflow_call: {}
