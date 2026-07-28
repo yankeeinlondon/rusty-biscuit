@@ -166,7 +166,7 @@ fn assert_renders_in_kitty(case: &DiagramCase) {
          plain:\n{}",
         case.cmd,
         case.arg,
-        &frame.raw.chars().take(400).collect::<String>(),
+        frame.raw.chars().take(400).collect::<String>(),
         frame.plain,
     );
 }
@@ -451,7 +451,7 @@ fn level2_diagram_width_kitty_apc_columns() {
         panic!(
             "could not extract Kitty APC payload from --width 50% render.\n\
              pane cols: {pane_cols}\nraw first 400:\n{:?}",
-            &frame.raw.chars().take(400).collect::<String>(),
+            frame.raw.chars().take(400).collect::<String>(),
         )
     });
 
@@ -533,7 +533,7 @@ fn level2_inverse_flag_changes_background_in_capture() {
         panic!(
             "could not extract Kitty APC payload from default render.\n\
              raw first 400:\n{:?}",
-            &frame1.raw.chars().take(400).collect::<String>(),
+            frame1.raw.chars().take(400).collect::<String>(),
         )
     });
 
@@ -549,7 +549,7 @@ fn level2_inverse_flag_changes_background_in_capture() {
         panic!(
             "could not extract Kitty APC payload from --inverse render.\n\
              raw first 400:\n{:?}",
-            &frame2.raw.chars().take(400).collect::<String>(),
+            frame2.raw.chars().take(400).collect::<String>(),
         )
     });
 
@@ -597,12 +597,12 @@ fn level2_diagram_fallback_when_no_image_protocol() {
     assert!(
         !frame.raw.contains("\x1b_G"),
         "Kitty APC bytes leaked into tmux capture; fallback path failed. raw:\n{:?}",
-        &frame.raw.chars().take(400).collect::<String>(),
+        frame.raw.chars().take(400).collect::<String>(),
     );
     assert!(
         !frame.raw.contains("\x1b]1337;File="),
         "iTerm2 OSC bytes leaked into tmux capture; fallback path failed. raw:\n{:?}",
-        &frame.raw.chars().take(400).collect::<String>(),
+        frame.raw.chars().take(400).collect::<String>(),
     );
 }
 
