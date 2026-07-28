@@ -374,6 +374,15 @@ mod tests {
 
         let stack = build_available_provider_stack(&installed);
 
+        // The filtering contract holds on every platform: nothing reaches the
+        // stack that is not available under `installed`. Asserting it here
+        // keeps the test meaningful off macOS, where the default stack may
+        // legitimately exclude Say and leave the stack empty.
+        assert!(
+            stack.iter().all(|p| p.is_available(&installed)),
+            "stack retained an unavailable provider: {stack:?}"
+        );
+
         // On macOS, Say should be in the stack; on other platforms it may not be in defaults
         #[cfg(target_os = "macos")]
         {

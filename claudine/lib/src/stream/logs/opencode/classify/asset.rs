@@ -16,12 +16,15 @@ pub(super) fn classify_malformed_asset(record: &OpenCodeLogRecord) -> Option<Log
         .map(String::as_str)
         .unwrap_or("");
 
-    let (asset_type, error_text) = if let Some(kind) = detect_asset_suffix(err) {
-        (kind, err.to_string())
-    } else if let Some(kind) = detect_asset_suffix(&record.message) {
-        (kind, record.message.clone())
-    } else {
-        return None;
+    // The `err`/`error` tag wins; the message body is the fallback. Neither
+    // carrying a recognizable suffix means this is not a malformed-asset
+    // record at all.
+    let (asset_type, error_text) = match detect_asset_suffix(err) {
+        Some(kind) => (kind, err.to_string()),
+        None => (
+            detect_asset_suffix(&record.message)?,
+            record.message.clone(),
+        ),
     };
 
     let path = match asset_type {

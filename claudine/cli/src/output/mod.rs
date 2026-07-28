@@ -427,7 +427,7 @@ pub(crate) fn repo_flag_info_message(
 
     Prose::new(format!(
         "- <blue><bold>Info:</bold></blue> the {} was used; this constrains skills, commands, and subagent definitions to those in the repo.{}",
-        &*claudine::badges::REPO_FLAG,
+        *claudine::badges::REPO_FLAG,
         shadow_msg
     ))
     .with_word_wrap(WordWrap::WrapProse(Some(8), Some(3)))
