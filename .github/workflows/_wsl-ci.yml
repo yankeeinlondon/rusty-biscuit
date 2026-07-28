@@ -1,0 +1,328 @@
+name: wsl-ci
+
+# The `wsl2-ubuntu` environment: the canonical L1 suite, run inside a WSL2 Ubuntu
+# guest hosted by a `windows-latest` runner.
+#
+# WHY THIS IS A SEPARATE WORKFLOW
+#
+# WSL2 cannot be another entry in `_area-ci.yml`'s `runs-on` matrix. The job
+# still runs on `windows-latest` and every command executes through `wsl-bash`,
+# so a shared job would evaluate `runner.os == 'Windows'` and take the Windows
+# branch for kache gating, native-package installation, path handling, shell
+# selection, cache keys, and artifact collection — while the code under test is
+# actually running on Linux. Isolating it here makes that impossible by
+# construction rather than by review discipline.
+#
+# WSL2, NOT WSL1
+#
+# `Vampire/setup-wsl` defaults to version 2 and GitHub's Windows runners have had
+# nested virtualization since the Dadsv5 move in January 2024, so no version pin
+# appears below. WSL1 is not an acceptable fallback: WSLg (GUI, audio, clipboard,
+# D-Bus) is WSL2-only, so under WSL1 `playa`, `messenger`, `biscuit-clipboard`,
+# `biscuit-visualized`, and `renderable` all take their no-capability fallback
+# branches and a green leg would misreport those packages for every real user.
+# Networking differs too — WSL1 shares the Windows stack, WSL2 is NAT'd — which
+# is material for `sniff`, `homelab`, and `rendezvous`.
+#
+# EXT4, NOT /mnt/c
+#
+# The repo is cloned into the guest filesystem (`/home/runner/rusty-biscuit`)
+# rather than built over `GITHUB_WORKSPACE`, which is a 9p mount. The 9p boundary
+# penalty is severe for a build tree, and ext4 is also where real WSL developers
+# keep their repos, so this is the configuration worth testing.
+#
+# BUILD ONCE, RUN IN THE GUEST
+#
+# `cargo nextest archive` builds `x86_64-unknown-linux-gnu` on `ubuntu-latest`
+# and the guest only *runs* the archived binaries. No rustup, no toolchain, no
+# compile inside WSL, and the binaries are byte-identical to the Linux leg's, so
+# a `wsl2-ubuntu` failure is an environment difference rather than a build
+# difference. L1 ONLY — the L2 tier needs the broker binary and a live tmux
+# server, which an archive does not carry; `wsl2-ubuntu` is therefore absent from
+# `L2_PROVISIONED_ENVIRONMENTS` in `scripts/ci/affected_scope.py`.
+
+on:
+  workflow_call:
+    inputs:
+      area:
+        description: "Area directory, used for `cd`, cache keys, and result identity (e.g. sniff)."
+        type: string
+        required: true
+      check-args:
+        description: "Cargo package selectors for the archive build (e.g. '-p sniff -p sniff-cli --features sniff/remote')."
+        type: string
+        required: true
+      shards:
+        description: 'JSON array of nextest partition specs; ["1/1"] means no sharding.'
+        type: string
+        default: '["1/1"]'
+      distribution:
+        description: "WSL distribution to provision."
+        type: string
+        default: Ubuntu-24.04
+  workflow_dispatch:
+    inputs:
+      area:
+        description: "Area directory to run inside WSL2."
+        type: string
+        required: true
+        default: sniff
+      check-args:
+        description: "Cargo package selectors for the archive build."
+        type: string
+        required: true
+        default: "-p sniff -p sniff-cli --features sniff/remote"
+      shards:
+        description: "JSON array of nextest partition specs."
+        type: string
+        default: '["1/1"]'
+      distribution:
+        description: "WSL distribution to provision."
+        type: string
+        default: Ubuntu-24.04
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  COLORTERM: truecolor
+  NEXTEST_PROFILE: ci
+  ARCHIVE_NAME: nextest-archive.tar.zst
+
+jobs:
+  # Linux build host. Produces the artifact the guest consumes; nothing here
+  # touches WSL.
+  archive:
+    name: archive (linux build for wsl2)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install just
+        uses: extractions/setup-just@v2
+      - name: Verify the archive passthrough is wired
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The guest has no Cargo, so the canonical recipes must be able to (a)
+          # invoke the standalone `cargo-nextest` binary, (b) forward
+          # --archive-file/--workspace-remap untouched, and (c) stage their JUnit
+          # report without shelling out to `cargo metadata`. Fail here, with a
+          # pointer, rather than deep inside `wsl-bash` with a confusing error.
+          missing=()
+          for knob in BISCUIT_NEXTEST_BIN BISCUIT_JUNIT_TARGET_DIR BISCUIT_JUNIT_WORKSPACE_ROOT; do
+            grep -q "$knob" just/devops.just || missing+=("$knob")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "just/devops.just is missing the WSL archive passthrough: ${missing[*]}" >&2
+            echo "See fixes/2026-07-27-refactor/wsl-archive-requirements.md for the exact contract." >&2
+            exit 1
+          fi
+      - name: Install native prerequisites
+        shell: bash
+        run: just _ensure-native-libs "${{ inputs.area }}"
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: area-ci-${{ inputs.area }}-test-ubuntu-latest
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+      - name: Build the nextest archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          # An explicit --target keeps the archived binaries unambiguously
+          # x86_64-unknown-linux-gnu, which is exactly what the guest executes.
+          cargo nextest archive \
+            --archive-file "$RUNNER_TEMP/$ARCHIVE_NAME" \
+            --target x86_64-unknown-linux-gnu \
+            ${{ inputs.check-args }}
+      - name: Upload the nextest archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: nextest-archive-${{ inputs.area }}-wsl2-ubuntu
+          path: ${{ runner.temp }}/${{ env.ARCHIVE_NAME }}
+          retention-days: 1
+          if-no-files-found: error
+
+  wsl:
+    name: test (wsl2-ubuntu${{ matrix.shard != '1/1' && format(' {0}', matrix.shard) || '' }})
+    needs: archive
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(inputs.shards) }}
+    env:
+      # Result identity, declared once. The environment is `wsl2-ubuntu` even
+      # though the runner label is `windows-latest`; stamping the label here
+      # would silently merge this leg into the native Windows rollup cell.
+      BISCUIT_CI_AREA: ${{ inputs.area }}
+      BISCUIT_CI_ENVIRONMENT: wsl2-ubuntu
+      BISCUIT_CI_SHARD: ${{ matrix.shard }}
+      # Pinned rather than defaulted. The guest's staging root is the one path
+      # two different `wsl-bash` invocations must agree on — the tests write it,
+      # and a later step copies it across the 9p mount for upload — and each
+      # invocation gets a fresh environment, so the value is declared once here
+      # and interpolated into both.
+      BISCUIT_JUNIT_STAGE_DIR: /home/runner/rusty-biscuit/target/nextest/ci-reports
+    steps:
+      - uses: actions/checkout@v4
+      # Inside the workspace, not RUNNER_TEMP: the guest reaches this through the
+      # 9p mount by resolving `pwd`, which needs no environment forwarding.
+      - name: Download the nextest archive
+        uses: actions/download-artifact@v4
+        with:
+          name: nextest-archive-${{ inputs.area }}-wsl2-ubuntu
+          path: ${{ github.workspace }}/nextest-archive
+      # No `wsl-version:` pin — the action already defaults to 2, and pinning 1
+      # would be an explicit downgrade to an environment without WSLg.
+      - name: Provision the WSL2 guest
+        uses: Vampire/setup-wsl@v4
+        with:
+          distribution: ${{ inputs.distribution }}
+          set-as-default: true
+          additional-packages: ca-certificates curl git xz-utils
+      - name: Verify the guest is WSL2
+        shell: wsl-bash {0}
+        run: |
+          set -euo pipefail
+          uname -a
+          # WSL2 runs a real Linux kernel and says so; WSL1's syscall translation
+          # layer reports a Microsoft build instead. A silent downgrade to WSL1
+          # would make every WSLg-dependent package (playa, messenger,
+          # biscuit-clipboard, biscuit-visualized, renderable) report its
+          # no-capability fallback, and NAT'd networking would stop applying to
+          # sniff, homelab, and rendezvous.
+          case "$(uname -r)" in
+            *microsoft-standard-WSL2*) ;;
+            *)
+              echo "guest is not WSL2 (kernel: $(uname -r)); refusing to report a result" >&2
+              exit 1
+              ;;
+          esac
+      - name: Clone the repository onto ext4
+        shell: wsl-bash {0}
+        run: |
+          set -euo pipefail
+          # `wsl-bash` starts in the translated workspace directory, so `pwd` is
+          # the one workspace path that needs no WSLENV forwarding to be correct.
+          workspace="$(pwd)"
+          git config --global --add safe.directory '*'
+          revision="$(git -C "$workspace" rev-parse HEAD)"
+          rm -rf /home/runner/rusty-biscuit
+          # Building over the workspace pays the 9p boundary penalty on every
+          # file access; ext4 is both faster and where real WSL developers keep
+          # their repositories, so it is the configuration worth testing.
+          git clone --no-hardlinks "$workspace" /home/runner/rusty-biscuit
+          git -C /home/runner/rusty-biscuit checkout --detach "$revision"
+          cp "$workspace/nextest-archive/nextest-archive.tar.zst" /home/runner/
+      - name: Install just and cargo-nextest in the guest
+        shell: wsl-bash {0}
+        run: |
+          set -euo pipefail
+          # Deliberately NOT rustup: the guest only RUNS prebuilt test binaries
+          # from the archive, so a Rust toolchain would add minutes and buy
+          # nothing. cargo-nextest executes an archive without Cargo or rustc.
+          curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh \
+            | bash -s -- --to /usr/local/bin
+          curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C /usr/local/bin
+          just --version
+          cargo-nextest nextest --version
+      - name: Install native prerequisites in the guest
+        shell: wsl-bash {0}
+        run: |
+          set -euo pipefail
+          # A WSL2 guest IS Linux, so `_ensure-native-libs` keys off `uname -s`
+          # and reads the area's `ubuntu-latest` package list. There is no
+          # separate `wsl2-ubuntu` key in areas.json.
+          cd /home/runner/rusty-biscuit
+          just _ensure-native-libs "${{ inputs.area }}"
+      - name: L1 tests from the archive
+        shell: wsl-bash {0}
+        run: |
+          set -euo pipefail
+          # Re-exported from the job-level `env:` block through GitHub expression
+          # interpolation rather than read from the guest environment: whether
+          # `wsl-bash` forwards a given variable depends on WSLENV, and the
+          # result identity is far too consequential to leave to that. A missing
+          # or wrong BISCUIT_CI_ENVIRONMENT does not fail — it silently files
+          # these results under the native Windows cell.
+          export BISCUIT_CI_AREA='${{ env.BISCUIT_CI_AREA }}'
+          export BISCUIT_CI_ENVIRONMENT='${{ env.BISCUIT_CI_ENVIRONMENT }}'
+          export BISCUIT_CI_SHARD='${{ env.BISCUIT_CI_SHARD }}'
+          export NEXTEST_PROFILE='${{ env.NEXTEST_PROFILE }}'
+          export COLORTERM='${{ env.COLORTERM }}'
+          # No Cargo in the guest, so the canonical recipe must reach nextest as
+          # a standalone binary and stage its JUnit report without shelling out
+          # to `cargo metadata`. See fixes/2026-07-27-refactor/wsl-archive-requirements.md.
+          export BISCUIT_NEXTEST_BIN='cargo-nextest nextest'
+          export BISCUIT_JUNIT_WORKSPACE_ROOT=/home/runner/rusty-biscuit
+          export BISCUIT_JUNIT_TARGET_DIR=/home/runner/rusty-biscuit/target
+          export BISCUIT_JUNIT_STAGE_DIR='${{ env.BISCUIT_JUNIT_STAGE_DIR }}'
+
+          archive=/home/runner/nextest-archive.tar.zst
+          [ -f "$archive" ] || { echo "nextest archive missing at $archive" >&2; exit 1; }
+
+          # --workspace-remap is not optional: the archive records the BUILD
+          # host's source paths, and the guest checkout is somewhere else.
+          args=(--no-fail-fast --archive-file "$archive" --workspace-remap /home/runner/rusty-biscuit)
+          if [ "${{ matrix.shard }}" != "1/1" ]; then
+            args+=(--partition "count:${{ matrix.shard }}")
+          fi
+
+          cd "/home/runner/rusty-biscuit/${{ inputs.area }}"
+          just test "${args[@]}"
+      - name: Stage the JUnit reports for upload
+        if: ${{ !cancelled() }}
+        shell: wsl-bash {0}
+        run: |
+          set -uo pipefail
+          # The upload runs on the Windows host, which cannot read ext4, so the
+          # reports cross the 9p mount once, at the end, rather than per test.
+          workspace="$(pwd)"
+          rm -rf "$workspace/wsl-junit"
+          mkdir -p "$workspace/wsl-junit"
+          # The CONTENTS of the staging root, so `manifest.jsonl` lands at the
+          # artifact root. `ci-rollup` reads the manifest only from there;
+          # copying `target/nextest/` instead would bury it one level down, and
+          # every record would silently degrade to artifact-name parsing with an
+          # unknown shard.
+          cp -R '${{ env.BISCUIT_JUNIT_STAGE_DIR }}/.' "$workspace/wsl-junit/" 2>/dev/null || true
+          # Staging must never change the tier's outcome.
+          exit 0
+      - name: Upload wsl2-ubuntu L1 JUnit
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-${{ inputs.area }}-L1-wsl2-ubuntu-${{ strategy.job-index }}
+          path: wsl-junit
+          if-no-files-found: ignore
+      # `L1`, not `wsl`: `ci-rollup` keys a status by TIER, and this job produces
+      # the wsl2-ubuntu L1 evidence. A non-tier name would manufacture a phantom
+      # cell beside the real one.
+      - name: Record producer status
+        if: ${{ always() }}
+        shell: bash
+        env:
+          AREA: ${{ inputs.area }}
+          JOB: L1
+          ENVIRONMENT: wsl2-ubuntu
+          RESULT: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/status"
+          printf '{"area":"%s","job":"%s","environment":"%s","result":"%s"}\n' \
+            "$AREA" "$JOB" "$ENVIRONMENT" "$RESULT" \
+            >"$RUNNER_TEMP/status/status.json"
+      - name: Upload producer status
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: status-${{ inputs.area }}-L1-wsl2-ubuntu-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/status

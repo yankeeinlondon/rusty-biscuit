@@ -13,6 +13,17 @@ name: messenger-desktop-tests
 # Its Linux system packages are still installed inline even though the area
 # record now declares them, because this workflow does not run
 # `just _ensure-native-libs`. Switching it over is deliberate follow-up work.
+#
+# The bespoke `wsl-tests` job was deleted on 2026-07-27. It pinned
+# `wsl-version: 1` (no WSLg, so `messenger`'s desktop-notification paths took
+# their no-capability fallback and a green leg would have misreported them),
+# installed rustup and compiled inside the guest, built over `/mnt/c`, and used
+# `cargo test` rather than the canonical `just` recipes — so it was outside the
+# "same canonical recipe" objective entirely. It had also been failing during
+# provisioning (`dpkg` error, `wsl.exe` exit 100) since 2026-06-17, before any
+# Rust ran. `.github/workflows/_wsl-ci.yml` is the one shared `wsl2-ubuntu`
+# mechanism now; messenger picks it up when it is promoted out of
+# `"ci": false` and gains `wsl2-ubuntu` in its `environments`.
 
 on:
   workflow_call: {}
@@ -61,48 +72,3 @@ jobs:
       - name: Run messenger CLI tests
         run: cargo test -p messenger-cli
 
-  wsl-tests:
-    name: messenger / desktop / WSL2 ubuntu
-    runs-on: windows-latest
-    timeout-minutes: 30
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup WSL
-        uses: Vampire/setup-wsl@v4
-        with:
-          distribution: Ubuntu-24.04
-          wsl-version: 1
-          set-as-default: true
-          update: true
-          additional-packages: pkg-config, libssl-dev, libdbus-1-dev
-
-      - name: Install Rust in WSL
-        shell: wsl-bash {0}
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-
-      - name: Cargo check in WSL (--all-features)
-        shell: wsl-bash {0}
-        run: |
-          source ~/.cargo/env
-          cargo check -p messenger --all-features
-
-      - name: Build desktop helper stubs in WSL
-        shell: wsl-bash {0}
-        run: |
-          source ~/.cargo/env
-          cargo build -p messenger --features desktop --bins
-
-      - name: Run messenger lib unit tests in WSL (desktop feature)
-        shell: wsl-bash {0}
-        run: |
-          source ~/.cargo/env
-          cargo test -p messenger --features desktop --lib
-
-      - name: Run messenger CLI tests in WSL
-        shell: wsl-bash {0}
-        run: |
-          source ~/.cargo/env
-          cargo test -p messenger-cli

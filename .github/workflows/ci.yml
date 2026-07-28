@@ -188,12 +188,18 @@ jobs:
     with:
       area: ${{ matrix.area }}
       check-args: ${{ matrix.check_args }}
-      full-os: ${{ toJSON(matrix.full_os) }}
+      # `native_environments`, `l2_environments`, and `wsl` are DERIVED by
+      # `affected_scope.py` from the single `environments` policy field, so the
+      # reusable workflow receives pre-split, un-confusable inputs and cannot
+      # route `wsl2-ubuntu` into a `runs-on` matrix.
+      native-environments: ${{ toJSON(matrix.native_environments) }}
       check-os: ${{ toJSON(matrix.check_os) }}
+      l2-environments: ${{ toJSON(matrix.l2_environments) }}
+      backends: ${{ toJSON(matrix.backends) }}
       shards: ${{ toJSON(matrix.shards) }}
-      soft-os: ${{ toJSON(matrix.soft_os) }}
       l2: ${{ matrix.l2 }}
       browser: ${{ matrix.browser }}
+      wsl: ${{ matrix.wsl }}
       kache: ${{ matrix.kache }}
       ai-provider-stubs: ${{ matrix.ai_provider_stubs }}
     secrets: inherit
@@ -214,12 +220,18 @@ jobs:
     with:
       area: ${{ matrix.area }}
       check-args: ${{ matrix.check_args }}
-      full-os: ${{ toJSON(matrix.full_os) }}
+      # `native_environments`, `l2_environments`, and `wsl` are DERIVED by
+      # `affected_scope.py` from the single `environments` policy field, so the
+      # reusable workflow receives pre-split, un-confusable inputs and cannot
+      # route `wsl2-ubuntu` into a `runs-on` matrix.
+      native-environments: ${{ toJSON(matrix.native_environments) }}
       check-os: ${{ toJSON(matrix.check_os) }}
+      l2-environments: ${{ toJSON(matrix.l2_environments) }}
+      backends: ${{ toJSON(matrix.backends) }}
       shards: ${{ toJSON(matrix.shards) }}
-      soft-os: ${{ toJSON(matrix.soft_os) }}
       l2: ${{ matrix.l2 }}
       browser: ${{ matrix.browser }}
+      wsl: ${{ matrix.wsl }}
       kache: ${{ matrix.kache }}
       ai-provider-stubs: ${{ matrix.ai_provider_stubs }}
     secrets: inherit
@@ -376,22 +388,167 @@ jobs:
     uses: ./.github/workflows/messenger-desktop-tests.yml
     secrets: inherit
 
-  # Failure-class summary (D15). Classifies the FIRST actionable failure from the
-  # job graph, so the run summary answers "what kind of failure is this?" without
-  # reading every matrix leg. It classifies by job RESULT, never by log text, so
-  # a Node deprecation warning or a cache-reservation collision inside a job that
-  # still succeeded can never be promoted over the real root cause. Each area
-  # additionally contributes its own gate-level line from `_area-ci.yml`.
+  # THE single required branch-protection check (plan 1.3).
   #
-  # Advisory only: this job always succeeds. Required status comes from the gates
-  # themselves, so a reporting bug can never turn a red run green.
-  summary:
-    name: Failure-class summary
+  # Everything above stays visibly red when it fails, and NONE of it is a
+  # required check. That is deliberate: a required producer's failure blocks the
+  # merge directly, the baseline is never consulted, and the entire mechanism is
+  # bypassed. Only this job gates.
+  #
+  # Three properties this job must have, each earned:
+  #
+  #   1. `if: always()` — a failed or cancelled producer must not skip it.
+  #      `needs` here is a "wait for, then download from" list, not a gate.
+  #   2. `--scope` from the scope job — it is the ONLY way `ci-rollup` learns an
+  #      area was scheduled and produced NOTHING. Infer scope from the artifacts
+  #      on disk and that case is invisible by construction, which is exactly
+  #      what MISSING exists to catch. A baseline entry outside the scope is
+  #      ignored, never counted as a pass.
+  #   3. Evidence, not job names. When `needs:` skips a matrix job GitHub never
+  #      evaluates the matrix context: the whole matrix collapses into ONE
+  #      skipped job named with the raw `${{ matrix.os }}` expression (measured,
+  #      run 30323254931). Nothing here parses a display name; identity comes
+  #      from each artifact's `manifest.jsonl` and `status.json`.
+  ci-verdict:
+    name: ci-verdict
+    # Every job that can produce a result or status artifact. The `wsl` leg and
+    # each area's `check`/`lint`/`test`/`l2`/`browser` jobs are nested inside
+    # `area-ci`/`canary`, so they are covered transitively.
     needs:
       - scope
       - preflight
       - canary
       - area-ci
+      - affected-coverage
+      - claudine-generator-signals
+      - darkmatter-no-color
+      - rendezvous
+      - biscuit-tui-captured-stdout
+      - playa-windows
+      - messenger-desktop
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
+      # A verdict computed from an unknown scope is not a verdict, so a broken
+      # scope job fails this check outright rather than rendering a vacuous
+      # CLEAR over an empty grid.
+      - name: Resolve the affected scope
+        id: verdict-scope
+        shell: bash
+        env:
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          AREA_NAMES: ${{ needs.scope.outputs.area_names }}
+        run: |
+          set -euo pipefail
+          if [ "$SCOPE_RESULT" != "success" ]; then
+            echo "the scope job concluded '$SCOPE_RESULT'; without its area list an area that produced nothing is invisible and this verdict would be vacuous" >&2
+            exit 1
+          fi
+          # `area_names` is a JSON array; `--scope` takes a comma list.
+          scope="$(jq -r 'join(",")' <<<"${AREA_NAMES:-[]}")"
+          {
+            echo "scope=${scope}"
+            if [ -n "$scope" ]; then echo "has_scope=true"; else echo "has_scope=false"; fi
+          } >>"$GITHUB_OUTPUT"
+      # Omitting `name:` downloads EVERY artifact in the run into one directory
+      # per artifact — exactly the layout `--artifacts` expects.
+      - name: Download every result and status artifact
+        uses: actions/download-artifact@v4
+        with:
+          path: ci-artifacts
+          merge-multiple: false
+      # `--no-default-features` deselects biscuit-terminal, sniff, and
+      # cargo_metadata, which the other two bins in `scripts/` need and this one
+      # does not. Measured: ~8s versus 40s+. Do not drop the flag.
+      - name: Build ci-rollup
+        run: |
+          cargo build --release \
+            --manifest-path scripts/Cargo.toml \
+            --no-default-features --bin ci-rollup
+      - name: Roll up results
+        id: rollup
+        if: ${{ steps.verdict-scope.outputs.has_scope == 'true' }}
+        # The rollup's own exit 2 (a cell fails the summary gate) must not stop
+        # the verdict step below from running and explaining WHY. The verdict is
+        # what gates.
+        continue-on-error: true
+        shell: bash
+        env:
+          SCOPE: ${{ steps.verdict-scope.outputs.scope }}
+        run: |
+          set -euo pipefail
+          # download-artifact creates nothing when the run produced no artifact
+          # at all; the walker must still see an (empty) root rather than fail.
+          mkdir -p ci-artifacts
+          ./scripts/target/release/ci-rollup rollup \
+            --artifacts ci-artifacts \
+            --areas .github/ci/areas.json \
+            --scope "$SCOPE" \
+            --browser-environments ubuntu-latest \
+            --provisioned-backends 'ubuntu-latest=tmux' \
+            --provisioned-backends 'macos-latest=tmux' \
+            --provisioned-backends 'windows-latest=' \
+            --provisioned-backends 'wsl2-ubuntu=' \
+            --out ci-results.json \
+            --run-id '${{ github.run_id }}'
+      - name: Upload the machine-readable rollup
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-results
+          path: ci-results.json
+          if-no-files-found: ignore
+      # THE gate. Exit 2 = blocked, exit 1 = the tool could not read its input
+      # (including a rollup that never wrote `ci-results.json`). Both are
+      # non-zero, so this check fails closed.
+      - name: Verdict
+        if: ${{ steps.verdict-scope.outputs.has_scope == 'true' }}
+        shell: bash
+        run: |
+          ./scripts/target/release/ci-rollup verdict \
+            --results ci-results.json \
+            --baseline .github/ci/ci-baseline.toml
+      # Success criterion 7: a docs-only change schedules no test leg anywhere,
+      # so there is nothing to verdict and this check must pass. Stated out loud
+      # rather than left as a silently green job.
+      - name: No area was scheduled
+        if: ${{ steps.verdict-scope.outputs.has_scope != 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo ""
+            echo "## CI verdict"
+            echo ""
+            echo "**CLEAR** — the affected-scope calculation selected no package area, so this run scheduled no test leg and there is nothing to compare against the baseline."
+          } >>"$GITHUB_STEP_SUMMARY"
+
+  # Navigation aid for the jobs `ci-verdict` cannot yet see, and ONLY those.
+  #
+  # `ci-rollup` covers every area in `areas.json`. It cannot cover the bootstrap
+  # stages or the specialized workflows: those are not areas, emit no
+  # `manifest.jsonl`, and can never appear in an affected scope, so their
+  # migrated baseline entries are reported `baseline-out-of-scope` and ignored
+  # (plan 3.5 is what closes this). Without a line here they would fail
+  # invisibly under a CLEAR verdict.
+  #
+  # It deliberately makes NO run-level claim. The old "No gate reported a
+  # failure" line was a green verdict computed from job results alone, which
+  # cannot see a MISSING cell, a cancelled producer, or a baselined entry that
+  # started passing — so it could and would contradict `ci-verdict`. Plan
+  # success criterion 1 asks for a single view; that view is the rollup grid.
+  #
+  # Advisory only: this job always succeeds.
+  summary:
+    name: Unrolled-up job summary
+    needs:
+      - scope
+      - preflight
+      - canary
       - affected-coverage
       - claudine-generator-signals
       - darkmatter-no-color
@@ -408,11 +565,11 @@ jobs:
         env:
           # Listed in dependency order: an earlier stage's failure is the root
           # cause, and later stages were skipped or would only repeat it.
+          # `area-ci` is absent on purpose — every area gate is a rollup cell.
           RESULTS: |
             bootstrap (scope calculation):${{ needs.scope.result }}
             bootstrap (preflight):${{ needs.preflight.result }}
             canary (shared-change regression):${{ needs.canary.result }}
-            area gate (build/lint/L1/L2/browser):${{ needs.area-ci.result }}
             claudine generator drift:${{ needs.claudine-generator-signals.result }}
             darkmatter NO_COLOR contract:${{ needs.darkmatter-no-color.result }}
             rendezvous native IPC runtime:${{ needs.rendezvous.result }}
@@ -424,7 +581,7 @@ jobs:
           set -euo pipefail
           {
             echo ""
-            echo "## CI result"
+            echo "## Jobs outside the rollup"
             echo ""
           } >>"$GITHUB_STEP_SUMMARY"
 
@@ -438,12 +595,12 @@ jobs:
           done <<<"$RESULTS"
 
           if [ -z "$first" ]; then
-            echo "No gate reported a failure. Skipped jobs were not selected by scope." >>"$GITHUB_STEP_SUMMARY"
+            echo "No bootstrap or specialized workflow failed. **The run's verdict is \`ci-verdict\`, not this line** — area results live in the CI rollup grid above." >>"$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
           {
             echo "**First actionable failure class: ${first}**"
             echo ""
-            echo "Open that job first — later red jobs are usually the same root cause."
+            echo "This stage is not an \`areas.json\` area, so it is invisible to \`ci-verdict\` until plan 3.5 makes it emit the same result schema. Open that job first — later red jobs are usually the same root cause."
           } >>"$GITHUB_STEP_SUMMARY"
