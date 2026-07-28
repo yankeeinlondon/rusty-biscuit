@@ -68,9 +68,46 @@ under constraints that no longer hold:
 - **`features/2026-07-24-devops/ci-failure-inventory.md`** — 34 failing jobs
   reduced to ~14 root causes. Phase 4 below is the burn-down of that inventory,
   which the devops feature declared an explicit non-goal.
-- **`features/2026-06-07-matrix-testing/`** — the original multi-OS spec. Its
-  WSL1 premise is superseded here. Its status needs updating so the assumption
-  is not re-inherited.
+- **`features/2026-06-07-matrix-testing/`** — the original multi-OS spec,
+  superseded by this plan and expected to be deleted. Its salvageable content is
+  carried below so nothing is lost with it.
+
+### Salvaged from the superseded matrix-testing spec
+
+**Keep — its D2 filesystem decision.** That spec already resolved the WSL
+checkout question: clone into the WSL guest filesystem
+(`git clone "${GITHUB_WORKSPACE}" /home/runner/rusty-biscuit`) rather than
+building over `/mnt/c`. Its reasoning was the WSL1 translation-layer penalty;
+under WSL2 the penalty is the 9p boundary, which is worse, so the conclusion
+strengthens rather than weakens under the version change. Adopted into 2.1.
+
+**Keep — docs-only changes must not spin up the matrix.** Its AC1 required that
+modifying a non-code file not trigger the multi-OS suite. Carried into the
+success criteria; verify against `affected_scope.py` rather than assuming.
+
+**Keep — `homelab` as the worked example of a legitimate exclusion.** It targets
+physical IoT hardware, so it is excluded on capability grounds, not because it is
+backlog. Useful as the reference case when resolving the 10 `ci: false` records
+in 3.5: a real exclusion looks like this; the rest need promotion.
+
+**Reject — D3's branch gating** (Linux-only on feature branches, full matrix only
+on `main`). Its stated rationale was minimizing Actions credit consumption, which
+is void for a public repo. More importantly it detects cross-platform breakage
+only *after* the offending commit reaches `main`, forfeiting cheap bisection and
+recreating the deferral pattern that produced the current backlog.
+
+**Reject — its macOS exclusion premise** ("the primary developer develops and
+thoroughly tests on macOS locally"). Refuted by measurement: `sniff` is the only
+area whose tests run on macOS in CI, and it fails there today.
+
+**Superseded — its WSL provisioning mechanic** (install rustup and `just` inside
+the guest, then compile). Its own AC2 worried about GHA timeouts from exactly
+this. The `nextest archive` approach in 2.2 removes the toolchain install and the
+compile from the guest entirely.
+
+**Superseded — `just ci-changed-areas` and git-range change detection.**
+`scripts/ci/affected_scope.py` does strictly more: reverse-dependency closure,
+area-schema validation, and shadow-workspace detection.
 
 ## Constraints
 
@@ -253,7 +290,7 @@ Not blockers for Phase 0/1. Resolve before the corresponding Phase 3 step.
 
 | # | Decision | Notes |
 |---|---|---|
-| 2.1 | WSL checkout on ext4 or `/mnt/c` | ext4 is where most WSL devs keep repos; `/mnt/c` is 9p with different case-sensitivity, permissions, symlink, and inotify semantics. Recommend ext4 primary + a targeted `/mnt/c` leg for `biscuit-file` |
+| 2.1 | WSL checkout on ext4 or `/mnt/c` | **Largely pre-decided** — see "Salvaged" below. Clone into the WSL guest filesystem (`git clone "${GITHUB_WORKSPACE}" /home/runner/rusty-biscuit`), not `/mnt/c`. ext4 is also where most WSL devs keep repos. Remaining decision is only whether to add a targeted `/mnt/c` leg for `biscuit-file`, where the differing case-sensitivity, permission, symlink, and inotify semantics are the point rather than an obstacle |
 | 2.2 | `nextest archive` for the WSL leg | Build `x86_64-unknown-linux-gnu` once on `ubuntu-latest`, run inside WSL — no toolchain install, no compile, byte-identical binaries to the Linux leg. Needs `--archive-file` passthrough in `just/devops.just:171,446`. **L1 only** — L2 needs the broker binary and a live tmux server |
 | 2.3 | Windows L2 backend | No current backend is proven. Spike headless `wezterm-mux-server` + `WEZTERM_UNIX_SOCKET`; if that fails, scope a ConPTY-backed harness as separate work. Until one works, Windows L2 is BLOCKED/POLICY GAP for areas with applicable L2 tests, never a green `0 run / N skipped` cell |
 
@@ -396,6 +433,9 @@ in the GitHub UI.
 5. `soft_os` no longer exists.
 6. All 31 declared areas are either represented in the unified verdict or have
    an explicit, time-bounded `ci: false` exclusion.
+7. A docs-only change does not schedule any test leg on any environment
+   (carried from the superseded matrix-testing spec's AC1; verify against
+   `affected_scope.py`, do not assume).
 
 ## Executing on another host
 
@@ -416,6 +456,13 @@ This plan is written to be picked up on a different machine. Prerequisites:
    config, `just` recipes, and a leaf crate. Phase 4 burn-down is not: fixing
    Windows failures wants a Windows host, and macOS/WSL failures likewise.
    Sequence the burn-down to whichever hosts are actually available.
+
+   One exception worth planning around: **1.1 is best done on a macOS desktop.**
+   It is the only environment where all four L2 backends exist — WezTerm, kitty,
+   Apple Terminal, and tmux. CI can never host more than tmux, so the
+   backend-identifier contract and the per-backend requirement parsing are far
+   easier to get right where every backend can actually be exercised. Observe the
+   repo rule that L2 tests must not steal window focus.
 5. **Verify workflow changes on a branch PR run.** The devops handoff records
    five CI-only bugs that passed every local check. Local gates are necessary
    and not sufficient.
