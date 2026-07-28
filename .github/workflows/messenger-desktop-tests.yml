@@ -4,34 +4,26 @@ name: messenger-desktop-tests
 # Runs unit tests and the stub-binary integration tests on Linux, Windows, and
 # macOS to ensure helper election, fallback, and platform-specific edge cases
 # remain green on every supported OS.
+#
+# `messenger` is a non-gating area (`ci: false` in `.github/ci/areas.json`), so
+# this workflow IS its CI ownership. Orchestrated by `ci.yml` when a messenger
+# package is in the affected scope (D12); no longer self-triggers on pushes/PRs.
+# Also dispatchable manually.
+#
+# Its Linux system packages are still installed inline even though the area
+# record now declares them, because this workflow does not run
+# `just _ensure-native-libs`. Switching it over is deliberate follow-up work.
 
 on:
-  pull_request:
-    paths:
-      - "messenger/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - ".github/workflows/messenger-desktop-tests.yml"
-  push:
-    branches:
-      - main
-    paths:
-      - "messenger/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - ".github/workflows/messenger-desktop-tests.yml"
+  workflow_call: {}
   workflow_dispatch: {}
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
-concurrency:
-  group: messenger-desktop-tests-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   desktop-tests:
-    name: Desktop helpers (${{ matrix.os }})
+    name: messenger / desktop / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -42,8 +34,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
 
       - name: Cache Cargo artifacts
         uses: Swatinem/rust-cache@v2
@@ -70,7 +62,7 @@ jobs:
         run: cargo test -p messenger-cli
 
   wsl-tests:
-    name: WSL2 Ubuntu
+    name: messenger / desktop / WSL2 ubuntu
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -113,4 +105,4 @@ jobs:
         shell: wsl-bash {0}
         run: |
           source ~/.cargo/env
-          cargo test -p messenger-cli"
+          cargo test -p messenger-cli

@@ -2,7 +2,7 @@
 name: model-config
 description: Configuring models in agentic CLIs — adding local or cloud models to Claude Code, Codex, Gemini CLI, Goose, Kimi Code, OpenCode, Qwen Code, Pi, or Kilo Code. Use when wiring a local runner (Ollama, LM Studio, oMLX, llama.cpp, vLLM) into an agentic CLI, redirecting a provider's base URL (ANTHROPIC_BASE_URL, OPENAI_BASE_URL, model_providers, provider.<id>.options.baseURL), choosing between OpenAI-compatible and Anthropic-compatible endpoints, bridging a CLI to a different cloud vendor's models, or working with per-provider model config file shapes and merge semantics.
 last_updated: 2026-07-02
-hash: b612c0ee680a45c0-7941edb75643d951
+hash: b612c0ee680a45c0-b57dc298d43fb3c5
 ---
 
 # Model Configuration in Agentic CLIs
@@ -17,7 +17,7 @@ that allows a base-URL override can use them. The two questions that matter are 
 2. How is its base URL redirected?
 
 Runner-side facts (ports, endpoint paths, which standards each runner serves) live in
-the **local-runners** skill — load it alongside this one for local-model work.
+the **local-llm-runners** skill — load it alongside this one for local-model work.
 
 ## Cross-provider comparison
 
@@ -95,4 +95,4 @@ the env vars that redirect endpoints or selection.
 
 Authoritative research (full body + validated frontmatter):
 `claudine/docs/research/model-config/<provider>.md`. Runner-side ground truth:
-`claudine/docs/research/local_runners/<runner>.md` and the **local-runners** skill.
+`claudine/docs/research/local_runners/<runner>.md` and the **local-llm-runners** skill.

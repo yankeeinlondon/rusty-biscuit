@@ -368,6 +368,135 @@ fn heavy_areas_shard_l1_and_surface_all_failures() {
     );
 }
 
+// --- D12: specialized runtime contracts are reusable and orchestrated ---------
+
+/// Each specialized runtime workflow the primary orchestrator calls, paired with
+/// the unique runtime evidence that must survive the move to `workflow_call`,
+/// and the scope expression that selects it.
+const ORCHESTRATED: [(&str, &str, &str); 4] = [
+    (
+        "rendezvous-tests.yml",
+        "os: [macos-latest, ubuntu-latest, windows-latest]",
+        "contains(fromJSON(needs.scope.outputs.area_names), 'sniff')",
+    ),
+    (
+        "biscuit-tui-windows-captured-stdout.yml",
+        "captured_stdout_receives_only_value_no_tui_bytes",
+        "contains(fromJSON(needs.scope.outputs.area_names), 'biscuit-tui')",
+    ),
+    (
+        "playa-windows.yml",
+        "--features audio-ducking-windows",
+        "contains(fromJSON(needs.scope.outputs.area_names), 'playa')",
+    ),
+    (
+        // messenger is EXEMPT from area ownership, so it is selected from the
+        // affected PACKAGE list rather than from `area_names`.
+        "messenger-desktop-tests.yml",
+        "wsl-bash",
+        "contains(fromJSON(needs.scope.outputs.packages), 'messenger')",
+    ),
+];
+
+#[test]
+fn specialized_contracts_are_reusable_and_orchestrated_by_primary_ci() {
+    let ci = workflow("ci.yml");
+    for (name, evidence, selector) in ORCHESTRATED {
+        let source = workflow(name);
+        assert!(
+            source.contains("workflow_call") && source.contains("workflow_dispatch"),
+            "{name} must be reusable and still manually dispatchable (D12)"
+        );
+        assert!(
+            !source.contains("\n  push:\n") && !source.contains("\n  pull_request:\n"),
+            "{name} must not self-trigger once ci.yml orchestrates it — one CI run per commit"
+        );
+        assert!(
+            !source.contains("\nconcurrency:\n"),
+            "{name} must not carry its own concurrency group; ci.yml owns cancellation"
+        );
+        assert!(
+            !source.contains("dtolnay/rust-toolchain"),
+            "{name} must honor the pinned rust-toolchain.toml, not a floating @stable override"
+        );
+        assert!(
+            source.contains("rustup show"),
+            "{name} must materialize the pinned toolchain"
+        );
+        assert!(
+            source.contains(evidence),
+            "{name} must preserve its unique runtime evidence ({evidence})"
+        );
+        assert!(
+            ci.contains(&format!("uses: ./.github/workflows/{name}")),
+            "ci.yml must orchestrate {name} (D12)"
+        );
+        assert!(
+            ci.contains(selector),
+            "ci.yml must select {name} from affected scope, not run it unconditionally"
+        );
+    }
+}
+
+#[test]
+fn release_artifact_builds_stay_out_of_per_commit_validation() {
+    // build-integrations packages aarch64 binaries for a published release. It
+    // has a different lifecycle from per-commit validation, so D12's "one primary
+    // run per commit" does NOT absorb it.
+    let integrations = workflow("build-integrations.yml");
+    assert!(
+        integrations.contains("release:") && integrations.contains("types: [published]"),
+        "build-integrations must stay release-triggered"
+    );
+    assert!(
+        !workflow("ci.yml").contains("build-integrations.yml"),
+        "ci.yml must not call the release artifact build on every commit"
+    );
+}
+
+#[test]
+fn ci_summarizes_the_first_actionable_failure_class() {
+    // D15: the run summary must name a failure CLASS, derived from job results
+    // rather than log text, so a Node warning or cache collision inside a passing
+    // job can never be promoted over the real root cause.
+    let ci = workflow("ci.yml");
+    assert!(
+        ci.contains("## CI result") && ci.contains("First actionable failure class"),
+        "ci.yml must write a failure-class summary to the step summary (D15)"
+    );
+    for stage in [
+        "bootstrap (scope calculation)",
+        "bootstrap (preflight)",
+        "canary (shared-change regression)",
+        "area gate (build/lint/L1/L2/browser)",
+        "coverage",
+    ] {
+        assert!(
+            ci.contains(stage),
+            "the failure-class summary must be able to report `{stage}`"
+        );
+    }
+    for (name, _, _) in ORCHESTRATED {
+        let job = name.trim_end_matches(".yml");
+        assert!(
+            ci.contains(&format!("uses: ./.github/workflows/{name}")),
+            "{job} must be part of the orchestrated graph the summary classifies"
+        );
+    }
+
+    // Each area contributes its own gate-level line, since a reusable workflow's
+    // matrix legs cannot report outputs back to the caller.
+    let shared = workflow("_area-ci.yml");
+    assert!(
+        shared.contains("if: failure()") && shared.contains("first actionable failure class"),
+        "_area-ci.yml must classify its earliest failing gate into the run summary (D15)"
+    );
+    assert!(
+        shared.contains("\"build:$CHECK\" \"lint:$LINT\" \"L1:$TEST\""),
+        "the area classifier must order classes by the staged gate graph (D4)"
+    );
+}
+
 // --- D5: controlled required toolchain + latest-stable advisory ---------------
 
 #[test]
@@ -469,17 +598,183 @@ fn release_calculation_asserts_a_clean_tracked_worktree() {
     );
 }
 
-// --- D12: specialized runtime evidence is preserved --------------------------
+// --- D14: scheduled automation is separate and bounded ------------------------
 
 #[test]
-fn claudine_preserves_native_windows_ctrl_c_evidence() {
-    let windows = workflow("claudine-windows-ctrl-c.yml");
+fn benchmarks_are_scheduled_only_and_carry_a_measured_budget() {
+    let bench = workflow("bench-nightly.yml");
     assert!(
-        windows.contains("windows_ctrl_c_verification_record"),
-        "claudine must preserve the native Windows Ctrl+C runtime test"
+        bench.contains("schedule:") && bench.contains("workflow_dispatch"),
+        "bench-nightly must be a scheduled/manual performance workflow"
     );
     assert!(
-        windows.contains(r#"RUSTFLAGS: "-D warnings""#),
-        "the specialized Windows runtime job must reject Rust warnings"
+        !bench.contains("\n  push:\n") && !bench.contains("\n  pull_request:\n"),
+        "bench-nightly must not run on push — a slow benchmark is not a test regression (D14)"
+    );
+    // The budget is a reviewed number backed by recorded durations, not a
+    // default. The comment block carries the measurement it was derived from.
+    assert!(
+        bench.contains("timeout-minutes: 90") && bench.contains("Timeout budget"),
+        "the benchmark job must document the measurement its timeout budget came from (AC30)"
+    );
+    assert!(
+        bench.contains("runner image") && bench.contains("toolchain"),
+        "benchmark results must record runner class and toolchain so comparisons stay valid"
     );
 }
+
+#[test]
+fn benchmark_upload_failure_cannot_erase_a_successful_measurement() {
+    // AC31: execution and upload are separate steps. Execution gates the job;
+    // the Bencher upload is best-effort and reads the captured output rather
+    // than re-running the suite.
+    let bench = workflow("bench-nightly.yml");
+    let run_at = bench
+        .find("- name: Run benchmarks")
+        .expect("bench-nightly must have a benchmark execution step");
+    let upload_at = bench
+        .find("- name: Upload results to Bencher.dev")
+        .expect("bench-nightly must have a separate upload step");
+    assert!(run_at < upload_at, "execution must precede upload");
+
+    // Bound to the upload step alone, so a `continue-on-error` belonging to a
+    // later step cannot satisfy this.
+    let rest = &bench[upload_at + 1..];
+    let upload = &rest[..rest.find("- name: ").unwrap_or(rest.len())];
+    assert!(
+        upload.contains("continue-on-error: true"),
+        "the upload step must be best-effort so it cannot fail an otherwise good measurement"
+    );
+    assert!(
+        !bench[..upload_at].contains("continue-on-error: true"),
+        "benchmark EXECUTION must not be continue-on-error — a broken bench must be visible"
+    );
+    assert!(
+        upload.contains("steps.bench.outcome == 'success'"),
+        "the upload must be tied to a successful measurement, not run unconditionally"
+    );
+}
+
+#[test]
+fn scheduled_workflows_are_operationally_distinct() {
+    // AC32: coverage, fuzz, benchmark, and maintenance results must not be
+    // mistakable for one another — distinct workflow names and distinct
+    // schedule slots so they neither collide for runners nor blur together.
+    const SCHEDULED: [&str; 5] = [
+        "bench-nightly.yml",
+        "fuzz-nightly.yml",
+        "coverage.yml",
+        "sniff-performance.yml",
+        "maintenance-audit.yml",
+    ];
+
+    let mut names: Vec<String> = Vec::new();
+    let mut crons: Vec<String> = Vec::new();
+    for file in SCHEDULED {
+        let source = workflow(file);
+        let name = source
+            .lines()
+            .find_map(|line| line.strip_prefix("name: "))
+            .unwrap_or_else(|| panic!("{file} must declare a workflow name"))
+            .to_string();
+        assert!(
+            !names.contains(&name),
+            "{file}: workflow name `{name}` is not unique"
+        );
+        names.push(name);
+
+        for line in source.lines() {
+            if let Some(cron) = line.trim().strip_prefix("- cron: ") {
+                let cron = cron.split('#').next().unwrap_or(cron).trim().to_string();
+                assert!(
+                    !crons.contains(&cron),
+                    "{file}: schedule slot {cron} collides with another scheduled workflow"
+                );
+                crons.push(cron);
+            }
+        }
+    }
+    assert_eq!(
+        crons.len(),
+        SCHEDULED.len(),
+        "each scheduled workflow must own exactly one schedule slot"
+    );
+}
+
+#[test]
+fn maintenance_audit_reports_without_changing_anything() {
+    // Task 5.4: findings stay advisory until a reviewed change advances a
+    // pinned value. An audit that can red the Actions tab, or that bumps pins
+    // on its own, is worse than none.
+    let audit = workflow("maintenance-audit.yml");
+    assert!(
+        audit.contains("schedule:") && audit.contains("workflow_dispatch"),
+        "the maintenance audit must be scheduled and manually dispatchable"
+    );
+    assert!(
+        audit.contains("permissions:") && audit.contains("contents: read"),
+        "the audit must hold read-only permissions — it never writes to the repository"
+    );
+    for forbidden in ["git commit", "git push", "create-pull-request", "peter-evans"] {
+        assert!(
+            !audit.contains(forbidden),
+            "the maintenance audit must not change the repository (found `{forbidden}`)"
+        );
+    }
+    for authority in ["rust-toolchain.toml", ".github/kache-version", "nextest"] {
+        assert!(
+            audit.contains(authority),
+            "the audit must cover the pinned authority `{authority}`"
+        );
+    }
+}
+
+// --- shared recipes must stay usable from a runner ---------------------------
+
+#[test]
+fn just_commit_is_deterministic_under_ci() {
+    // The local flow writes its message with an LLM, speaks a completion sound,
+    // and needs credentials — none of which exist on a runner. Under CI the
+    // recipe must be a plain `git commit` with a caller-supplied message.
+    let justfile = read("justfile");
+    // Recipe bodies are indented, so the recipe ends at the next line with
+    // column-zero content. A blank line does NOT end it — the body has several.
+    let recipe: String = justfile
+        .lines()
+        .skip_while(|line| !line.starts_with("commit *args="))
+        .take_while(|line| {
+            line.starts_with("commit *args=") || line.is_empty() || line.starts_with(' ')
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        recipe.starts_with("commit *args="),
+        "root justfile must define a `commit` recipe"
+    );
+
+    let ci_branch = recipe
+        .find(r#"if [[ -n "${CI:-}" ]]; then"#)
+        .expect("`just commit` must branch on CI");
+    let ci_exit = recipe[ci_branch..]
+        .find("exit 0")
+        .expect("the CI branch must return before the interactive flow");
+    let ci_path = &recipe[ci_branch..ci_branch + ci_exit];
+
+    assert!(
+        ci_path.contains("git commit -m"),
+        "the CI branch must perform a plain git commit"
+    );
+    for interactive in ["claudine", "_speak", "COMMIT_MODEL"] {
+        assert!(
+            !ci_path.contains(interactive),
+            "the CI branch must not reach `{interactive}` — no LLM, audio, or network on a runner"
+        );
+    }
+    // `quote()` shell-escapes the message, so a commit subject containing quotes
+    // or apostrophes cannot break out of the generated script.
+    assert!(
+        recipe.contains("{{ quote(args) }}"),
+        "the CI message must be shell-quoted rather than interpolated raw"
+    );
+}
+

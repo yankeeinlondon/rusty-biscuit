@@ -132,7 +132,7 @@ fn level2_image_renders_in_wezterm() {
          growth observed.\n  osc_present={osc_present}\n  pre_rows={pre_rows} \
          post_rows={post_rows} delta={observed_delta} debug_rows={debug_rows}\n\
          raw_first_400={:?}\n  plain:\n{}",
-        &frame.raw.chars().take(400).collect::<String>(),
+        frame.raw.chars().take(400).collect::<String>(),
         frame.plain,
     );
 }
@@ -451,7 +451,7 @@ fn level2_image_kitty_row_advance() {
     assert!(
         frame.raw.contains("\x1b_G"),
         "expected Kitty APC graphics bytes. raw first 400:\n{:?}",
-        &frame.raw.chars().take(400).collect::<String>(),
+        frame.raw.chars().take(400).collect::<String>(),
     );
 
     let cursor_rows = parse_debug_cursor_rows(&frame.plain).unwrap_or_else(|| {

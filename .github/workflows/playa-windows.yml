@@ -1,6 +1,6 @@
 name: playa-windows
 
-# Opt-in native-Windows verification for the playa package area. macOS and Linux
+# Native-Windows verification for the playa package area. macOS and Linux
 # are exercised by the canonical `test` workflow, but playa carries a meaningful
 # amount of `cfg(target_os = "windows")` code (WASAPI SFX routing, per-session
 # ducking, the `windows` crate bindings) that only a real Windows host compiles.
@@ -10,44 +10,38 @@ name: playa-windows
 #
 # `--target x86_64-pc-windows-msvc` is the host target on windows-latest; pinning
 # it explicitly keeps the matrix unambiguous and matches the review's commands.
+# Being the host target, `rustup show` already materializes it — no `targets:`
+# install is required on top of the pinned toolchain.
+#
+# Orchestrated by `ci.yml` when playa is in the affected scope (D12), so it no
+# longer self-triggers on pushes/PRs. Also dispatchable manually.
 
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/playa-windows.yml"
-      - "Cargo.lock"
-      - "Cargo.toml"
-      - "playa/**"
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/playa-windows.yml"
-      - "Cargo.lock"
-      - "Cargo.toml"
-      - "playa/**"
+  workflow_call: {}
   workflow_dispatch: {}
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   CARGO_TERM_COLOR: never
 
-concurrency:
-  group: playa-windows-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   verify:
-    name: Windows native verification
+    name: playa / native / windows
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      - name: Install native prerequisites
+        shell: bash
+        run: just _ensure-native-libs playa
+
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
 
       - name: Cache Cargo artifacts
         uses: Swatinem/rust-cache@v2

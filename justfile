@@ -343,17 +343,40 @@ check-canonical *args="":
     fi
 
 # commits all the staged changes using model from COMMIT_MODEL or MODEL in OpenCode
+# (under CI: a plain `git commit` with the message passed as the argument)
 commit *args="":
-    @echo ""
-    @echo -e "Committing staged changes in the {{ BOLD }}Rusty Biscuit{{ RESET }} monorepo to git"
-    @echo -e "{{ DIM }}{{ ITALIC }}- using the {{ RESET }}{{ ITALIC }}${COMMIT_MODEL:-${MODEL:-minimax-coding-plan/MiniMax-M3}} {{ DIM }}model{{ RESET }}"
-    @echo ""
-    @echo -e "{{ BOLD }}{{ BLUE }}Staged Files:{{ RESET }}"
-    @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
-    @claudine compose "@prompts/commit.md" --opencode --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax-coding-plan/MiniMax-M3}}" -y {{ args }}
-    @just _speak "git commits completed in rusty-biscuit monorepo"
-    @sniff repo git-status 2>/dev/null || exit 0
-    @echo
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # A runner has no TTY, no model credentials, and no audio device, and CI must
+    # not depend on a network round-trip to write a commit message. Under CI this
+    # is therefore a plain, deterministic commit whose message the caller supplies
+    # — no LLM, no `_speak`, no network. Local behavior is unchanged.
+    if [[ -n "${CI:-}" ]]; then
+        message={{ quote(args) }}
+        if [[ -z "$message" ]]; then
+            echo "just commit: under CI the commit message must be passed as the argument" >&2
+            echo "  e.g. just commit \"chore(ci): regenerate catalog\"" >&2
+            exit 1
+        fi
+        if git diff --cached --quiet; then
+            echo "No Staged Files! Nothing to do ..."
+            exit 1
+        fi
+        git commit -m "$message"
+        exit 0
+    fi
+
+    echo ""
+    echo -e "Committing staged changes in the {{ BOLD }}Rusty Biscuit{{ RESET }} monorepo to git"
+    echo -e "{{ DIM }}{{ ITALIC }}- using the {{ RESET }}{{ ITALIC }}${COMMIT_MODEL:-${MODEL:-minimax-coding-plan/MiniMax-M3}} {{ DIM }}model{{ RESET }}"
+    echo ""
+    echo -e "{{ BOLD }}{{ BLUE }}Staged Files:{{ RESET }}"
+    sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
+    claudine compose "@prompts/commit.md" --opencode --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax-coding-plan/MiniMax-M3}}" -y {{ args }}
+    just _speak "git commits completed in rusty-biscuit monorepo"
+    sniff repo git-status 2>/dev/null || exit 0
+    echo
 
 # stages all files in package area and then commits and pushes
 cp:
@@ -373,7 +396,7 @@ cp:
     @echo
 
 # install rusty-biscuit and third-party CLIs used for development
-init: _ensure-build-deps _ensure-native-libs _ensure-kache _ensure-gitnexus
+init: _ensure-build-deps _ensure-native-libs _ensure-kache _ensure-nextest _ensure-gitnexus
     #!/usr/bin/env bash
     set -euo pipefail
     # Source cargo env in case _ensure-build-deps just installed Rust
@@ -469,10 +492,11 @@ _ensure-native-libs area="":
         install_packages jq
     fi
 
-    # `.github/ci/areas.json` is the single source of truth for native OS
-    # packages, and this recipe is the single installer: CI runs it before an
-    # area's build/test/lint commands and `just init` runs it for every area, so
-    # a new requirement is declared once and reaches both.
+    # `.github/ci/areas.json` declares EVERY area -- gating or not -- and is the
+    # single source of truth for native OS packages; this recipe is the single
+    # installer. A requirement is declared once, on the area that needs it, and
+    # reaches both developer hosts and CI from there. Declarations are per-OS, so
+    # a Linux-only dependency never touches a macOS or Windows host.
     areas_json="{{ justfile_directory() }}/.github/ci/areas.json"
     area="{{ area }}"
 
@@ -481,6 +505,9 @@ _ensure-native-libs area="":
         exit 1
     fi
 
+    # An empty area selects every record, which is what `just init` and the
+    # workspace-wide coverage job need: non-gating areas carry declarations too
+    # and have no area name to scope to.
     declared=$(jq -r --arg k "$runner_key" --arg a "$area" \
         '[.[] | select($a == "" or .area == $a) | (.native // {})[$k] // []] | add // [] | unique | .[]' \
         "$areas_json")
@@ -498,6 +525,9 @@ _ensure-native-libs area="":
     native_map="
     libasound2-dev|alsa|alsa-lib-devel|alsa-lib|alsa-lib-dev
     libpulse-dev|libpulse|pulseaudio-libs-devel|libpulse|pulseaudio-dev
+    libgtk-3-dev|gtk+-3.0|gtk3-devel|gtk3|gtk+3.0-dev
+    libwebkit2gtk-4.1-dev|webkit2gtk-4.1|webkit2gtk4.1-devel|webkit2gtk-4.1|webkit2gtk-4.1-dev
+    libdbus-1-dev|dbus-1|dbus-devel|dbus|dbus-dev
     "
 
     row_for() {
@@ -605,6 +635,31 @@ _ensure-kache:
     fi
 
     kache --version
+
+# ensure the test runner every tier above L1 depends on is available
+#
+# Only `_test` (L1) degrades to `cargo test` when nextest is absent. `_test_l2`,
+# `_test_l3`, `_test_browser`, `_test_real`, and `_sanity` invoke `cargo nextest
+# run` unconditionally — they need its `-E` filtersets to select a tier — and
+# `.config/nextest.toml` carries the retry, slow-timeout, and leak-timeout policy
+# that `cargo test` has no equivalent for. A host missing nextest therefore fails
+# every tier above L1 outright rather than running them unprotected.
+_ensure-nextest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [[ -f "$HOME/.cargo/env" ]] && source "$HOME/.cargo/env"
+
+    if cargo nextest --version &> /dev/null; then
+        exit 0
+    fi
+
+    if command -v cargo-binstall &> /dev/null; then
+        RUSTC_WRAPPER="" cargo binstall --no-confirm cargo-nextest
+    else
+        RUSTC_WRAPPER="" cargo install --locked cargo-nextest
+    fi
+
+    cargo nextest --version
 
 # ensure GitNexus and its native parser are available for this host
 _ensure-gitnexus:

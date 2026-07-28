@@ -348,3 +348,35 @@ jobs:
           name: junit-${{ inputs.area }}-browser-ubuntu
           path: target/nextest/ci/test-results.xml
           if-no-files-found: ignore
+
+  # Failure class for this area (D15). Runs ONLY when a gate failed, and writes
+  # one line to the shared run summary naming the earliest failing stage. Because
+  # the gates are staged (D4), the earliest failure is the root cause and the
+  # later ones either did not run or would repeat it — so the summary points at
+  # one job to open instead of a wall of red matrix legs.
+  classify:
+    name: failure class
+    needs: [check, lint, test, l2, browser]
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Classify the first actionable failure
+        shell: bash
+        env:
+          AREA: ${{ inputs.area }}
+          CHECK: ${{ needs.check.result }}
+          LINT: ${{ needs.lint.result }}
+          TEST: ${{ needs.test.result }}
+          L2: ${{ needs.l2.result }}
+          BROWSER: ${{ needs.browser.result }}
+        run: |
+          set -euo pipefail
+          # Ordered by the staged gate graph: build -> lint -> L1 -> L2/browser.
+          for entry in "build:$CHECK" "lint:$LINT" "L1:$TEST" "L2/harness:$L2" "browser:$BROWSER"; do
+            if [ "${entry##*:}" = "failure" ]; then
+              printf -- '- **%s** — first actionable failure class: **%s**\n' \
+                "$AREA" "${entry%%:*}" >>"$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          done

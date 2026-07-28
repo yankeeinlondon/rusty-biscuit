@@ -283,13 +283,19 @@ provider client and its Wiremock test, bench, and example targets:
   `darkmatter`; the dependency-aware scope includes those consumers whenever
   the Sniff surface changes.
 
-### Retired / folded workflows
+### Orchestrated and standalone workflows
 
-The bespoke single-behavior Windows workflows (`playa-windows`,
-`claudine-windows-ctrl-c`, `biscuit-tui-windows-captured-stdout`) remain
-separate until their tests fold into the shared area contract. `coverage`
-(nightly/manual, report-only), `bench-nightly` and `fuzz-nightly` (nightly),
-and `build-integrations` (on release) remain standalone by design.
+The bespoke single-behavior workflows (`playa-windows`,
+`biscuit-tui-windows-captured-stdout`, `rendezvous-tests`,
+`messenger-desktop-tests`) keep their own files — they test runtime contracts the
+shared area matrix cannot host — but they are **reusable workflows called by
+`ci.yml`** and selected from affected scope, so one commit produces one CI run.
+
+Standalone by design: `coverage` (nightly/manual, report-only), `bench-nightly`
+and `fuzz-nightly` (nightly, advisory), `maintenance-audit` (weekly, advisory),
+`sniff-performance` (its own measurement contract), and `build-integrations`
+(on release). Each owns a distinct name, schedule slot, artifacts, and summary
+so a scheduled failure is never read as an L1 regression.
 
 ## Why this matters
 

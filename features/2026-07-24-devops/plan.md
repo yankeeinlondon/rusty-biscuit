@@ -4,7 +4,7 @@ created: 2026-07-24
 phase: 1
 agent: codex/default
 yolo: true
-status: "phases 1-3 complete; branch devops-phase-1-bootstrap-release; phases 4-5 pending"
+status: "phases 1-5 implemented; PRs #5/#7/#8/#9 stacked for review"
 ---
 
 # Reliable CI/CD and DevOps Execution Plan
@@ -277,7 +277,7 @@ workspace Cargo commands or root lifecycle recipes as routine final gates.
   - Refine global path classification so documentation-only changes remain
     empty unless the document is an executable input.
 
-- [ ] **Task 4.4: Orchestrate specialized runtime contracts from primary CI.**
+- [x] **Task 4.4: Orchestrate specialized runtime contracts from primary CI.**
   - Convert Rendezvous native IPC, Claudine Windows Ctrl+C, captured-stdout,
     desktop-feature, browser, terminal, and other affected specialized checks
     into reusable workflows or uniquely scoped jobs called by `.github/workflows/ci.yml`.
@@ -292,7 +292,7 @@ workspace Cargo commands or root lifecycle recipes as routine final gates.
     Note: the hook is opt-in (`core.hooksPath` defaults to `.git/hooks`, not
     `.githooks/`), so CI only verifies the script is correct.
 
-- [ ] **Task 4.5: Emit one actionable scope and failure summary.**
+- [x] **Task 4.5: Emit one actionable scope and failure summary.**
   - Carry event, base/head revisions, normalized changed files, affected seeds,
     reverse dependencies, owned/exempt areas, full-scope reason, canaries, OSes,
     shards, optional tiers, toolchain, and kache version through scope outputs.
@@ -327,13 +327,13 @@ workspace Cargo commands or root lifecycle recipes as routine final gates.
 
 ## Phase 5: Separate and Harden Scheduled Automation
 
-- [ ] **Task 5.1: Record the Phase 5 change and verification scope.**
+- [x] **Task 5.1: Record the Phase 5 change and verification scope.**
   - Run impact analysis for changed automation/helper symbols and use `sniff` to
     record affected benchmark, coverage, fuzz, release, and package-area owners.
   - Capture comparable cold-run benchmark durations, runner identity,
     toolchain, suite, and upload behavior before changing budgets.
 
-- [ ] **Task 5.2: Make benchmark automation truly scheduled/manual.**
+- [x] **Task 5.2: Make benchmark automation truly scheduled/manual.**
   - Remove the `push` trigger from `.github/workflows/bench-nightly.yml`; if a
     push-triggered smoke check is retained, give it a separate workflow, scope,
     timeout, and non-nightly name.
@@ -344,7 +344,7 @@ workspace Cargo commands or root lifecycle recipes as routine final gates.
   - Separate benchmark execution from optional Bencher upload so upload failure
     cannot erase or relabel a successful benchmark result.
 
-- [ ] **Task 5.3: Keep coverage and fuzzing operationally distinct.**
+- [x] **Task 5.3: Keep coverage and fuzzing operationally distinct.**
   - Audit `.github/workflows/coverage.yml` and
     `.github/workflows/fuzz-nightly.yml` for unique names, schedules or
     affected-scope triggers, timeouts, artifacts, summaries, and failure
@@ -355,7 +355,7 @@ workspace Cargo commands or root lifecycle recipes as routine final gates.
     mistaken for one another in required status configuration or the Actions
     UI.
 
-- [ ] **Task 5.4: Add recurring maintenance audits.**
+- [x] **Task 5.4: Add recurring maintenance audits.**
   - Add a scheduled/manual audit that reports, without silently updating,
     available Rust toolchain, GitHub Action, kache, nextest, and runner-image
     changes.
@@ -365,7 +365,7 @@ workspace Cargo commands or root lifecycle recipes as routine final gates.
   - Keep maintenance findings advisory until a reviewed repository change
     advances an authority value.
 
-- [ ] **Task 5.5: Add scheduled-automation contract tests and documentation.**
+- [x] **Task 5.5: Add scheduled-automation contract tests and documentation.**
   - Assert benchmark trigger separation, measured timeout metadata,
     execution/upload result separation, distinct workflow names, and advisory
     maintenance behavior.
