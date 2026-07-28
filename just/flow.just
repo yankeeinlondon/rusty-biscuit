@@ -322,9 +322,9 @@ flow filter="":
         if [[ ${#models[@]} -eq 0 ]]; then
             models=(
                 'zai-coding-plan/glm-5.2'
-                'minimax-coding-plan/MiniMax-M2.7-highspeed'
-                'minimax-coding-plan/MiniMax-M3'
-                'kimi-for-coding/k2p7'
+                'minimax/MiniMax-M2.7-highspeed'
+                'minimax/MiniMax-M3'
+                'kimi-for-coding/k3'
             )
         fi
         choose_from "Choose ${stage} Opencode model" "${models[@]}"
