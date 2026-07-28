@@ -83,4 +83,10 @@ trace/*
 # do not add gitnexus cache
 .gitnexus/*
 
+# Python bytecode cache. `scripts/ci/test_affected_scope.py` imports
+# `affected_scope`, so running it — locally or in CI's preflight job — writes
+# `scripts/ci/__pycache__/`.
+**/__pycache__/
+**/*.py[cod]
+
 /.claude/settings.local.json
