@@ -244,6 +244,15 @@ pub(super) fn infer_service_from_message(record: &OpenCodeLogRecord) -> &'static
         {
             "llm"
         }
+        // OpenCode 1.18.4 reports session-level provider failures as
+        // `message=failed ref=err_… error="<Name>: <detail>"`, with no
+        // `service=`, `providerID`, or `modelID`. Route it to `llm` so an AI
+        // SDK envelope (429, usage cap, retry exhaustion) still reaches
+        // `classify_llm_failure` and keeps its terminal semantics; shapes that
+        // classifier cannot claim fall through to the ERROR-level backstop in
+        // `super::classify`. `classify_llm_call` is unreachable for these —
+        // it requires a trailing `stream` keyword.
+        "failed" if error_context(record).is_some() => "llm",
         "evaluated" if record.tags.contains_key("permission") => "permission",
         "created" if record.tags.contains_key("id") => "session",
         "opencode" if record.tags.contains_key("version") => "default",

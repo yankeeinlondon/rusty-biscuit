@@ -1178,3 +1178,97 @@ use crate::stream::logs::opencode::events::*;
             other => panic!("expected ApiFailure, got {other:?}"),
         }
     }
+
+    /// Captured verbatim from OpenCode 1.18.4 (2026-07-27) when a prompt
+    /// pinned a provider id that no longer exists. The stdout NDJSON reported
+    /// only `UnknownError` / "Unexpected server error"; this stderr record was
+    /// the sole carrier of the actionable text and used to be dropped.
+    #[test]
+    fn new_format_failed_record_surfaces_provider_error() {
+        let record = parse_new_format_record(
+            r#"timestamp=2026-07-28T00:36:54.753Z level=ERROR run=3d79f440 message=failed ref=err_58916eca error="ProviderModelNotFoundError: Model not found: minimax-coding-plan/MiniMax-M3. Did you mean: MiniMax-M3?" cause="ProviderModelNotFoundError: Model not found: minimax-coding-plan/MiniMax-M3. Did you mean: MiniMax-M3?\n    at <anonymous> (/$bunfs/root/chunk-2nxwk333.js:439:92342)\n    at SessionPrompt.getModel (/$bunfs/root/chunk-a7dkkw6a.js:1096:11482)""#,
+        );
+
+        match classify(&record) {
+            LogClassification::UnclassifiedError { error, reference } => {
+                assert_eq!(
+                    error,
+                    "ProviderModelNotFoundError: Model not found: minimax-coding-plan/MiniMax-M3. Did you mean: MiniMax-M3?"
+                );
+                assert_eq!(reference.as_deref(), Some("err_58916eca"));
+            }
+            other => panic!("expected UnclassifiedError, got {other:?}"),
+        }
+    }
+
+    /// A payload with no stack and no `cause=` must survive intact.
+    #[test]
+    fn error_headline_keeps_a_short_payload_whole() {
+        let record = parse_new_format_record(
+            r#"timestamp=2026-07-28T00:36:54.753Z level=ERROR run=3d79f440 message=failed error="Token refresh failed: 401""#,
+        );
+
+        match classify(&record) {
+            LogClassification::UnclassifiedError { error, reference } => {
+                assert_eq!(error, "Token refresh failed: 401");
+                assert_eq!(reference, None);
+            }
+            other => panic!("expected UnclassifiedError, got {other:?}"),
+        }
+    }
+
+    /// The cap counts chars, not bytes — a multi-byte payload must not panic
+    /// on a split codepoint.
+    #[test]
+    fn error_headline_cap_respects_char_boundaries() {
+        let payload = "😀".repeat(400);
+        let record = parse_new_format_record(&format!(
+            "timestamp=2026-07-28T00:36:54.753Z level=ERROR run=3d79f440 message=failed error={payload}"
+        ));
+
+        match classify(&record) {
+            LogClassification::UnclassifiedError { error, .. } => {
+                assert!(error.ends_with("..."), "expected truncation marker: {error}");
+                assert_eq!(error.chars().count(), 300);
+            }
+            other => panic!("expected UnclassifiedError, got {other:?}"),
+        }
+    }
+
+    /// The backstop must not hijack records a dedicated classifier owns: a
+    /// `failed` record wrapping a usage cap stays terminal.
+    #[test]
+    fn failed_record_with_usage_cap_envelope_stays_a_provider_limit() {
+        let record = parse_new_format_record(
+            r#"timestamp=2026-07-28T00:36:54.753Z level=ERROR run=3d79f440 message=failed ref=err_c0ffee error="AI_APICallError: Usage limit reached for 5 hour.""#,
+        );
+
+        match classify(&record) {
+            LogClassification::ProviderLimit { kind, .. } => {
+                assert_eq!(kind, ProviderLimitKind::UsageCap);
+            }
+            other => panic!("expected ProviderLimit, got {other:?}"),
+        }
+    }
+
+    /// `error=Aborted` is OpenCode's cancellation sentinel — it fires on every
+    /// Ctrl+C and would otherwise emit a warning for ordinary control flow.
+    #[test]
+    fn error_level_abort_sentinel_stays_unclassified() {
+        let record = parse_new_format_record(
+            "timestamp=2026-07-28T00:36:54.753Z level=ERROR run=3d79f440 message=process session.id=ses_a error=Aborted",
+        );
+
+        assert!(matches!(classify(&record), LogClassification::Unclassified));
+    }
+
+    /// The backstop is gated on `ERROR`; a WARN record carrying the same tag
+    /// stays quiet.
+    #[test]
+    fn warn_level_error_payload_stays_unclassified() {
+        let record = parse_new_format_record(
+            r#"timestamp=2026-07-28T00:36:54.753Z level=WARN run=3d79f440 message=retrying error="transient blip""#,
+        );
+
+        assert!(matches!(classify(&record), LogClassification::Unclassified));
+    }

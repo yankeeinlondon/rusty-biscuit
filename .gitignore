@@ -84,3 +84,4 @@ trace/*
 .gitnexus/*
 
 /.claude/settings.local.json
+.codex/config.toml

@@ -314,7 +314,7 @@ workspace Cargo commands or root lifecycle recipes as routine final gates.
   - Review adjacent comments for every behavior-changing workflow/scope edit
     and correct or remove drifted prose.
 
-- [ ] **Validation checkpoint 4: Prove complete scope and coherent orchestration.**
+- [x] **Validation checkpoint 4: Prove complete scope and coherent orchestration.**
   - Run ownership/policy fixtures, affected-scope tests, workflow contract
     tests, and the recorded affected package-area gates.
   - Test package-local, shared dependency, documentation-only, unmapped package,
@@ -373,7 +373,7 @@ workspace Cargo commands or root lifecycle recipes as routine final gates.
     dependency docs, and the Rust DevOps/testing skills to describe the final
     validation, release, performance, coverage, fuzz, and maintenance signals.
 
-- [ ] **Validation checkpoint 5: Prove independent scheduled signals.**
+- [x] **Validation checkpoint 5: Prove independent scheduled signals.**
   - Run the recorded affected package-area gates and all workflow/policy
     contract tests.
   - Manually dispatch benchmark, coverage, fuzz, and maintenance workflows and

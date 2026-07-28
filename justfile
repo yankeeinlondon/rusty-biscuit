@@ -382,11 +382,11 @@ commit *args="":
 
     echo ""
     echo -e "Committing staged changes in the {{ BOLD }}Rusty Biscuit{{ RESET }} monorepo to git"
-    echo -e "{{ DIM }}{{ ITALIC }}- using the {{ RESET }}{{ ITALIC }}${COMMIT_MODEL:-${MODEL:-minimax-coding-plan/MiniMax-M3}} {{ DIM }}model{{ RESET }}"
+    echo -e "{{ DIM }}{{ ITALIC }}- using the {{ RESET }}{{ ITALIC }}${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M3}} {{ DIM }}model{{ RESET }}"
     echo ""
     echo -e "{{ BOLD }}{{ BLUE }}Staged Files:{{ RESET }}"
     sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
-    claudine compose "@prompts/commit.md" --opencode --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax-coding-plan/MiniMax-M3}}" -y {{ args }}
+    claudine compose "@prompts/commit.md" --opencode --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M3}}" -y {{ args }}
     just _speak "git commits completed in rusty-biscuit monorepo"
     sniff repo git-status 2>/dev/null || exit 0
     echo
