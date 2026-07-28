@@ -3,6 +3,7 @@ status: root cause confirmed — design approved
 reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-07-27
+review_iterations: 1
 created: 2026-07-27
 area: darkmatter
 packages:
