@@ -11,6 +11,13 @@
 - `dirs` is gated behind `file-reference` and supplies the cross-platform
   home directory for `home_dir` / `~` (home-pinned) references. It replaces a
   bare `$HOME` read, which is not a complete contract on native Windows.
+- `dunce` is gated behind `file-reference` and reduces a Windows `\\?\`
+  verbatim path to its legacy spelling at the resolver's root boundary. Anchors
+  reach the resolver in both spellings (`std::fs::canonicalize` yields verbatim;
+  `gix` and `dirs` yield legacy), and Win32 applies no path normalization under
+  the verbatim prefix, so a reference's own `/` separators would never resolve.
+  It is a no-op on every other target, and is also a dev-dependency because the
+  integration tests must build expectations in the same spelling.
 - `reqwest`, `bytes`, and `tokio` are gated behind the off-by-default `fetch`
   feature. They provide the shared policy-enforcing HTTP primitive used by
   Darkmatter compose and side-effect network paths.

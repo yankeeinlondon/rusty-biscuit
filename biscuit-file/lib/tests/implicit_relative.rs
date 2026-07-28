@@ -16,6 +16,15 @@ fn git_init(path: &Path) {
     gix::init(path).expect("git init failed");
 }
 
+/// Canonicalize into the spelling the resolver reports.
+///
+/// `std::fs::canonicalize` returns a `\\?\` verbatim path on Windows, but the
+/// resolver reduces every anchor to the legacy form -- and so does `gix`
+/// worktree discovery, which supplies the repository leg of these expectations.
+fn canonical(path: &Path) -> std::path::PathBuf {
+    dunce::canonicalize(path).expect("canonicalize")
+}
+
 #[test]
 fn resolves_file_in_git_root_when_absent_from_cwd() {
     let tmp = TempDir::new().unwrap();
@@ -30,8 +39,8 @@ fn resolves_file_in_git_root_when_absent_from_cwd() {
     fs::create_dir_all(&subdir).unwrap();
 
     // Canonicalize to match what the resolver does internally.
-    let subdir = subdir.canonicalize().unwrap();
-    let repo_root_canon = repo_root.canonicalize().unwrap();
+    let subdir = canonical(&subdir);
+    let repo_root_canon = canonical(repo_root);
 
     let resolved = FileReference::new("file_in_root.md")
         .unwrap()
@@ -57,8 +66,8 @@ fn prefers_git_root_over_cwd_on_name_collision() {
     fs::create_dir_all(&subdir).unwrap();
     fs::write(subdir.join("notes.md"), b"subdir").unwrap();
 
-    let subdir = subdir.canonicalize().unwrap();
-    let repo_root_canon = repo_root.canonicalize().unwrap();
+    let subdir = canonical(&subdir);
+    let repo_root_canon = canonical(repo_root);
 
     let resolved = FileReference::new("notes.md")
         .unwrap()
@@ -83,7 +92,7 @@ fn explicit_relative_does_not_fall_back_to_git_root() {
     fs::write(repo_root.join("file_in_root.md"), b"root").unwrap();
     let subdir = repo_root.join("sub");
     fs::create_dir_all(&subdir).unwrap();
-    let subdir = subdir.canonicalize().unwrap();
+    let subdir = canonical(&subdir);
 
     let resolved = FileReference::new("./file_in_root.md")
         .unwrap()
@@ -108,8 +117,8 @@ fn subdir_path_resolves_against_git_root() {
     // CWD is the repo root's sibling subdir with no `foo/bar/doc.md`.
     let subdir = repo_root.join("other");
     fs::create_dir_all(&subdir).unwrap();
-    let subdir = subdir.canonicalize().unwrap();
-    let repo_root_canon = repo_root.canonicalize().unwrap();
+    let subdir = canonical(&subdir);
+    let repo_root_canon = canonical(repo_root);
 
     let resolved = FileReference::new("foo/bar/doc.md")
         .unwrap()
@@ -130,7 +139,7 @@ fn returns_none_when_neither_cwd_nor_git_root_has_file() {
 
     let subdir = repo_root.join("pkg");
     fs::create_dir_all(&subdir).unwrap();
-    let subdir = subdir.canonicalize().unwrap();
+    let subdir = canonical(&subdir);
 
     let resolved = FileReference::new("does_not_exist.md")
         .unwrap()
@@ -147,7 +156,7 @@ fn resolves_outside_any_git_repo() {
     let dir = tmp.path();
     fs::write(dir.join("loose.md"), b"loose").unwrap();
 
-    let dir_canon = dir.canonicalize().unwrap();
+    let dir_canon = canonical(dir);
 
     let resolved = FileReference::new("loose.md")
         .unwrap()
@@ -169,7 +178,7 @@ fn resolves_when_cwd_is_git_root() {
     git_init(repo_root);
 
     fs::write(repo_root.join("top.md"), b"top").unwrap();
-    let repo_root_canon = repo_root.canonicalize().unwrap();
+    let repo_root_canon = canonical(repo_root);
 
     let resolved = FileReference::new("top.md")
         .unwrap()
@@ -200,8 +209,8 @@ fn recursive_implicit_relative_with_subdir_filter() {
 
     let subdir = repo_root.join("other");
     fs::create_dir_all(&subdir).unwrap();
-    let subdir = subdir.canonicalize().unwrap();
-    let repo_root_canon = repo_root.canonicalize().unwrap();
+    let subdir = canonical(&subdir);
+    let repo_root_canon = canonical(repo_root);
 
     let resolved = FileReference::new("%docs/spec.md")
         .unwrap()
@@ -251,7 +260,7 @@ mod ambient_cwd {
         fs::write(repo_root.join("file_in_root.md"), b"root").unwrap();
         let subdir = repo_root.join("sub/dir");
         fs::create_dir_all(&subdir).unwrap();
-        let subdir = subdir.canonicalize().unwrap();
+        let subdir = canonical(&subdir);
 
         let _guard = CwdGuard::set(&subdir);
 
@@ -278,7 +287,7 @@ mod ambient_cwd {
 
         fs::create_dir_all(repo_root.join("docs")).unwrap();
         fs::write(repo_root.join("docs/readme.md"), b"doc").unwrap();
-        let repo_root_canon = repo_root.canonicalize().unwrap();
+        let repo_root_canon = canonical(repo_root);
 
         // Use a name unlikely to collide with ambient env.
         let var_name = "BISCUIT_FILE_IMPLICIT_REL_TEST_DIR";
@@ -313,8 +322,8 @@ fn recursive_implicit_relative_finds_file_under_git_root() {
     // CWD is a sibling that won't see `deep.md` via its own walk.
     let subdir = repo_root.join("other");
     fs::create_dir_all(&subdir).unwrap();
-    let subdir = subdir.canonicalize().unwrap();
-    let repo_root_canon = repo_root.canonicalize().unwrap();
+    let subdir = canonical(&subdir);
+    let repo_root_canon = canonical(repo_root);
 
     let resolved = FileReference::new("%deep.md")
         .unwrap()
@@ -395,10 +404,10 @@ mod partial_completion {
         let tmp_repo = TempDir::new().unwrap();
         let repo_root = tmp_repo.path();
         git_init(repo_root);
-        let repo_root_canon = repo_root.canonicalize().unwrap();
+        let repo_root_canon = canonical(repo_root);
 
         let tmp_home = TempDir::new().unwrap();
-        let home_canon = tmp_home.path().canonicalize().unwrap();
+        let home_canon = canonical(tmp_home.path());
         let _home_guard = HomeGuard::set(&home_canon);
 
         let completion = FileReference::complete_partial("@prompts/ab", &repo_root_canon)
@@ -419,10 +428,10 @@ mod partial_completion {
     fn magic_without_repo_only_returns_home_root() {
         // Use a temp dir that is not a git repo as the base.
         let base = TempDir::new().unwrap();
-        let base_canon = base.path().canonicalize().unwrap();
+        let base_canon = canonical(base.path());
 
         let tmp_home = TempDir::new().unwrap();
-        let home_canon = tmp_home.path().canonicalize().unwrap();
+        let home_canon = canonical(tmp_home.path());
         let _home_guard = HomeGuard::set(&home_canon);
 
         let completion = FileReference::complete_partial("@pr", &base_canon)
@@ -445,7 +454,7 @@ mod partial_completion {
         let tmp_repo = TempDir::new().unwrap();
         let repo_root = tmp_repo.path();
         git_init(repo_root);
-        let repo_root_canon = repo_root.canonicalize().unwrap();
+        let repo_root_canon = canonical(repo_root);
 
         // Unset HOME while the test runs. Unlike a bare `$HOME` read, the shared
         // cross-platform provider still supplies the native profile home (D11),
@@ -479,10 +488,10 @@ mod partial_completion {
         let tmp = TempDir::new().unwrap();
         let repo_root = tmp.path();
         git_init(repo_root);
-        let repo_root_canon = repo_root.canonicalize().unwrap();
+        let repo_root_canon = canonical(repo_root);
         let subdir = repo_root.join("pkg");
         fs::create_dir_all(&subdir).unwrap();
-        let subdir = subdir.canonicalize().unwrap();
+        let subdir = canonical(&subdir);
 
         let completion = FileReference::complete_partial("prompts/ab", &subdir)
             .unwrap()
@@ -506,7 +515,7 @@ mod partial_completion {
         let tmp = TempDir::new().unwrap();
         let repo_root = tmp.path();
         git_init(repo_root);
-        let repo_root_canon = repo_root.canonicalize().unwrap();
+        let repo_root_canon = canonical(repo_root);
 
         let completion = FileReference::complete_partial("", &repo_root_canon)
             .unwrap()
@@ -519,7 +528,7 @@ mod partial_completion {
     fn implicit_relative_without_repo_only_returns_base() {
         // Temp directory with no git init.
         let tmp = TempDir::new().unwrap();
-        let base = tmp.path().canonicalize().unwrap();
+        let base = canonical(tmp.path());
 
         let completion = FileReference::complete_partial("prompts/", &base)
             .unwrap()
@@ -537,7 +546,7 @@ mod partial_completion {
     #[test]
     fn separator_reset_empties_active_segment() {
         let tmp = TempDir::new().unwrap();
-        let base = tmp.path().canonicalize().unwrap();
+        let base = canonical(tmp.path());
 
         let completion = FileReference::complete_partial("prompts/", &base)
             .unwrap()

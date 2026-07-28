@@ -612,6 +612,24 @@ struct RootEntry {
     provenance: RootProvenance,
 }
 
+/// Strip a Windows `\\?\` verbatim prefix from a search root. No-op elsewhere.
+///
+/// Roots arrive in whichever spelling the caller produced: `std::fs::canonicalize`
+/// yields a verbatim path, while `gix` worktree discovery and `dirs` yield the
+/// legacy form. Both spellings must be collapsed *before* anything is joined
+/// onto a root, because Win32 performs no path normalization under a verbatim
+/// prefix -- a reference's own `/` separators would stay literal filename
+/// characters and every probe would miss. Collapsing here also makes two
+/// spellings of one directory compare equal, which is what lets candidate
+/// dedupe fold them into a single entry.
+///
+/// [`dunce::simplified`] declines to strip when the legacy form would not be
+/// equivalent (reserved DOS names, over-long paths), so a genuinely
+/// verbatim-only path survives intact.
+fn simplify_root(root: &Path) -> &Path {
+    dunce::simplified(root)
+}
+
 /// Collect the ordered search roots for a reference kind, each tagged with its
 /// provenance. `repository_root` is the pre-resolved root (supplied or
 /// discovered once); kinds that do not anchor on it ignore it.
@@ -781,7 +799,9 @@ fn build_candidates(
     let roots = collect_roots(&parsed.kind, magic_paths, vault_roots, ctx, repository_root)?;
     let candidates = roots
         .into_iter()
-        .map(|root| make_candidate(root.path.join(interpolated), root.provenance))
+        .map(|root| {
+            make_candidate(simplify_root(&root.path).join(interpolated), root.provenance)
+        })
         .collect();
     Ok(dedupe_candidates(candidates))
 }
@@ -802,12 +822,17 @@ fn build_anchoring_candidates(
             vec![make_candidate(PathBuf::from(interpolated), RootProvenance::Absolute)]
         }
         EffectiveAnchoring::ExplicitRelative => {
-            vec![make_candidate(ctx.cwd.join(interpolated), RootProvenance::Source)]
+            vec![make_candidate(
+                simplify_root(&ctx.cwd).join(interpolated),
+                RootProvenance::Source,
+            )]
         }
         EffectiveAnchoring::ImplicitRelative => {
             let candidates = implicit_relative_roots(&ctx.cwd, repository_root)
                 .into_iter()
-                .map(|root| make_candidate(root.path.join(interpolated), root.provenance))
+                .map(|root| {
+                    make_candidate(simplify_root(&root.path).join(interpolated), root.provenance)
+                })
                 .collect();
             dedupe_candidates(candidates)
         }
@@ -832,7 +857,9 @@ fn build_search_roots(
     };
     let candidates = roots
         .into_iter()
-        .map(|root| make_candidate(root.path, root.provenance))
+        .map(|root| {
+            make_candidate(simplify_root(&root.path).to_path_buf(), root.provenance)
+        })
         .collect();
     Ok(dedupe_candidates(candidates))
 }
@@ -865,8 +892,9 @@ fn collect_anchoring_roots(
 
 /// Remove lexically duplicate candidates while preserving first-seen order.
 ///
-/// The dedupe key is the `.`/`..`-normalized path, so `<root>/x` reached via two
-/// equal roots collapses to one entry; the earlier provenance wins.
+/// The dedupe key is [`normalize_components`], so `<root>/x` reached via two
+/// roots that name the same directory -- including one spelled verbatim and one
+/// legacy -- collapses to one entry; the earlier provenance wins.
 fn dedupe_candidates(candidates: Vec<ResolutionCandidate>) -> Vec<ResolutionCandidate> {
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::with_capacity(candidates.len());
@@ -955,7 +983,16 @@ fn normalize_absolute(path: &Path, cwd: &Path) -> PathBuf {
     }
 }
 
-/// Resolve `.` and `..` components without touching the filesystem.
+/// Resolve `.` and `..` components without touching the filesystem, then reduce
+/// a Windows `\\?\` verbatim path to its legacy spelling.
+///
+/// Every lexical path comparison in this module funnels through here, so
+/// stripping the prefix is what lets a verbatim and a legacy spelling of one
+/// directory compare equal -- required for candidate dedupe, repository
+/// containment, and [`diff_paths`]' common-prefix walk. Stripping happens
+/// *after* `.`/`..` collapse because [`dunce::simplified`] refuses to touch a
+/// verbatim path that still carries relative components (Win32 takes those
+/// literally under the prefix).
 pub(crate) fn normalize_components(path: &Path) -> PathBuf {
     let mut components = Vec::new();
     for component in path.components() {
@@ -967,7 +1004,8 @@ pub(crate) fn normalize_components(path: &Path) -> PathBuf {
             other => components.push(other),
         }
     }
-    components.iter().collect()
+    let collapsed: PathBuf = components.iter().collect();
+    simplify_root(&collapsed).to_path_buf()
 }
 
 /// Compute a relative path from `base` to `target`.
@@ -1211,8 +1249,12 @@ fn split_scope_and_active(path: &str) -> (&str, &str) {
 /// Append a scope string to a root directory.
 ///
 /// Strips the trailing `/` before joining so the result is a normal
-/// directory path rather than one with an empty final component.
+/// directory path rather than one with an empty final component. This is
+/// completion's counterpart to the candidate builder, so it applies the same
+/// [`simplify_root`] boundary: an emitted root must be spelled the way the
+/// resolver will probe it.
 fn append_scope(root: &Path, scope: &str) -> PathBuf {
+    let root = simplify_root(root);
     let trimmed = scope.trim_end_matches('/');
     if trimmed.is_empty() {
         root.to_path_buf()
@@ -1253,6 +1295,30 @@ mod tests {
     fn normalize_dotdot() {
         let result = normalize_components(Path::new("/a/b/../c/./d"));
         assert_eq!(result, PathBuf::from("/a/c/d"));
+    }
+
+    /// Verbatim spellings must collapse for the dedupe and containment keys,
+    /// otherwise one directory reached through two producers (`canonicalize`
+    /// vs `gix` discovery) reads as two distinct directories.
+    #[cfg(windows)]
+    #[test]
+    fn normalize_components_reduces_verbatim_paths() {
+        assert_eq!(
+            normalize_components(Path::new(r"\\?\C:\a\b\..\c")),
+            normalize_components(Path::new(r"C:\a\c")),
+        );
+    }
+
+    /// The resolved path and the caller's base routinely come from different
+    /// producers on Windows -- resolution reports a legacy path while a caller
+    /// hands `resolve_relative` a `canonicalize`d verbatim one. Without the
+    /// verbatim reduction the two share no common prefix and the whole
+    /// absolute path leaks out as the "relative" answer.
+    #[cfg(windows)]
+    #[test]
+    fn diff_paths_bridges_verbatim_and_legacy_spellings() {
+        let result = diff_paths(Path::new(r"C:\a\b\file.txt"), Path::new(r"\\?\C:\a\c")).unwrap();
+        assert_eq!(result, PathBuf::from(r"..\b\file.txt"));
     }
 
     #[test]

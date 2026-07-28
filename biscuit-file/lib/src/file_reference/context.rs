@@ -392,11 +392,13 @@ impl FileResolutionContext {
 
     /// Validate repository containment for the request and authoring bases.
     ///
-    /// Containment is component-aware and lexical after `.`/`..` normalization;
-    /// it does **not** canonicalize through symlinks, so the authored/worktree
-    /// identity is preserved. This is a trust check on the caller-provided
-    /// root, not a sandbox boundary. When no repository root is supplied, the
-    /// context is trivially valid.
+    /// Containment is component-aware and lexical after `.`/`..` normalization
+    /// and Windows verbatim-prefix reduction, so a root and a base that name the
+    /// same tree in different spellings still validate. It does **not**
+    /// canonicalize through symlinks, so the authored/worktree identity is
+    /// preserved. This is a trust check on the caller-provided root, not a
+    /// sandbox boundary. When no repository root is supplied, the context is
+    /// trivially valid.
     ///
     /// Normal derivations must keep their authoring base inside the repository.
     /// Trusted-external derivations exempt only the current authoring base; the

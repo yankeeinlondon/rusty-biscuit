@@ -26,6 +26,15 @@ fn git_init(path: &Path) {
     gix::init(path).expect("git init failed");
 }
 
+/// Canonicalize into the spelling the resolver reports.
+///
+/// `std::fs::canonicalize` returns a `\\?\` verbatim path on Windows; the
+/// resolver reduces every anchor to the legacy form before joining, so
+/// expectations must be built in that same form.
+fn canonical(path: &Path) -> PathBuf {
+    dunce::canonicalize(path).expect("canonicalize")
+}
+
 /// The file a completion consumer would display, plus the token it would insert.
 struct Emitted {
     /// The absolute path of the file the consumer enumerated and displayed.
@@ -78,7 +87,7 @@ fn pick_first_candidate(token: &str, ctx: &FileResolutionContext) -> Emitted {
 #[test]
 fn implicit_relative_completion_value_resolves_to_the_displayed_file() {
     let tmp = TempDir::new().unwrap();
-    let repo_root = tmp.path().canonicalize().unwrap();
+    let repo_root = canonical(tmp.path());
     git_init(&repo_root);
 
     // The repository-root target and a same-named decoy under the base dir, so
@@ -121,7 +130,7 @@ fn implicit_relative_completion_value_resolves_to_the_displayed_file() {
 #[test]
 fn implicit_relative_completion_roots_are_repository_first() {
     let tmp = TempDir::new().unwrap();
-    let repo_root = tmp.path().canonicalize().unwrap();
+    let repo_root = canonical(tmp.path());
     let base = repo_root.join("prompts");
     fs::create_dir_all(&base).unwrap();
 
@@ -145,7 +154,7 @@ fn implicit_relative_completion_roots_are_repository_first() {
 #[test]
 fn magic_completion_value_resolves_through_a_shared_configured_root() {
     let tmp = TempDir::new().unwrap();
-    let repo_root = tmp.path().canonicalize().unwrap();
+    let repo_root = canonical(tmp.path());
     git_init(&repo_root);
 
     // `plan.md` lives ONLY under the configured magic root, never directly under
@@ -159,7 +168,7 @@ fn magic_completion_value_resolves_through_a_shared_configured_root() {
     let empty_home = TempDir::new().unwrap();
     let ctx = FileResolutionContext::new(repo_root.clone())
         .with_repository_root(repo_root.clone())
-        .with_home_dir(empty_home.path().canonicalize().unwrap())
+        .with_home_dir(canonical(empty_home.path()))
         .add_magic_path(&magic_root, PathPosition::Start);
 
     let emitted = pick_first_candidate("@pl", &ctx);
@@ -180,7 +189,7 @@ fn magic_completion_value_resolves_through_a_shared_configured_root() {
 #[test]
 fn completion_rejects_rooted_magic_payloads_before_enumerating_roots() {
     let tmp = TempDir::new().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical(tmp.path());
     let ctx = FileResolutionContext::new(&base)
         .with_repository_root(&base)
         .with_home_dir(&base);
@@ -211,7 +220,7 @@ fn completion_rejects_rooted_magic_payloads_before_enumerating_roots() {
 #[test]
 fn context_without_repository_root_stays_base_only() {
     let tmp = TempDir::new().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical(tmp.path());
     // Deliberately NOT a git repo and no repository root on the context, so a
     // live-discovery completer would still find nothing, but the point is the
     // context path never probes for one.
