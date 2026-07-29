@@ -158,6 +158,15 @@ jobs:
       # lets a compile-check become a rollup cell that can be baselined and can
       # still block. `always()`, so a FAILED job still reports itself; a job that
       # reports nothing is MISSING, never a pass.
+      # Report what the wrapper actually achieved. `always()` because a
+      # failed build's cache data is exactly as interesting as a passing
+      # one's — often more so.
+      - name: Report kache effectiveness
+        if: ${{ always() }}
+        uses: ./.github/actions/report-kache
+        with:
+          enabled: ${{ inputs.kache && runner.os != 'Windows' }}
+          label: "${{ inputs.area }} check ${{ matrix.os }}"
       - name: Record producer status
         if: ${{ always() }}
         shell: bash
@@ -320,6 +329,15 @@ jobs:
       # tree carries one XML per invocation plus `manifest.jsonl`, and the
       # manifest — not this artifact's name — is what gives each record its
       # {area, environment, tier, shard, package} identity.
+      # Report what the wrapper actually achieved. `always()` because a
+      # failed build's cache data is exactly as interesting as a passing
+      # one's — often more so.
+      - name: Report kache effectiveness
+        if: ${{ always() }}
+        uses: ./.github/actions/report-kache
+        with:
+          enabled: ${{ inputs.kache && runner.os != 'Windows' }}
+          label: "${{ inputs.area }} test ${{ matrix.environment }} ${{ matrix.shard }}"
       - name: Upload L1 JUnit
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
@@ -394,6 +412,15 @@ jobs:
       # entries at all. In run 30323254931 `claudine / lint` was CANCELLED, which
       # a job-result reading records as neither pass nor fail; an explicit status
       # makes it MISSING, which blocks.
+      # Report what the wrapper actually achieved. `always()` because a
+      # failed build's cache data is exactly as interesting as a passing
+      # one's — often more so.
+      - name: Report kache effectiveness
+        if: ${{ always() }}
+        uses: ./.github/actions/report-kache
+        with:
+          enabled: ${{ inputs.kache && runner.os != 'Windows' }}
+          label: "${{ inputs.area }} lint ubuntu-latest"
       - name: Record producer status
         if: ${{ always() }}
         shell: bash
@@ -527,6 +554,15 @@ jobs:
         run: cd "${{ inputs.area }}" && just test-l2
       # The staging directory, so the manifest travels with the reports. See the
       # L1 upload for why the single overwritten file is not enough.
+      # Report what the wrapper actually achieved. `always()` because a
+      # failed build's cache data is exactly as interesting as a passing
+      # one's — often more so.
+      - name: Report kache effectiveness
+        if: ${{ always() }}
+        uses: ./.github/actions/report-kache
+        with:
+          enabled: ${{ inputs.kache && runner.os != 'Windows' }}
+          label: "${{ inputs.area }} test-l2 ${{ matrix.environment }}"
       - name: Upload L2 JUnit
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
@@ -597,6 +633,15 @@ jobs:
         run: cd "${{ inputs.area }}" && just test-browser
       # The staging directory, so the manifest travels with the reports. See the
       # L1 upload for why the single overwritten file is not enough.
+      # Report what the wrapper actually achieved. `always()` because a
+      # failed build's cache data is exactly as interesting as a passing
+      # one's — often more so.
+      - name: Report kache effectiveness
+        if: ${{ always() }}
+        uses: ./.github/actions/report-kache
+        with:
+          enabled: ${{ inputs.kache && runner.os != 'Windows' }}
+          label: "${{ inputs.area }} test-browser ubuntu-latest"
       - name: Upload browser JUnit
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
