@@ -1,6 +1,47 @@
 use std::path::PathBuf;
 
+/// Warn once that path-based protection does not function on Windows.
+///
+/// This is instrumentation for a known gap, not a fix. Every matcher in this
+/// module and in `permissions::matchers` hardcodes `/` as the path-segment
+/// boundary, while a Windows path uses `\`. Because each matcher returns `bool`
+/// with no error channel, a separator mismatch is indistinguishable from a
+/// legitimate "this path is not under that prefix" — so the negative branch is
+/// taken, and for these particular checks the negative branch is the *permissive*
+/// one:
+///
+/// - a sensitive-path check returning `false` means "not sensitive", so
+///   `~/.ssh`, `~/.aws`, `~/.gnupg`, and `~/.claude` are unprotected;
+/// - a *deny* rule that fails to match is a denial that never applies.
+///
+/// An allow rule failing to match is merely inconvenient; the two above are not.
+/// Until the real fix lands, a Windows user is told rather than left to assume
+/// the control is working. A red CI cell would never reach them.
+#[cfg(windows)]
+pub(crate) fn warn_windows_path_matching_is_broken() {
+    use std::sync::OnceLock;
+    static WARNED: OnceLock<()> = OnceLock::new();
+    WARNED.get_or_init(|| {
+        tracing::warn!(
+            "path matching does not function on Windows: sensitive-path \
+             classification and directory-scoped permission rules compare against \
+             a hardcoded '/' separator. `~/.ssh`, `~/.aws`, `~/.gnupg` and \
+             `~/.claude` are NOT classified sensitive, and directory-scoped deny \
+             rules do NOT apply. See claudine/fixes/2026-07-29-windows-paths."
+        );
+    });
+}
+
+#[cfg(not(windows))]
+pub(crate) fn warn_windows_path_matching_is_broken() {}
+
 /// Check if `path` is exactly `prefix` or starts with `prefix/`.
+///
+/// ## Notes
+///
+/// The `/` boundary is hardcoded, so this returns `false` for every Windows path
+/// regardless of whether it is genuinely under `prefix`. See
+/// [`warn_windows_path_matching_is_broken`].
 fn is_prefix_match(path: &str, prefix: &str) -> bool {
     path == prefix || (path.starts_with(prefix) && path.as_bytes().get(prefix.len()) == Some(&b'/'))
 }
@@ -64,7 +105,15 @@ impl SensitivePathChecker {
     }
 
     /// Returns true if the path is under a sensitive prefix.
+    ///
+    /// ## Notes
+    ///
+    /// On Windows this currently returns `false` for every home-relative
+    /// sensitive path, because the prefix is spliced with a hardcoded `/` against
+    /// a `\`-separated path. The caller is warned once rather than left assuming
+    /// the check succeeded — see [`warn_windows_path_matching_is_broken`].
     pub fn is_sensitive(&self, path: &str) -> bool {
+        warn_windows_path_matching_is_broken();
         let normalized = normalize_path(path);
         let path_str = normalized.to_string_lossy();
 
