@@ -49,6 +49,15 @@ build *args="":
 sanity:
     @just _sanity_all "sniff --features remote; sniff-cli --features test-fixtures"
 
+# run cargo check to do a quick validation that code can be built
+#
+# Scoped to this package area: `sniff/` holds no crate of its own, so a bare
+# `cargo check` falls back to the whole workspace (libduckdb-sys et al).
+# `remote` is required for the same reason as `lint`: without it the provider
+# and remote-observation modules are never handed to rustc at all.
+check *args="":
+    @cargo check -p sniff --features remote -p sniff-cli {{ args }}
+
 # test library and CLI
 #
 # `remote` transitively enables `network`. Selecting `network` alone would
