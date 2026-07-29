@@ -4,7 +4,7 @@ description: |-
   Monorepo testing guide: L1/L2/L3 taxonomy, canonical just recipes,
   `require_level!` gating, nextest filtersets, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 1acc7c1c76b11142-b9c2ecd633547e33
+hash: 1acc7c1c76b11142-4ac6a4feacedd58f
 last_updated: 2026-07-29
 ---
 # Rust Testing — Rusty Biscuit Monorepo
@@ -311,14 +311,36 @@ teardown.
 ## Nextest Filtersets
 
 The `.config/nextest.toml` does not yet define named filterset aliases (nextest
-feature limitation). The shared `_sanity`, `_test_l2`, etc. recipes pass the
-filter expression directly:
+feature limitation). `just/devops.just`'s `_tier_filter` is the single source of
+truth; the shared `_sanity`, `_test_l2`, etc. recipes read it:
 
-- `sanity`: `-E '!(test(/level2_/) + test(/level3_/) + test(/browser_/) + test(/real_/) + test(/slow_/))'`
-- `test-l2`: `-E 'test(/level2_/)'`
-- `test-l3`: `-E 'test(/level3_/)'`
-- `test-browser`: `-E 'test(/browser_/)'`
-- `test-real`: `-E 'test(/real_/)'`
+- `sanity`: `-E '!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))'`
+- `test-l2`: `-E 'test(/(^|::)level2_/)'`
+- `test-l3`: `-E 'test(/(^|::)level3_/)'`
+- `test-browser`: `-E 'test(/(^|::)browser_/)'`
+- `test-real`: `-E 'test(/(^|::)real_/)'`
+
+**A tier marker is a prefix, not a substring.** `test(/…/)` is an unanchored
+regex search over the test *name* (`module::path::test_name`; nextest does not
+match it against the binary id), so the older bare `test(/browser_/)` also
+caught `unresolved_browser_feature_fails_the_render` and
+`image_emits_typed_browser_attributes` — ordinary unit tests. The `(^|::)`
+anchor confines each marker to a path-segment boundary. Name a test so the
+marker is the first segment of its final name or not present at all;
+`render_browser_fragment_carries_same_figures` is L1, `browser_fragment_…`
+is not.
+
+Anchoring alone cannot save a test whose name genuinely *starts* with a marker
+it does not earn. `renderable` had 16 such tests: excluded from L1, and its
+`test-browser` was a stub, so they ran in no tier for as long as they existed.
+`just check-tier-coverage` now fails on exactly that combination — a stub
+`test-<tier>` recipe in an area where tests still match that tier. It builds the
+stubbing areas' test binaries, so it is deliberately not wired into `test`,
+`lint`, or a hook; run it when tier markers or tier recipes change.
+
+An area that sets `BISCUIT_TEST_FILTER` carries its own copy of these
+expressions and must anchor them too — `_tier_filter` cannot reach inside an
+override.
 
 ## Leaked Process Detection
 
@@ -470,5 +492,7 @@ Open the topic file when the task matches:
 ## Resources
 
 - `docs/testing-strategy.md` — human-facing deep dive
-- `just/devops.just` — shared `_*` lifecycle recipes
+- `just/devops.just` — shared `_*` lifecycle recipes, `_tier_filter`
 - `.config/nextest.toml` — slow-timeout and retry config
+- `just check-tier-coverage` — fails when a tier's tests are stranded behind a
+  stub `test-<tier>` recipe

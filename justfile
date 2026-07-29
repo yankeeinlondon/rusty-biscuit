@@ -66,6 +66,14 @@ test *args="":
 check-test-interrupts:
     @just _check_test_interrupts
 
+# Verify no tier filter strands tests behind a stub `test-<tier>` recipe.
+#
+# Not part of any lifecycle recipe or hook: it has to build each stubbing area's
+# test binaries to answer the question. Run it when tier markers or tier recipes
+# change. Optional args restrict it to named area directories.
+check-tier-coverage *args="":
+    @just _check_tier_coverage {{ args }}
+
 # run the test suite, then sweep for child processes that outlived it
 #
 # Wraps `just test` in the cross-platform `leak-sweep` detector (tools/test-toolkit).

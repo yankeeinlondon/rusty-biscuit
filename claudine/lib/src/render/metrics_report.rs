@@ -588,7 +588,7 @@ mod tests {
     }
 
     #[test]
-    fn browser_fragment_carries_same_figures() {
+    fn render_browser_fragment_carries_same_figures() {
         let html = BrowserRenderable::render_html_fragment(&MetricsReport::new(sample_summary()))
             .render();
         assert!(html.contains("Claudine Logs"));
@@ -602,7 +602,7 @@ mod tests {
     }
 
     #[test]
-    fn browser_fragment_empty_day_omits_optional_sections() {
+    fn render_browser_fragment_empty_day_omits_optional_sections() {
         let html = BrowserRenderable::render_html_fragment(&MetricsReport::new(empty_summary()))
             .render();
         assert!(html.contains("Events 0"));

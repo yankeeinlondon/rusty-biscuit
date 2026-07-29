@@ -465,23 +465,34 @@ _backend_proof command:
 # `BISCUIT_TEST_FILTER` replaces the L1 expression wholesale — only areas whose
 # L1 contract genuinely differs should set it (darkmatter runs its `slow_` tests
 # as part of `just test`).
+#
+# ## A tier marker is a prefix, not a substring
+#
+# `test(/…/)` is an unanchored regex search over the *test name*
+# (`module::path::test_name` — nextest does not match it against the binary id),
+# so a bare `test(/browser_/)` also matched `unresolved_browser_feature_…` and
+# `image_emits_typed_browser_attributes`. Those are ordinary in-process unit
+# tests; the marker was never meant to be readable mid-word. Every predicate
+# therefore anchors to a path-segment boundary with `(^|::)`. `renderable` lost
+# 8 tests to this — excluded from L1, and its `test-browser` is a stub, so they
+# ran nowhere. `just check-tier-coverage` now fails on that combination.
 _tier_filter tier pkg="":
     #!/usr/bin/env bash
     set -euo pipefail
-    base='!(test(/level2_/) + test(/level3_/) + test(/browser_/) + test(/real_/) + test(/slow_/))'
+    base='!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))'
     case '{{ tier }}' in
         L1|l1)
             filter="${base}"
             if [[ '{{ pkg }}' == "worktree-cli" ]]; then
-                filter='!(test(/level2_/) + test(/level3_/) + test(/browser_/) + test(/real_/) + test(/slow_/) + test(/perf_/))'
+                filter='!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/) + test(/(^|::)perf_/))'
             fi
             printf '%s\n' "${BISCUIT_TEST_FILTER:-${filter}}"
             ;;
         sanity)  printf '%s\n' "${base}" ;;
-        L2|l2)       printf '%s\n' 'test(/level2_/)' ;;
-        L3|l3)       printf '%s\n' 'test(/level3_/)' ;;
-        browser)     printf '%s\n' 'test(/browser_/)' ;;
-        real)        printf '%s\n' 'test(/real_/)' ;;
+        L2|l2)       printf '%s\n' 'test(/(^|::)level2_/)' ;;
+        L3|l3)       printf '%s\n' 'test(/(^|::)level3_/)' ;;
+        browser)     printf '%s\n' 'test(/(^|::)browser_/)' ;;
+        real)        printf '%s\n' 'test(/(^|::)real_/)' ;;
         *)
             echo "_tier_filter: unknown tier '{{ tier }}' (expected L1, L2, L3, browser, real, sanity)" >&2
             exit 1
@@ -984,6 +995,163 @@ _check_test_interrupts:
     echo
 
     if (( ${#failed_areas[@]} > 0 )); then
+        exit 1
+    fi
+
+# Fail when a tier filter strands tests behind a stub recipe.
+#
+# A tier marker takes a test OUT of L1 unconditionally; only the area's own
+# `test-<tier>` recipe can put it back IN. When that recipe is a stub —
+# `@echo "…: not applicable…"` — the two halves disagree and every test the
+# filter caught runs in no tier at all. Nothing else reports that: the L1 run is
+# green because it never saw them, and the stub exits 0 because it does nothing.
+#
+# `renderable` sat in exactly that state with 16 tests, 8 of them ordinary unit
+# tests the then-unanchored filter matched mid-name (`…_browser_…`). This guard
+# would have failed the day the first one was written.
+#
+# Selection comes from `_tier_filter`, so the guard asks precisely the question
+# the tier recipe would have asked.
+#
+# Cost is why this is its own recipe and not part of `test`, `lint`, or a
+# pre-push hook: answering it needs `cargo nextest list`, which builds the area's
+# test binaries. Areas that stub no tier are skipped before any cargo runs, and a
+# stubbing area is listed only for the tiers it stubs. All of an area's packages
+# go into ONE `list` per tier, which also pins the feature resolution — listing
+# `-p biscuit-icon` and `-p biscuit-icon-cli` separately unifies features
+# differently each time and rebuilds the world between them.
+#
+# Known blind spot: the listing uses default features, because an area's real
+# feature flags live in its own recipe arguments and are not recoverable from
+# here. A stranded test behind a non-default feature is invisible. That only
+# hides a violation when EVERY stranded test in a tier is feature-gated; one
+# ungated sibling still fails the area.
+#
+# Optional `args` restrict the run to named area directories.
+_check_tier_coverage *args="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "_check_tier_coverage: jq is required." >&2
+        exit 2
+    fi
+
+    # A stub is a recipe whose every non-blank body line says "not applicable".
+    # The body runs from the header to the first line back at column 0.
+    #
+    # The pipeline's exit status is deliberately ignored: `sed … q` closes the
+    # pipe as soon as it sees that line, so under `pipefail` the whole
+    # substitution reports its upstream's SIGPIPE (141) on a perfectly good read.
+    # The captured text is the only signal here.
+    is_stub_recipe() {
+        local justfile="$1" recipe="$2" body
+        body="$(sed -n "/^${recipe}[ :]/,\$p" "${justfile}" \
+            | tail -n +2 \
+            | sed '/^[^[:space:]]/q' \
+            | sed '/^[^[:space:]]/d' \
+            | grep -v '^[[:space:]]*$')"
+        [[ -n "${body}" ]] || return 1
+        ! grep -qv 'not applicable' <<< "${body}"
+    }
+
+    declare -a target_areas=()
+    if [[ -n "{{ args }}" ]]; then
+        read -r -a target_areas <<< "{{ args }}"
+    else
+        while IFS= read -r justfile; do
+            area="${justfile%/justfile}"
+            # The root justfile has no directory component and owns no packages.
+            [[ "${area}" == "${justfile}" ]] && continue
+            target_areas+=("${area}")
+        done < <(rg --files -g justfile | sort)
+    fi
+
+    meta_file="$(mktemp "${TMPDIR:-/tmp}/biscuit-tier-meta.XXXXXX")"
+    listing="$(mktemp "${TMPDIR:-/tmp}/biscuit-tier-list.XXXXXX")"
+    # bash runs an inherited EXIT trap when a `$(…)` subshell finishes, so an
+    # unguarded `rm` here deletes both scratch files partway through the first
+    # command substitution and the rest of the run reads empty ones. `BASHPID`
+    # is per-process where `$$` is not, so it distinguishes the two.
+    main_pid="${BASHPID}"
+    trap '[[ "${BASHPID}" == "${main_pid}" ]] && rm -f "${meta_file}" "${listing}"' EXIT
+    cargo metadata --no-deps --format-version 1 > "${meta_file}" || exit 2
+    workspace_root="$(jq -r '.workspace_root' "${meta_file}")"
+
+    failures=()
+    checked=()
+    skipped=()
+
+    for area in "${target_areas[@]}"; do
+        justfile="${area}/justfile"
+        [[ -f "${justfile}" ]] || continue
+
+        stubbed=()
+        for tier in l2 l3 browser real; do
+            if is_stub_recipe "${justfile}" "test-${tier}"; then
+                stubbed+=("${tier}")
+            fi
+        done
+        if (( ${#stubbed[@]} == 0 )); then
+            skipped+=("${area}")
+            continue
+        fi
+
+        packages=()
+        while IFS= read -r pkg; do
+            [[ -n "${pkg}" ]] && packages+=("${pkg}")
+        done < <(jq -r --arg prefix "${workspace_root%/}/${area}/" \
+            '.packages[] | select(.manifest_path | startswith($prefix)) | .name' "${meta_file}")
+        if (( ${#packages[@]} == 0 )); then
+            skipped+=("${area}")
+            continue
+        fi
+
+        selection=()
+        for package in "${packages[@]}"; do
+            selection+=(-p "${package}")
+        done
+
+        echo -e "🔎 {{ bold }}${area}{{ reset }} {{ dim }}stubs: ${stubbed[*]} — listing ${packages[*]}{{ reset }}"
+        for tier in "${stubbed[@]}"; do
+            filter="$(just _tier_filter "${tier}")"
+            if ! cargo nextest list "${selection[@]}" -E "${filter}" \
+                --message-format json > "${listing}" 2>/dev/null; then
+                echo -e "  {{ red }}❌ could not list ${area} for ${tier}{{ reset }}"
+                failures+=("${area} (${tier}: listing failed)")
+                continue
+            fi
+            stranded=()
+            while IFS= read -r line; do
+                [[ -n "${line}" ]] && stranded+=("${line}")
+            done < <(jq -r '
+                .["rust-suites"][]?
+                | ."binary-id" as $binary
+                | (.testcases // {})
+                | to_entries[]
+                | select(.value["filter-match"].status == "matches")
+                | "\($binary)::\(.key)"
+            ' "${listing}")
+            (( ${#stranded[@]} == 0 )) && continue
+            echo -e "  {{ red }}❌ ${#stranded[@]} test(s) match the ${tier} tier, but test-${tier} is a stub{{ reset }}"
+            printf '      %s\n' "${stranded[@]}"
+            failures+=("${area} (${tier}: ${#stranded[@]} stranded)")
+        done
+        checked+=("${area}")
+    done
+
+    echo
+    echo "Tier coverage"
+    echo "================================================"
+    echo -e "{{ dim }}No stubbed tier (not listed): ${#skipped[@]}{{ reset }}"
+    echo -e "Listed (${#checked[@]}): ${checked[*]:-(none)}"
+    echo -e "{{ red }}Stranded{{ reset }} (${#failures[@]}): ${failures[*]:-(none)}"
+    echo "================================================"
+    echo
+
+    if (( ${#failures[@]} > 0 )); then
+        echo "A stranded test runs in no tier. Either rename it so it carries no tier"
+        echo "marker, or give the area a real test-<tier> recipe."
         exit 1
     fi
 

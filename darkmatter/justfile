@@ -68,7 +68,7 @@ test *args="":
     #!/usr/bin/env bash
     set -uo pipefail
     # Unlike the shared default, darkmatter's L1 contract keeps `slow_` tests.
-    export BISCUIT_TEST_FILTER='!(test(/level2_/) + test(/level3_/) + test(/browser_/) + test(/real_/))'
+    export BISCUIT_TEST_FILTER='!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/))'
     exit_code=0
     just _test_all "{{ LIBRARY }} {{ CLI }} {{ DMLS }}" {{ args }} || exit_code=$?
     if (( exit_code == 130 )); then

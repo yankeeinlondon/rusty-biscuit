@@ -1095,7 +1095,7 @@ mod tests {
     }
 
     #[test]
-    fn browser_only_attrs_are_dropped_in_both_markdown_dialects() {
+    fn drops_browser_only_attrs_in_both_dialects() {
         // Browser-only typed attributes (link target/rel/download, image
         // loading/decoding, data-*, inline_style) have no portable Markdown
         // spelling and no MarkdownPlus HTML form on links/images, so both

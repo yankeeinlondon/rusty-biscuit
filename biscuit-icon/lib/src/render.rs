@@ -67,7 +67,7 @@ mod tests {
     };
 
     #[test]
-    fn browser_target_emits_inline_svg_verbatim() {
+    fn render_browser_target_emits_inline_svg_verbatim() {
         let icon = crate::domain::Os::Apple.icon();
         let node = icon.render_tree();
         let opts =
