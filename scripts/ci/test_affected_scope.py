@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 import tempfile
 import unittest
 from datetime import date
@@ -318,6 +319,32 @@ class AreaSchemaTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "must be a boolean"):
             validate_area_schema([{"area": "alpha", "check_args": "-p alpha", "l2": "yes"}])
 
+    def test_non_boolean_node_flag_is_rejected(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "'node' must be a boolean"):
+            validate_area_schema([{"area": "alpha", "check_args": "-p alpha", "node": "yes"}])
+
+    def test_declared_node_capability_passes(self) -> None:
+        validate_area_schema(
+            [{"area": "alpha", "check_args": "-p alpha", "node": True}], today=TODAY
+        )
+
+    def test_node_capability_no_environment_can_host_is_rejected(self) -> None:
+        # The failure mode the flag exists to prevent: `node_environments`
+        # resolves empty, the recipe self-skips on every leg, and the area
+        # reports PASS having run none of its JavaScript tests.
+        with self.assertRaisesRegex(RuntimeError, r'"node": true.*none of which provisions pnpm'):
+            validate_area_schema(
+                [
+                    {
+                        "area": "alpha",
+                        "check_args": "-p alpha",
+                        "node": True,
+                        "environments": ["windows-latest", "macos-latest"],
+                    }
+                ],
+                today=TODAY,
+            )
+
 
 class EnvironmentPolicyTests(unittest.TestCase):
     """`environment` is not `os`, and the split must survive into the workflow."""
@@ -383,6 +410,26 @@ class EnvironmentPolicyTests(unittest.TestCase):
         # The WSL leg runs from a nextest archive, which carries no broker binary
         # and hosts no tmux server.
         self.assertEqual(["ubuntu-latest"], policy["l2_environments"])
+
+    def test_an_area_without_a_javascript_suite_provisions_no_node(self) -> None:
+        self.assertEqual([], environment_policy({"area": "alpha"})["node_environments"])
+
+    def test_node_is_provisioned_on_linux_only(self) -> None:
+        # Not a reduction of tests within an area: the recipe is identical on
+        # every environment and self-gates on the capability. The suite is jsdom
+        # with no native dependency, so the other three legs would exercise
+        # identical code paths for three more toolchain installs — the same
+        # reasoning that already makes `lint` Linux-only.
+        policy = environment_policy({"area": "alpha", "node": True})
+        self.assertEqual(["ubuntu-latest"], policy["node_environments"])
+
+    def test_wsl_never_appears_as_a_node_environment(self) -> None:
+        # The WSL leg runs `just test` from a prebuilt nextest archive inside a
+        # guest with no Node toolchain; the recipe skips there loudly.
+        policy = environment_policy(
+            {"area": "alpha", "node": True, "environments": ["ubuntu-latest", "wsl2-ubuntu"]}
+        )
+        self.assertEqual(["ubuntu-latest"], policy["node_environments"])
 
     def test_wsl_preflights_on_the_runner_that_hosts_it(self) -> None:
         root = Path(tempfile.mkdtemp())
@@ -591,6 +638,32 @@ class LiveAreaConfigTests(unittest.TestCase):
                     area.get("backends"),
                     f"{area['area']} sets l2 but declares no backends",
                 )
+
+    def test_an_area_whose_justfile_drives_pnpm_declares_the_node_capability(self) -> None:
+        # Drift guard for the defect this capability was added to close. An area
+        # whose canonical recipes shell out to pnpm, with nothing declaring it,
+        # gets pnpm on no runner: `homelab`'s `just test` died on `pnpm: command
+        # not found` after every Rust package passed, so its 22 frontend tests
+        # had never once executed in CI. Declaration and usage must agree in
+        # BOTH directions — an undeclared user is a silent gap, and a declared
+        # non-user pays for a toolchain install that gates nothing.
+        root = Path(__file__).resolve().parents[2]
+        for area in self.areas:
+            justfile = root / area["area"] / "justfile"
+            if not justfile.exists():
+                continue
+            recipes = "\n".join(
+                line
+                for line in justfile.read_text(encoding="utf-8").splitlines()
+                if not line.lstrip().startswith("#")
+            )
+            drives_pnpm = re.search(r"\bpnpm\b", recipes) is not None
+            self.assertEqual(
+                drives_pnpm,
+                bool(area.get("node", False)),
+                f"{area['area']}: its justfile invokes pnpm ({drives_pnpm}) but its declared "
+                f"\"node\" capability is {bool(area.get('node', False))}",
+            )
 
     def test_every_exclusion_is_owned(self) -> None:
         excluded_areas = [area for area in self.areas if area.get("ci") is False]

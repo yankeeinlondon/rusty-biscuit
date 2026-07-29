@@ -51,6 +51,10 @@ on:
         description: "JSON array of L2 terminal backends this area's tests declare, used to report per-backend coverage."
         type: string
         default: '[]'
+      node-environments:
+        description: "JSON array of environments where Node + pnpm are provisioned, for an area whose canonical `just test` also drives a JavaScript suite. Empty when the area declares no `node` capability."
+        type: string
+        default: '[]'
       shards:
         description: 'JSON array of nextest partition specs; ["1/1"] means no sharding (e.g. ["1/4","2/4","3/4","4/4"]).'
         type: string
@@ -204,6 +208,13 @@ jobs:
       BISCUIT_CI_AREA: ${{ inputs.area }}
       BISCUIT_CI_ENVIRONMENT: ${{ matrix.environment }}
       BISCUIT_CI_SHARD: ${{ matrix.shard }}
+      # Plan 1.1's asymmetry, applied to the `node` capability: a PROVISIONED
+      # capability hard-fails when missing, an INAPPLICABLE one skips cleanly.
+      # Set only on the legs `affected_scope.py` says can host pnpm, so on those
+      # legs a missing pnpm is a provisioning failure the recipe must not
+      # swallow, while every other leg (and every developer host) skips loudly
+      # and exits 0.
+      BISCUIT_FRONTEND_REQUIRED: ${{ contains(fromJSON(inputs.node-environments), matrix.environment) && '1' || '' }}
     steps:
       - uses: actions/checkout@v4
       - name: Install just
@@ -246,6 +257,47 @@ jobs:
             fi
           done
           echo "$stubdir" >>"$GITHUB_PATH"
+      # Node + pnpm for an area whose canonical `just test` also drives a
+      # JavaScript suite (`"node": true` in areas.json — today only `homelab`,
+      # whose `test` recipe runs a Vue + Vitest + jsdom suite after the Rust
+      # packages). Until this landed, `pnpm: command not found` killed that
+      # recipe on EVERY runner, so the suite had never once executed in CI while
+      # the rollup — which parses Rust JUnit only — rendered the area PASS
+      # 222/0/0 on three environments (measured, run 30427703024).
+      #
+      # LINUX ONLY, by the reasoning that already makes `lint` Linux-only: the
+      # suite runs under jsdom with no native dependency, so four environments
+      # would exercise identical code paths for four toolchain installs. This is
+      # not an exception to "the same canonical recipe on every environment" —
+      # the recipe IS identical everywhere and self-gates on the capability, the
+      # way `require_level!` self-gates on a terminal backend. `_ensure-native-libs`
+      # is the analogous precedent for a declared, per-area system prerequisite.
+      #
+      # Which environments qualify is DERIVED by `affected_scope.py` from the
+      # single `node` policy flag; nothing here decides it.
+      - name: Set up pnpm
+        if: ${{ contains(fromJSON(inputs.node-environments), matrix.environment) }}
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Set up Node
+        if: ${{ contains(fromJSON(inputs.node-environments), matrix.environment) }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Runtime reachability, mirroring the L2 tier's `tmux -V`: a capability the
+      # area DECLARED must fail its own named provisioning step when it is not
+      # actually usable, rather than surface minutes later as a suite that
+      # "skipped" under a green cell. `BISCUIT_FRONTEND_REQUIRED` above is the
+      # second half of the same contract, for the case where these steps were
+      # never scheduled at all.
+      - name: Verify the pnpm toolchain
+        if: ${{ contains(fromJSON(inputs.node-environments), matrix.environment) }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          pnpm --version
       - name: L1 tests
         shell: bash
         run: |

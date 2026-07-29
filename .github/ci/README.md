@@ -58,6 +58,7 @@ order must match the root `justfile` `areas :=` list.
 | `ai_provider_stubs` | bool | no | `false` | Install inert AI-provider CLI stubs for tests needing provider discovery. |
 | `backends` | string[] | no | `[]` | L2 terminal backends this area's tests require. One of: `tmux`, `wezterm`, `kitty`, `apple-terminal`. |
 | `native` | object | no | `{}` | Map of runner OS → system packages needed to build/test (e.g. `{"ubuntu-latest": ["libasound2-dev"]}`). |
+| `node` | bool | no | `false` | Whether this area's canonical `just test` also drives a JavaScript suite, so the leg needs Node + pnpm. |
 | `canary` | bool | no | `false` | Whether this area is a global-change canary (Phase 4). |
 
 Supported environments: `ubuntu-latest`, `windows-latest`, `macos-latest`,
@@ -104,6 +105,52 @@ is normal in cross-platform Rust. `lint` still denies warnings via clippy, where
 with an owned baseline, the treatment skips already get.
 Same job count per area as before, aimed better. The trade-off is explicit:
 **macOS-only warning drift is no longer detected in CI.**
+
+### The `node` capability
+
+`homelab` is the only area whose canonical `just test` also drives a JavaScript
+suite — `homelab/server/frontend`, Vue + Vitest under jsdom, 22 tests. pnpm is on
+no GitHub runner image, so until this flag existed `pnpm: command not found`
+killed the `test` recipe on every runner *after* all the Rust packages had
+passed. The suite had **never once run in CI**, and because the rollup parses
+Rust JUnit only, `homelab` rendered `PASS 222/0/0` on macOS, Linux, and Windows
+while every `homelab / test` job was red (measured, run 30427703024). The
+producer status artifact caught the failure and the verdict blocked, so the
+safety net held — but the grid was misleading, which is what success criterion 1
+forbids.
+
+`"node": true` is a declared capability, not an unconditional install.
+`affected_scope.py` derives `node_environments` from it exactly as it derives
+`l2_environments` from `"l2": true`, and `_area-ci.yml` uses that list to gate
+its pnpm/Node setup steps. Nothing in the workflow decides which environments
+qualify.
+
+`NODE_PROVISIONED_ENVIRONMENTS` is `{ubuntu-latest}` — **Linux only**, for the
+reason `lint` is Linux only. The suite runs under jsdom with no native
+dependency, so the other three environments would exercise identical code paths
+in exchange for three more toolchain installs. This is not an exception to "the
+same canonical recipe on every environment": the recipe is identical everywhere
+and self-gates on the capability, the way `require_level!` self-gates on a
+terminal backend.
+
+Two rules keep a missing capability from reading as success:
+
+- **The skip is loud and never silent.** Where pnpm is absent, `test-frontend`
+  prints an unmissable block saying the suite did not run and why, then exits 0.
+  A developer without pnpm is not blocked; nobody can mistake the run for one
+  that covered the frontend.
+- **A declared-but-missing capability hard-fails.** On the leg whose area
+  declared `node`, `_area-ci.yml` verifies reachability in a named step
+  (`pnpm --version`, mirroring the L2 tier's `tmux -V`) and exports
+  `BISCUIT_FRONTEND_REQUIRED=1`, which turns the recipe's loud skip into a
+  failure. Same asymmetry as the per-backend L2 requirement: a provisioned
+  capability hard-fails when missing, an inapplicable one skips cleanly.
+
+An area that sets `"node": true` but declares no environment in
+`NODE_PROVISIONED_ENVIRONMENTS` fails the scope calculation — the suite would
+skip on every leg while the area still reported PASS, which is the exact defect
+the flag exists to close. A drift test in `test_affected_scope.py` also requires
+declaration and justfile pnpm usage to agree in **both** directions.
 
 ### Policy gaps
 

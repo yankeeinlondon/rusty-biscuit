@@ -183,7 +183,8 @@
   },
   {
     "area": "homelab",
-    "check_args": "-p homelab -p homelab-cli -p homelab-server -p unfolded-integration-helper -p arcam-amp-integration -p eversolo-integration -p sony-receiver-integration"
+    "check_args": "-p homelab -p homelab-cli -p homelab-server -p unfolded-integration-helper -p arcam-amp-integration -p eversolo-integration -p sony-receiver-integration",
+    "node": true
   },
   {
     "area": "biscuit-contract",

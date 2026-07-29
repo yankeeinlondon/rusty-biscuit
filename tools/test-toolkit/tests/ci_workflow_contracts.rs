@@ -957,6 +957,84 @@ fn l2_runs_on_every_environment_with_a_provisioned_backend() {
 }
 
 #[test]
+fn a_declared_node_capability_is_provisioned_verified_and_hard_required() {
+    // `homelab`'s canonical `just test` runs a Vue + Vitest + jsdom suite after
+    // its Rust packages. pnpm exists on no runner image, so that suite had never
+    // executed in CI — and because the rollup parses Rust JUnit only, the area
+    // rendered PASS 222/0/0 on three environments while every `homelab / test`
+    // job was red (measured, run 30427703024). The capability is declared in
+    // areas.json and derived into `node-environments` by `affected_scope.py`, so
+    // the workflow never decides for itself which environments qualify.
+    let areas = read(".github/ci/areas.json");
+    assert!(
+        areas.contains(r#""node": true"#),
+        "areas.json must declare the node capability for the area whose `just test` drives a \
+         JavaScript suite"
+    );
+
+    let policy = read("scripts/ci/affected_scope.py");
+    assert!(
+        policy.contains("NODE_PROVISIONED_ENVIRONMENTS = {\"ubuntu-latest\"}"),
+        "pnpm must be provisioned on Linux only — the suite is jsdom with no native dependency, \
+         so the other three environments would exercise identical code paths"
+    );
+    assert!(
+        policy.contains("\"node_environments\""),
+        "affected_scope.py must derive node_environments from the single `node` policy flag"
+    );
+
+    let ci = workflow("ci.yml");
+    assert_eq!(
+        ci.matches("node-environments: ${{ toJSON(matrix.node_environments) }}")
+            .count(),
+        2,
+        "both the canary and area fan-out call sites must forward the derived node environments"
+    );
+
+    let test_job = job_block("_area-ci.yml", "  test:");
+    // Gated on the DERIVED list, never on a runner label written into the YAML.
+    assert_eq!(
+        test_job
+            .matches("if: ${{ contains(fromJSON(inputs.node-environments), matrix.environment) }}")
+            .count(),
+        3,
+        "pnpm setup, Node setup, and the verification step must each gate on the declared \
+         capability"
+    );
+    // Runtime reachability in a NAMED step, exactly as the L2 tier verifies
+    // `tmux -V`: a declared capability that is not usable must fail its own
+    // provisioning step, not surface later as a suite that quietly skipped.
+    assert!(
+        test_job.contains("- name: Verify the pnpm toolchain") && test_job.contains("pnpm --version"),
+        "a declared node capability must be verified reachable in its own named step"
+    );
+    // The other half of the same contract, for the case where those steps were
+    // never scheduled at all. Plan 1.1's asymmetry: a provisioned capability
+    // hard-fails when missing, an inapplicable one skips cleanly.
+    assert!(
+        test_job.contains(
+            "BISCUIT_FRONTEND_REQUIRED: ${{ contains(fromJSON(inputs.node-environments), \
+             matrix.environment) && '1' || '' }}"
+        ),
+        "the leg that declared the capability must hard-require it through the recipe too"
+    );
+
+    // The recipe self-gates and is identical on every environment — the skip is
+    // LOUD and non-fatal off the declared leg, fatal on it.
+    let recipe = read("homelab/justfile");
+    assert!(
+        recipe.contains("FRONTEND TEST SUITE DID NOT RUN"),
+        "a missing pnpm must announce that the suite did not run; a silent skip is what produced \
+         the PASS-over-a-failed-job cell"
+    );
+    assert!(
+        recipe.contains(r#"if [ -n "${BISCUIT_FRONTEND_REQUIRED:-}" ]; then"#)
+            && recipe.contains("PROVISIONING FAILURE"),
+        "the recipe must fail when the capability was declared and pnpm is still unreachable"
+    );
+}
+
+#[test]
 fn exclusions_are_owned_and_time_bounded() {
     // Ten `"ci": false` records accumulated because an exclusion cost nothing to
     // leave in place. Every one now names an owner and a date, and a lapsed date

@@ -55,6 +55,17 @@ ENVIRONMENT_RUNNER_OS: dict[str, str] = {"wsl2-ubuntu": "windows-latest"}
 # carries no broker binary and hosts no tmux server.
 L2_PROVISIONED_ENVIRONMENTS = {"ubuntu-latest", "macos-latest"}
 
+# Environments where Node + pnpm are provisioned for an area whose canonical
+# `just test` also drives a JavaScript suite (`"node": true`).
+#
+# Linux only, for the reason `lint` is Linux only: the one such suite today
+# (`homelab/server/frontend`, Vue + Vitest) runs under jsdom with no native
+# dependency, so four environments would execute identical code paths and buy
+# four toolchain installs. This does NOT reduce tests within an area — the
+# recipe is identical on every environment and self-gates on the capability the
+# way `require_level!` self-gates on a terminal backend.
+NODE_PROVISIONED_ENVIRONMENTS = {"ubuntu-latest"}
+
 # Per-area policy defaults, shared by config loading and preflight OS derivation
 # so a test that passes minimal area records still resolves environment policy.
 AREA_DEFAULTS: dict[str, Any] = {
@@ -77,11 +88,14 @@ AREA_DEFAULTS: dict[str, Any] = {
     "ai_provider_stubs": False,
     # Capability policy (D8/D9/D11). `backends`: L2 terminal backends this area's
     # tests require. `native`: runner OS -> system packages needed to build/test.
-    # `canary`: whether this area is a global-change canary (Phase 4).
-    # `policy_gaps`: tiers this area owns tests for that no environment can
-    # currently host — recorded so the rollup renders POLICY GAP, never green.
+    # `node`: whether this area's canonical `just test` also drives a JavaScript
+    # suite, so the leg needs Node + pnpm. `canary`: whether this area is a
+    # global-change canary (Phase 4). `policy_gaps`: tiers this area owns tests
+    # for that no environment can currently host — recorded so the rollup
+    # renders POLICY GAP, never green.
     "backends": [],
     "native": {},
+    "node": False,
     "canary": False,
     "policy_gaps": [],
 }
@@ -274,7 +288,7 @@ def validate_area_schema(areas: list[dict[str, Any]], today: date | None = None)
         # Types before semantics: every rule below reads these flags, so a
         # mistyped one must be reported as the typo it is rather than as the
         # policy violation its truthiness happens to produce.
-        for field in ("l2", "browser", "kache", "ai_provider_stubs", "canary", "ci"):
+        for field in ("l2", "browser", "kache", "ai_provider_stubs", "canary", "ci", "node"):
             if field in area and not isinstance(area[field], bool):
                 raise RuntimeError(f"area '{label}' field '{field}' must be a boolean")
 
@@ -354,6 +368,23 @@ def validate_area_schema(areas: list[dict[str, Any]], today: date | None = None)
                     f"known backends: {sorted(KNOWN_L2_BACKENDS)}"
                 )
 
+        # A declared `node` capability that no declared environment can host is a
+        # silent gap by construction: `node_environments` resolves empty, the
+        # recipe self-skips on every leg, and the area reads green having run
+        # none of its JavaScript tests. That is precisely the failure this flag
+        # exists to prevent, so it fails at config time.
+        if area.get("ci", AREA_DEFAULTS["ci"]) and area.get("node", AREA_DEFAULTS["node"]):
+            environments = area.get("environments", AREA_DEFAULTS["environments"])
+            if not any(
+                environment in NODE_PROVISIONED_ENVIRONMENTS for environment in environments
+            ):
+                raise RuntimeError(
+                    f"area '{label}' sets \"node\": true but runs on {environments}, none of "
+                    f"which provisions pnpm ({sorted(NODE_PROVISIONED_ENVIRONMENTS)}). Its "
+                    "JavaScript suite would skip on every leg while the area still reported "
+                    "PASS. Declare an environment that can host it, or drop the capability."
+                )
+
         # A WSL2 guest IS Linux, so it consumes the `ubuntu-latest` package list
         # (`_ensure-native-libs` keys off `uname -s`). `native` therefore stays a
         # runner-OS map and must not grow a `wsl2-ubuntu` key.
@@ -374,7 +405,8 @@ def environment_policy(area: dict[str, Any]) -> dict[str, Any]:
 
     ## Returns
 
-    ``{"native_environments": [...], "l2_environments": [...], "wsl": bool}``.
+    ``{"native_environments": [...], "l2_environments": [...],
+    "node_environments": [...], "wsl": bool}``.
     """
     environments = list(area.get("environments", AREA_DEFAULTS["environments"]))
     return {
@@ -388,6 +420,18 @@ def environment_policy(area: dict[str, Any]) -> dict[str, Any]:
                 if environment in L2_PROVISIONED_ENVIRONMENTS
             ]
             if area.get("l2", AREA_DEFAULTS["l2"])
+            else []
+        ),
+        # Same derivation as `l2_environments`: the area declares a capability,
+        # not a runner list, and the intersection with what CI can provision is
+        # computed here rather than hard-coded in workflow YAML.
+        "node_environments": (
+            [
+                environment
+                for environment in environments
+                if environment in NODE_PROVISIONED_ENVIRONMENTS
+            ]
+            if area.get("node", AREA_DEFAULTS["node"])
             else []
         ),
         "wsl": "wsl2-ubuntu" in environments,

@@ -195,6 +195,7 @@ jobs:
       native-environments: ${{ toJSON(matrix.native_environments) }}
       check-os: ${{ toJSON(matrix.check_os) }}
       l2-environments: ${{ toJSON(matrix.l2_environments) }}
+      node-environments: ${{ toJSON(matrix.node_environments) }}
       backends: ${{ toJSON(matrix.backends) }}
       shards: ${{ toJSON(matrix.shards) }}
       l2: ${{ matrix.l2 }}
@@ -227,6 +228,7 @@ jobs:
       native-environments: ${{ toJSON(matrix.native_environments) }}
       check-os: ${{ toJSON(matrix.check_os) }}
       l2-environments: ${{ toJSON(matrix.l2_environments) }}
+      node-environments: ${{ toJSON(matrix.node_environments) }}
       backends: ${{ toJSON(matrix.backends) }}
       shards: ${{ toJSON(matrix.shards) }}
       l2: ${{ matrix.l2 }}
