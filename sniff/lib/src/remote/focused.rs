@@ -530,6 +530,8 @@ impl FocusedProviderClient {
         }
         let client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(std::time::Duration::from_secs(3))
+            .timeout(std::time::Duration::from_secs(5))
             .build()
             .map_err(|error| transport(&endpoint, error))?;
         let (token, variable) = match self.credential_scope {
