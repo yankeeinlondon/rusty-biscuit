@@ -1,4 +1,5 @@
 mod common;
+use test_toolkit::{Level, require_level};
 
 use predicates::prelude::*;
 
@@ -82,7 +83,12 @@ fn every_subcommand_exits_with_code_1_on_non_tty_event_loop_read() {
 }
 
 #[test]
-fn text_input_exits_with_code_1_on_escape_in_real_tty() {
+fn level2_text_input_exits_with_code_1_on_escape_in_pty() {
+    require_level!(
+        Level::L2,
+        common::expect_driver_available(),
+        "expect (PTY script driver)"
+    );
     // Phase 12 split: Esc now maps to exit code 1 (ABORTED), distinct
     // from Ctrl+C which continues to map to 130 (CANCELLED).
     let output = common::run_question_in_pty(&["text-input", "--initial", "Ada"], r"\033", 1);

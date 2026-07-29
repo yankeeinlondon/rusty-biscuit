@@ -1,4 +1,5 @@
 mod common;
+use test_toolkit::{Level, require_level};
 
 use predicates::prelude::*;
 
@@ -65,7 +66,12 @@ fn input_table_accepts_output_flag_at_global_position() {
 }
 
 #[test]
-fn input_table_submits_json_output_via_real_tty() {
+fn level2_input_table_submits_json_output_via_pty() {
+    require_level!(
+        Level::L2,
+        common::expect_driver_available(),
+        "expect (PTY script driver)"
+    );
     let output = common::run_question_in_pty(
         &[
             "--output",

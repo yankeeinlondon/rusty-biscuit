@@ -1,4 +1,5 @@
 mod common;
+use test_toolkit::{Level, require_level};
 
 use predicates::prelude::*;
 
@@ -67,7 +68,12 @@ fn choose_many_accepts_output_flag_at_global_position() {
 }
 
 #[test]
-fn choose_many_submits_raw_output_via_real_tty() {
+fn level2_choose_many_submits_raw_output_via_pty() {
+    require_level!(
+        Level::L2,
+        common::expect_driver_available(),
+        "expect (PTY script driver)"
+    );
     let output = common::run_question_in_pty(
         &[
             "--output",
