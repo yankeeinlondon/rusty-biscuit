@@ -27,7 +27,8 @@ use std::path::{Path, PathBuf};
 /// to avoid writing into the real user home.
 pub const CLIP_AUTOSTART_PREFIX_ENV: &str = "CLIP_AUTOSTART_PREFIX";
 
-/// Identifier embedded in every autostart manifest.
+/// Identifier embedded in the macOS launchd plist.
+#[cfg(target_os = "macos")]
 pub const AUTOSTART_LABEL: &str = "com.biscuit.clipper";
 
 /// Options controlling install/uninstall behaviour.
