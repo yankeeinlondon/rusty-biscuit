@@ -466,7 +466,11 @@ fn unknown_backend_provisioning_asserts_no_policy_gap() {
 /// The measured case: `needs: lint` skipped the whole matrix, GitHub never
 /// evaluated the matrix context, and no artifact exists for any leg.
 #[test]
-fn a_lint_blocked_area_renders_missing_and_names_the_upstream_job() {
+fn a_failing_lint_is_never_blamed_for_a_missing_l1_cell() {
+    // `needs: lint` was removed from the test job, so lint gates nothing. This
+    // test previously asserted the opposite, which was correct while the edge
+    // existed. Blaming any failing job in the area sent claudine's triage at
+    // lint in run 30427703024 for MISSING L1 cells lint could not have caused.
     let statuses = vec![ProducerStatus {
         area: "claudine".to_owned(),
         job: "lint".to_owned(),
@@ -484,13 +488,54 @@ fn a_lint_blocked_area_renders_missing_and_names_the_upstream_job() {
         expected_tests: &expected_tests,
     }));
 
+    // Still MISSING and still blocking — only the attribution changes.
     assert_eq!(cell.state, CellState::Missing);
     assert!(cell.state.blocks());
     assert!(
+        !cell.reasons.iter().any(|r| r.contains("upstream job")),
+        "lint gates no tier, so it must not be named as an upstream cause: {:?}",
+        cell.reasons
+    );
+    assert!(
+        cell.reasons.iter().any(|r| r.contains("no report")),
+        "the cell must still explain what IT observed: {:?}",
+        cell.reasons
+    );
+}
+
+/// L2 *does* declare `needs: test`, so a failing L1 is a real gating edge and
+/// must still be named — the fix narrows attribution, it does not remove it.
+#[test]
+fn a_failing_l1_is_still_blamed_for_a_missing_l2_cell() {
+    let statuses = vec![ProducerStatus {
+        area: "darkmatter".to_owned(),
+        job: "L1".to_owned(),
+        result: "failure".to_owned(),
+        environment: None,
+    }];
+    let provisioned = BTreeMap::new();
+    let expected_tests = BTreeMap::new();
+
+    let cell = only_cell(classify(&ClassifyInputs {
+        expected: &[expectation("darkmatter", "ubuntu-latest", Tier::L2)],
+        records: &[],
+        statuses: &statuses,
+        provisioned: &provisioned,
+        expected_tests: &expected_tests,
+    }));
+
+    assert_eq!(cell.state, CellState::Missing);
+    assert!(
         cell.reasons
             .iter()
-            .any(|r| r.contains("lint") && r.contains("failure")),
-        "reasons should name the upstream job: {:?}",
+            .any(|r| r.contains("upstream job") && r.contains("L1")),
+        "a real `needs:` edge must still be attributed: {:?}",
+        cell.reasons
+    );
+    // The cell's own observation leads; the upstream edge is context.
+    assert!(
+        cell.reasons[0].contains("no report"),
+        "the leading reason must be what this cell observed: {:?}",
         cell.reasons
     );
 }

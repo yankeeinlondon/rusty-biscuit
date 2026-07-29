@@ -1212,16 +1212,27 @@ fn classify_one(
         }
     }
 
-    // Matched on area alone. A status's `environment` says where that job ran,
-    // not what it gated: `lint` is Linux-only but `needs: lint` deletes the
-    // test matrix for *every* environment, which is how five areas lost all
-    // their L1 legs in run 30323254931.
+    // A cell may only be blamed on a job that actually gates it. Matching any
+    // failing job in the area blamed `lint` for claudine's MISSING L1 cells in
+    // run 30427703024 — but `needs: lint` was removed from the test job, so lint
+    // gates nothing. `check` had succeeded and the optional tiers were skipped,
+    // leaving lint as the only candidate, and it was blamed for a cause it could
+    // not have. A wrong reason is worse than no reason: it sends triage at the
+    // wrong job.
+    //
+    // Only the `needs:` edges `_area-ci.yml` actually declares are encoded here.
+    // Anything else gets no upstream attribution and falls back to the cell's
+    // own intrinsic reason, which is always computed below.
+    let gating_jobs: &[&str] = match key.tier {
+        Tier::L2 | Tier::Browser => &["L1"],
+        _ => &[],
+    };
     let upstream = inputs
         .statuses
         .iter()
         .find(|status| {
             status.area == key.area
-                && Tier::parse(&status.job) != key.tier
+                && gating_jobs.contains(&status.job.as_str())
                 && matches!(status.result.as_str(), "failure" | "cancelled")
         })
         .cloned();
@@ -1243,19 +1254,24 @@ fn classify_one(
         // Actual failures still outrank it, handled below.
         CellState::PolicyGap
     } else if indices.is_empty() || has_unusable_record || !missing_shards.is_empty() {
-        if let Some(status) = &upstream {
-            reasons.push(format!(
-                "upstream job `{}` concluded `{}`, so this leg never ran and \
-                 GitHub never evaluated its matrix context",
-                status.job, status.result
-            ));
-        }
+        // The cell's own observation comes FIRST. The upstream edge is context,
+        // not cause, and a renderer showing only the leading reason must show
+        // what this cell actually saw. In run 30427703024 claudine's true reason
+        // — "no report for shard(s) 1/4, 2/4", i.e. two shards hit the job
+        // timeout — was computed but pushed behind a false upstream blame.
         if indices.is_empty() {
             reasons.push("scheduled but produced no report at all".to_owned());
         } else if !missing_shards.is_empty() {
             reasons.push(format!(
                 "no report for shard(s) {}",
                 missing_shards.join(", ")
+            ));
+        }
+        if let Some(status) = &upstream {
+            reasons.push(format!(
+                "upstream job `{}` concluded `{}`, so this leg never ran and \
+                 GitHub never evaluated its matrix context",
+                status.job, status.result
             ));
         }
         CellState::Missing

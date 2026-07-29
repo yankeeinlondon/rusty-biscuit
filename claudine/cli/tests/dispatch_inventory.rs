@@ -1063,6 +1063,22 @@ const GUARD_ALLOWLIST: &[GuardEntry] = &[
         tag: KEEP,
         reason: "Codex final-message stdout emission (direct wrapper twin).",
     },
+    // --- CLI: `CODEX_SQLITE_HOME` shadow-home derivation (two stages of one
+    //     feature: baseline capture, then overlay push).
+    GuardEntry {
+        path: "claudine/cli/src/commands/wrap/composition/pipeline.rs",
+        form: FORM_EQ,
+        providers: &["Codex"],
+        tag: KEEP,
+        reason: "CODEX_SQLITE_HOME is Codex-owned vocabulary; records the ambient baseline so a provider transition undoes it.",
+    },
+    GuardEntry {
+        path: "claudine/cli/src/commands/wrap/launch_plan.rs",
+        form: FORM_EQ,
+        providers: &["Codex"],
+        tag: KEEP,
+        reason: "CODEX_SQLITE_HOME is Codex-owned vocabulary; pushes the derived value into the child env overlay.",
+    },
     // --- CLI: other behavioral wire/prep quirks.
     GuardEntry {
         path: "claudine/cli/src/commands/exec_prep/mod.rs",
