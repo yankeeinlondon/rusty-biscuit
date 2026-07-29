@@ -63,12 +63,24 @@ jobs:
           if [ -z "$pr" ]; then
             # push event: find an open PR for this branch. No PR yet is the
             # normal case for a freshly pushed branch and is not a failure.
-            pr="$(gh api "repos/${REPO}/pulls" -f state=open -f head="${REPO%%/*}:${BRANCH}" \
-                    --jq '.[0].number // empty' 2>/dev/null || true)"
-            if [ -z "$pr" ]; then
-              echo "No open pull request for '${BRANCH}' — nothing to check."
+            #
+            # The query MUST live in the URL. `gh api` switches to POST as soon
+            # as a `-f` flag is present, and POST on this path is
+            # create-a-pull-request -- which 403s, and whose JSON error body
+            # then lands in `$pr` as if it were a number.
+            if ! listing="$(gh api "repos/${REPO}/pulls?state=open&head=${REPO%%/*}:${BRANCH}" 2>&1)"; then
+              echo "::warning::could not list pull requests for '${BRANCH}': ${listing}"
               exit 0
             fi
+            pr="$(printf '%s' "$listing" | jq -r '.[0].number // empty')"
+            # Validate rather than trust: an unchecked capture is how the error
+            # body above became a PR number in the first place.
+            case "$pr" in
+              '' | *[!0-9]*)
+                echo "No open pull request for '${BRANCH}' — nothing to check."
+                exit 0
+                ;;
+            esac
           fi
 
           # `mergeable` is computed asynchronously and reads `null` until the
@@ -76,7 +88,11 @@ jobs:
           # and would report a healthy PR as unknown.
           state="null"
           for _ in $(seq 1 15); do
-            state="$(gh api "repos/${REPO}/pulls/${pr}" --jq '.mergeable // "null"')"
+            if ! body="$(gh api "repos/${REPO}/pulls/${pr}" 2>&1)"; then
+              echo "::warning::could not read pull request #${pr}: ${body}"
+              exit 0
+            fi
+            state="$(printf '%s' "$body" | jq -r '.mergeable // "null"')"
             [ "$state" != "null" ] && break
             sleep 4
           done
@@ -89,7 +105,7 @@ jobs:
           fi
 
           if [ "$state" = "false" ]; then
-            reason="$(gh api "repos/${REPO}/pulls/${pr}" --jq '.mergeable_state')"
+            reason="$(printf '%s' "$body" | jq -r '.mergeable_state')"
             echo "::error title=PR #${pr} conflicts with its base::No CI run will be scheduled."
             {
               echo "## ❌ PR #${pr} conflicts with its base branch"
