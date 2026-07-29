@@ -1,11 +1,10 @@
 mod common;
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 
 #[test]
 fn choose_one_exits_nonzero_when_no_option_source() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one"])
         .assert()
         .failure()
@@ -15,7 +14,7 @@ fn choose_one_exits_nonzero_when_no_option_source() {
 
 #[test]
 fn choose_many_exits_nonzero_when_no_option_source() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-many"])
         .assert()
         .failure()
@@ -25,7 +24,7 @@ fn choose_many_exits_nonzero_when_no_option_source() {
 
 #[test]
 fn input_table_exits_nonzero_with_malformed_columns() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["input-table", "--columns", "not-json"])
         .assert()
         .failure()
@@ -73,7 +72,7 @@ fn every_subcommand_exits_with_code_1_on_non_tty_event_loop_read() {
     ];
 
     for (_name, args) in test_cases {
-        cargo_bin_cmd!("question")
+        assert_cmd::Command::cargo_bin("question").unwrap()
             .args(&args)
             .assert()
             .failure()

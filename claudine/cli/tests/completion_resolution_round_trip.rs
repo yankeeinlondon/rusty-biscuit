@@ -5,7 +5,6 @@
 //! second `claudine compose --dry-run` process. The composed body identifies
 //! which ordered magic root execution selected.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 
 mod common;
 use common::completion::{
@@ -24,7 +23,7 @@ fn emitted_magic_token(cwd: &std::path::Path, home: &std::path::Path, partial: &
 }
 
 fn compose_dry_run(cwd: &std::path::Path, home: &std::path::Path, token: &str) -> String {
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("HOME", home)
         .env("NO_COLOR", "1")
         .current_dir(cwd)

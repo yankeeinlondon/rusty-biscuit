@@ -124,7 +124,7 @@ fn run_dry_run_compose<H: TerminalHarness>(harness: &mut H) -> DryRunCapture {
     let doc = workspace.path().join("doc.md");
     fs::write(&doc, FIXTURE_DOC).unwrap();
 
-    let claudine = cargo_bin!("claudine").display().to_string();
+    let claudine = cargo_bin("claudine").display().to_string();
     // Hermetic PATH: exactly the stub bin dir, so installed/not-installed is
     // a fact of the fixture, never of the host (a host-installed provider
     // must not flip the resolution state under test).
@@ -192,7 +192,7 @@ fn run_dry_run_compose_with_doc<H: TerminalHarness>(
     let doc = workspace.path().join("doc.md");
     fs::write(&doc, doc_content).unwrap();
 
-    let claudine = cargo_bin!("claudine").display().to_string();
+    let claudine = cargo_bin("claudine").display().to_string();
     // Hermetic PATH: exactly the stub bin dir, so installed/not-installed is
     // a fact of the fixture, never of the host (a host-installed provider
     // must not flip the resolution state under test).
@@ -641,7 +641,7 @@ fn run_dry_run_compose_plain<H: TerminalHarness>(harness: &mut H) -> DryRunCaptu
     let doc = workspace.path().join("doc.md");
     fs::write(&doc, FIXTURE_DOC).unwrap();
 
-    let claudine = cargo_bin!("claudine").display().to_string();
+    let claudine = cargo_bin("claudine").display().to_string();
     // Hermetic PATH: exactly the stub bin dir, so installed/not-installed is
     // a fact of the fixture, never of the host (a host-installed provider
     // must not flip the resolution state under test).

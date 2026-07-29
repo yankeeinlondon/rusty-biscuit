@@ -1,4 +1,3 @@
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::path::PathBuf;
 
 fn repo_root() -> PathBuf {
@@ -8,7 +7,7 @@ fn repo_root() -> PathBuf {
 
 #[test]
 fn context_default_exits_zero_and_produces_stdout() {
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .current_dir(repo_root())
         .args(["context"])
@@ -38,7 +37,7 @@ fn context_default_exits_zero_and_produces_stdout() {
 #[test]
 fn context_default_works_outside_repo() {
     let temp_dir = std::env::temp_dir();
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .current_dir(&temp_dir)
         .args(["context"])
@@ -58,7 +57,7 @@ fn context_default_works_outside_repo() {
 
 #[test]
 fn context_values_exits_zero_and_produces_stdout() {
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .current_dir(repo_root())
         .args(["context", "--values"])
@@ -87,7 +86,7 @@ fn context_values_exits_zero_and_produces_stdout() {
 /// their canonical counterparts must also resolve to non-null values.
 #[test]
 fn context_values_renders_canonical_keys_non_null() {
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .current_dir(repo_root())
         .args(["context", "--values"])
@@ -113,7 +112,7 @@ fn context_values_renders_canonical_keys_non_null() {
 /// aliases. `ctx.today` always has a value, so use it as a sentinel.
 #[test]
 fn context_values_renders_non_null_for_canonical_keys() {
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .current_dir(repo_root())
         .args(["context", "--values"])
@@ -133,7 +132,7 @@ fn context_values_renders_non_null_for_canonical_keys() {
 
 #[test]
 fn context_expressions_exits_zero_and_produces_stdout() {
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .current_dir(repo_root())
         .args(["context", "--expressions"])
@@ -178,7 +177,7 @@ fn context_expressions_exits_zero_and_produces_stdout() {
 
 #[test]
 fn context_side_effects_exits_zero_and_produces_stdout() {
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .current_dir(repo_root())
         .args(["context", "--side-effects"])
@@ -207,7 +206,7 @@ fn context_side_effects_exits_zero_and_produces_stdout() {
 /// first data row's contents being promoted to a header.
 #[test]
 fn context_expressions_truthiness_table_uses_real_headers() {
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .current_dir(repo_root())
         .args(["context", "--expressions"])
@@ -244,7 +243,7 @@ fn context_expressions_truthiness_table_uses_real_headers() {
 /// header and the operator cells both carry inline code.
 #[test]
 fn context_expressions_inline_code_renders_without_leaking_markup() {
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .current_dir(repo_root())
         .args(["context", "--expressions"])
@@ -267,7 +266,7 @@ fn context_expressions_inline_code_renders_without_leaking_markup() {
 
 #[test]
 fn context_default_writes_footer_to_stderr() {
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .current_dir(repo_root())
         .args(["context"])
@@ -291,7 +290,7 @@ fn context_default_writes_footer_to_stderr() {
 
 #[test]
 fn context_values_writes_footer_to_stderr() {
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .current_dir(repo_root())
         .args(["context", "--values"])
@@ -315,7 +314,7 @@ fn context_values_writes_footer_to_stderr() {
 
 #[test]
 fn context_expressions_writes_footer_to_stderr() {
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .current_dir(repo_root())
         .args(["context", "--expressions"])
@@ -339,7 +338,7 @@ fn context_expressions_writes_footer_to_stderr() {
 
 #[test]
 fn context_side_effects_writes_footer_to_stderr() {
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .current_dir(repo_root())
         .args(["context", "--side-effects"])
@@ -436,7 +435,7 @@ fn assert_one_row_each(kind: &str, expected: &[String], actual: &[String]) {
 /// Runs `claudine context <args>` at a wide terminal (200 cells) so no canonical
 /// identifier wraps, then returns the rendered first-column cells.
 fn context_first_column_cells(args: &[&str]) -> Vec<String> {
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("COLUMNS", "200")
         .current_dir(repo_root())
@@ -518,7 +517,7 @@ fn context_side_effects_includes_every_capability() {
 #[test]
 fn context_deterministic_output() {
     let run = || {
-        let assert = cargo_bin_cmd!("claudine")
+        let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
             .env("NO_COLOR", "1")
             .current_dir(repo_root())
             .args(["context"])
@@ -539,7 +538,7 @@ fn context_deterministic_output() {
 #[test]
 fn context_no_markdown_parsing_artifacts() {
     for args in [vec!["context"], vec!["context", "--values"], vec!["context", "--expressions"], vec!["context", "--side-effects"]] {
-        let assert = cargo_bin_cmd!("claudine")
+        let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
             .env("NO_COLOR", "1")
             .current_dir(repo_root())
             .args(&args)
@@ -571,7 +570,7 @@ fn context_clap_rejects_combined_flags() {
         vec!["context", "--expressions", "--side-effects"],
         vec!["context", "--values", "--expressions", "--side-effects"],
     ] {
-        cargo_bin_cmd!("claudine")
+        assert_cmd::Command::cargo_bin("claudine").unwrap()
             .env("NO_COLOR", "1")
             .current_dir(repo_root())
             .args(&pair)
@@ -587,7 +586,7 @@ fn context_clap_rejects_combined_flags() {
 /// `--values` must include every context row, even when null/unavailable.
 #[test]
 fn context_values_preserves_null_rows() {
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .current_dir(repo_root())
         .args(["context", "--values"])
@@ -642,7 +641,7 @@ fn context_side_effects_makes_no_filesystem_changes() {
 
     let before = snapshot(work.path());
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", home.path())
         .current_dir(work.path())
@@ -665,7 +664,7 @@ fn context_side_effects_makes_no_filesystem_changes() {
 /// Side-effects report must use "capabilities" language and avoid availability claims.
 #[test]
 fn context_side_effects_uses_capability_language() {
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .current_dir(repo_root())
         .args(["context", "--side-effects"])
@@ -691,7 +690,7 @@ fn context_side_effects_uses_capability_language() {
 #[test]
 fn context_footer_no_availability_claims() {
     for args in [vec!["context"], vec!["context", "--values"], vec!["context", "--expressions"], vec!["context", "--side-effects"]] {
-        let assert = cargo_bin_cmd!("claudine")
+        let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
             .env("NO_COLOR", "1")
             .current_dir(repo_root())
             .args(&args)
@@ -748,7 +747,7 @@ fn context_reports_preserve_all_columns_at_minimum_supported_width() {
     // 53 is the minimum supported width; 60 and 80 confirm columns persist above it.
     for width in ["53", "60", "80"] {
         for (args, headers, sentinel) in cases {
-            let assert = cargo_bin_cmd!("claudine")
+            let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
                 .env("NO_COLOR", "1")
                 .env("COLUMNS", width)
                 .current_dir(repo_root())
@@ -794,7 +793,7 @@ fn context_default_report_never_drops_type_column_at_any_width() {
     let mut saw_header_row = false;
 
     for width in ["35", "40", "45", "50", "53", "56", "60"] {
-        let assert = cargo_bin_cmd!("claudine")
+        let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
             .env("NO_COLOR", "1")
             .env("COLUMNS", width)
             .current_dir(repo_root())
@@ -826,7 +825,7 @@ fn context_default_report_never_drops_type_column_at_any_width() {
 /// The "Interpolation vs. Condition Mode" introduction uses corrected wording.
 #[test]
 fn context_expressions_corrected_interpolation_wording() {
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .current_dir(repo_root())
         .args(["context", "--expressions"])

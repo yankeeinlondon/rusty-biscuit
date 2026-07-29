@@ -3,7 +3,6 @@
 //! Split out of the `wrap_commands.rs` god file; shared fixtures live in
 //! `common::wrap`.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use tempfile::tempdir;
 mod common;
@@ -38,7 +37,7 @@ fn sequence_composition_dry_run_for_every_provider() {
         )
         .unwrap();
 
-        let output = cargo_bin_cmd!("claudine")
+        let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
             .env("NO_COLOR", "1")
             .env("OPENCODE_MODEL", "test-model")
             .env("PATH", &path_dir)
@@ -84,7 +83,7 @@ fn sequence_preflight_rejects_blacklisted_lifecycle_shell_before_launch() {
     )
     .unwrap();
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -128,7 +127,7 @@ fn sequence_yolo_approves_lifecycle_shell_during_preflight() {
     )
     .unwrap();
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -181,7 +180,7 @@ fn sequence_dry_run_concatenates_bodies_with_dividers() {
     )
     .unwrap();
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -250,7 +249,7 @@ fn sequence_dry_run_quiet_and_silent_are_no_op() {
         )
         .unwrap();
 
-        let output = cargo_bin_cmd!("claudine")
+        let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
             .env("NO_COLOR", "1")
             .env("HOME", workspace.path())
             .env("PATH", augmented_path(&path_dir))
@@ -312,7 +311,7 @@ fn sequence_dry_run_fail_fast_on_composition_error() {
     )
     .unwrap();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -379,7 +378,7 @@ fn run_sequence_dry_run_agent_state(
     )
     .unwrap();
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         // Restrict PATH to the fake bin so only `installed` providers count.
@@ -525,7 +524,7 @@ fn run_sequence_live_agent_state(agent_line: &str, installed: &[&str]) -> (i32, 
     let stdin_file = workspace.path().join("empty-stdin.txt");
     fs::write(&stdin_file, "").unwrap();
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         // Restrict PATH to the fake bin so only `installed` providers count.
@@ -673,7 +672,7 @@ fn sequence_live_silent_does_not_suppress_agent_resolution_abort() {
     let stdin_file = workspace.path().join("empty-stdin.txt");
     fs::write(&stdin_file, "").unwrap();
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)

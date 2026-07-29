@@ -3,7 +3,6 @@
 //! Split out of the `wrap_commands.rs` god file; shared fixtures live in
 //! `common::wrap`.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use tempfile::tempdir;
 mod common;
@@ -45,7 +44,7 @@ printf '%s' 'Final assistant response' > "$LAST"
 "#,
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
@@ -103,7 +102,7 @@ exit 0
 "#,
     );
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
@@ -174,7 +173,7 @@ exit 1
 "#,
     );
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
@@ -199,7 +198,7 @@ fn wrapper_missing_binary_does_not_fabricate_agent_pid_in_jsonl() {
 
     // Do NOT create a codex binary — binary resolution will fail.
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
@@ -235,7 +234,7 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
 "#,
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
@@ -253,7 +252,7 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
     assert!(default_stderr.contains("5 cached tokens"));
     assert!(default_stderr.contains("no tool calls"));
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
@@ -272,7 +271,7 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
     assert!(quiet_stderr.contains("5 cached tokens"));
     assert!(quiet_stderr.contains("no tool calls"));
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
@@ -311,7 +310,7 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
 "#,
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
@@ -348,7 +347,7 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
 "#,
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
@@ -386,7 +385,7 @@ printf '%s\n' '{"type":"result","status":"success","cost_usd":0.02,"stats":{"tot
 "#,
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
@@ -427,7 +426,7 @@ printf '%s\n' '{"type":"result","subtype":"success","stop_reason":"end_turn","nu
 "#,
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
@@ -469,7 +468,7 @@ printf '%s\n' '{"type":"result","duration_ms":4600,"total_cost_usd":0.02,"usage"
 "#,
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
@@ -520,7 +519,7 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"output_token
 "#,
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
@@ -570,7 +569,7 @@ fi
 "#,
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)

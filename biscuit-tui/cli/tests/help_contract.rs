@@ -1,9 +1,9 @@
-use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 
 #[test]
 fn top_level_help_uses_canonical_public_names() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question")
+        .unwrap()
         .arg("--help")
         .assert()
         .success()
@@ -21,7 +21,8 @@ fn top_level_help_uses_canonical_public_names() {
 
 #[test]
 fn top_level_help_shows_height_as_global_option() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question")
+        .unwrap()
         .arg("--help")
         .assert()
         .success()
@@ -35,7 +36,8 @@ fn text_input_help_shows_height_as_inherited_global() {
     // marked differently or appear in a separate section. The important
     // thing is that --height is NOT in the text-input-specific Args
     // struct, which we've already verified in code.
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question")
+        .unwrap()
         .args(["text-input", "--help"])
         .assert()
         .success()
@@ -55,7 +57,8 @@ fn every_subcommand_accepts_height_before_subcommand_token() {
     ];
 
     for subcommand in subcommands {
-        cargo_bin_cmd!("question")
+        assert_cmd::Command::cargo_bin("question")
+            .unwrap()
             .args(["--height", "5", subcommand, "--help"])
             .assert()
             .success()

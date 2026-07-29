@@ -1,4 +1,3 @@
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use tempfile::tempdir;
 
@@ -29,7 +28,8 @@ exit 0
 "#,
     );
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine")
+        .unwrap()
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
         .env("OPENCODE_MODEL", "test-model")
@@ -102,7 +102,8 @@ exit 0
 "#,
     );
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine")
+        .unwrap()
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
         .env("GOOSE_MODEL", "test-model")

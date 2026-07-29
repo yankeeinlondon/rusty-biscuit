@@ -89,7 +89,7 @@ fn stage_workspace() -> (tempfile::TempDir, PathBuf, PathBuf) {
 /// Build a PTY-spawnable `claudine compose --goose <query>` command inside the
 /// staged workspace.
 fn compose_command(workspace: &Path, bin_dir: &Path, query: &str) -> Command {
-    let mut cmd = Command::new(cargo_bin!("claudine"));
+    let mut cmd = Command::new(cargo_bin("claudine"));
     cmd.args(["compose", "--goose", query]);
     cmd.env("HOME", workspace);
     cmd.env("PATH", augmented_path(bin_dir));

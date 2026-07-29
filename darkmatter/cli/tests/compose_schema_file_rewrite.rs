@@ -14,7 +14,6 @@
 //!
 //! See `darkmatter/features/2026-06-27-file-property-rewrite/spec.md`.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use darkmatter::markdown::Markdown;
 use std::fs;
 use std::io::Write;
@@ -22,7 +21,7 @@ use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
 fn md_cmd() -> assert_cmd::Command {
-    cargo_bin_cmd!("md")
+    assert_cmd::Command::cargo_bin("md").unwrap()
 }
 
 fn write_file(dir: &TempDir, name: &str, content: &str) -> PathBuf {

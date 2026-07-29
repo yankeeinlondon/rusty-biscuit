@@ -12,7 +12,6 @@
 //! `sequence_cli.rs`; reserved-key *writes* (the `set` side effect) live in
 //! `composition_outputs.rs`.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use std::path::Path;
 use tempfile::{TempDir, tempdir};
@@ -31,7 +30,7 @@ fn run_and_flatten(workspace: &TempDir, file: &Path, extra_args: &[&str]) -> Str
     let file_arg = file.to_str().unwrap();
     args.push(file_arg);
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .current_dir(workspace.path())

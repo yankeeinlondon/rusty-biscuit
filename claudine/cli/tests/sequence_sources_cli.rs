@@ -12,7 +12,6 @@
 //! home in `sequence_magic_reference.rs`; typed rejections live in
 //! `sequence_errors_cli.rs`.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use std::path::Path;
 use tempfile::{TempDir, tempdir};
@@ -46,7 +45,7 @@ fn dry_run(
     let file_arg = file.to_str().unwrap();
     args.push(file_arg);
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .current_dir(workspace.path())

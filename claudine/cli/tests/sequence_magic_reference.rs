@@ -5,7 +5,6 @@
 //! reference resolution, source-doc-relative resolution, and clear
 //! not-found errors.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use tempfile::tempdir;
 mod common;
@@ -43,7 +42,7 @@ exit 0
 "#,
     );
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -110,7 +109,7 @@ exit 0
 "#,
     );
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -206,7 +205,7 @@ exit 0
     );
 
     // Run FROM the unrelated repo, but target the doc inside repo_root.
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -233,7 +232,7 @@ fn sequence_external_file_not_found_fails_clearly() {
     let md_file = workspace.path().join("seq.md");
     fs::write(&md_file, "---\nsequence: does-not-exist.yaml\n---\nBody\n").unwrap();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args(["sequence", md_file.to_str().unwrap()])
         .assert()

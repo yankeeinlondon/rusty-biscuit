@@ -35,9 +35,7 @@ fn level2_git_status_headers_and_links_render_styled_in_tmux() {
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
 
-    let bin_path = cargo_bin!("render_git_status_fixture")
-        .display()
-        .to_string();
+    let bin_path = cargo_bin("render_git_status_fixture").display().to_string();
     harness
         .send_command_with_env(&bin_path, &[("FORCE_COLOR", "1")])
         .expect("send_command_with_env failed");

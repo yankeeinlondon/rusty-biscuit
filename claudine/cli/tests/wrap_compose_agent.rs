@@ -3,7 +3,6 @@
 //! Split out of the `wrap_commands.rs` god file; shared fixtures live in
 //! `common::wrap`.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::str::contains;
 use std::fs;
 use tempfile::tempdir;
@@ -59,7 +58,7 @@ exit 99
 "#,
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
         .env("HOME", workspace.path())
@@ -101,7 +100,7 @@ fn agent_hint_resolved_early_in_non_tty() {
     let stdin_file = workspace.path().join("empty-stdin.txt");
     fs::write(&stdin_file, "").unwrap();
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
@@ -136,7 +135,7 @@ fn unknown_agent_hint_is_non_fatal_and_aborts_in_non_tty() {
     let stdin_file = workspace.path().join("empty-stdin.txt");
     fs::write(&stdin_file, "").unwrap();
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
@@ -170,7 +169,7 @@ fn compose_dry_run_list_one_installed_renders_auto_select_header() {
     .unwrap();
     write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         // Restrict PATH to the fake bin so only `claude` is "installed".
@@ -214,7 +213,7 @@ fn compose_dry_run_single_entry_invalid_list_is_zero_installed() {
     fs::write(&md_file, "---\nname: zero\nagent: [not-real]\n---\nBODY\n").unwrap();
     write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
@@ -263,7 +262,7 @@ fn compose_silent_does_not_suppress_agent_resolution_report() {
     let stdin_file = workspace.path().join("empty-stdin.txt");
     fs::write(&stdin_file, "").unwrap();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
@@ -299,7 +298,7 @@ fn assert_direct_wrap_dry_run_delivers_prompt(provider_slug: &str) {
 
     // An empty PATH proves dry-run neither resolves nor spawns the provider.
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("OPENCODE_MODEL", "test-model")

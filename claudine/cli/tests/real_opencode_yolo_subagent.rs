@@ -42,7 +42,6 @@
 
 #![cfg(unix)]
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -182,7 +181,7 @@ fn real_opencode_yolo_subagent_external_dir_completes() {
     // - `--step-timeout 90s`: a silently-blocked child emits no bytes, so both
     //   clocks go stale and this terminates the run.
     // - `--timeout 4m`: hard wall-clock backstop for the whole session.
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&repo_root)
         .env("NO_COLOR", "1")
         .env("OPENCODE_MODEL", &model)

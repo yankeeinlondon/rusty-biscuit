@@ -18,7 +18,7 @@ pub mod pty;
 pub mod real_terminal;
 
 pub fn run_question_in_pty(args: &[&str], send_sequence: &str, expected_code: i32) -> Output {
-    let binary = assert_cmd::cargo::cargo_bin!("question");
+    let binary = assert_cmd::cargo::cargo_bin("question");
     let script = build_expect_script(
         binary
             .to_str()

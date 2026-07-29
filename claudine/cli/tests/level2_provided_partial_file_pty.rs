@@ -67,7 +67,7 @@ fn compose_command(
     partial: &str,
 ) -> Command {
     stage_default_config(workspace_dir);
-    let mut cmd = Command::new(cargo_bin!("claudine"));
+    let mut cmd = Command::new(cargo_bin("claudine"));
     cmd.args([
         "compose",
         "--goose",

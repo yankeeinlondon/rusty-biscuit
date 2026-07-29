@@ -1,11 +1,10 @@
 mod common;
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 
 #[test]
 fn text_input_help_lists_max_length_flag() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["text-input", "--help"])
         .assert()
         .success()
@@ -14,7 +13,7 @@ fn text_input_help_lists_max_length_flag() {
 
 #[test]
 fn text_input_rejects_unknown_flag() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["text-input", "--nonsense"])
         .assert()
         .failure()
@@ -23,7 +22,7 @@ fn text_input_rejects_unknown_flag() {
 
 #[test]
 fn text_input_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args([
             "text-input",
             "--initial",
@@ -41,7 +40,7 @@ fn text_input_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty()
 
 #[test]
 fn text_input_accepts_output_flag_at_global_position() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["--output", "json", "text-input", "--help"])
         .assert()
         .success()

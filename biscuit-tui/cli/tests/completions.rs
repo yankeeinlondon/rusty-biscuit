@@ -1,9 +1,9 @@
-use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 
 #[test]
 fn completions_bash_emits_non_empty_script() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question")
+        .unwrap()
         .args(["completions", "bash"])
         .assert()
         .success()
@@ -13,7 +13,8 @@ fn completions_bash_emits_non_empty_script() {
 
 #[test]
 fn completions_zsh_emits_non_empty_script() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question")
+        .unwrap()
         .args(["completions", "zsh"])
         .assert()
         .success()
@@ -23,7 +24,8 @@ fn completions_zsh_emits_non_empty_script() {
 
 #[test]
 fn completions_fish_emits_non_empty_script() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question")
+        .unwrap()
         .args(["completions", "fish"])
         .assert()
         .success()
@@ -35,7 +37,8 @@ fn completions_fish_emits_non_empty_script() {
 fn completions_script_mentions_choose_subcommands() {
     let shells = ["bash", "zsh", "fish"];
     for shell in shells {
-        cargo_bin_cmd!("question")
+        assert_cmd::Command::cargo_bin("question")
+            .unwrap()
             .args(["completions", shell])
             .assert()
             .success()
@@ -48,7 +51,8 @@ fn completions_script_mentions_choose_subcommands() {
 fn completions_script_mentions_sort_flags() {
     let shells = ["bash", "zsh", "fish"];
     for shell in shells {
-        cargo_bin_cmd!("question")
+        assert_cmd::Command::cargo_bin("question")
+            .unwrap()
             .args(["completions", shell])
             .assert()
             .success()
@@ -63,7 +67,8 @@ fn completions_script_mentions_sort_flags() {
 
 #[test]
 fn completions_zsh_contains_inverse_for_sort() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question")
+        .unwrap()
         .args(["completions", "zsh"])
         .assert()
         .success()
@@ -72,7 +77,8 @@ fn completions_zsh_contains_inverse_for_sort() {
 
 #[test]
 fn completions_bash_contains_inverse_for_sort() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question")
+        .unwrap()
         .args(["completions", "bash"])
         .assert()
         .success()
@@ -81,7 +87,8 @@ fn completions_bash_contains_inverse_for_sort() {
 
 #[test]
 fn completions_fish_contains_inverse_for_sort() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question")
+        .unwrap()
         .args(["completions", "fish"])
         .assert()
         .success()
@@ -93,7 +100,8 @@ fn completions_zsh_does_not_present_reverse_as_canonical() {
     // `reverse` is a hidden alias and must not appear in the
     // generated zsh completion script. clap omits aliases marked as
     // hidden via `#[clap(alias = "...")]`.
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question")
+        .unwrap()
         .args(["completions", "zsh"])
         .assert()
         .success()
@@ -102,7 +110,8 @@ fn completions_zsh_does_not_present_reverse_as_canonical() {
 
 #[test]
 fn completions_bash_does_not_present_reverse_as_canonical() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question")
+        .unwrap()
         .args(["completions", "bash"])
         .assert()
         .success()
@@ -111,7 +120,8 @@ fn completions_bash_does_not_present_reverse_as_canonical() {
 
 #[test]
 fn completions_fish_does_not_present_reverse_as_canonical() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question")
+        .unwrap()
         .args(["completions", "fish"])
         .assert()
         .success()
@@ -122,7 +132,8 @@ fn completions_fish_does_not_present_reverse_as_canonical() {
 fn completions_script_mentions_source_flags() {
     let shells = ["bash", "zsh", "fish"];
     for shell in shells {
-        cargo_bin_cmd!("question")
+        assert_cmd::Command::cargo_bin("question")
+            .unwrap()
             .args(["completions", shell])
             .assert()
             .success()
@@ -138,7 +149,8 @@ fn completions_script_mentions_source_flags() {
 fn completions_script_mentions_padding_flags() {
     let shells = ["bash", "zsh", "fish"];
     for shell in shells {
-        cargo_bin_cmd!("question")
+        assert_cmd::Command::cargo_bin("question")
+            .unwrap()
             .args(["completions", shell])
             .assert()
             .success()
@@ -154,7 +166,8 @@ fn completions_script_mentions_padding_flags() {
 fn completions_script_mentions_convention_flags() {
     let shells = ["bash", "zsh", "fish"];
     for shell in shells {
-        cargo_bin_cmd!("question")
+        assert_cmd::Command::cargo_bin("question")
+            .unwrap()
             .args(["completions", shell])
             .assert()
             .success()
@@ -167,7 +180,8 @@ fn completions_script_mentions_convention_flags() {
 fn completions_do_not_present_hidden_legacy_flags() {
     let shells = ["bash", "zsh", "fish", "powershell", "elvish"];
     for shell in shells {
-        cargo_bin_cmd!("question")
+        assert_cmd::Command::cargo_bin("question")
+            .unwrap()
             .args(["completions", shell])
             .assert()
             .success()
@@ -178,7 +192,8 @@ fn completions_do_not_present_hidden_legacy_flags() {
 
 #[test]
 fn completions_only_offer_hotkey_prefixes_after_bracket_prefix() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question")
+        .unwrap()
         .args(["completions", "zsh"])
         .assert()
         .success()
@@ -187,7 +202,8 @@ fn completions_only_offer_hotkey_prefixes_after_bracket_prefix() {
         .stdout(predicate::str::contains("[ALT+"))
         .stdout(predicate::str::contains("[OPT+"));
 
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question")
+        .unwrap()
         .args(["completions", "bash"])
         .assert()
         .success()
@@ -204,7 +220,8 @@ fn completions_only_offer_hotkey_prefixes_after_bracket_prefix() {
 fn completions_include_active_color_flag() {
     let shells = ["bash", "zsh", "fish"];
     for shell in shells {
-        cargo_bin_cmd!("question")
+        assert_cmd::Command::cargo_bin("question")
+            .unwrap()
             .args(["completions", shell])
             .assert()
             .success()
@@ -216,7 +233,8 @@ fn completions_include_active_color_flag() {
 fn completions_include_active_color_values() {
     let shells = ["bash", "zsh", "fish"];
     for shell in shells {
-        cargo_bin_cmd!("question")
+        assert_cmd::Command::cargo_bin("question")
+            .unwrap()
             .args(["completions", shell])
             .assert()
             .success()

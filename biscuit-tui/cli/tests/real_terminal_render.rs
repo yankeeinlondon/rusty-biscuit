@@ -67,7 +67,7 @@ use serial_test::serial;
 use test_toolkit::{Backend, Level, require_level};
 
 fn question_binary() -> String {
-    assert_cmd::cargo::cargo_bin!("question")
+    assert_cmd::cargo::cargo_bin("question")
         .to_str()
         .expect("question binary path is utf-8")
         .to_string()

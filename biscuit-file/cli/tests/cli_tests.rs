@@ -1,9 +1,8 @@
 use assert_cmd::Command;
-use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 
 fn bf() -> Command {
-    cargo_bin_cmd!("bf")
+    assert_cmd::Command::cargo_bin("bf").unwrap()
 }
 
 fn fixture(name: &str) -> String {

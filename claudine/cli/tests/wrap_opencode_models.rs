@@ -3,7 +3,6 @@
 //! Split out of the `wrap_commands.rs` god file; shared fixtures live in
 //! `common::wrap`.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use std::path::Path;
 use tempfile::tempdir;
@@ -41,7 +40,7 @@ fn compose_claude_dry_run_does_not_call_opencode_models() {
     write_failing_opencode_models(&path_dir);
     write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -73,7 +72,7 @@ fn inline_compose_claude_dry_run_does_not_call_opencode_models() {
     write_failing_opencode_models(&path_dir);
     write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -101,7 +100,7 @@ fn compose_codex_dry_run_does_not_call_opencode_models() {
     write_failing_opencode_models(&path_dir);
     write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 0\n");
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -128,7 +127,7 @@ fn inline_compose_codex_dry_run_does_not_call_opencode_models() {
     write_failing_opencode_models(&path_dir);
     write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 0\n");
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -158,7 +157,7 @@ fn compose_opencode_dry_run_calls_opencode_models_and_fails_with_test_double() {
     // When --opencode is selected, model validation *should* call `opencode
     // models`, so the failing test double causes a failure (or the catalog
     // refresh is skipped because the model comes from an env var).
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -193,7 +192,7 @@ fn sequence_opencode_dry_run_with_env_model_skips_opencode_models_call() {
 
     write_failing_opencode_models(&path_dir);
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -229,7 +228,7 @@ fn sequence_claude_dry_run_does_not_call_opencode_models() {
     write_failing_opencode_models(&path_dir);
     write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))

@@ -115,7 +115,7 @@ fn capture_context(args: &[&str], cols: u32, rows: u32) -> CapturedFrame {
     // ambient `NO_COLOR` out-votes — see `common::clear_no_color`.
     clear_no_color(&mut harness);
 
-    let claudine = cargo_bin!("claudine").display().to_string();
+    let claudine = cargo_bin("claudine").display().to_string();
     let cols_s = cols.to_string();
     // The environment is bound through `env` rather than the harness' inline
     // `KEY='v' cmd` prefix so the line can open with the `REPORT_SENTINEL`

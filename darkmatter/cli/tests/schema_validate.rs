@@ -1,13 +1,12 @@
 //! Integration tests for `md schema validate`.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use std::io::Write;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
 fn md_cmd() -> assert_cmd::Command {
-    cargo_bin_cmd!("md")
+    assert_cmd::Command::cargo_bin("md").unwrap()
 }
 
 fn write_file(dir: &TempDir, name: &str, content: &str) -> PathBuf {

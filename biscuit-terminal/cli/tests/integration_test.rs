@@ -1,12 +1,11 @@
 //! Integration tests for the `terminal` CLI binary.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use serde_json::json;
 
 #[test]
 fn test_default_shows_metadata() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .assert()
         .success()
         .stdout(predicate::str::contains("Terminal Metadata"));
@@ -14,7 +13,7 @@ fn test_default_shows_metadata() {
 
 #[test]
 fn test_json_flag_outputs_json() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("--json")
         .assert()
         .success()
@@ -24,7 +23,7 @@ fn test_json_flag_outputs_json() {
 
 #[test]
 fn test_help_flag() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("--help")
         .assert()
         .success()
@@ -33,7 +32,7 @@ fn test_help_flag() {
 
 #[test]
 fn test_columns_help() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("columns")
         .arg("--help")
         .assert()
@@ -73,7 +72,7 @@ fn test_every_subcommand_help_exposes_example_flag() {
     ];
 
     for subcommand in subcommands {
-        cargo_bin_cmd!("bt")
+        assert_cmd::Command::cargo_bin("bt").unwrap()
             .arg(subcommand)
             .arg("--help")
             .assert()
@@ -84,7 +83,7 @@ fn test_every_subcommand_help_exposes_example_flag() {
 
 #[test]
 fn test_version_flag() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("--version")
         .assert()
         .success()
@@ -93,7 +92,7 @@ fn test_version_flag() {
 
 #[test]
 fn test_respects_no_color() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .env("NO_COLOR", "1")
         .assert()
         .success()
@@ -114,7 +113,7 @@ fn test_respects_no_color() {
 /// fix `color_depth()` rather than the `quote` command.
 #[test]
 fn test_tree_rendered_quote_respects_no_color() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .env("NO_COLOR", "1")
         .env_remove("FORCE_COLOR")
         .env_remove("CLICOLOR_FORCE")
@@ -127,7 +126,7 @@ fn test_tree_rendered_quote_respects_no_color() {
 
 #[test]
 fn test_graph_expression_example_plain_overrides_force_color() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .env("FORCE_COLOR", "1")
         .env_remove("CLICOLOR_FORCE")
         .args(["--plain", "graph-expression", "--example"])
@@ -151,7 +150,7 @@ fn test_graph_expression_example_plain_overrides_force_color() {
 
 #[test]
 fn test_block_plain_overrides_force_color() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .env("FORCE_COLOR", "1")
         .env("CLICOLOR_FORCE", "1")
         .args(["--plain", "block", "hello", "--bold"])
@@ -176,7 +175,7 @@ fn test_block_plain_overrides_force_color() {
 
 #[test]
 fn test_shows_underline_support() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .assert()
         .success()
         .stdout(predicate::str::contains("Underline Support"))
@@ -186,7 +185,7 @@ fn test_shows_underline_support() {
 
 #[test]
 fn test_json_output_is_valid_json() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("--json")
         .output()
         .expect("Failed to execute command");
@@ -222,7 +221,7 @@ fn test_json_output_is_valid_json() {
 
 #[test]
 fn test_default_output_shows_size() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .assert()
         .success()
         .stdout(predicate::str::contains("Size:"));
@@ -230,7 +229,7 @@ fn test_default_output_shows_size() {
 
 #[test]
 fn test_default_output_shows_tty_status() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .assert()
         .success()
         .stdout(predicate::str::contains("Is TTY:"));
@@ -241,7 +240,7 @@ fn test_default_output_shows_tty_status() {
 /// the terminal and whether a config file exists.
 #[test]
 fn test_json_font_fields_are_valid_if_present() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("--json")
         .output()
         .expect("Failed to execute command");
@@ -277,7 +276,7 @@ fn test_json_font_fields_are_valid_if_present() {
 /// shown conditionally when font data was available. Now it's always shown.
 #[test]
 fn test_always_shows_font_section() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .output()
         .expect("Failed to execute command");
 
@@ -307,7 +306,7 @@ fn test_always_shows_font_section() {
 /// This ensures the heuristic-based ligature support detection is exported.
 #[test]
 fn test_json_includes_ligatures_likely() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("--json")
         .output()
         .expect("Failed to execute command");
@@ -331,7 +330,7 @@ fn test_json_includes_ligatures_likely() {
 
 #[test]
 fn test_json_includes_content_analysis() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("--json")
         .arg("red\nblue")
         .output()
@@ -357,7 +356,7 @@ fn test_json_includes_content_analysis() {
 #[test]
 fn test_content_analysis_detects_color_and_osc8() {
     let content = "\x1b[31mred\x1b[0m \x1b]8;;https://example.com\x07link\x1b]8;;\x07";
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("--json")
         .arg(content)
         .output()
@@ -382,7 +381,7 @@ fn test_content_analysis_detects_color_and_osc8() {
 
 #[test]
 fn test_completions_bash() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("--completions")
         .arg("bash")
         .assert()
@@ -393,7 +392,7 @@ fn test_completions_bash() {
 
 #[test]
 fn test_completions_zsh() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("--completions")
         .arg("zsh")
         .assert()
@@ -404,7 +403,7 @@ fn test_completions_zsh() {
 
 #[test]
 fn test_completions_fish() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("--completions")
         .arg("fish")
         .assert()
@@ -414,7 +413,7 @@ fn test_completions_fish() {
 
 #[test]
 fn test_completions_invalid_shell() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("--completions")
         .arg("invalid")
         .assert()
@@ -429,7 +428,7 @@ fn test_completions_invalid_shell() {
 
 #[test]
 fn test_pie_chart_help() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("pie-chart")
         .arg("--help")
         .assert()
@@ -442,7 +441,7 @@ fn test_pie_chart_help() {
 
 #[test]
 fn test_pie_chart_json_simple_format() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("pie-chart")
         .arg("--json")
         .arg("Dogs: 386")
@@ -464,7 +463,7 @@ fn test_pie_chart_json_simple_format() {
 
 #[test]
 fn test_pie_chart_json_semicolon_format() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("pie-chart")
         .arg("--json")
         .arg("Dogs: 386; Cats: 85; Birds: 15")
@@ -485,7 +484,7 @@ fn test_pie_chart_json_semicolon_format() {
 
 #[test]
 fn test_pie_chart_json_official_mermaid_format() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("pie-chart")
         .arg("--json")
         .arg("\"Dogs\" : 386")
@@ -506,7 +505,7 @@ fn test_pie_chart_json_official_mermaid_format() {
 
 #[test]
 fn test_pie_chart_json_with_title() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("pie-chart")
         .arg("--json")
         .arg("--title")
@@ -528,7 +527,7 @@ fn test_pie_chart_json_with_title() {
 
 #[test]
 fn test_pie_chart_json_with_show_data() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("pie-chart")
         .arg("--json")
         .arg("--show-data")
@@ -549,7 +548,7 @@ fn test_pie_chart_json_with_show_data() {
 
 #[test]
 fn test_pie_chart_requires_data() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("pie-chart")
         .assert()
         .failure()
@@ -558,7 +557,7 @@ fn test_pie_chart_requires_data() {
 
 #[test]
 fn test_pie_chart_json_with_custom_colors() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("pie-chart")
         .arg("--json")
         .arg("TypeScript: 45 #3178c6")
@@ -587,7 +586,7 @@ fn test_pie_chart_json_with_custom_colors() {
 
 #[test]
 fn test_pie_chart_json_with_color_prefix() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("pie-chart")
         .arg("--json")
         .arg("TypeScript: 45 color: #3178c6")
@@ -607,7 +606,7 @@ fn test_pie_chart_json_with_color_prefix() {
 
 #[test]
 fn test_pie_chart_semicolon_with_colors() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("pie-chart")
         .arg("--json")
         .arg("A: 10 #ff0000; B: 20 #00ff00; C: 30")
@@ -628,7 +627,7 @@ fn test_pie_chart_semicolon_with_colors() {
 
 #[test]
 fn test_pie_chart_example_flag_uses_example_data() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("pie-chart")
         .arg("--json")
         .arg("--example")
@@ -651,7 +650,7 @@ fn test_pie_chart_example_flag_uses_example_data() {
 
 #[test]
 fn test_flowchart_example_flag() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("flowchart")
         .arg("--json")
         .arg("--example")
@@ -673,10 +672,10 @@ fn test_flowchart_example_flag() {
 #[test]
 fn test_example_flag_does_not_require_data() {
     // Without --example, data is required
-    cargo_bin_cmd!("bt").arg("pie-chart").assert().failure();
+    assert_cmd::Command::cargo_bin("bt").unwrap().arg("pie-chart").assert().failure();
 
     // With --example, data is not required
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("pie-chart")
         .arg("--json")
         .arg("--example")
@@ -690,7 +689,7 @@ fn test_example_flag_does_not_require_data() {
 
 #[test]
 fn test_bar_chart_help() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("bar-chart")
         .arg("--help")
         .assert()
@@ -705,7 +704,7 @@ fn test_bar_chart_help() {
 
 #[test]
 fn test_bar_chart_json_with_space_separated_values() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("bar-chart")
         .arg("--json")
         .arg("1")
@@ -729,7 +728,7 @@ fn test_bar_chart_json_with_space_separated_values() {
 
 #[test]
 fn test_bar_chart_json_input_format() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("bar-chart")
         .arg("--json")
         .arg("[1, 8, 7, 5]")
@@ -748,7 +747,7 @@ fn test_bar_chart_json_input_format() {
 
 #[test]
 fn test_bar_chart_comma_separated_input() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("bar-chart")
         .arg("--json")
         .arg("1,8,7,5")
@@ -767,7 +766,7 @@ fn test_bar_chart_comma_separated_input() {
 
 #[test]
 fn test_bar_chart_with_title() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("bar-chart")
         .arg("--json")
         .arg("--title")
@@ -789,7 +788,7 @@ fn test_bar_chart_with_title() {
 
 #[test]
 fn test_bar_chart_with_x_axis_labels() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("bar-chart")
         .arg("--json")
         .arg("--x-axis")
@@ -810,7 +809,7 @@ fn test_bar_chart_with_x_axis_labels() {
 
 #[test]
 fn test_bar_chart_with_y_axis_label() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("bar-chart")
         .arg("--json")
         .arg("--y-axis")
@@ -831,7 +830,7 @@ fn test_bar_chart_with_y_axis_label() {
 
 #[test]
 fn test_bar_chart_horizontal_flag() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("bar-chart")
         .arg("--json")
         .arg("--horizontal")
@@ -851,7 +850,7 @@ fn test_bar_chart_horizontal_flag() {
 
 #[test]
 fn test_bar_chart_example_flag() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("bar-chart")
         .arg("--json")
         .arg("--example")
@@ -871,7 +870,7 @@ fn test_bar_chart_example_flag() {
 
 #[test]
 fn test_bar_chart_requires_data_without_example() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("bar-chart")
         .assert()
         .failure()
@@ -880,7 +879,7 @@ fn test_bar_chart_requires_data_without_example() {
 
 #[test]
 fn test_bar_chart_with_line_overlay() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("bar-chart")
         .arg("--json")
         .arg("--line")
@@ -905,7 +904,7 @@ fn test_bar_chart_with_line_overlay() {
 
 #[test]
 fn test_line_chart_help() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("line-chart")
         .arg("--help")
         .assert()
@@ -920,7 +919,7 @@ fn test_line_chart_help() {
 
 #[test]
 fn test_line_chart_json_with_values() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("line-chart")
         .arg("--json")
         .arg("10,20,15,25")
@@ -941,7 +940,7 @@ fn test_line_chart_json_with_values() {
 
 #[test]
 fn test_line_chart_with_title() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("line-chart")
         .arg("--json")
         .arg("--title")
@@ -961,7 +960,7 @@ fn test_line_chart_with_title() {
 
 #[test]
 fn test_line_chart_horizontal() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("line-chart")
         .arg("--json")
         .arg("--horizontal")
@@ -981,7 +980,7 @@ fn test_line_chart_horizontal() {
 
 #[test]
 fn test_line_chart_with_bar_overlay() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("line-chart")
         .arg("--json")
         .arg("--bar")
@@ -1002,7 +1001,7 @@ fn test_line_chart_with_bar_overlay() {
 
 #[test]
 fn test_line_chart_example_flag() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("line-chart")
         .arg("--json")
         .arg("--example")
@@ -1022,7 +1021,7 @@ fn test_line_chart_example_flag() {
 
 #[test]
 fn test_line_chart_requires_data_without_example() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("line-chart")
         .assert()
         .failure()
@@ -1035,7 +1034,7 @@ fn test_line_chart_requires_data_without_example() {
 
 #[test]
 fn test_timeline_help() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("timeline")
         .arg("--help")
         .assert()
@@ -1048,7 +1047,7 @@ fn test_timeline_help() {
 
 #[test]
 fn test_timeline_basic() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("timeline")
         .arg("--json")
         .arg("2020: Started")
@@ -1073,7 +1072,7 @@ fn test_timeline_basic() {
 
 #[test]
 fn test_timeline_with_title() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("timeline")
         .arg("--json")
         .arg("--title")
@@ -1095,7 +1094,7 @@ fn test_timeline_with_title() {
 
 #[test]
 fn test_timeline_example_flag() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("timeline")
         .arg("--json")
         .arg("--example")
@@ -1114,7 +1113,7 @@ fn test_timeline_example_flag() {
 
 #[test]
 fn test_timeline_requires_events_without_example() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("timeline")
         .assert()
         .failure()
@@ -1127,7 +1126,7 @@ fn test_timeline_requires_events_without_example() {
 
 #[test]
 fn test_state_diagram_help() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("state-diagram")
         .arg("--help")
         .assert()
@@ -1140,7 +1139,7 @@ fn test_state_diagram_help() {
 
 #[test]
 fn test_state_diagram_basic() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("state-diagram")
         .arg("--json")
         .arg("[*] --> Idle")
@@ -1164,7 +1163,7 @@ fn test_state_diagram_basic() {
 
 #[test]
 fn test_state_diagram_with_title() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("state-diagram")
         .arg("--json")
         .arg("--title")
@@ -1187,7 +1186,7 @@ fn test_state_diagram_with_title() {
 
 #[test]
 fn test_state_diagram_example_flag() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("state-diagram")
         .arg("--json")
         .arg("--example")
@@ -1206,7 +1205,7 @@ fn test_state_diagram_example_flag() {
 
 #[test]
 fn test_state_diagram_requires_transitions_without_example() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("state-diagram")
         .assert()
         .failure()
@@ -1219,7 +1218,7 @@ fn test_state_diagram_requires_transitions_without_example() {
 
 #[test]
 fn test_erd_help() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("erd")
         .arg("--help")
         .assert()
@@ -1232,7 +1231,7 @@ fn test_erd_help() {
 
 #[test]
 fn test_erd_basic() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("erd")
         .arg("--json")
         .arg("Customer ||--o{ Order : places")
@@ -1254,7 +1253,7 @@ fn test_erd_basic() {
 
 #[test]
 fn test_erd_with_title() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("erd")
         .arg("--json")
         .arg("--title")
@@ -1277,7 +1276,7 @@ fn test_erd_with_title() {
 
 #[test]
 fn test_erd_with_entity_definitions() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("erd")
         .arg("--json")
         .arg("--entity")
@@ -1301,7 +1300,7 @@ fn test_erd_with_entity_definitions() {
 
 #[test]
 fn test_erd_example_flag() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("erd")
         .arg("--json")
         .arg("--example")
@@ -1320,7 +1319,7 @@ fn test_erd_example_flag() {
 
 #[test]
 fn test_erd_requires_relationships_without_example() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("erd")
         .assert()
         .failure()
@@ -1329,7 +1328,7 @@ fn test_erd_requires_relationships_without_example() {
 
 #[test]
 fn test_graph_expression_json_example() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("graph-expression")
         .arg("--json")
         .arg("--example")
@@ -1357,7 +1356,7 @@ fn test_graph_expression_json_example() {
 
 #[test]
 fn test_graph_expression_json_dot_mode() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("graph-expression")
         .arg("--json")
         .arg("--syntax")
@@ -1384,7 +1383,7 @@ fn test_graph_expression_json_dot_mode() {
 
 #[test]
 fn test_graph_expression_json_reports_inverse_flag() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("graph-expression")
         .arg("--json")
         .arg("--inverse")
@@ -1404,7 +1403,7 @@ fn test_graph_expression_json_reports_inverse_flag() {
 
 #[test]
 fn test_graph_expression_falls_back_to_code_block_on_non_tty() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("graph-expression")
         .arg("a -> b -> c")
         .output()
@@ -1419,7 +1418,7 @@ fn test_graph_expression_falls_back_to_code_block_on_non_tty() {
 
 #[test]
 fn test_graph_expression_dot_fallback_uses_dot_info_string() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("graph-expression")
         .arg("--syntax")
         .arg("dot")
@@ -1440,7 +1439,7 @@ fn test_graph_expression_meta_outputs_render_metadata_in_a_pty() {
     use expectrl::{Expect, Session};
     use std::process::Command;
 
-    let bin_path = assert_cmd::cargo::cargo_bin!("bt");
+    let bin_path = assert_cmd::cargo::cargo_bin("bt");
     let mut cmd = Command::new(bin_path);
     cmd.arg("graph-expression")
         .arg("--meta")
@@ -1459,7 +1458,7 @@ fn test_graph_expression_meta_outputs_render_metadata_in_a_pty() {
 
 #[test]
 fn test_graph_expression_rejects_mixed_edge_kinds() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("graph-expression")
         .arg("a -> b; c -- d")
         .assert()
@@ -1471,7 +1470,7 @@ fn test_graph_expression_rejects_mixed_edge_kinds() {
 
 #[test]
 fn test_prose_snapshot() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("prose")
         .arg("Hello <bold>world</bold>!")
         .env("NO_COLOR", "1")
@@ -1484,7 +1483,7 @@ fn test_prose_snapshot() {
 
 #[test]
 fn test_columns_snapshot() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("columns")
         .arg("Left side")
         .arg("Right side")
@@ -1504,7 +1503,7 @@ fn test_columns_snapshot() {
 
 #[test]
 fn test_verbose_flag_shows_environment_section() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("-v")
         .assert()
         .success()
@@ -1515,7 +1514,7 @@ fn test_verbose_flag_shows_environment_section() {
 
 #[test]
 fn test_very_verbose_shows_raw_detection() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("-vv")
         .assert()
         .success()
@@ -1527,7 +1526,7 @@ fn test_very_verbose_shows_raw_detection() {
 
 #[test]
 fn test_default_no_environment_section() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .assert()
         .success()
         .stdout(predicate::str::contains("Environment").not())
@@ -1536,7 +1535,7 @@ fn test_default_no_environment_section() {
 
 #[test]
 fn test_quiet_suppresses_output() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("--quiet")
         .output()
         .expect("Failed to execute command");
@@ -1552,7 +1551,7 @@ fn test_quiet_suppresses_output() {
 
 #[test]
 fn test_silent_suppresses_all_output() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("--silent")
         .output()
         .expect("Failed to execute command");
@@ -1567,7 +1566,7 @@ fn test_silent_suppresses_all_output() {
 
 #[test]
 fn test_silent_suppresses_json_output() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("--silent")
         .arg("--json")
         .output()
@@ -1583,7 +1582,7 @@ fn test_silent_suppresses_json_output() {
 
 #[test]
 fn test_quiet_short_flag() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("-q")
         .output()
         .expect("Failed to execute command");
@@ -1602,7 +1601,7 @@ fn test_prose_empty_errors_to_stderr() {
     // check and exercise the runtime guard in `ProseArgs::run`. Without any
     // positional at all, clap rejects the invocation at parse time before the
     // guard can run.
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("prose")
         .arg("")
         .output()
@@ -1633,7 +1632,7 @@ fn test_prose_empty_errors_to_stderr() {
 /// terminal harness.
 #[test]
 fn test_prose_force_color_flag_emits_sgr_to_pipe() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("prose")
         .arg("--force-color")
         .arg("<red>x</red>")
@@ -1665,7 +1664,7 @@ fn test_prose_force_color_flag_emits_sgr_to_pipe() {
 /// capture filtering.
 #[test]
 fn test_prose_print_bytes_flag_dumps_hex_to_stderr() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("prose")
         .arg("--force-color")
         .arg("--print-bytes")
@@ -1695,7 +1694,7 @@ fn test_prose_print_bytes_flag_dumps_hex_to_stderr() {
 
 #[test]
 fn test_prose_markdown_margin_left_emits_style_frontmatter() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("prose")
         .arg("<b>bold</b>")
         .arg("--margin-left")
@@ -1718,7 +1717,7 @@ fn test_prose_markdown_margin_left_emits_style_frontmatter() {
 
 #[test]
 fn test_prose_markdown_without_layout_omits_frontmatter() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("prose")
         .arg("<b>bold</b>")
         .arg("--md")
@@ -1736,7 +1735,7 @@ fn test_prose_markdown_without_layout_omits_frontmatter() {
 
 #[test]
 fn test_prose_markdown_plus_preserves_color_as_inline_html() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("prose")
         .arg("<purple-800>dark purple</purple-800>")
         .arg("--md-plus")
@@ -1761,7 +1760,7 @@ fn test_prose_markdown_plus_preserves_color_as_inline_html() {
 
 #[test]
 fn test_prose_markdown_plus_margin_left_emits_style_frontmatter() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("prose")
         .arg("<blue>blue</blue>")
         .arg("--margin-left")
@@ -1788,7 +1787,7 @@ fn test_prose_markdown_plus_margin_left_emits_style_frontmatter() {
 
 #[test]
 fn test_prose_html_margin_left_emits_layout_wrapper() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("prose")
         .arg("<b>bold</b>")
         .arg("--margin-left")
@@ -1811,7 +1810,7 @@ fn test_prose_html_margin_left_emits_layout_wrapper() {
 
 #[test]
 fn test_prose_html_without_layout_omits_layout_wrapper() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("prose")
         .arg("<b>bold</b>")
         .arg("--html")
@@ -1832,7 +1831,7 @@ fn test_prose_html_without_layout_omits_layout_wrapper() {
 
 #[test]
 fn test_quote_empty_errors_to_stderr() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("quote")
         .output()
         .expect("Failed to execute command");
@@ -1857,7 +1856,7 @@ fn test_quote_empty_errors_to_stderr() {
 
 #[test]
 fn test_quote_md_emits_canonical_block_quote_syntax() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("quote")
         .arg("--md")
         .arg("To be or not to be")
@@ -1884,7 +1883,7 @@ fn test_quote_md_emits_canonical_block_quote_syntax() {
 
 #[test]
 fn test_quote_md_with_attribution_renders_separate_paragraph() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("quote")
         .arg("--md")
         .arg("--attribution")
@@ -1908,7 +1907,7 @@ fn test_quote_md_with_attribution_renders_separate_paragraph() {
 
 #[test]
 fn test_quote_html_emits_blockquote_fragment() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("quote")
         .arg("--html")
         .arg("To be or not to be")
@@ -1935,7 +1934,7 @@ fn test_quote_html_emits_blockquote_fragment() {
 
 #[test]
 fn test_quote_html_with_attribution_has_two_paragraphs() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("quote")
         .arg("--html")
         .arg("--attribution")
@@ -1958,7 +1957,7 @@ fn test_quote_html_with_attribution_has_two_paragraphs() {
 
 #[test]
 fn test_quote_md_and_html_are_mutually_exclusive() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("quote")
         .arg("--md")
         .arg("--html")
@@ -1976,7 +1975,7 @@ fn test_quote_md_and_html_are_mutually_exclusive() {
 
 #[test]
 fn test_quote_example_renders_default_quote() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("quote")
         .arg("--example")
         .env("NO_COLOR", "1")
@@ -2005,7 +2004,7 @@ fn test_quote_example_renders_default_quote() {
 
 #[test]
 fn test_quote_md_strips_inline_styling_tags() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("quote")
         .arg("--md")
         .arg("<b>bold</b> text")
@@ -2023,7 +2022,7 @@ fn test_quote_md_strips_inline_styling_tags() {
 
 #[test]
 fn test_list_empty_errors_to_stderr() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("list")
         .assert()
         .failure()
@@ -2033,7 +2032,7 @@ fn test_list_empty_errors_to_stderr() {
 
 #[test]
 fn test_padleft_missing_args_errors_to_stderr() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("padleft")
         .assert()
         .failure()
@@ -2043,7 +2042,7 @@ fn test_padleft_missing_args_errors_to_stderr() {
 
 #[test]
 fn test_padright_missing_args_errors_to_stderr() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("padright")
         .assert()
         .failure()
@@ -2053,7 +2052,7 @@ fn test_padright_missing_args_errors_to_stderr() {
 
 #[test]
 fn test_image_nonexistent_file_errors_to_stderr() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("image")
         .arg("/tmp/nonexistent_file_12345.png")
         .output()
@@ -2069,7 +2068,7 @@ fn test_image_nonexistent_file_errors_to_stderr() {
 
 #[test]
 fn test_bar_chart_invalid_data_errors_to_stderr() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("bar-chart")
         .arg("not_a_number")
         .output()
@@ -2086,7 +2085,7 @@ fn test_bar_chart_invalid_data_errors_to_stderr() {
 
 #[test]
 fn test_timeline_bad_format_errors_to_stderr() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("timeline")
         .arg("no colon here")
         .output()
@@ -2104,7 +2103,7 @@ fn test_timeline_bad_format_errors_to_stderr() {
 #[test]
 fn test_error_exit_code_is_nonzero() {
     // Verify the actual exit code is non-zero (not just failure)
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("prose")
         .output()
         .expect("Failed to execute command");
@@ -2119,7 +2118,7 @@ fn test_error_exit_code_is_nonzero() {
 
 #[test]
 fn test_prose_styled_snapshot() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("prose")
         .arg("<b>Error:</b> something went <red>wrong</red> in the <i>module</i>")
         .env("NO_COLOR", "1")
@@ -2135,7 +2134,7 @@ fn test_quote_snapshot() {
     // `bt quote` is rendered through the canonical render-tree path. In the
     // non-TTY snapshot environment the border stays visible but color SGR is
     // suppressed.
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("quote")
         .arg("To be or not to be, that is the question.")
         .arg("--attribution")
@@ -2150,7 +2149,7 @@ fn test_quote_snapshot() {
 
 #[test]
 fn test_list_snapshot() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("list")
         .arg("First item")
         .arg("Second item with <b>bold</b>")
@@ -2165,7 +2164,7 @@ fn test_list_snapshot() {
 
 #[test]
 fn test_padleft_snapshot() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("padleft")
         .arg("30")
         .arg("hello")
@@ -2179,7 +2178,7 @@ fn test_padleft_snapshot() {
 
 #[test]
 fn test_padright_snapshot() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("padright")
         .arg("30")
         .arg("hello")
@@ -2246,7 +2245,7 @@ fn test_actual_terminal_query_integration() {
     use std::process::Command;
 
     // We get the path to the 'bt' binary
-    let bin_path = assert_cmd::cargo::cargo_bin!("bt");
+    let bin_path = assert_cmd::cargo::cargo_bin("bt");
 
     // Spawn in a PTY so `is_tty()` is true, but force a non-probing path.
     // Pseudo-terminals used in tests do not implement real terminal query
@@ -2271,7 +2270,7 @@ fn test_actual_terminal_query_integration() {
 
 #[test]
 fn test_compose_no_args_errors_to_stderr() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("compose")
         .output()
         .expect("Failed to execute command");
@@ -2288,7 +2287,7 @@ fn test_compose_no_args_errors_to_stderr() {
 
 #[test]
 fn test_compose_positional_items_concatenate() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["compose", "--md", "foo", "bar"])
         .output()
         .expect("Failed to execute command");
@@ -2304,7 +2303,7 @@ fn test_compose_positional_items_concatenate() {
 
 #[test]
 fn test_compose_md_renders_heading() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["compose", "--md", "--heading", "1", "Hello"])
         .output()
         .expect("Failed to execute command");
@@ -2318,7 +2317,7 @@ fn test_compose_md_renders_heading() {
 
 #[test]
 fn test_compose_html_emits_div_wrapper() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["compose", "--html", "hello"])
         .output()
         .expect("Failed to execute command");
@@ -2330,7 +2329,7 @@ fn test_compose_html_emits_div_wrapper() {
 
 #[test]
 fn test_compose_md_and_html_are_mutually_exclusive() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["compose", "--md", "--html", "x"])
         .output()
         .expect("Failed to execute command");
@@ -2339,7 +2338,7 @@ fn test_compose_md_and_html_are_mutually_exclusive() {
 
 #[test]
 fn test_compose_example_emits_command_line() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["compose", "--example"])
         .output()
         .expect("Failed to execute command");
@@ -2360,7 +2359,7 @@ fn test_compose_example_emits_command_line() {
 
 #[test]
 fn test_compose_html_example_emits_html_and_command_line() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["compose", "--example", "--html"])
         .output()
         .expect("Failed to execute command");
@@ -2374,7 +2373,7 @@ fn test_compose_html_example_emits_html_and_command_line() {
 
 #[test]
 fn test_compose_help_exposes_md_md_plus_html_and_example_flags() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["compose", "--help"])
         .output()
         .expect("Failed to execute command");
@@ -2411,7 +2410,7 @@ fn strip_sgr(s: &str) -> String {
 fn test_compose_default_terminal_concatenates_positional_items() {
     // Default (no --md / --html / --md-plus) takes the terminal path —
     // assert that ANSI-stripped output contains the concatenated string.
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["compose", "foo", "bar"])
         .env("NO_COLOR", "1")
         .output()
@@ -2431,7 +2430,7 @@ fn test_compose_default_terminal_concatenates_positional_items() {
 
 #[test]
 fn test_compose_md_plus_with_text_succeeds() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["compose", "--md-plus", "--text", "x"])
         .output()
         .expect("Failed to execute command");
@@ -2452,7 +2451,7 @@ fn test_compose_prose_terminal_output_contains_bold_sgr() {
     // The terminal path lowers Prose `<b>` to the SGR bold open sequence
     // (`\x1b[1m`). Stripping SGR is irrelevant here — assert the raw byte
     // sequence is present so a regression in inline-style lowering shows up.
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["compose", "--prose", "<b>bold</b>"])
         .env_remove("NO_COLOR")
         .env("FORCE_COLOR", "1")
@@ -2472,7 +2471,7 @@ fn test_compose_prose_terminal_output_contains_bold_sgr() {
 
 #[test]
 fn test_compose_md_with_list_emits_dash_marker() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["compose", "--md", "--list", "one", "two"])
         .output()
         .expect("Failed to execute command");
@@ -2494,7 +2493,7 @@ fn test_compose_md_with_list_emits_dash_marker() {
 
 #[test]
 fn test_compose_md_with_table_emits_gfm_table() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["compose", "--md", "--table", "A,B", "x,y"])
         .output()
         .expect("Failed to execute command");
@@ -2531,7 +2530,7 @@ fn test_compose_md_with_table_emits_gfm_table() {
 
 #[test]
 fn test_compose_md_plus_md_mutual_exclusion() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["compose", "--md-plus", "--md", "x"])
         .output()
         .expect("Failed to execute command");
@@ -2540,7 +2539,7 @@ fn test_compose_md_plus_md_mutual_exclusion() {
 
 #[test]
 fn test_compose_md_plus_html_mutual_exclusion() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["compose", "--md-plus", "--html", "x"])
         .output()
         .expect("Failed to execute command");
@@ -2553,7 +2552,7 @@ fn test_compose_md_plus_html_mutual_exclusion() {
 
 #[test]
 fn test_list_ordered_renders_numbered_items() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["list", "--ordered", "First", "Second", "Third"])
         .assert()
         .success()
@@ -2564,7 +2563,7 @@ fn test_list_ordered_renders_numbered_items() {
 
 #[test]
 fn test_list_short_ordered_flag_works() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["list", "-o", "A", "B"])
         .assert()
         .success()
@@ -2574,7 +2573,7 @@ fn test_list_short_ordered_flag_works() {
 
 #[test]
 fn test_list_ordered_md_emits_commonmark() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["list", "--ordered", "--md", "First", "Second", "Third"])
         .output()
         .expect("Failed to execute command");
@@ -2590,11 +2589,11 @@ fn test_list_ordered_md_emits_commonmark() {
 
 #[test]
 fn test_list_ordered_md_plus_matches_md() {
-    let md = cargo_bin_cmd!("bt")
+    let md = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["list", "--ordered", "--md", "A", "B", "C"])
         .output()
         .expect("Failed to execute command");
-    let md_plus = cargo_bin_cmd!("bt")
+    let md_plus = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["list", "--ordered", "--md-plus", "A", "B", "C"])
         .output()
         .expect("Failed to execute command");
@@ -2608,7 +2607,7 @@ fn test_list_ordered_md_plus_matches_md() {
 
 #[test]
 fn test_list_ordered_html_emits_ol_li() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["list", "--ordered", "--html", "First", "Second"])
         .output()
         .expect("Failed to execute command");
@@ -2623,7 +2622,7 @@ fn test_list_ordered_html_emits_ol_li() {
 
 #[test]
 fn test_list_ordered_example_renders_and_prints_command() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["list", "--ordered", "--example"])
         .output()
         .expect("Failed to execute command");
@@ -2636,7 +2635,7 @@ fn test_list_ordered_example_renders_and_prints_command() {
 
 #[test]
 fn test_list_unordered_example_unchanged() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["list", "--example"])
         .output()
         .expect("Failed to execute command");
@@ -2655,7 +2654,7 @@ fn test_list_unordered_terminal_honors_custom_bullet() {
     // `test_list_unordered_md_ignores_custom_bullet` /
     // `test_list_unordered_html_ignores_custom_bullet`); this test pins the
     // terminal path.
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["list", "--bullet", "→ ", "x"])
         .output()
         .expect("Failed to execute command");
@@ -2671,7 +2670,7 @@ fn test_list_unordered_terminal_honors_custom_bullet() {
 
 #[test]
 fn test_list_md_html_mutual_exclusion() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["list", "--ordered", "--md", "--html", "x"])
         .output()
         .expect("Failed to execute command");
@@ -2680,7 +2679,7 @@ fn test_list_md_html_mutual_exclusion() {
 
 #[test]
 fn test_list_md_md_plus_mutual_exclusion() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["list", "--ordered", "--md", "--md-plus", "x"])
         .output()
         .expect("Failed to execute command");
@@ -2694,7 +2693,7 @@ fn test_list_unordered_md_emits_commonmark() {
     // tree, mirroring the ordered path. The CLI's custom terminal bullet
     // (`--bullet`, default `• `) is ignored — Markdown's portable contract
     // uses `- `.
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["list", "--md", "First", "Second", "Third"])
         .output()
         .expect("Failed to execute command");
@@ -2715,7 +2714,7 @@ fn test_list_unordered_md_emits_commonmark() {
 fn test_list_unordered_md_ignores_custom_bullet() {
     // `--bullet "→ "` only affects terminal output. The Markdown path emits
     // standard `- ` regardless.
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["list", "--md", "--bullet", "→ ", "Alpha", "Beta"])
         .output()
         .expect("Failed to execute command");
@@ -2731,11 +2730,11 @@ fn test_list_unordered_md_ignores_custom_bullet() {
 
 #[test]
 fn test_list_unordered_md_plus_matches_md() {
-    let md = cargo_bin_cmd!("bt")
+    let md = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["list", "--md", "A", "B", "C"])
         .output()
         .expect("Failed to execute command");
-    let md_plus = cargo_bin_cmd!("bt")
+    let md_plus = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["list", "--md-plus", "A", "B", "C"])
         .output()
         .expect("Failed to execute command");
@@ -2749,7 +2748,7 @@ fn test_list_unordered_md_plus_matches_md() {
 
 #[test]
 fn test_list_unordered_html_emits_ul_li() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["list", "--html", "First", "Second"])
         .output()
         .expect("Failed to execute command");
@@ -2768,7 +2767,7 @@ fn test_list_unordered_html_emits_ul_li() {
 fn test_list_unordered_html_ignores_custom_bullet() {
     // Browsers control list-marker presentation via CSS; the terminal bullet
     // is not rendered into the HTML fragment.
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["list", "--html", "--bullet", "→ ", "Alpha", "Beta"])
         .output()
         .expect("Failed to execute command");
@@ -2784,7 +2783,7 @@ fn test_list_unordered_html_ignores_custom_bullet() {
 
 #[test]
 fn test_list_unordered_md_with_left_margin_emits_frontmatter() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["list", "--md", "--margin-left", "4", "First", "Second"])
         .output()
         .expect("Failed to execute command");
@@ -2802,7 +2801,7 @@ fn test_list_unordered_html_with_layout_emits_margin_on_ul_only() {
     // Same contract as the ordered path: `--margin-left N` lowers to
     // `margin-left:Nch` on the `<ul>` itself; the CLI must not double-wrap
     // in `<div style="…">` for tree-expressible properties.
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["list", "--html", "--margin-left", "2", "X", "Y"])
         .output()
         .expect("Failed to execute command");
@@ -2830,7 +2829,7 @@ fn test_list_unordered_html_with_alignment_wraps_in_div() {
     // peer on the tree path's `<ul>` CSS (which only emits
     // `margin-left:auto`/`margin-right:auto` with `max_width`), so the CLI
     // wraps in `<div style="text-align: …">` to express it.
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["list", "--html", "--alignment", "center", "X", "Y"])
         .output()
         .expect("Failed to execute command");
@@ -2845,7 +2844,7 @@ fn test_list_unordered_html_with_alignment_wraps_in_div() {
 
 #[test]
 fn test_list_ordered_md_with_left_margin_emits_frontmatter() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args([
             "list",
             "--ordered",
@@ -2871,7 +2870,7 @@ fn test_list_ordered_html_with_layout_emits_margin_on_ol_only() {
     // Per OrderedList-spec: LayoutArgs that the tree path's CSS lowering can
     // express on the component's own root (margins) must NOT be additionally
     // wrapped in a `<div style="…">` — that would double-apply them.
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args([
             "list",
             "--ordered",
@@ -2907,7 +2906,7 @@ fn test_list_ordered_html_with_alignment_wraps_in_div() {
     // text-align from --alignment has no peer on the tree path's <ol> CSS
     // (which only emits margin-left:auto / margin-right:auto with max_width),
     // so the CLI must wrap in a <div style="text-align: …"> to express it.
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args([
             "list",
             "--ordered",
@@ -2934,7 +2933,7 @@ fn test_list_ordered_html_with_alignment_wraps_in_div() {
 
 #[test]
 fn test_progress_terminal_default() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .env("NO_COLOR", "1")
         .args(["progress", "60", "--label", "Loading"])
         .assert()
@@ -2947,7 +2946,7 @@ fn test_progress_terminal_default() {
 
 #[test]
 fn test_progress_example_succeeds() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .env("NO_COLOR", "1")
         .args(["progress", "--example"])
         .assert()
@@ -2961,7 +2960,7 @@ fn test_progress_example_succeeds() {
 
 #[test]
 fn test_progress_md_outputs_label_and_percentage() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["progress", "75", "--label", "Loading", "--md"])
         .output()
         .expect("Failed to execute command");
@@ -2981,7 +2980,7 @@ fn test_progress_md_outputs_label_and_percentage() {
 
 #[test]
 fn test_progress_md_unlabeled_outputs_just_percentage() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["progress", "50", "--md"])
         .output()
         .expect("Failed to execute command");
@@ -2996,7 +2995,7 @@ fn test_progress_md_unlabeled_outputs_just_percentage() {
 
 #[test]
 fn test_progress_md_plus_emits_semantic_html() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["progress", "40", "--label", "Sync", "--md-plus"])
         .output()
         .expect("Failed to execute command");
@@ -3016,7 +3015,7 @@ fn test_progress_md_plus_emits_semantic_html() {
 
 #[test]
 fn test_progress_html_emits_semantic_widget() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["progress", "25", "--label", "Loading", "--html"])
         .output()
         .expect("Failed to execute command");
@@ -3042,7 +3041,7 @@ fn test_progress_html_emits_semantic_widget() {
 
 #[test]
 fn test_progress_html_unlabeled_omits_label_span() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["progress", "50", "--html"])
         .output()
         .expect("Failed to execute command");
@@ -3060,7 +3059,7 @@ fn test_progress_html_unlabeled_omits_label_span() {
 
 #[test]
 fn test_progress_md_html_mutually_exclusive() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["progress", "50", "--md", "--html"])
         .assert()
         .failure()
@@ -3069,7 +3068,7 @@ fn test_progress_md_html_mutually_exclusive() {
 
 #[test]
 fn test_progress_md_md_plus_mutually_exclusive() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["progress", "50", "--md", "--md-plus"])
         .assert()
         .failure()
@@ -3078,7 +3077,7 @@ fn test_progress_md_md_plus_mutually_exclusive() {
 
 #[test]
 fn test_progress_html_md_plus_mutually_exclusive() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["progress", "50", "--html", "--md-plus"])
         .assert()
         .failure()
@@ -3087,7 +3086,7 @@ fn test_progress_html_md_plus_mutually_exclusive() {
 
 #[test]
 fn test_progress_rejects_percentage_above_100() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["progress", "150"])
         .assert()
         .failure()
@@ -3096,7 +3095,7 @@ fn test_progress_rejects_percentage_above_100() {
 
 #[test]
 fn test_progress_color_flags_parse_for_terminal() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .env("NO_COLOR", "1")
         .args([
             "progress",
@@ -3118,7 +3117,7 @@ fn test_progress_color_flags_parse_for_terminal() {
 
 #[test]
 fn test_progress_html_color_flags_inline_css() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args([
             "progress",
             "50",
@@ -3142,7 +3141,7 @@ fn test_progress_html_color_flags_inline_css() {
 
 #[test]
 fn test_progress_example_with_md_renders_markdown() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["progress", "--example", "--md"])
         .output()
         .expect("Failed to execute command");
@@ -3156,7 +3155,7 @@ fn test_progress_example_with_md_renders_markdown() {
 
 #[test]
 fn test_progress_example_with_html_renders_semantic_widget() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["progress", "--example", "--html"])
         .output()
         .expect("Failed to execute command");
@@ -3186,7 +3185,7 @@ fn test_progress_example_with_html_renders_semantic_widget() {
 
 #[test]
 fn test_progress_example_with_md_plus_renders_inline_html() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["progress", "--example", "--md-plus"])
         .output()
         .expect("Failed to execute command");
@@ -3220,7 +3219,7 @@ fn test_progress_example_with_md_plus_renders_inline_html() {
 
 #[test]
 fn test_section_requires_title_or_example() {
-    let assert = cargo_bin_cmd!("bt").arg("section").assert().failure();
+    let assert = assert_cmd::Command::cargo_bin("bt").unwrap().arg("section").assert().failure();
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
     assert!(
         stderr.contains("required") || stderr.contains("Title"),
@@ -3230,7 +3229,7 @@ fn test_section_requires_title_or_example() {
 
 #[test]
 fn test_section_terminal_default_emits_heading_prefix() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["section", "My Title"])
         .output()
         .expect("Failed to execute command");
@@ -3244,7 +3243,7 @@ fn test_section_terminal_default_emits_heading_prefix() {
 
 #[test]
 fn test_section_level_flag_changes_heading_prefix() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["section", "Heading", "--level", "4"])
         .output()
         .expect("Failed to execute command");
@@ -3258,7 +3257,7 @@ fn test_section_level_flag_changes_heading_prefix() {
 
 #[test]
 fn test_section_invalid_level_errors() {
-    let assert = cargo_bin_cmd!("bt")
+    let assert = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["section", "Title", "--level", "9"])
         .assert()
         .failure();
@@ -3271,7 +3270,7 @@ fn test_section_invalid_level_errors() {
 
 #[test]
 fn test_section_md_renders_heading_and_body() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args([
             "section",
             "Hello",
@@ -3292,11 +3291,11 @@ fn test_section_md_renders_heading_and_body() {
 
 #[test]
 fn test_section_md_plus_matches_md_for_pure_section() {
-    let md_output = cargo_bin_cmd!("bt")
+    let md_output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["section", "Title", "--md", "--content", "Body"])
         .output()
         .expect("md run");
-    let md_plus_output = cargo_bin_cmd!("bt")
+    let md_plus_output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["section", "Title", "--md-plus", "--content", "Body"])
         .output()
         .expect("md-plus run");
@@ -3312,7 +3311,7 @@ fn test_section_md_plus_matches_md_for_pure_section() {
 
 #[test]
 fn test_section_html_emits_section_element() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["section", "Title", "--html", "--level", "3"])
         .output()
         .expect("Failed to execute command");
@@ -3326,7 +3325,7 @@ fn test_section_html_emits_section_element() {
 
 #[test]
 fn test_section_md_html_mutual_exclusion() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["section", "Title", "--md", "--html"])
         .assert()
         .failure();
@@ -3334,7 +3333,7 @@ fn test_section_md_html_mutual_exclusion() {
 
 #[test]
 fn test_section_md_md_plus_mutual_exclusion() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["section", "Title", "--md", "--md-plus"])
         .assert()
         .failure();
@@ -3342,7 +3341,7 @@ fn test_section_md_md_plus_mutual_exclusion() {
 
 #[test]
 fn test_section_example_emits_command_line() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["section", "--example"])
         .output()
         .expect("Failed to execute command");
@@ -3364,7 +3363,7 @@ fn test_section_example_emits_command_line() {
 
 #[test]
 fn test_section_example_with_html_emits_section_element() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["section", "--example", "--html"])
         .output()
         .expect("Failed to execute command");
@@ -3386,7 +3385,7 @@ fn test_section_example_with_html_emits_section_element() {
 
 #[test]
 fn test_section_help_exposes_md_md_plus_html_and_example_flags() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["section", "--help"])
         .output()
         .expect("Failed to execute command");
@@ -3415,7 +3414,7 @@ fn test_section_help_exposes_md_md_plus_html_and_example_flags() {
 
 #[test]
 fn test_status_block_requires_severity_and_body() {
-    let assert = cargo_bin_cmd!("bt").arg("status-block").assert().failure();
+    let assert = assert_cmd::Command::cargo_bin("bt").unwrap().arg("status-block").assert().failure();
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
     assert!(
         stderr.contains("severity") || stderr.contains("required"),
@@ -3425,7 +3424,7 @@ fn test_status_block_requires_severity_and_body() {
 
 #[test]
 fn test_status_block_example_succeeds_and_prints_command() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["status-block", "--example"])
         .output()
         .expect("Failed to execute command");
@@ -3446,7 +3445,7 @@ fn test_status_block_example_succeeds_and_prints_command() {
 
 #[test]
 fn test_status_block_terminal_default_emits_thick_border() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["status-block", "--severity", "error", "Body text"])
         .output()
         .expect("Failed to execute command");
@@ -3467,7 +3466,7 @@ fn test_status_block_terminal_default_emits_thick_border() {
 
 #[test]
 fn test_status_block_md_emits_block_quote() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["status-block", "--md", "--severity", "error", "Body text"])
         .output()
         .expect("Failed to execute command");
@@ -3481,7 +3480,7 @@ fn test_status_block_md_emits_block_quote() {
 
 #[test]
 fn test_status_block_html_emits_div_with_classes() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args([
             "status-block",
             "--html",
@@ -3511,7 +3510,7 @@ fn test_status_block_html_emits_div_with_classes() {
 
 #[test]
 fn test_status_block_md_html_mutual_exclusion() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .args([
             "status-block",
             "--md",
@@ -3537,7 +3536,7 @@ fn test_status_block_every_non_deprecated_severity_runs() {
         "subagent",
     ];
     for severity in severities {
-        let output = cargo_bin_cmd!("bt")
+        let output = assert_cmd::Command::cargo_bin("bt").unwrap()
             .args(["status-block", "--severity", severity, "body"])
             .output()
             .expect("Failed to execute command");
@@ -3551,7 +3550,7 @@ fn test_status_block_every_non_deprecated_severity_runs() {
 
 #[test]
 fn test_status_block_help_exposes_target_and_layout_flags() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["status-block", "--help"])
         .output()
         .expect("Failed to execute command");
@@ -3588,7 +3587,7 @@ fn test_status_block_help_exposes_target_and_layout_flags() {
 fn test_status_block_border_color_applies_on_color_terminal() {
     // FORCE_COLOR makes the terminal report TrueColor so the override is
     // emitted as truecolor SGR. We check for the truecolor preamble.
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .env("FORCE_COLOR", "1")
         .args([
             "status-block",
@@ -3617,7 +3616,7 @@ fn test_status_block_border_color_applies_on_color_terminal() {
 
 #[test]
 fn test_table_requires_columns_without_example() {
-    let assert = cargo_bin_cmd!("bt").arg("table").assert().failure();
+    let assert = assert_cmd::Command::cargo_bin("bt").unwrap().arg("table").assert().failure();
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
     assert!(
         stderr.contains("required") || stderr.contains("columns"),
@@ -3627,7 +3626,7 @@ fn test_table_requires_columns_without_example() {
 
 #[test]
 fn test_table_terminal_default_emits_box_borders() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args([
             "table",
             "--columns",
@@ -3649,7 +3648,7 @@ fn test_table_terminal_default_emits_box_borders() {
 
 #[test]
 fn test_table_md_emits_gfm_pipe_table() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args([
             "table",
             "--md",
@@ -3678,7 +3677,7 @@ fn test_table_md_emits_gfm_pipe_table() {
 
 #[test]
 fn test_table_md_plus_matches_md_for_pure_gfm_table() {
-    let md_output = cargo_bin_cmd!("bt")
+    let md_output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args([
             "table",
             "--md",
@@ -3689,7 +3688,7 @@ fn test_table_md_plus_matches_md_for_pure_gfm_table() {
         ])
         .output()
         .expect("md run");
-    let md_plus_output = cargo_bin_cmd!("bt")
+    let md_plus_output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args([
             "table",
             "--md-plus",
@@ -3712,7 +3711,7 @@ fn test_table_md_plus_matches_md_for_pure_gfm_table() {
 
 #[test]
 fn test_table_html_emits_table_element() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args([
             "table",
             "--html",
@@ -3737,7 +3736,7 @@ fn test_table_html_emits_table_element() {
 
 #[test]
 fn test_table_title_renders_caption_on_every_target() {
-    let term_output = cargo_bin_cmd!("bt")
+    let term_output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args([
             "table",
             "--title",
@@ -3756,7 +3755,7 @@ fn test_table_title_renders_caption_on_every_target() {
         "terminal title present: {term_stdout}"
     );
 
-    let md_output = cargo_bin_cmd!("bt")
+    let md_output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args([
             "table",
             "--md",
@@ -3776,7 +3775,7 @@ fn test_table_title_renders_caption_on_every_target() {
         "Markdown title present: {md_stdout}"
     );
 
-    let html_output = cargo_bin_cmd!("bt")
+    let html_output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args([
             "table",
             "--html",
@@ -3806,7 +3805,7 @@ fn test_table_md_cell_pipe_is_escaped() {
     // The CLI splits rows on `,`, so a cell value containing a literal `|`
     // exercises the Markdown table-cell escape path through the canonical
     // tree renderer.
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args([
             "table",
             "--md",
@@ -3827,7 +3826,7 @@ fn test_table_md_cell_pipe_is_escaped() {
 
 #[test]
 fn test_table_md_html_mutual_exclusion() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["table", "--md", "--html", "--columns", "A", "--row", "x"])
         .assert()
         .failure();
@@ -3835,7 +3834,7 @@ fn test_table_md_html_mutual_exclusion() {
 
 #[test]
 fn test_table_md_md_plus_mutual_exclusion() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["table", "--md", "--md-plus", "--columns", "A", "--row", "x"])
         .assert()
         .failure();
@@ -3843,7 +3842,7 @@ fn test_table_md_md_plus_mutual_exclusion() {
 
 #[test]
 fn test_table_html_md_plus_mutual_exclusion() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .args([
             "table",
             "--html",
@@ -3859,7 +3858,7 @@ fn test_table_html_md_plus_mutual_exclusion() {
 
 #[test]
 fn test_table_help_exposes_cross_target_and_example_flags() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["table", "--help"])
         .output()
         .expect("Failed to execute command");
@@ -3880,7 +3879,7 @@ fn test_table_help_exposes_cross_target_and_example_flags() {
 
 #[test]
 fn test_table_example_emits_command_line() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["table", "--example"])
         .output()
         .expect("Failed to execute command");
@@ -3901,7 +3900,7 @@ fn test_table_example_emits_command_line() {
 fn test_table_typed_currency_column_formats_value() {
     // A `usd` entry in `--column-types` declares a currency column whose
     // `--mixed-row` cell is formatted; the literal header is untouched.
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args([
             "table",
             "--columns",
@@ -3923,7 +3922,7 @@ fn test_table_typed_currency_column_formats_value() {
 fn test_table_unknown_column_type_errors() {
     // `--column-types` is an explicit declaration, so an unrecognized token is a
     // user error rather than silently-ignored header text.
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args([
             "table",
             "--columns",
@@ -3950,7 +3949,7 @@ fn test_table_unknown_column_type_errors() {
 fn test_table_literal_colon_header_is_preserved() {
     // Header text is always literal now that types live in `--column-types`, so
     // a colon-bearing header is preserved verbatim, never split into a type.
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["table", "--columns", "Time: Value", "--row", "12:00"])
         .output()
         .expect("Failed to execute command");
@@ -3982,7 +3981,7 @@ fn test_table_header_ending_in_type_word_is_literal() {
         "Cost gbp",
         "Sum eur",
     ] {
-        let output = cargo_bin_cmd!("bt")
+        let output = assert_cmd::Command::cargo_bin("bt").unwrap()
             .args(["table", "--columns", header, "--row", "1"])
             .output()
             .expect("Failed to execute command");
@@ -4005,7 +4004,7 @@ fn test_table_header_ending_in_type_word_is_literal() {
 
 #[test]
 fn test_text_block_terminal_default_emits_text() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .env("NO_COLOR", "1")
         .args(["text-block", "Hello world"])
         .output()
@@ -4021,7 +4020,7 @@ fn test_text_block_terminal_default_emits_text() {
 #[test]
 fn test_text_block_bold_emits_bold_sgr() {
     // FORCE_COLOR=1 advertises TrueColor so the tree path emits ANSI SGR.
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .env("FORCE_COLOR", "1")
         .args(["text-block", "Hello", "--bold"])
         .output()
@@ -4036,7 +4035,7 @@ fn test_text_block_bold_emits_bold_sgr() {
 
 #[test]
 fn test_text_block_md_emits_plain_text() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["text-block", "Hello world", "--md", "--bold", "--italic"])
         .output()
         .expect("Failed to execute command");
@@ -4056,11 +4055,11 @@ fn test_text_block_md_emits_plain_text() {
 
 #[test]
 fn test_text_block_md_plus_matches_md_for_styled_text() {
-    let md_output = cargo_bin_cmd!("bt")
+    let md_output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["text-block", "Hello", "--md", "--bold"])
         .output()
         .expect("md run");
-    let md_plus_output = cargo_bin_cmd!("bt")
+    let md_plus_output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["text-block", "Hello", "--md-plus", "--bold"])
         .output()
         .expect("md-plus run");
@@ -4078,7 +4077,7 @@ fn test_text_block_md_plus_matches_md_for_styled_text() {
 
 #[test]
 fn test_text_block_html_emits_paragraph_with_style() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["text-block", "Hello", "--html", "--bold"])
         .output()
         .expect("Failed to execute command");
@@ -4096,7 +4095,7 @@ fn test_text_block_html_emits_paragraph_with_style() {
 
 #[test]
 fn test_text_block_md_html_mutually_exclusive() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["text-block", "Hello", "--md", "--html"])
         .assert()
         .failure()
@@ -4105,7 +4104,7 @@ fn test_text_block_md_html_mutually_exclusive() {
 
 #[test]
 fn test_text_block_md_plus_html_mutually_exclusive() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["text-block", "Hello", "--md-plus", "--html"])
         .assert()
         .failure()
@@ -4114,7 +4113,7 @@ fn test_text_block_md_plus_html_mutually_exclusive() {
 
 #[test]
 fn test_text_block_md_md_plus_mutually_exclusive() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["text-block", "Hello", "--md", "--md-plus"])
         .assert()
         .failure()
@@ -4125,7 +4124,7 @@ fn test_text_block_md_md_plus_mutually_exclusive() {
 fn test_text_block_underline_variants_are_mutually_exclusive() {
     // The five underline flags pairwise conflict — `--underline` (straight)
     // vs `--curly-underline` is a representative pair.
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["text-block", "Hello", "--underline", "--curly-underline"])
         .assert()
         .failure()
@@ -4134,7 +4133,7 @@ fn test_text_block_underline_variants_are_mutually_exclusive() {
 
 #[test]
 fn test_text_block_bold_and_dim_are_mutually_exclusive() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["text-block", "Hello", "--bold", "--dim"])
         .assert()
         .failure()
@@ -4143,7 +4142,7 @@ fn test_text_block_bold_and_dim_are_mutually_exclusive() {
 
 #[test]
 fn test_text_block_example_succeeds_and_prints_command() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["text-block", "--example"])
         .output()
         .expect("Failed to execute command");
@@ -4168,7 +4167,7 @@ fn test_text_block_example_succeeds_and_prints_command() {
 
 #[test]
 fn test_text_block_fg_emits_foreground_sgr_on_color_terminal() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .env("FORCE_COLOR", "1")
         .args(["text-block", "Hello", "--fg", "red"])
         .output()
@@ -4186,7 +4185,7 @@ fn test_text_block_fg_emits_foreground_sgr_on_color_terminal() {
 
 #[test]
 fn test_text_block_fg_lowers_to_css_in_html() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["text-block", "Hello", "--html", "--fg", "red"])
         .output()
         .expect("Failed to execute command");
@@ -4204,7 +4203,7 @@ fn test_text_block_example_dim_wins_over_implicit_bold() {
     // command. When the user passes `--dim`, that injection must be skipped
     // so the in-memory state is not contradictory (clap's `conflicts_with`
     // does not fire on the implicit injection).
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .env("FORCE_COLOR", "1")
         .args(["text-block", "--example", "--dim"])
         .output()
@@ -4240,7 +4239,7 @@ fn test_text_block_example_dim_wins_over_implicit_bold() {
 
 #[test]
 fn test_columns_html_emits_columns_flex_container() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["columns", "--html", "LeftBody", "RightBody"])
         .output()
         .expect("Failed to execute command");
@@ -4264,7 +4263,7 @@ fn test_columns_html_emits_columns_flex_container() {
 
 #[test]
 fn test_columns_md_collapses_to_sequential_blocks() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["columns", "--md", "LeftBody", "RightBody"])
         .output()
         .expect("Failed to execute command");
@@ -4289,7 +4288,7 @@ fn test_columns_md_collapses_to_sequential_blocks() {
 
 #[test]
 fn test_columns_md_plus_emits_flex_html_container() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["columns", "--md-plus", "LeftBody", "RightBody"])
         .output()
         .expect("Failed to execute command");
@@ -4309,7 +4308,7 @@ fn test_columns_md_plus_emits_flex_html_container() {
 
 #[test]
 fn test_columns_md_and_html_are_mutually_exclusive() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["columns", "--md", "--html", "L", "R"])
         .output()
         .expect("Failed to execute command");
@@ -4321,7 +4320,7 @@ fn test_columns_md_and_html_are_mutually_exclusive() {
 
 #[test]
 fn test_columns_md_plus_and_html_are_mutually_exclusive() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["columns", "--md-plus", "--html", "L", "R"])
         .output()
         .expect("Failed to execute command");
@@ -4333,7 +4332,7 @@ fn test_columns_md_plus_and_html_are_mutually_exclusive() {
 
 #[test]
 fn test_columns_md_and_md_plus_are_mutually_exclusive() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["columns", "--md", "--md-plus", "L", "R"])
         .output()
         .expect("Failed to execute command");
@@ -4345,7 +4344,7 @@ fn test_columns_md_and_md_plus_are_mutually_exclusive() {
 
 #[test]
 fn test_columns_example_with_md_succeeds() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["columns", "--example", "--md"])
         .output()
         .expect("Failed to execute command");
@@ -4368,7 +4367,7 @@ fn test_columns_example_with_md_succeeds() {
 
 #[test]
 fn test_columns_example_with_md_plus_succeeds() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["columns", "--example", "--md-plus"])
         .output()
         .expect("Failed to execute command");
@@ -4387,7 +4386,7 @@ fn test_columns_example_with_md_plus_succeeds() {
 
 #[test]
 fn test_columns_example_with_html_succeeds() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["columns", "--example", "--html"])
         .output()
         .expect("Failed to execute command");

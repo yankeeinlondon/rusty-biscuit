@@ -361,7 +361,7 @@ fn run_in_pane(
         clear_no_color(harness);
     }
 
-    let claudine = cargo_bin!("claudine").display().to_string();
+    let claudine = cargo_bin("claudine").display().to_string();
     let home = staged.workspace.path().to_string_lossy().into_owned();
     let path = augmented_path(&staged.bin_dir);
     let path = path.to_string_lossy().into_owned();
@@ -395,7 +395,7 @@ fn run_in_pane(
 /// the document link remains available even when the block exceeds the
 /// viewport.
 fn run_in_wezterm_pane(harness: &mut WezTermHarness, staged: &Staged) -> Capture {
-    let claudine = cargo_bin!("claudine").display().to_string();
+    let claudine = cargo_bin("claudine").display().to_string();
     let home = staged.workspace.path().to_string_lossy().into_owned();
     let path = augmented_path(&staged.bin_dir);
     let path = path.to_string_lossy().into_owned();

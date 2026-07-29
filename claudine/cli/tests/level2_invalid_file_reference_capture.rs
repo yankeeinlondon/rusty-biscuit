@@ -220,7 +220,7 @@ fn capture_command(harness: &mut TmuxHarness, staged: &Staged) -> CapturedFrame 
     // out-vote — see `common::clear_no_color`.
     clear_no_color(harness);
 
-    let claudine = cargo_bin!("claudine").display().to_string();
+    let claudine = cargo_bin("claudine").display().to_string();
     let home = staged.workspace.path().to_string_lossy().into_owned();
     let path = augmented_path(&staged.bin_dir);
     let path = path.to_string_lossy().into_owned();

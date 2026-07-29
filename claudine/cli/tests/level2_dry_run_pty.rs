@@ -164,7 +164,7 @@ fn stage_shell_approval_doc() -> StagedApproval {
 /// fixture, with the environment normalized so the approval prompt renders
 /// identically regardless of the developer's shell.
 fn compose_command(staged: &StagedApproval, dry_run: bool) -> Command {
-    let mut cmd = Command::new(cargo_bin!("claudine"));
+    let mut cmd = Command::new(cargo_bin("claudine"));
     cmd.arg("compose").arg("--goose");
     if dry_run {
         cmd.arg("--dry-run");

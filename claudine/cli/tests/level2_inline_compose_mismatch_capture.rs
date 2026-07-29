@@ -100,7 +100,7 @@ fn level2_tmux_mismatch_renders_styled_diagnostic_with_yaml() {
     clear_no_color(&mut harness);
     let staged = stage(MISMATCH_FIXTURE);
     let home = staged.workspace.path().to_string_lossy().into_owned();
-    let claudine = cargo_bin!("claudine").display().to_string();
+    let claudine = cargo_bin("claudine").display().to_string();
 
     harness.send_text(b"clear\n").expect("clear pane");
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
@@ -173,7 +173,7 @@ fn level2_wezterm_mismatch_renders_yaml_codeblock() {
     clear_no_color(&mut harness);
     let staged = stage(MINIMAL_FIXTURE);
     let home = staged.workspace.path().to_string_lossy().into_owned();
-    let claudine = cargo_bin!("claudine").display().to_string();
+    let claudine = cargo_bin("claudine").display().to_string();
 
     harness.send_text(b"clear\n").expect("clear pane");
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);

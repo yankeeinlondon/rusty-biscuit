@@ -3,7 +3,6 @@
 //! Phase 1 of the `2026-06-03-always-harness` feature. Pins current observable
 //! behavior so divergence introduced by later phases fails loudly.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use tempfile::tempdir;
 mod common;
@@ -48,7 +47,7 @@ fn compose_direct_produces_expected_stdout_body() {
     )
     .unwrap();
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -111,7 +110,7 @@ fn compose_dry_run_malformed_whole_value_spec_path_aborts_without_leaking() {
         ),
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -207,7 +206,7 @@ exit 0
     let doc = root.join("prompts/doc.md");
     write(&doc, "---\n---\n::file shared.md\n");
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", root)
         .env("PATH", augmented_path(&path_dir))
@@ -311,7 +310,7 @@ exit 0
     // Launch from the decoy repo while targeting the document in repo_root.
     // If repository discovery were still CWD-driven, the decoy's snippet.md
     // would win and the delivered prompt would contain the decoy marker.
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))

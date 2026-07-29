@@ -3,7 +3,6 @@
 //! Split out of the `wrap_commands.rs` god file; shared fixtures live in
 //! `common::wrap`.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use claudine::provider::Provider;
 use std::fs;
 use tempfile::tempdir;
@@ -36,7 +35,7 @@ fn compose_dry_run_non_tty_unapproved_shell_emits_gate_error() {
         "#!/bin/sh\necho 'provider should not run' >&2\nexit 99\n",
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -101,7 +100,7 @@ fn compose_dry_run_yolo_bypasses_shell_gate() {
         "#!/bin/sh\necho 'provider should not run' >&2\nexit 99\n",
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -161,7 +160,7 @@ fn compose_non_tty_uses_cwd_config_when_source_outside_git() {
     );
 
     // Run in non-TTY mode (null stdin) from a CWD that is NOT a git repo.
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", &home)
         .env("PATH", augmented_path(&path_dir))
@@ -220,7 +219,7 @@ fn compose_interactive_preflight_with_whitelisted_command() {
     // Include system dirs so shell expansion can find `echo`.
     let full_path = format!("{}:/usr/bin:/bin", path_dir.display());
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &full_path)
@@ -273,7 +272,7 @@ fn compose_preflight_discovers_shell_inside_false_block() {
 
     // No whitelist for curl and no --interactive approval handler, so the
     // discovered command fails preflight.
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
@@ -330,7 +329,7 @@ fn compose_dry_run_does_not_traverse_a_proxy_handoff() {
         "#!/bin/sh\necho 'provider should not run' >&2\nexit 99\n",
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -402,7 +401,7 @@ fn compose_dry_run_fires_no_lifecycle_side_effects() {
         "#!/bin/sh\necho 'provider should not run' >&2\nexit 99\n",
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))

@@ -1,12 +1,11 @@
 //! CLI coverage for repository-scoped trigger schemas.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
 fn md_cmd() -> assert_cmd::Command {
-    cargo_bin_cmd!("md")
+    assert_cmd::Command::cargo_bin("md").unwrap()
 }
 
 fn write(root: &Path, relative: &str, content: &str) -> PathBuf {

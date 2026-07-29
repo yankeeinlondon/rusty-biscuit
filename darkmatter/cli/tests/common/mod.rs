@@ -1,6 +1,5 @@
 #![allow(dead_code)]
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::io::Write;
 use std::net::TcpListener;
 use std::sync::{
@@ -10,7 +9,7 @@ use std::sync::{
 use std::thread;
 
 pub fn md_cmd() -> assert_cmd::Command {
-    cargo_bin_cmd!("md")
+    assert_cmd::Command::cargo_bin("md").unwrap()
 }
 
 pub fn md_file(content: &str) -> tempfile::NamedTempFile {

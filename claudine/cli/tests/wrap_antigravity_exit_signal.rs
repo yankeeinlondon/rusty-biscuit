@@ -17,7 +17,6 @@
 //! surviving signal carries `source == "exit"`, pinning it to the seam under
 //! test rather than to stream-side detection.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use tempfile::tempdir;
 mod common;
@@ -62,7 +61,7 @@ exit 1
     );
 
     // Antigravity's child exits nonzero, so the wrapper propagates a failure.
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)

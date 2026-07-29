@@ -4,7 +4,6 @@
 //! styled `BlockError` rendering, stderr routing, and the top-level error
 //! handler are all covered end-to-end.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use darkmatter::markdown::Markdown;
 use predicates::prelude::*;
 use std::fs;
@@ -13,7 +12,7 @@ use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
 fn md_cmd() -> assert_cmd::Command {
-    cargo_bin_cmd!("md")
+    assert_cmd::Command::cargo_bin("md").unwrap()
 }
 
 fn write_file(dir: &TempDir, name: &str, content: &str) -> PathBuf {

@@ -61,7 +61,7 @@ fn level2_dirty_tree_renders_in_tmux() {
     let mut harness = TmuxHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
 
-    let bin_path = cargo_bin!("render_dirty_tree").display().to_string();
+    let bin_path = cargo_bin("render_dirty_tree").display().to_string();
     harness
         .send_command_with_env(
             &bin_path,
@@ -115,7 +115,7 @@ fn level2_remove_dirty_worktree_shows_tree_and_prompt() {
     std::thread::sleep(std::time::Duration::from_millis(200));
 
     // Run wt remove on the dirty worktree (no force = prompts).
-    let wt_path = cargo_bin!("wt").display().to_string();
+    let wt_path = cargo_bin("wt").display().to_string();
     harness
         .send_command_with_env(&format!("{} remove feat-dirty", wt_path), &[])
         .expect("send_command_with_env failed");

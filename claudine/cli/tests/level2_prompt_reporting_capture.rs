@@ -199,7 +199,7 @@ fn send_compose<H: TerminalHarness>(
     cols: u32,
     extra_args: &[&str],
 ) -> CapturedFrame {
-    let claudine = cargo_bin!("claudine").display().to_string();
+    let claudine = cargo_bin("claudine").display().to_string();
     let path = augmented_path(&fx.bin_dir);
     let path = path.to_string_lossy().into_owned();
     let home = fx.workspace.path().to_string_lossy().into_owned();

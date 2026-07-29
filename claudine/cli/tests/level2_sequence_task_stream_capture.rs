@@ -423,7 +423,7 @@ fn run_in_pane_within(
 ) -> Capture {
     harness.resize(cols, rows).expect("resize pane");
 
-    let claudine = cargo_bin!("claudine").display().to_string();
+    let claudine = cargo_bin("claudine").display().to_string();
     let home = staged.workspace.path().to_string_lossy().into_owned();
     let path = augmented_path(&staged.bin_dir);
     let path = path.to_string_lossy().into_owned();

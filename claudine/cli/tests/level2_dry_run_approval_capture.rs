@@ -165,7 +165,7 @@ fn capture_prompt_in_mode(harness: &mut TmuxHarness, staged: &Staged, dry_run: b
     let home = staged.workspace.path().to_string_lossy().into_owned();
     let path = augmented_path(&staged.bin_dir);
     let path = path.to_string_lossy().into_owned();
-    let claudine = cargo_bin!("claudine").display().to_string();
+    let claudine = cargo_bin("claudine").display().to_string();
 
     harness.send_text(b"clear\n").expect("clear pane");
     let _ = biscuit_test_harness::wait_for_prompt(harness);

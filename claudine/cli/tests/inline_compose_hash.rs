@@ -4,7 +4,6 @@
 //! Darkmatter `Simple` hash and that `md hash --diff` exits 0 on the
 //! resulting file.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -15,7 +14,7 @@ use common::wrap::seed_minimal_config;
 
 /// Locate the `md` binary in the workspace target directory.
 ///
-/// `assert_cmd::cargo::cargo_bin_cmd!` works for binaries of the crate under
+/// `assert_cmd::cargo::cargo_bin` works for binaries of the crate under
 /// test; `md` lives in `darkmatter-cli`, so we resolve it relative to the
 /// shared workspace target directory via `CARGO_BIN_EXE_md` when available
 /// (cargo sets it when the binary is a dependency artifact) and fall back to
@@ -88,7 +87,7 @@ fn inline_compose_writes_hash_that_passes_md_diff() {
 
     write_goose_provider(&path_dir);
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         // `dirs::home_dir()` reads `HOME` on Unix and `USERPROFILE` on Windows;
         // set both so the wrapper's config home resolves to the temp workspace

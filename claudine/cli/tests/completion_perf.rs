@@ -43,7 +43,6 @@ use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use assert_cmd::cargo::cargo_bin_cmd;
 
 #[cfg(unix)]
 use expectrl::{Expect, Session};
@@ -165,7 +164,7 @@ fn seed_workspace(root: &Path) {
 
 fn run_complete_once(cwd: &Path, home: &Path, argv_tail: &[&str]) -> Duration {
     let current = argv_tail.len();
-    let reference = cargo_bin_cmd!("claudine");
+    let reference = assert_cmd::Command::cargo_bin("claudine").unwrap();
     let program = reference.get_program().to_os_string();
     let mut cmd = Command::new(program);
     cmd.current_dir(cwd)
@@ -346,7 +345,7 @@ fn run_enter_once(cwd: &Path, home: &Path, partial: &str) -> Duration {
     fs::create_dir_all(&config_dir).unwrap();
     fs::write(config_dir.join("config.json"), "{}").unwrap();
 
-    let program = cargo_bin_cmd!("claudine").get_program().to_os_string();
+    let program = assert_cmd::Command::cargo_bin("claudine").unwrap().get_program().to_os_string();
     let mut cmd = Command::new(program);
     cmd.current_dir(cwd)
         .env("HOME", home)

@@ -121,7 +121,7 @@ fn level2_list_verbose_renders_table_and_verbose_in_tmux() {
 
     // Use `env -u` to ensure no image-capable env vars leak from the parent
     // terminal, so the non-image verbose path is taken.
-    let bin = cargo_bin!("wt").display().to_string();
+    let bin = cargo_bin("wt").display().to_string();
     let cmd = format!("env -u TERM_PROGRAM -u KITTY_WINDOW_ID FORCE_COLOR=1 {bin} list -v\n");
     harness.send_text(cmd.as_bytes()).expect("send_text failed");
 
@@ -178,7 +178,7 @@ fn level2_list_verbose_renders_with_graph_path_active() {
     // tmux cannot display Kitty graphics, so Mermaid rendering falls back
     // silently — but the gather path still runs, and the table and verbose
     // section must remain visible.
-    let bin = cargo_bin!("wt").display().to_string();
+    let bin = cargo_bin("wt").display().to_string();
     harness
         .send_command_with_env(
             &format!("{bin} list -v"),
@@ -248,7 +248,7 @@ fn level2_graph_emits_image_protocol_bytes_in_kitty() {
         .expect("cd failed");
     harness.settle();
 
-    let bin = cargo_bin!("wt").display().to_string();
+    let bin = cargo_bin("wt").display().to_string();
     harness
         .send_text(format!("{bin} list\n").as_bytes())
         .expect("send_text failed");

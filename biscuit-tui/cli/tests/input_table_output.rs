@@ -1,11 +1,10 @@
 mod common;
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 
 #[test]
 fn input_table_help_lists_columns_and_rows_flags() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["input-table", "--help"])
         .assert()
         .success()
@@ -15,7 +14,7 @@ fn input_table_help_lists_columns_and_rows_flags() {
 
 #[test]
 fn input_table_rejects_unknown_flag() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["input-table", "--nonsense"])
         .assert()
         .failure()
@@ -24,7 +23,7 @@ fn input_table_rejects_unknown_flag() {
 
 #[test]
 fn input_table_fails_with_invalid_json_columns() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["input-table", "--columns", "[{"])
         .assert()
         .failure()
@@ -33,7 +32,7 @@ fn input_table_fails_with_invalid_json_columns() {
 
 #[test]
 fn input_table_fails_with_unknown_column_type() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["input-table", "--columns", r#"[{"type":"frobnicate"}]"#])
         .assert()
         .failure()
@@ -42,7 +41,7 @@ fn input_table_fails_with_unknown_column_type() {
 
 #[test]
 fn input_table_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args([
             "input-table",
             "--columns",
@@ -58,7 +57,7 @@ fn input_table_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty(
 
 #[test]
 fn input_table_accepts_output_flag_at_global_position() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["--output", "json", "input-table", "--help"])
         .assert()
         .success()

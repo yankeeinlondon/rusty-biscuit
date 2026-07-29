@@ -15,7 +15,6 @@
 
 #![cfg(unix)]
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use tempfile::tempdir;
 
@@ -53,7 +52,7 @@ fn compose_frontmatter_interactive_rejects_step_timeout() {
     )
     .unwrap();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&bin_dir))
@@ -100,7 +99,7 @@ fn compose_frontmatter_interactive_rejects_frontmatter_timeout() {
     )
     .unwrap();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&bin_dir))
@@ -138,7 +137,7 @@ fn compose_frontmatter_interactive_header_shows_interactive_badge() {
     let md_file = workspace.path().join("plan.md");
     fs::write(&md_file, "---\ninteractive: true\n---\nOpen a dialog.\n").unwrap();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&bin_dir))
@@ -171,7 +170,7 @@ fn compose_default_non_interactive_header_omits_interactive_badge() {
     let md_file = workspace.path().join("plan.md");
     fs::write(&md_file, "---\n---\nOpen a dialog.\n").unwrap();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&bin_dir))
@@ -207,7 +206,7 @@ fn compose_no_interactive_overrides_frontmatter_and_allows_timeout() {
     )
     .unwrap();
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&bin_dir))

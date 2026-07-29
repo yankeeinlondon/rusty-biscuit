@@ -11,7 +11,6 @@
 
 #![cfg(unix)]
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use std::path::Path;
 use tempfile::tempdir;
@@ -46,7 +45,7 @@ exit 0"#,
 }
 
 fn run(workspace: &Path, path_dir: &Path, args: &[&str]) -> (String, String, i32) {
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace)
         .env("PATH", augmented_path(path_dir))

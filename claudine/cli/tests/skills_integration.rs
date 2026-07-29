@@ -1,7 +1,6 @@
 use std::fs;
 use std::path::Path;
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::str::contains;
 mod common;
 use common::{TestWorkspace, write};
@@ -23,7 +22,7 @@ fn skills_subcommand_runs_without_panic() {
     fs::create_dir_all(&home_dir).unwrap();
     fs::create_dir_all(&cwd).unwrap();
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
         .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
@@ -40,7 +39,7 @@ fn skills_with_verbose_flag_runs_without_panic() {
     fs::create_dir_all(&home_dir).unwrap();
     fs::create_dir_all(&cwd).unwrap();
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
         .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
@@ -58,7 +57,7 @@ fn skills_with_global_verbose_flag_runs_without_panic() {
     fs::create_dir_all(&cwd).unwrap();
 
     // Global -v before the subcommand
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
         .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
@@ -77,7 +76,7 @@ fn skills_shows_no_skills_message_when_empty() {
     fs::create_dir_all(&home_dir).unwrap();
     fs::create_dir_all(&cwd).unwrap();
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
         .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
@@ -98,7 +97,7 @@ fn skills_lists_user_scoped_skill() {
     fs::create_dir_all(&cwd).unwrap();
     setup_skill(&skills_dir, "my-tool", "A useful tool");
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
         .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
@@ -117,7 +116,7 @@ fn skills_lists_repo_scoped_skill() {
     fs::create_dir_all(&home_dir).unwrap();
     setup_skill(&skills_dir, "repo-skill", "Repo-scoped skill");
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&repo_root)
         .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
@@ -140,7 +139,7 @@ fn skills_filters_by_name() {
     setup_skill(&skills_dir, "beta", "Beta skill");
     setup_skill(&skills_dir, "gamma", "Gamma skill");
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
         .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
@@ -159,7 +158,7 @@ fn skills_filter_no_match_shows_message() {
     fs::create_dir_all(&cwd).unwrap();
     setup_skill(&skills_dir, "alpha", "Alpha skill");
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
         .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
@@ -180,7 +179,7 @@ fn skills_verbose_shows_descriptions() {
     fs::create_dir_all(&cwd).unwrap();
     setup_skill(&skills_dir, "my-tool", "A useful testing tool");
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
         .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
@@ -201,7 +200,7 @@ fn skills_fix_flag_accepted() {
     fs::create_dir_all(&home_dir).unwrap();
     fs::create_dir_all(&cwd).unwrap();
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
         .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
@@ -218,7 +217,7 @@ fn skills_apply_flag_accepted() {
     fs::create_dir_all(&home_dir).unwrap();
     fs::create_dir_all(&cwd).unwrap();
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
         .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
@@ -236,7 +235,7 @@ fn skills_fix_shows_summary() {
     fs::create_dir_all(&cwd).unwrap();
     setup_skill(&skills_dir, "fixable", "A fixable skill");
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
         .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
@@ -255,7 +254,7 @@ fn skills_fix_does_not_show_fix_hint() {
     fs::create_dir_all(&cwd).unwrap();
     setup_skill(&skills_dir, "my-skill", "A skill");
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
         .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
@@ -288,7 +287,7 @@ fn skills_detail_view_shows_filesystem() {
     )
     .unwrap();
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
         .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
@@ -320,7 +319,7 @@ fn skills_filter_suppresses_unrelated_exceptions() {
         "---\ndescription: Broken tool\n---\nSee [missing](./gone.md) for more.\n",
     );
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
         .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
@@ -347,7 +346,7 @@ fn skills_footer_shows_filter_hint() {
     fs::create_dir_all(&cwd).unwrap();
     setup_skill(&skills_dir, "my-tool", "A tool");
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
         .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
@@ -371,7 +370,7 @@ fn skills_footer_hides_filter_hint_with_filter() {
     fs::create_dir_all(&cwd).unwrap();
     setup_skill(&skills_dir, "my-tool", "A tool");
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
         .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
@@ -396,7 +395,7 @@ fn skills_not_in_git_repo_shows_user_only_hint() {
     fs::create_dir_all(&cwd).unwrap();
     setup_skill(&skills_dir, "my-tool", "A tool");
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
         .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
@@ -424,7 +423,7 @@ fn skills_negation_with_dash_prefix_excludes_match() {
     setup_skill(&skills_dir, "beta", "Beta skill");
     setup_skill(&skills_dir, "gamma", "Gamma skill");
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
         .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
@@ -458,7 +457,7 @@ fn skills_negation_with_bang_prefix_excludes_match() {
     setup_skill(&skills_dir, "beta", "Beta skill");
     setup_skill(&skills_dir, "gamma", "Gamma skill");
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
         .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
@@ -493,7 +492,7 @@ fn skills_exact_filter_matches_only_full_name() {
     setup_skill(&skills_dir, "alpha", "Alpha skill");
     setup_skill(&skills_dir, "alpha-extended", "Alpha extended skill");
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
         .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
@@ -526,7 +525,7 @@ fn skills_combined_positive_and_negation() {
     setup_skill(&skills_dir, "gamma", "Gamma skill");
 
     // "a" matches alpha, beta, and gamma; "-alpha" excludes alpha
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
         .env("HOME", &home_dir)
         .env("NO_COLOR", "1")

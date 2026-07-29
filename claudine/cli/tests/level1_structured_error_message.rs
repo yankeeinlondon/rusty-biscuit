@@ -31,7 +31,7 @@
 //! terminal glyphs, SGR sequences, or scrollback. There is nothing to capture
 //! from a real terminal here — the proof is a deterministic on-disk record of
 //! what the lifecycle stacks observed. So this uses the lighter
-//! `cargo_bin_cmd!("claudine")` subprocess harness (from `loop_cli.rs`) rather
+//! `assert_cmd::Command::cargo_bin("claudine").unwrap()` subprocess harness (from `loop_cli.rs`) rather
 //! than the heavier `level2_*` tmux harness (which exists to assert real-
 //! terminal rendering). It runs under the standard integration-test recipe;
 //! it needs no tmux/WezTerm backend.
@@ -46,7 +46,6 @@
 
 #![cfg(unix)]
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use std::time::Duration;
 use tempfile::tempdir;
@@ -125,7 +124,7 @@ exit 1
         ),
     );
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))

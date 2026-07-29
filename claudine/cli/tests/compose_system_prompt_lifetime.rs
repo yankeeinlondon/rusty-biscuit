@@ -18,7 +18,6 @@
 
 #![cfg(unix)]
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use std::path::Path;
 use std::time::Duration;
@@ -109,7 +108,7 @@ fn direct_compose_keeps_its_file_backed_system_prompt_readable_at_spawn() {
         let sysprompt = workspace.path().join("sysprompt.md");
         fs::write(&sysprompt, format!("{SENTINEL}\n")).unwrap();
 
-        cargo_bin_cmd!("claudine")
+        assert_cmd::Command::cargo_bin("claudine").unwrap()
             .current_dir(workspace.path())
             .env("NO_COLOR", "1")
             .env("HOME", workspace.path())

@@ -3,7 +3,6 @@
 //! Phase 1 of the `2026-06-03-always-harness` feature. Pins current observable
 //! behavior so divergence introduced by later phases fails loudly.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use tempfile::tempdir;
 mod common;
@@ -51,7 +50,7 @@ fn inline_compose_writes_expected_final_body() {
     )
     .unwrap();
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -107,7 +106,7 @@ fn inline_compose_uses_source_doc_repository_not_launch_cwd() {
     fs::create_dir_all(&path_dir).unwrap();
     write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))

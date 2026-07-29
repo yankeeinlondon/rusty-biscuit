@@ -84,7 +84,7 @@ fn run_perf_compose<H: TerminalHarness>(harness: &mut H) -> PerfCapture {
     let doc = workspace.path().join("doc.md");
     fs::write(&doc, FIXTURE_DOC).unwrap();
 
-    let claudine = cargo_bin!("claudine").display().to_string();
+    let claudine = cargo_bin("claudine").display().to_string();
     let path = augmented_path(&bin_dir);
     let path = path.to_string_lossy().into_owned();
     let home = workspace.path().to_string_lossy().into_owned();

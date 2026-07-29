@@ -1,6 +1,5 @@
 //! Integration tests for the `wt list --perf` runtime performance report.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use std::fs;
 use std::path::Path;
@@ -35,7 +34,7 @@ fn run_git(repo: &Path, args: &[&str]) {
 fn list_perf_emits_report_on_stderr_and_empty_stdout() {
     let repo = temp_repo();
 
-    cargo_bin_cmd!("wt")
+    assert_cmd::Command::cargo_bin("wt").unwrap()
         .current_dir(repo.path())
         .args(["list", "--perf"])
         .assert()
@@ -51,7 +50,7 @@ fn list_perf_emits_report_on_stderr_and_empty_stdout() {
 fn list_without_perf_emits_no_report() {
     let repo = temp_repo();
 
-    cargo_bin_cmd!("wt")
+    assert_cmd::Command::cargo_bin("wt").unwrap()
         .current_dir(repo.path())
         .args(["list"])
         .assert()
@@ -83,7 +82,7 @@ fn temp_repo_with_feature_branch() -> tempfile::TempDir {
 fn list_perf_non_image_terminal_omits_graph_stages() {
     let repo = temp_repo();
 
-    cargo_bin_cmd!("wt")
+    assert_cmd::Command::cargo_bin("wt").unwrap()
         .current_dir(repo.path())
         .env_remove("TERM_PROGRAM")
         .env_remove("KITTY_WINDOW_ID")
@@ -111,7 +110,7 @@ fn list_perf_non_image_verbose_includes_verbose_gather() {
         ));
     run_git(repo_path, &["worktree", "add", feature_path.to_str().unwrap(), "feature-a"]);
 
-    cargo_bin_cmd!("wt")
+    assert_cmd::Command::cargo_bin("wt").unwrap()
         .current_dir(&feature_path)
         .env_remove("TERM_PROGRAM")
         .env_remove("KITTY_WINDOW_ID")
@@ -132,7 +131,7 @@ fn list_perf_non_image_verbose_includes_verbose_gather() {
 fn list_perf_error_path_emits_no_report() {
     let dir = tempfile::tempdir().expect("create temp dir");
 
-    cargo_bin_cmd!("wt")
+    assert_cmd::Command::cargo_bin("wt").unwrap()
         .current_dir(dir.path())
         .args(["list", "--perf"])
         .assert()
