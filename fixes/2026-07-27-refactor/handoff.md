@@ -106,6 +106,37 @@ Store exemptions as a `feature_gap` block per area in `areas.json` with the same
 `affected_scope.py`. That turns "these 53 messenger tests never run" into an
 owned, expiring record instead of an invisible property of a recipe string.
 
+## A PR can schedule no run at all — now guarded
+
+`pull_request` workflows execute against the merge commit `refs/pull/N/merge`.
+GitHub cannot create that ref while a PR conflicts with its base, so it creates
+**no workflow run at all — silently**. No check suite, no annotation, nothing in
+the Actions tab. The PR renders exactly like one whose CI has not started, and
+`ci-verdict` never reports, so nothing blocks and nothing explains why.
+
+This bit PR #19: a conflicted `baseline-failures.txt` suppressed the entire
+matrix, undetected until mergeability was inspected by hand. It is the same
+defect class as `soft_os` — a leg that does not run and produces no signal.
+
+`.github/workflows/pr-health.yml` closes it. The guard cannot live in a
+`pull_request` workflow, since that is precisely what does not fire; it uses
+`pull_request_target` (runs against the base branch, needs no merge commit) plus
+`push` as a backstop for a conflict introduced by a later push. It never checks
+out pull-request code, which a contract test enforces along with the trigger
+choice and the requirement that a conflict *fails* rather than warns.
+
+Two implementation notes worth keeping:
+
+- `mergeable` is computed asynchronously and reads null until GitHub's
+  background job finishes, so the check polls. A persistent null warns rather
+  than fails — gating merges on a background job would trade one silent failure
+  for another.
+- `gh api` switches to POST as soon as a `-f` flag is present. `gh api
+  repos/OWNER/REPO/pulls -f state=open` therefore calls *create-a-pull-request*,
+  403s, and — if stderr is discarded — puts its JSON error body on stdout where
+  an unvalidated capture treats it as a PR number. Put the query in the URL, and
+  validate what you capture.
+
 ## Pre-existing breakage found, not fixed
 
 1. **`scripts/drift.rs` does not compile** — 6 errors, `fallback_render` was
