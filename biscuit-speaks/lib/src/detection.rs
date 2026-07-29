@@ -374,12 +374,20 @@ mod tests {
 
         let stack = build_available_provider_stack(&installed);
 
-        // On macOS, Say should be in the stack; on other platforms it may not be in defaults
-        #[cfg(target_os = "macos")]
-        {
-            assert!(!stack.is_empty());
-            assert!(stack.contains(&TtsProvider::Host(HostTtsProvider::Say)));
-        }
+        // Stated as a biconditional against the OS default stack so it asserts
+        // something on every OS. The previous `#[cfg(target_os = "macos")]`
+        // form left the Linux and Windows builds with no assertion at all —
+        // `stack` went unused there, which `-D warnings` caught as a lint error
+        // rather than as the vacuous test it was. Say is installed here, so it
+        // belongs in the filtered stack exactly when this OS's defaults list
+        // it: macOS proves the filter keeps it, Linux and Windows prove the
+        // filter does not invent it.
+        let say = TtsProvider::Host(HostTtsProvider::Say);
+        assert_eq!(
+            stack.contains(&say),
+            get_os_default_stack().contains(&say),
+            "installed Say should survive the filter iff this OS's default stack lists it"
+        );
     }
 
     #[test]
