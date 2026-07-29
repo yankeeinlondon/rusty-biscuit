@@ -171,7 +171,7 @@ expression: stable
       {
         "binary": {
           "name": "cargo",
-          "path": "/Users/ken/.cargo/bin/cargo",
+          "path": "<normalized>",
           "satisfies_min_version": null,
           "source": "path",
           "version": null
