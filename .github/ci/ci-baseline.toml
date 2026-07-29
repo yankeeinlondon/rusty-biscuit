@@ -71,37 +71,7 @@ source_run = "30323254931"
 expiry = "2026-10-31"
 
 [[failure]]
-area = "biscuit-icon"
-environment = "windows-latest"
-tier = "L1"
-shard = "1/1"
-owner = "@yankeeinlondon"
-reason = "migrated from baseline-failures.txt, unverified"
-source_run = "30323254931"
-expiry = "2026-10-31"
-
-[[failure]]
 area = "biscuit-tui"
-environment = "windows-latest"
-tier = "L1"
-shard = "1/1"
-owner = "@yankeeinlondon"
-reason = "migrated from baseline-failures.txt, unverified"
-source_run = "30323254931"
-expiry = "2026-10-31"
-
-[[failure]]
-area = "model-citizen"
-environment = "windows-latest"
-tier = "L1"
-shard = "1/1"
-owner = "@yankeeinlondon"
-reason = "migrated from baseline-failures.txt, unverified"
-source_run = "30323254931"
-expiry = "2026-10-31"
-
-[[failure]]
-area = "playa"
 environment = "windows-latest"
 tier = "L1"
 shard = "1/1"
@@ -252,16 +222,6 @@ source_run = "30323254931"
 expiry = "2026-10-31"
 
 [[failure]]
-area = "schematic"
-environment = "ubuntu-latest"
-tier = "L1"
-shard = "1/1"
-owner = "@yankeeinlondon"
-reason = "migrated from baseline-failures.txt, unverified"
-source_run = "30323254931"
-expiry = "2026-10-31"
-
-[[failure]]
 area = "sniff"
 environment = "ubuntu-latest"
 tier = "L1"
@@ -270,20 +230,6 @@ owner = "@yankeeinlondon"
 reason = "migrated from baseline-failures.txt, unverified"
 source_run = "30323254931"
 expiry = "2026-10-31"
-
-[[failure]]
-area = "unchained-ai"
-environment = "ubuntu-latest"
-tier = "L1"
-shard = "1/1"
-owner = "@yankeeinlondon"
-reason = "migrated from baseline-failures.txt, unverified"
-source_run = "30323254931"
-expiry = "2026-10-31"
-
-# ---------------------------------------------------------------------------
-# macOS L1 failures
-# ---------------------------------------------------------------------------
 
 [[failure]]
 area = "sniff"
@@ -315,18 +261,6 @@ source_run = "30323254931"
 expiry = "2026-10-31"
 
 # KNOWN STALE — lint PASSES for this area in run 30323254931.
-[[failure]]
-area = "biscuit-terminal"
-environment = "ubuntu-latest"
-tier = "lint"
-shard = "1/1"
-owner = "@yankeeinlondon"
-reason = "migrated from baseline-failures.txt, unverified — measured PASSING in run 30323254931"
-source_run = "30323254931"
-expiry = "2026-10-31"
-
-# Measured as *cancelled*, not failed. A cancelled job emits no result, so the
-# verdict blocks on it rather than accepting it — deliberately.
 [[failure]]
 area = "claudine"
 environment = "ubuntu-latest"
