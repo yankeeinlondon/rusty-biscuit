@@ -16,7 +16,7 @@ use std::ops::Range;
 pub type SourceSpan = Range<usize>;
 
 /// Serde adapter that serializes a [`SourceSpan`] as a `{"start", "end"}`
-/// object. Use with `#[serde(with = "crate::span::span_serde")]` on
+/// object. Use with `#[serde(with = "biscuit_file::span_serde")]` on
 /// `SourceSpan` fields; [`Range`] itself has no serde implementation.
 ///
 /// Deserialization rejects inverted ranges (`start > end`).
