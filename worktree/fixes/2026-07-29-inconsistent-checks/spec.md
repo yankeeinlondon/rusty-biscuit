@@ -134,6 +134,26 @@ The outcome MUST be independent of:
 The command MUST continue to avoid network access. It uses the local default
 branch and MUST NOT fetch, pull, or refresh remote-tracking refs.
 
+### `D` failing to resolve is the CI default, not an edge case
+
+The unresolvable-default row above will fire routinely, so treat it as a first-
+class path rather than a defensive branch. `actions/checkout@v4` runs at default
+depth, producing a single-branch shallow checkout with no `origin/HEAD`, no
+`main`, and no `master` — so `default_branch()` returns `Err` there. That was
+diagnosed while fixing `default_branch_detection`, which failed on macOS, Linux,
+and Windows simultaneously for exactly this reason (a test asserting against the
+ambient checkout rather than a repository it owned).
+
+Two consequences:
+
+- The warning for an unresolvable default branch must be actionable on a CI
+  runner, where the cause is checkout depth rather than anything about the
+  target branch.
+- No test may depend on ambient default-branch resolution succeeding. A test
+  that passes locally because the developer's checkout has `origin/HEAD` and
+  fails on a runner because it does not is the failure mode this fix exists to
+  remove, reproduced one level down.
+
 ## Proposed Implementation
 
 Change the branch-deletion library boundary so its merge authority is explicit,
@@ -240,6 +260,27 @@ the warning names the local default branch as the failed merge authority.
 Tests MUST disable repository background maintenance consistently with existing
 temporary-repository fixtures. They must use ordinary cross-platform Git and
 filesystem operations and avoid Unix-only shell scripts or path assumptions.
+
+### Fixtures MUST name their default branch explicitly
+
+`worktree/cli/tests/remove.rs:11` currently does `run_git(path, &["init"])` with
+no `-b`, so every fixture in that file takes its default branch from the caller's
+ambient `init.defaultBranch` — `main` on a developer machine that sets it,
+`master` on a clean runner that does not.
+
+That is load-bearing for this fix specifically. The whole premise is that
+deletion is evaluated against *the resolved local default branch*, so a fixture
+whose default branch name varies by host makes these tests environment-dependent
+in precisely the way the fix is meant to eliminate. A green local run would prove
+nothing about CI.
+
+Every fixture touched by this work — new and existing — MUST create its default
+branch explicitly (`git init -b main`, or an equivalent explicit rename), so the
+branch the assertions reason about is the branch the test created. The nine other
+`git init` sites under `worktree/**` already pass `-b main`; `remove.rs` and
+`level2_dirty_tree.rs` are the outliers. Neither currently asserts on the branch
+name, which is why the inconsistency has been inert — this fix makes it
+load-bearing.
 
 ## Impact and Verification Scope
 
