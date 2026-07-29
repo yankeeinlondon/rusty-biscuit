@@ -466,12 +466,21 @@ fn default_true() -> bool {
     true
 }
 
-/// Mirrors `scripts/ci/affected_scope.py`'s `AREA_DEFAULTS`.
+/// Second copy of `scripts/ci/affected_scope.py`'s `AREA_DEFAULTS["environments"]`.
+///
+/// Most areas omit `environments` entirely, so this list — not `areas.json` —
+/// decides which cells exist for them. When it fell behind the Python side's
+/// addition of `wsl2-ubuntu`, six areas' WSL2 legs ran, passed, and uploaded
+/// JUnit that the rollup then filed as `NOT SCHEDULED`.
+/// `default_environments_match_affected_scope_py` reads the Python literal and
+/// fails on any divergence; keep it, because a comment saying "mirrors" is what
+/// was here when the two lists drifted apart.
 fn default_environments() -> Vec<String> {
     vec![
         "ubuntu-latest".to_owned(),
         "windows-latest".to_owned(),
         "macos-latest".to_owned(),
+        "wsl2-ubuntu".to_owned(),
     ]
 }
 
@@ -1217,14 +1226,16 @@ fn classify_one(
         })
         .cloned();
 
-    let state = if !scheduled {
-        // Reached only for evidence policy did not schedule; the caller pushes
-        // the explanatory reason.
-        if counts.bad() > 0 {
-            CellState::Fail
-        } else {
-            CellState::NotScheduled
-        }
+    let state = if !scheduled && indices.is_empty() {
+        // Policy did not schedule it and nothing was uploaded for it, so the
+        // cell genuinely does not exist. Evidence deliberately does NOT reach
+        // here: a leg that ran and uploaded a report is scheduled in every
+        // sense that matters, whatever `areas.json` says, so it is classified
+        // by the ordinary rules below and `verdict` blocks on the disagreement.
+        // Deciding this on `counts.bad()` instead filed passing legs as
+        // `NOT SCHEDULED` while failing ones rendered `FAIL`, which is how six
+        // green WSL2 legs disappeared from run 30427703024.
+        CellState::NotScheduled
     } else if counts.bad() == 0 && declared_gap.is_some() {
         // A *declared* gap explains the absence of evidence, so MISSING would
         // be the wrong answer: nobody failed to upload anything. It still
@@ -1641,6 +1652,28 @@ fn verdict(rollup: &Rollup, baseline: &Baseline, today: Option<&str>) -> Vec<Fin
             format!(
                 "outside this run's affected scope; ignored, not treated as a pass: {}",
                 out_of_scope.iter().cloned().collect::<Vec<_>>().join(", ")
+            ),
+        ));
+    }
+
+    // A cell that produced evidence policy never scheduled means `areas.json`
+    // (or the rollup's copy of its defaults) disagrees with what CI actually
+    // ran. Blocking is what makes that self-correcting: the cell's own state is
+    // now honest about the tests, so if this did not block, a green leg the
+    // policy layer cannot see would report as an ordinary PASS and the
+    // divergence would stay invisible — which is exactly how it survived a
+    // whole run before.
+    for cell in &rollup.cells {
+        if cell.scheduled || cell.records.is_empty() {
+            continue;
+        }
+        findings.push(Finding::block(
+            "cell-unscheduled-evidence",
+            cell.key.to_string(),
+            format!(
+                "rendered {} from a leg that ran, but policy scheduled no such cell; \
+                 areas.json or the affected scope is wrong",
+                cell.state
             ),
         ));
     }

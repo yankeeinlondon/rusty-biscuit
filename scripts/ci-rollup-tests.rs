@@ -1851,3 +1851,181 @@ fn a_malformed_provisioned_backends_flag_is_rejected() {
 fn a_positional_argument_is_rejected() {
     assert!(Args::parse(["oops".to_owned()].into_iter()).is_err());
 }
+
+// ---------------------------------------------------------------------------
+// `wsl2-ubuntu` and the areas.json default-environment contract
+// ---------------------------------------------------------------------------
+
+/// An area record that omits `environments`, exactly as serde builds it.
+fn defaulted_area(area: &str) -> AreaPolicy {
+    AreaPolicy {
+        area: area.to_owned(),
+        ci: true,
+        environments: default_environments(),
+        shards: default_shards(),
+        l2: false,
+        browser: false,
+        backends: Vec::new(),
+        policy_gaps: Vec::new(),
+    }
+}
+
+fn scope_of(areas: &[&str]) -> BTreeSet<String> {
+    areas.iter().map(|a| (*a).to_owned()).collect()
+}
+
+/// `AREA_DEFAULTS["environments"]` as written in `affected_scope.py`.
+///
+/// Panics rather than returning an `Option` on a shape it cannot read: a
+/// silently-skipped drift guard is the failure mode this whole test exists to
+/// prevent.
+fn python_default_environments() -> Vec<String> {
+    let source = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/ci/affected_scope.py"
+    ))
+    .expect("scripts/ci/affected_scope.py must be readable");
+
+    let defaults = source
+        .split_once("AREA_DEFAULTS")
+        .expect("affected_scope.py must define AREA_DEFAULTS")
+        .1;
+    let line = defaults
+        .lines()
+        .find(|line| line.trim_start().starts_with("\"environments\":"))
+        .expect("AREA_DEFAULTS must set \"environments\"");
+    let list = line
+        .split_once('[')
+        .and_then(|(_, rest)| rest.split_once(']'))
+        .expect("\"environments\" must be a single-line list literal")
+        .0;
+
+    let parsed: Vec<String> = list
+        .split(',')
+        .map(|item| item.trim().trim_matches('"').to_owned())
+        .filter(|item| !item.is_empty())
+        .collect();
+    assert!(
+        !parsed.is_empty(),
+        "parsed an empty environment list out of `{line}`, so this guard would pass vacuously"
+    );
+    parsed
+}
+
+/// Most areas omit `environments`, so this Rust list — not `areas.json` —
+/// decides which cells exist for them. It silently fell behind the Python side
+/// once already; that cost a full run of WSL2 evidence.
+#[test]
+fn default_environments_match_affected_scope_py() {
+    assert_eq!(
+        default_environments(),
+        python_default_environments(),
+        "ci-rollup's default environments have drifted from AREA_DEFAULTS in \
+         scripts/ci/affected_scope.py; an area omitting `environments` will be \
+         judged against a different cell set than CI actually scheduled"
+    );
+}
+
+/// The reported bug: five WSL2 legs ran green and were filed `NOT SCHEDULED`.
+#[test]
+fn a_passing_wsl2_leg_renders_pass_not_not_scheduled() {
+    let areas = vec![defaulted_area("biscuit-hash")];
+    let expected = expected_cells(&areas, &scope_of(&["biscuit-hash"]), &[]);
+
+    assert!(
+        expected
+            .iter()
+            .any(|cell| cell.key.environment == "wsl2-ubuntu"),
+        "an area that omits `environments` must still schedule a wsl2-ubuntu cell"
+    );
+
+    let cells = classify_simple(
+        &expected,
+        &[passing_record("biscuit-hash", "wsl2-ubuntu", Tier::L1)],
+    );
+    let cell = cells
+        .iter()
+        .find(|cell| cell.key.environment == "wsl2-ubuntu")
+        .expect("the wsl2-ubuntu cell must exist");
+
+    assert_eq!(cell.state, CellState::Pass);
+    assert!(cell.scheduled);
+    assert_eq!(cell.counts.passed, 3);
+}
+
+/// The dangerous inverse. A leg policy scheduled that uploads nothing must not
+/// quietly become a non-blocking `NOT SCHEDULED`.
+#[test]
+fn a_scheduled_wsl2_leg_with_no_report_is_missing_and_blocks() {
+    let areas = vec![defaulted_area("biscuit-hash")];
+    let expected = expected_cells(&areas, &scope_of(&["biscuit-hash"]), &[]);
+
+    // Every native leg reported; only wsl2-ubuntu is silent.
+    let records: Vec<RunRecord> = ["ubuntu-latest", "windows-latest", "macos-latest"]
+        .into_iter()
+        .map(|environment| passing_record("biscuit-hash", environment, Tier::L1))
+        .collect();
+
+    let cells = classify_simple(&expected, &records);
+    let cell = cells
+        .iter()
+        .find(|cell| cell.key.environment == "wsl2-ubuntu")
+        .expect("a scheduled leg must render a cell even with no evidence");
+
+    assert_eq!(cell.state, CellState::Missing);
+    assert!(cell.state.blocks(), "MISSING must fail the summary gate");
+    assert!(cell
+        .reasons
+        .iter()
+        .any(|reason| reason.contains("produced no report")));
+
+    let findings = verdict(
+        &rollup_of(cells, &["biscuit-hash"]),
+        &Baseline::default(),
+        None,
+    );
+    assert!(blocks_with_rule(&findings, "cell-missing"));
+}
+
+/// The legitimate case must keep working: opting out is a policy statement, and
+/// it is the one thing `NOT SCHEDULED` is for.
+#[test]
+fn an_area_excluding_wsl2_from_environments_still_renders_not_scheduled() {
+    let mut area = defaulted_area("homelab");
+    area.environments = vec!["ubuntu-latest".to_owned(), "macos-latest".to_owned()];
+
+    let expected = expected_cells(&[area], &scope_of(&["homelab"]), &[]);
+    assert!(
+        !expected
+            .iter()
+            .any(|cell| cell.key.environment == "wsl2-ubuntu"),
+        "a declared opt-out must schedule no wsl2-ubuntu cell"
+    );
+
+    // No expectation and no evidence means no cell at all, which the grid
+    // renders as NOT SCHEDULED.
+    let cells = classify_simple(&expected, &[]);
+    assert!(!cells
+        .iter()
+        .any(|cell| cell.key.environment == "wsl2-ubuntu"));
+}
+
+/// Evidence proves a leg ran, so the cell must report what the tests did. The
+/// policy disagreement is separately blocking rather than a state that hides
+/// the counts.
+#[test]
+fn passing_evidence_for_an_unscheduled_cell_renders_pass_and_blocks() {
+    let cells = classify_simple(&[], &[passing_record("ghost", "wsl2-ubuntu", Tier::L1)]);
+    let cell = only_cell(cells.clone());
+
+    assert!(!cell.scheduled);
+    assert_eq!(
+        cell.state,
+        CellState::Pass,
+        "a leg that ran and passed is not `NOT SCHEDULED`"
+    );
+    assert_eq!(cell.counts.passed, 3);
+
+    let findings = verdict(&rollup_of(cells, &["ghost"]), &Baseline::default(), None);
+    assert!(blocks_with_rule(&findings, "cell-unscheduled-evidence"));
+}
