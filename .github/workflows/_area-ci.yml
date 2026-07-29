@@ -91,13 +91,30 @@ jobs:
   # runners are free and macOS now runs the real suite; the compile-check would
   # be strictly weaker than the test leg beside it.
   #
-  # What survives is the ONE thing a test leg cannot do: carry
-  # `RUSTFLAGS: -D warnings`. Denying warnings on a test job deletes the run's
-  # test evidence over a plain rustc hint (plan 0.3), so warning enforcement
-  # needs its own compile-only slot. `lint` already denies warnings on Linux and
-  # macOS is the primary development host where drift is caught locally, so the
-  # default `check_os` points this at Windows — nobody's dev box, and where
-  # warning drift actually hides. Same job count as before, aimed better.
+  # What survives is `--all-targets`: benches and examples are compiled here and
+  # nowhere else, because the test leg builds only lib/bins/tests. That is a
+  # narrow remit, and if warning counting lands in the rollup this job becomes a
+  # candidate for deletion under plan 3.1 ("drop check_os where a test leg now
+  # covers it").
+  #
+  # It deliberately does NOT carry `RUSTFLAGS: -D warnings`. This gate answers
+  # "does it COMPILE on this environment", and promoting warnings destroyed that
+  # distinction three ways:
+  #
+  #   1. It lied. Dead code reported as `error: could not compile <crate>` when
+  #      the crate compiled perfectly well.
+  #   2. It blamed the wrong area. `playa`'s Windows leg went red for dead code
+  #      in `biscuit-terminal`, compiled as a dependency — across 21 areas and
+  #      four environments one missing `#[allow]` reddens unrelated cells.
+  #   3. It had no local reproduction. `just check` sets no RUSTFLAGS, so no
+  #      canonical recipe could reproduce the failure.
+  #
+  # Platform-conditional dead code is the normal shape of cross-platform Rust,
+  # and this refactor added three more platforms. `lint` still denies warnings,
+  # through clippy inside `_lint`, so `just lint` enforces the same bar off CI.
+  # Warning COUNTS per area/environment belong in the rollup with an owned
+  # baseline — the treatment skips already get, where a spike is loud but a
+  # steady state does not wedge the repo. See the handoff.
   check:
     name: check (${{ matrix.os }})
     strategy:
@@ -106,13 +123,6 @@ jobs:
         os: ${{ fromJSON(inputs.check-os) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
-    env:
-      # Scoped to the compile-only gate: this job exists to catch
-      # platform-specific warning drift, and it runs no tests, so denying
-      # warnings here cannot suppress test evidence. Deliberately NOT set at
-      # workflow level — on the `test` job it made a plain rustc warning abort
-      # the build so no test ran at all.
-      RUSTFLAGS: "-D warnings"
     steps:
       - uses: actions/checkout@v4
       - name: Install just

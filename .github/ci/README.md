@@ -49,7 +49,7 @@ order must match the root `justfile` `areas :=` list.
 | `expiry` | string | when not `ci` unless `capability` | — | ISO `YYYY-MM-DD`. A **past** date fails the scope calculation. |
 | `exclusion_class` | string | when not `ci` | — | One of `capability` (permanent), `promotion-pending`, `time-bounded`. |
 | `environments` | string[] | no | `["ubuntu-latest","windows-latest","macos-latest"]` | Environments that run the full canonical L1 suite. |
-| `check_os` | string[] | no | `["windows-latest"]` | Runner OSes that only compile-check, under `RUSTFLAGS: -D warnings`. |
+| `check_os` | string[] | no | `["windows-latest"]` | Runner OSes that only compile-check (`--all-targets`, warnings not denied). |
 | `policy_gaps` | object[] | no | `[]` | Tiers this area owns tests for that a declared environment cannot host. |
 | `shards` | string[] | no | `["1/1"]` | nextest `--partition count:i/N` specs; `["1/1"]` = no sharding. Sized from measured cold-run duration. |
 | `l2` | bool | no | `false` | Run the real-terminal (L2) tier on every environment with a provisioned backend. |
@@ -90,14 +90,18 @@ was the only area testing there and it fails on macOS today.
 
 It is no longer "the macOS floor". A compile-check is strictly weaker than a test
 run on the same environment, so it would be a wasted slot beside the new macOS
-test leg. What survives is the one thing a test leg cannot do: carry
-`RUSTFLAGS: -D warnings`. Denying warnings on a test job deletes the run's test
-evidence over a plain rustc hint, so warning enforcement needs its own
-compile-only slot.
+test leg. What survives is `--all-targets`: benches and examples compile here and
+nowhere else, since the test leg builds only lib/bins/tests. The default
+`check_os` is `["windows-latest"]`, the platform nobody develops on.
 
-`lint` already denies warnings on Linux, and macOS is the primary development
-host where drift is caught locally. So the default `check_os` is
-`["windows-latest"]` — nobody's dev box, and where warning drift actually hides.
+It does **not** deny warnings. That gate answers "does it compile", and
+promoting warnings destroyed the distinction: dead code reported as
+`error: could not compile <crate>`, a dependency's warning failed whichever area
+built it (`playa` went red for `biscuit-terminal`), and `just check` sets no
+`RUSTFLAGS` so nothing local could reproduce it. Platform-conditional dead code
+is normal in cross-platform Rust. `lint` still denies warnings via clippy, where
+`just lint` enforces the same bar locally; warning *counts* belong in the rollup
+with an owned baseline, the treatment skips already get.
 Same job count per area as before, aimed better. The trade-off is explicit:
 **macOS-only warning drift is no longer detected in CI.**
 

@@ -4,8 +4,8 @@ description: |-
   Monorepo testing guide: L1/L2/L3 taxonomy, canonical just recipes,
   `require_level!` gating, nextest filtersets, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 1acc7c1c76b11142-0d65568fb3670d31
-last_updated: 2026-07-28
+hash: 1acc7c1c76b11142-b9c2ecd633547e33
+last_updated: 2026-07-29
 ---
 # Rust Testing — Rusty Biscuit Monorepo
 
@@ -208,9 +208,10 @@ must not delete an area's entire test evidence. Every configured L1 leg blocks:
 the `soft_os` policy is retired, because `continue-on-error` removed a leg from
 the run's verdict rather than merely making it non-blocking. Enabling `l2` or
 `browser` makes the Linux harness tier hard-required. The shared workflow runs
-each selected area's lint/docs guards and denies warnings in the `check` and
-`lint` jobs (`_lint` passes `-D warnings` to clippy directly, so the same bar
-applies locally). Heavy areas shard their L1 run via nextest
+each selected area's lint/docs guards and denies warnings in the `lint` job
+only (`_lint` passes `-D warnings` to clippy directly, so the same bar applies
+locally). `check` is a compile gate and does not promote warnings — dead code is
+not a build failure, and platform-conditional dead code is normal. Heavy areas shard their L1 run via nextest
 `--partition count:i/N` with `--no-fail-fast` (darkmatter and claudine both use
 4 shards); CI selects the `ci` nextest profile explicitly.
 

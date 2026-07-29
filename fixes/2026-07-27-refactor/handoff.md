@@ -137,6 +137,43 @@ Two implementation notes worth keeping:
   an unvalidated capture treats it as a PR number. Put the query in the URL, and
   validate what you capture.
 
+## Warnings are counted, not fatal — follow-up
+
+`check` no longer carries `RUSTFLAGS: -D warnings`. Measured on the first real
+run: `playa`'s Windows leg failed with `error: could not compile
+biscuit-terminal (lib) due to 3 previous errors`, where all three "errors" were
+`dead_code` warnings for Unix-only terminal-query helpers. Three defects in one
+message — it said the crate did not compile (it did), it blamed `playa` for
+`biscuit-terminal`'s code, and `just check` sets no `RUSTFLAGS` so no canonical
+recipe could reproduce it.
+
+Platform-conditional dead code is the normal shape of cross-platform Rust, and
+this refactor added three more platforms, so that class of false failure was
+about to multiply. A second hazard: `rust-toolchain.toml` pins
+`channel = "stable"`, not a version, so a new stable ships new lints and
+`-D warnings` turns that into every PR blocked on untouched code — the same
+drift hazard `CLAUDE.md` already documents for rustfmt.
+
+`lint` still denies warnings, through clippy inside `_lint`, so `just lint`
+enforces the same bar locally. That is a fair contract; a CI-only variable with
+no local equivalent is not.
+
+**Follow-up:** count warnings per area and environment and surface them in the
+rollup with an owned, expiring baseline — the treatment skips already get, where
+a spike reads as loudly as a failure but a steady state does not wedge the repo.
+`cargo check --message-format=json` gives structured diagnostics, and the
+rollup already has the grid and baseline machinery. Attribute each warning to
+the crate that emitted it, not the area that happened to build it.
+
+Two smaller items fall out of this:
+
+- The three `biscuit-terminal` dead-code items want `#[cfg(unix)]` or an
+  `#[allow]`. Real, small, and no longer gating anything.
+- `check` now exists only for `--all-targets` (benches and examples compile
+  there and nowhere else, since the test leg builds lib/bins/tests). If warning
+  counting lands, it becomes a candidate for deletion under plan §3.1, "drop
+  `check_os` where a test leg now covers it".
+
 ## Pre-existing breakage found, not fixed
 
 1. **`scripts/drift.rs` does not compile** — 6 errors, `fallback_render` was

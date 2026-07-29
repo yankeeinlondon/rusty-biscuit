@@ -254,16 +254,16 @@ fn area_ci_treats_rust_warnings_as_failures_and_runs_lint() {
     );
     assert_eq!(
         shared.matches(r#"RUSTFLAGS: "-D warnings""#).count(),
-        2,
-        "exactly the compile-check and lint jobs must reject Rust warnings"
+        1,
+        "lint is the only gate that may reject Rust warnings"
     );
     for job in jobs(&shared) {
         let denies_warnings = job.contains(r#"RUSTFLAGS: "-D warnings""#);
-        let is_warning_gate = job.starts_with("  check:") || job.starts_with("  lint:");
+        let is_warning_gate = job.starts_with("  lint:");
         assert_eq!(
             denies_warnings,
             is_warning_gate,
-            "only the compile-check and lint gates may deny warnings; offending job: {}",
+            "only the lint gate may deny warnings; offending job: {}",
             job.lines().next().unwrap_or_default()
         );
     }
@@ -277,6 +277,20 @@ fn area_ci_treats_rust_warnings_as_failures_and_runs_lint() {
     assert!(
         devops.contains("cargo clippy") && devops.contains("-- -D warnings"),
         "`_lint` must pass -D warnings to clippy directly so lint denies warnings off CI too"
+    );
+
+    // The compile gate must stay a COMPILE gate. Promoting warnings there made a
+    // dead-code hint report as `error: could not compile <crate>`, attributed a
+    // dependency's warning to whichever area happened to build it, and failed in
+    // a way `just check` — which sets no RUSTFLAGS — could not reproduce.
+    let check = jobs(&shared)
+        .into_iter()
+        .find(|job| job.starts_with("  check:"))
+        .expect("_area-ci.yml must define the compile-check job");
+    assert!(
+        !check.contains("RUSTFLAGS"),
+        "the compile check must not promote warnings to errors — a warning is not \
+         a build failure, and cross-platform dead code is normal"
     );
 }
 

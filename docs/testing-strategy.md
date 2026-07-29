@@ -267,12 +267,14 @@ the latest stable toolchain (`RUSTUP_TOOLCHAIN=stable`) and runs
 - **Optional tiers**: Darkmatter enables the reusable Linux L2 and browser jobs;
   Claudine enables Linux L2 and installs portable inert provider stubs for
   discovery-dependent tests.
-- **Warnings and lint are gates**: `RUSTFLAGS=-D warnings` is scoped to the
-  `check` and `lint` jobs — the two whose job is to reject warnings. It is
-  deliberately **not** set for the test tiers, where it made a plain rustc
-  warning fail the build so no test ran. The lint job's real authority is the
-  recipe: `_lint` passes `-D warnings` to clippy directly, so the same bar
-  applies locally. Area-specific documentation, generated-artifact, and
+- **Lint is the warning gate; `check` is not**: `RUSTFLAGS=-D warnings` is
+  scoped to the `lint` job alone. It is deliberately **not** set for the test
+  tiers, where it made a plain rustc warning fail the build so no test ran, nor
+  for `check`, where it reported dead code as `error: could not compile`,
+  attributed a dependency's warning to whichever area built it, and could not be
+  reproduced by `just check`. The lint job's real authority is the recipe:
+  `_lint` passes `-D warnings` to clippy directly, so the same bar applies
+  locally. Area-specific documentation, generated-artifact, and
   typed-error guards wired into `just lint` remain blocking CI checks.
 - **Coverage uses the same dependency scope on PRs**: one `cargo llvm-cov`
   invocation selects every affected workspace package. A nightly/manual
