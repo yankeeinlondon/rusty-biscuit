@@ -887,10 +887,28 @@ branch refs/heads/fix/bug-42
     #[test]
     #[serial_test::serial]
     fn default_branch_detection() {
-        // Should work inside this monorepo
-        let result = default_branch();
-        assert!(result.is_ok());
-        assert!(["main", "master"].contains(&result.unwrap().as_str()));
+        // A remote-less repo has no `refs/remotes/origin/HEAD`, so detection
+        // falls through to probing for a local `main`/`master`.
+        let repo = temp_repo();
+        let _guard = DirGuard::enter(repo.path());
+
+        assert_eq!(default_branch().expect("local main is detectable"), "main");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn default_branch_prefers_remote_head_over_local_main() {
+        let repo = temp_repo();
+        let _guard = DirGuard::enter(repo.path());
+        run_git(repo.path(), &["branch", "trunk"]);
+        run_git(repo.path(), &["update-ref", "refs/remotes/origin/trunk", "trunk"]);
+        run_git(repo.path(), &[
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/trunk",
+        ]);
+
+        assert_eq!(default_branch().expect("origin/HEAD is detectable"), "trunk");
     }
 
     #[test]
