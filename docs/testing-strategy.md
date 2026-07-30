@@ -252,13 +252,11 @@ the latest stable toolchain (`RUSTUP_TOOLCHAIN=stable`) and runs
   once; scoped `retries = 2` overrides remain only for the `test(/level2_/)` and
   `test(/browser_/)` tiers (documented resource contention). `[profile.default]`
   keeps `retries = 3` for local dev — only the CI profile went to 0.
-- **Build cache**: `kache` is opt-in — there is no committed global
-  `rustc-wrapper`. The reusable workflow enables the pinned `kache` version
-  (single authority in `.github/kache-version`, verified by the
-  `.github/actions/enable-kache` composite action) with the GitHub Actions
-  cache backend on Linux and macOS **only**. `kunobi-ninja/kache-action@v1`
-  rejects `win32-x64` (`Unsupported platform`), so Windows CI builds without
-  kache.
+- **Build cache**: CI caches Cargo artifacts with `Swatinem/rust-cache@v2` on
+  every native leg and uses no rustc wrapper. The `kache` wrapper was removed
+  from CI on 2026-07-30 after measuring 0-6% hit rates (0.4-2.3% weighted by
+  compile cost); it remains a per-host developer opt-in via
+  `just install-kache`, pinned by `.github/kache-version`.
 - **Every configured L1 leg gates**: there is no `continue-on-error` on any area
   gate. The retired `soft-os` input did not merely make a leg non-blocking — it
   removed the leg from the run's verdict, so 14 permanently red Windows areas
@@ -380,7 +378,7 @@ Rust and long wall-clock times.
 | One dependency-aware `ci.yml` caller + reusable `_area-ci.yml` | Uniform platform behavior without starting jobs for unrelated areas. |
 | macOS compile-checked (not full-tested) on PRs | GitHub macOS runners bill ~10× Linux; the `check` job catches macOS compile drift cheaply while full L1 runs on Linux + Windows. |
 | Windows runs full L1 | Windows is the highest-risk platform for silent API/type drift; compile-only would miss runtime-shaped bugs. |
-| Pinned `kache` on Linux and macOS (opt-in) | One version authority (`.github/kache-version`) applies the same cache-key version to every kache-eligible leg. `kache-action@v1` rejects `win32-x64`, so Windows builds without it. |
+| `Swatinem/rust-cache@v2` on every native leg | CI uses no rustc wrapper. `kache` was measured at 0-6% hit rate through the GitHub Actions cache backend and removed from CI on 2026-07-30; it stays a per-host developer opt-in with one version authority (`.github/kache-version`). |
 
 See also:
 

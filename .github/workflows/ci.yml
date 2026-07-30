@@ -18,13 +18,6 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  # kache is only installed in area legs (enable-kache composite action). Every
-  # other job here builds wrapper-free: the tracked .cargo/config.toml pins
-  # rustc-wrapper = "kache", and an empty RUSTC_WRAPPER overrides it
-  # (docs/kache-strategy.md).
-  RUSTC_WRAPPER: ""
-
 jobs:
   scope:
     name: Determine affected scope
@@ -125,7 +118,6 @@ jobs:
             echo "| affected areas | $(jq -rc 'if (.areas | length) > 0 then ([.areas[].area] | join(", ")) else "(none)" end' <<<"$scope_json") |"
             echo "| affected packages | $(jq -r '.packages | length' <<<"$scope_json") |"
             echo "| toolchain | $(grep '^channel' rust-toolchain.toml | cut -d'"' -f2) |"
-            echo "| kache version | $(cat .github/kache-version) |"
           } >>"$GITHUB_STEP_SUMMARY"
 
   # Bootstrap preflight (D3). Verifies a clean runner can initialize the shared
@@ -167,9 +159,9 @@ jobs:
           just --version
           cargo nextest --version
           protoc --version
-      # Proves a fresh checkout runs Cargo WITHOUT the optional kache wrapper
-      # (D1). RUSTC_WRAPPER is explicitly cleared so a stray environment value
-      # cannot mask a broken clean-checkout path.
+      # Proves a fresh checkout runs Cargo with no rustc wrapper at all. The
+      # repository tracks none; RUSTC_WRAPPER is cleared explicitly so a stray
+      # environment value cannot mask a broken clean-checkout path.
       - name: Cargo metadata without build acceleration
         shell: bash
         env:
@@ -208,7 +200,6 @@ jobs:
       l2: ${{ matrix.l2 }}
       browser: ${{ matrix.browser }}
       wsl: ${{ matrix.wsl }}
-      kache: ${{ matrix.kache }}
       ai-provider-stubs: ${{ matrix.ai_provider_stubs }}
     secrets: inherit
 
@@ -241,7 +232,6 @@ jobs:
       l2: ${{ matrix.l2 }}
       browser: ${{ matrix.browser }}
       wsl: ${{ matrix.wsl }}
-      kache: ${{ matrix.kache }}
       ai-provider-stubs: ${{ matrix.ai_provider_stubs }}
     secrets: inherit
 

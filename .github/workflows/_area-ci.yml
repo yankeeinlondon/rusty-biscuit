@@ -17,8 +17,9 @@ name: area-ci
 #
 # Policy this encodes: the same canonical L1 recipe on every native environment;
 # `check`, `lint`, and `test` are independent gates with `l2`/`browser` staged
-# behind `test`; kache on Linux/macOS runners (kache-action@v1 rejects
-# win32-x64); nextest sharding for heavy areas.
+# behind `test`; nextest sharding for heavy areas. Cargo artifacts are cached by
+# `Swatinem/rust-cache` only — see docs/kache-strategy.md for why the kache
+# rustc-wrapper was removed from CI.
 #
 # Every building job first runs `just _ensure-native-libs <area>` — the same
 # recipe `just init` runs on a developer host — so an area's `native` libraries
@@ -71,10 +72,6 @@ on:
         description: "Run the canonical L1 suite inside a WSL2 Ubuntu guest (environment `wsl2-ubuntu`)."
         type: boolean
         default: false
-      kache:
-        description: "Enable the kache RUSTC_WRAPPER with the GitHub Actions cache backend."
-        type: boolean
-        default: true
       ai-provider-stubs:
         description: "Install inert AI-provider CLI stubs for tests that require provider discovery."
         type: boolean
@@ -82,6 +79,9 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # The repository tracks no rustc wrapper; cleared explicitly so a stray
+  # environment value cannot silently intercept an area's builds.
+  RUSTC_WRAPPER: ""
   # Force TrueColor on headless runners so styled output matches local dev.
   COLORTERM: truecolor
   # Explicitly select the CI nextest profile (D6) — every `cargo nextest` in the
@@ -140,14 +140,6 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Enable and verify kache
-        uses: ./.github/actions/enable-kache
-        with:
-          # kache-action@v1 rejects win32-x64 ("Unsupported platform"), so the
-          # composite action installs kache on Linux/macOS and neutralizes the
-          # tracked rustc-wrapper on Windows (D1: a missing cache must reduce
-          # performance, never make a platform's build fail).
-          enabled: ${{ inputs.kache }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -159,15 +151,6 @@ jobs:
       # lets a compile-check become a rollup cell that can be baselined and can
       # still block. `always()`, so a FAILED job still reports itself; a job that
       # reports nothing is MISSING, never a pass.
-      # Report what the wrapper actually achieved. `always()` because a
-      # failed build's cache data is exactly as interesting as a passing
-      # one's — often more so.
-      - name: Report kache effectiveness
-        if: ${{ always() }}
-        uses: ./.github/actions/report-kache
-        with:
-          enabled: ${{ inputs.kache && runner.os != 'Windows' }}
-          label: "${{ inputs.area }} check ${{ matrix.os }}"
       - name: Record producer status
         if: ${{ always() }}
         shell: bash
@@ -238,14 +221,6 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Enable and verify kache
-        uses: ./.github/actions/enable-kache
-        with:
-          # kache-action@v1 rejects win32-x64 ("Unsupported platform"), so the
-          # composite action installs kache on Linux/macOS and neutralizes the
-          # tracked rustc-wrapper on Windows (D1: a missing cache must reduce
-          # performance, never make a platform's build fail).
-          enabled: ${{ inputs.kache }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -331,15 +306,6 @@ jobs:
       # tree carries one XML per invocation plus `manifest.jsonl`, and the
       # manifest — not this artifact's name — is what gives each record its
       # {area, environment, tier, shard, package} identity.
-      # Report what the wrapper actually achieved. `always()` because a
-      # failed build's cache data is exactly as interesting as a passing
-      # one's — often more so.
-      - name: Report kache effectiveness
-        if: ${{ always() }}
-        uses: ./.github/actions/report-kache
-        with:
-          enabled: ${{ inputs.kache && runner.os != 'Windows' }}
-          label: "${{ inputs.area }} test ${{ matrix.environment }} ${{ matrix.shard }}"
       - name: Upload L1 JUnit
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
@@ -396,14 +362,6 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Enable and verify kache
-        uses: ./.github/actions/enable-kache
-        with:
-          # kache-action@v1 rejects win32-x64 ("Unsupported platform"), so the
-          # composite action installs kache on Linux/macOS and neutralizes the
-          # tracked rustc-wrapper on Windows (D1: a missing cache must reduce
-          # performance, never make a platform's build fail).
-          enabled: ${{ inputs.kache }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -415,15 +373,6 @@ jobs:
       # entries at all. In run 30323254931 `claudine / lint` was CANCELLED, which
       # a job-result reading records as neither pass nor fail; an explicit status
       # makes it MISSING, which blocks.
-      # Report what the wrapper actually achieved. `always()` because a
-      # failed build's cache data is exactly as interesting as a passing
-      # one's — often more so.
-      - name: Report kache effectiveness
-        if: ${{ always() }}
-        uses: ./.github/actions/report-kache
-        with:
-          enabled: ${{ inputs.kache && runner.os != 'Windows' }}
-          label: "${{ inputs.area }} lint ubuntu-latest"
       - name: Record producer status
         if: ${{ always() }}
         shell: bash
@@ -540,14 +489,6 @@ jobs:
               fi
             done < <(printf '%s' "$DECLARED_BACKENDS" | jq -r '.[]?')
           } >>"$GITHUB_STEP_SUMMARY"
-      - name: Enable and verify kache
-        uses: ./.github/actions/enable-kache
-        with:
-          # kache-action@v1 rejects win32-x64 ("Unsupported platform"), so the
-          # composite action installs kache on Linux/macOS and neutralizes the
-          # tracked rustc-wrapper on Windows (D1: a missing cache must reduce
-          # performance, never make a platform's build fail).
-          enabled: ${{ inputs.kache }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -558,15 +499,6 @@ jobs:
         run: cd "${{ inputs.area }}" && just test-l2
       # The staging directory, so the manifest travels with the reports. See the
       # L1 upload for why the single overwritten file is not enough.
-      # Report what the wrapper actually achieved. `always()` because a
-      # failed build's cache data is exactly as interesting as a passing
-      # one's — often more so.
-      - name: Report kache effectiveness
-        if: ${{ always() }}
-        uses: ./.github/actions/report-kache
-        with:
-          enabled: ${{ inputs.kache && runner.os != 'Windows' }}
-          label: "${{ inputs.area }} test-l2 ${{ matrix.environment }}"
       - name: Upload L2 JUnit
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
@@ -620,14 +552,6 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Enable and verify kache
-        uses: ./.github/actions/enable-kache
-        with:
-          # kache-action@v1 rejects win32-x64 ("Unsupported platform"), so the
-          # composite action installs kache on Linux/macOS and neutralizes the
-          # tracked rustc-wrapper on Windows (D1: a missing cache must reduce
-          # performance, never make a platform's build fail).
-          enabled: ${{ inputs.kache }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -638,15 +562,6 @@ jobs:
         run: cd "${{ inputs.area }}" && just test-browser
       # The staging directory, so the manifest travels with the reports. See the
       # L1 upload for why the single overwritten file is not enough.
-      # Report what the wrapper actually achieved. `always()` because a
-      # failed build's cache data is exactly as interesting as a passing
-      # one's — often more so.
-      - name: Report kache effectiveness
-        if: ${{ always() }}
-        uses: ./.github/actions/report-kache
-        with:
-          enabled: ${{ inputs.kache && runner.os != 'Windows' }}
-          label: "${{ inputs.area }} test-browser ubuntu-latest"
       - name: Upload browser JUnit
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
@@ -678,7 +593,7 @@ jobs:
   # WSL2 is a supported Linux environment, not a runner label. Delegating to a
   # dedicated reusable workflow is the whole point: that job runs on
   # `windows-latest` and executes through `wsl-bash`, so if it shared the matrix
-  # above, every `runner.os == 'Windows'` branch — kache gating, native package
+  # above, every `runner.os == 'Windows'` branch — native package
   # installation, path handling, shell selection, cache keys, artifact names —
   # would silently apply to a Linux guest.
   wsl:

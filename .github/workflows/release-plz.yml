@@ -8,10 +8,17 @@ name: Release-plz
 # BRANCH, not from the triggering commit. Edits to this trigger take effect only
 # once merged to `main`.
 #
-# Lockfile note: every `Cargo.lock` is gitignored (repo policy since
-# 2026-04-08), so release-plz regenerating `schematic/Cargo.lock` cannot dirty
-# tracked state or block a branch checkout. The clean-worktree assertions below
-# therefore inspect tracked files only.
+# Lockfile note: lockfiles are TRACKED as of 2026-07-30 (they were gitignored
+# from 2026-04-08). The clean-worktree assertions below inspect tracked files
+# only, so a lock that release-plz regenerates is now visible to them and will
+# fail the release rather than being silently ignored.
+#
+# That is deliberate for now — a version bump that rewrites a lock should be
+# surfaced, not swallowed — but this path only runs on `main` after a green CI
+# run and has not been exercised since the policy changed. If it fires, decide
+# between committing the regenerated lock as part of the release commit or
+# scoping the assertion to exclude lockfiles; do not simply re-ignore them.
+# See fixes/2026-07-30-ci-cd-stabilization/plan.md.
 on:
   workflow_run:
     workflows: ["ci"]
@@ -26,9 +33,9 @@ on:
       - closed
 
 env:
-  # release-plz shells out to `cargo package`/`publish`, which compiles; build
-  # wrapper-free by overriding the tracked .cargo/config.toml rustc-wrapper
-  # (docs/kache-strategy.md).
+  # release-plz shells out to `cargo package`/`publish`, which compiles. The
+  # repository tracks no rustc wrapper; cleared explicitly so a stray
+  # environment value cannot intercept a release build.
   RUSTC_WRAPPER: ""
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 

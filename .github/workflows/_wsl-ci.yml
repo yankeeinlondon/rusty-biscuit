@@ -8,7 +8,7 @@ name: wsl-ci
 # WSL2 cannot be another entry in `_area-ci.yml`'s `runs-on` matrix. The job
 # still runs on `windows-latest` and every command executes through `wsl-bash`,
 # so a shared job would evaluate `runner.os == 'Windows'` and take the Windows
-# branch for kache gating, native-package installation, path handling, shell
+# branch for native-package installation, path handling, shell
 # selection, cache keys, and artifact collection — while the code under test is
 # actually running on Linux. Isolating it here makes that impossible by
 # construction rather than by review discipline.
@@ -82,8 +82,8 @@ on:
         default: Ubuntu-24.04
 
 env:
-  # kache is not installed in this workflow; build wrapper-free by overriding
-  # the tracked .cargo/config.toml rustc-wrapper (docs/kache-strategy.md).
+  # No rustc wrapper is tracked by the repository; cleared explicitly so a stray
+  # environment value cannot reach the archive build.
   RUSTC_WRAPPER: ""
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   COLORTERM: truecolor

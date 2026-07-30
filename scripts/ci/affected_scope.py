@@ -17,7 +17,6 @@ AREA_CONFIG = ROOT / ".github" / "ci" / "areas.json"
 GLOBAL_PATHS = {
     ".config/nextest.toml",
     ".github/ci/areas.json",
-    ".github/kache-version",
     ".github/workflows/_area-ci.yml",
     ".github/workflows/_wsl-ci.yml",
     ".github/workflows/ci.yml",
@@ -84,7 +83,6 @@ AREA_DEFAULTS: dict[str, Any] = {
     "shards": ["1/1"],
     "l2": False,
     "browser": False,
-    "kache": True,
     "ai_provider_stubs": False,
     # Capability policy (D8/D9/D11). `backends`: L2 terminal backends this area's
     # tests require. `native`: runner OS -> system packages needed to build/test.
@@ -288,7 +286,7 @@ def validate_area_schema(areas: list[dict[str, Any]], today: date | None = None)
         # Types before semantics: every rule below reads these flags, so a
         # mistyped one must be reported as the typo it is rather than as the
         # policy violation its truthiness happens to produce.
-        for field in ("l2", "browser", "kache", "ai_provider_stubs", "canary", "ci", "node"):
+        for field in ("l2", "browser", "ai_provider_stubs", "canary", "ci", "node"):
             if field in area and not isinstance(area[field], bool):
                 raise RuntimeError(f"area '{label}' field '{field}' must be a boolean")
 
