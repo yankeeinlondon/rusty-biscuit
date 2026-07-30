@@ -126,7 +126,7 @@ impl RelativeAssetPath {
     /// absolute — external asset paths must be relative.
     pub fn new(path: impl Into<PathBuf>) -> Result<RelativeAssetPath, PageOptionsError> {
         let path = path.into();
-        if path.is_absolute() {
+        if path.has_root() {
             return Err(PageOptionsError::AbsoluteAssetPath(path));
         }
         Ok(RelativeAssetPath(path))
