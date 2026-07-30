@@ -26,6 +26,7 @@ use super::types::{DEFAULT_TIMEOUT, OscQueryError, RgbValue};
 ///
 /// The event carries a `code` field; a dedicated target keeps it distinguishable
 /// from the outcome/fallback events this module also logs at `debug`.
+#[cfg(unix)]
 pub(super) const OSC_QUERY_ATTEMPT_TARGET: &str = "biscuit_terminal::osc_query_attempt";
 
 /// Human-readable name for an OSC color query code.
