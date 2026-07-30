@@ -3,10 +3,19 @@ name: ci
 # Dependency-aware CI for pull requests and pushes to main. Changed workspace
 # packages are expanded through reverse Cargo dependencies and then mapped to
 # the curated package-area policy in `.github/ci/areas.json`.
-
+#
+# `pull_request` carries NO `branches:` filter on purpose. Restricting it to
+# `main` meant a stacked pull request — one targeting another feature branch —
+# created no `ci` run at all, so its changes reached `main` having never been
+# validated on their own. Measured on PR #22, which targeted PR #21 and ran
+# nothing but `pr-health` and Socket.
+#
+# This does not multiply work: `affected_scope.py` computes scope from the
+# event's own base and head, so a stacked PR validates only its delta, and the
+# concurrency group cancels superseded runs. `pr-health.yml` mirrors this
+# applicability rule and a workflow-contract test keeps the two from drifting.
 on:
   pull_request:
-    branches: [main]
   push:
     branches: [main]
   workflow_dispatch: {}

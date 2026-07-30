@@ -1432,3 +1432,38 @@ fn a_conflicted_pr_is_reported_rather_than_silently_unscheduled() {
          is as invisible as the missing run it is reporting"
     );
 }
+
+/// The guard and the workflow it guards must agree on which pull requests are in
+/// scope. While `ci.yml` filtered `pull_request` to `branches: [main]`, a stacked
+/// PR created no `ci` run at all, and `pr-health` — which checks only whether a
+/// merge ref can exist — passed it and printed that CI could be scheduled. Both
+/// statements were individually true and jointly misleading. Measured on PR #22,
+/// which targeted PR #21 and ran nothing but `pr-health` and Socket.
+#[test]
+fn pr_health_and_ci_agree_on_which_pull_requests_are_in_scope() {
+    fn pull_request_base_filter(source: &str, trigger: &str) -> Option<String> {
+        let after = source.split_once(&format!("\n  {trigger}:\n"))?.1;
+        after
+            .lines()
+            // Stop at the next top-level trigger key (two-space indent).
+            .take_while(|line| line.starts_with("    ") || line.trim().is_empty())
+            .find(|line| line.trim_start().starts_with("branches:"))
+            .map(|line| line.trim().to_string())
+    }
+
+    let ci = workflow("ci.yml");
+    let health = workflow("pr-health.yml");
+
+    assert_eq!(
+        pull_request_base_filter(&ci, "pull_request"),
+        None,
+        "ci.yml must not filter `pull_request` by base branch; a stacked PR that \
+         schedules no run reaches main unvalidated"
+    );
+    assert_eq!(
+        pull_request_base_filter(&health, "pull_request_target"),
+        None,
+        "pr-health must watch the same pull requests as ci.yml, or it will \
+         report that CI can be scheduled for a PR ci.yml filters out"
+    );
+}
