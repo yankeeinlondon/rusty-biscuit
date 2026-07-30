@@ -53,7 +53,15 @@ Once you've cloned you're going to want to install the [`just`](https://github.c
 brew install just
 # ubuntu / debian
 apt install just
+# windows
+winget install Casey.Just
 ```
+
+> **Windows:** recipes run through bash, so Cygwin or Git for Windows must be
+> on PATH before `just` can do anything. Run the PowerShell preflight, which
+> checks that (and tells you exactly what to fix) before delegating:
+> `powershell -ExecutionPolicy Bypass -File scripts\init.ps1`
+
 
 <details>
 <summary>Other Package Managers</summary>
