@@ -126,7 +126,21 @@ jobs:
       matrix:
         os: ${{ fromJSON(inputs.check-os) }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    # 45, not 30 — shared by `check`, `test`, and `lint` below.
+    #
+    # Measured on run 30562649123: completing cells for the heaviest areas
+    # cluster at 19-29 minutes, with several landing at 26-29. The old
+    # 30-minute ceiling sat inside the normal distribution rather than above
+    # it. It killed 11 claudine/darkmatter cells mid-suite, and GitHub reports
+    # a timed-out step as `cancelled`, so the rollup recorded MISSING evidence
+    # rather than a timeout — indistinguishable, from the rollup's side, from a
+    # leg that never ran. A baseline cannot be trusted while its heaviest areas
+    # are the ones with no verdict.
+    #
+    # This buys evidence; it does not make the build cheaper. The real fix is
+    # to stop rebuilding the same library once per invocation — see
+    # fixes/2026-07-30-ci-cd-stabilization/plan.md, Phase 4.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Install just
@@ -192,7 +206,7 @@ jobs:
         environment: ${{ fromJSON(inputs.native-environments) }}
         shard: ${{ fromJSON(inputs.shards) }}
     runs-on: ${{ matrix.environment }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       # Result identity (plan 0.2/1.3). The shared `just` recipes stamp these
       # into the per-invocation JUnit manifest so a rollup cell traces back to
@@ -342,7 +356,7 @@ jobs:
   lint:
     name: lint (ubuntu)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       # `just/devops.just`'s `_lint` already passes `-D warnings` to clippy for
       # each package in the area; this keeps the area's workspace dependencies
