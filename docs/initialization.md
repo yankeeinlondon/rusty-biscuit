@@ -9,16 +9,16 @@ settings for unrelated repositories.
 Initialization runs these stages in order:
 
 1. Ensures Rust, Cargo, and the platform C build tools are available.
-2. Installs the repository-pinned kache compiler cache.
-3. Ensures GitNexus and its native Tree-sitter dependency are usable.
-4. Builds and installs `sniff`, then reports whether the runtime is native,
+2. Ensures GitNexus and its native Tree-sitter dependency are usable.
+3. Builds and installs `sniff`, then reports whether the runtime is native,
    WSL 1, or WSL 2.
-5. Runs `kache doctor` to verify that Cargo resolves the repository-local
-   compiler wrapper.
-6. Builds and installs the core Rusty Biscuit developer CLIs.
+4. Builds and installs the core Rusty Biscuit developer CLIs.
 
-The recipe is idempotent. Running it again repairs missing tools and updates
-kache when the repository pin changes.
+The recipe is idempotent. Running it again repairs missing tools.
+
+It does **not** install or activate a compiler cache. See
+[Build Caching](#build-caching) — that is an opt-in host decision, because
+whether it pays off depends on the filesystem rather than the OS.
 
 ## Native Windows
 
@@ -57,26 +57,61 @@ WSL terminal, not through `scripts\init.ps1`.
 
 ## Build Caching
 
-kache is the compiler cache for every build in this repository, on every OS.
-The tracked `.cargo/config.toml` wires it in:
+kache is an **optional, per-host** compiler cache. This repository tracks no
+Cargo wrapper configuration: nothing in a fresh clone activates it, and Cargo
+works normally without it.
 
-```toml
-[build]
-rustc-wrapper = "kache"
+That is deliberate. kache's economics are decided by the **filesystem**, not the
+operating system. APFS, btrfs, XFS-with-reflink, and ReFS restore cache hits by
+cloning blocks; ext4 and NTFS fall back to hardlink or copy, so the store
+becomes a genuine second copy of every artifact. A tracked wrapper would impose
+one answer on every contributor's machine — and would hard-fail Cargo for anyone
+who has not installed kache. `docs/kache-strategy.md` records the measured
+evidence.
+
+### Installing
+
+```sh
+just install-kache
 ```
 
-Cargo discovers this file from the repository root and its package
-subdirectories. Direct Cargo commands and package-area `just` recipes therefore
-use the same cache. The initialization recipe does not call `kache init`
-because that command edits the user-wide Cargo configuration and would affect
-unrelated checkouts.
+This installs the exact version declared by `.github/kache-version` (surfaced as
+`KACHE_VERSION` in the root `justfile`) using `cargo binstall`, which fetches a
+prebuilt binary rather than compiling from source. It is the supported install
+path on every OS; per-OS package managers are fallbacks. On hosts with no kache
+configuration it seeds a default store cap of `local_max_size = "100GiB"` — an
+existing config is never overwritten. It clears `RUSTC_WRAPPER` during the
+install so an absent or older wrapper cannot intercept its own installation.
 
-`just init` installs the kache version declared by `.github/kache-version`
-(surfaced as `KACHE_VERSION` in the root `justfile`) and, on hosts with no
-kache configuration, seeds a default store cap of `local_max_size = "100GiB"`
-— an existing config is never overwritten. It temporarily clears
-`RUSTC_WRAPPER` while installing kache so an absent or older wrapper cannot
-intercept its own installation.
+Installing does not activate anything.
+
+### Probing before activating
+
+Never infer the restore mode from the OS. Confirm the store and `target/` can
+actually clone blocks:
+
+```sh
+kache doctor                                   # reports the store filesystem (0.12.0+)
+cp -c  <store-file> <target-dir>/probe                 # macOS: fails if clonefile can't
+cp --reflink=always <store-file> <target-dir>/probe    # Linux: fails if reflink can't
+```
+
+### Activating
+
+Two supported scopes:
+
+```sh
+export RUSTC_WRAPPER=kache   # this shell only — narrowest, trivially undone
+kache init                   # host-wide: writes $CARGO_HOME/config.toml
+```
+
+`kache init` affects **every** Rust repository on the host, so choose it only
+with that in mind. To undo: `unset RUSTC_WRAPPER`, or remove the wrapper line
+from Cargo home. Do not hand-create an ignored `.cargo/config.toml` in this
+repository — hidden local policy is difficult to diagnose later.
+
+Activating disables Cargo's incremental compilation, which is the largest
+behavioral change on adoption.
 
 The store is bounded; `target/` is not. Run `just sweep` to prune stale
 build artifacts (`cargo sweep`: uninstalled toolchains, then anything untouched
@@ -112,13 +147,18 @@ KACHE_DISABLED=1 cargo build
 
 ## Platform Behavior
 
-| Runtime | Local cache | Login service |
-|---|---|---|
-| Native Linux | Enabled | Optional systemd user service |
-| macOS | Enabled | Optional launchd service |
-| Native Windows | Enabled | Not installed by `just init` |
-| WSL 2 | Enabled | Optional when systemd is enabled |
-| WSL 1 | Best effort; `kache doctor` must pass | Do not install automatically |
+Nothing below is enabled by `just init`. The column records how strong a
+candidate each runtime is once you have probed it.
+
+| Runtime | Typical restore mode | Recommendation | Login service |
+|---|---|---|---|
+| macOS (APFS) | reflink | Strong candidate | Optional launchd service |
+| Linux (btrfs, XFS-reflink) | reflink | Strong candidate | Optional systemd user service |
+| Linux (ext4) | hardlink | Qualified — store is a second copy | Optional systemd user service |
+| WSL 2 | hardlink (ext4 in a VHDX) | Qualified; measure first | Optional when systemd is enabled |
+| Native Windows (ReFS / Dev Drive) | block clone | Candidate; measure first | Not installed |
+| Native Windows (NTFS) | copy | Off by default | Not installed |
+| WSL 1 | best effort | Not recommended | Do not install |
 
 Under WSL, keep the repository and kache store in the Linux filesystem, such
 as `~/coding` and `~/.cache/kache`. Builds under `/mnt/c`, `/mnt/d`, or another
@@ -154,12 +194,14 @@ again. Useful focused checks are:
 ```sh
 rustc --version
 cargo --version
-kache doctor
 sniff runtime
 gitnexus status
+kache doctor   # only if you opted into the compiler cache
 ```
 
-If Cargo reports that `kache` cannot be found, run `just _ensure-kache` and
-then `just cache-status`. If a WSL 2 host should support a daemon but
+If Cargo reports that `kache` cannot be found, either activate it after
+`just install-kache`, or clear the wrapper (`unset RUSTC_WRAPPER`, or remove it
+from Cargo home) — a wrapper is only needed if you opted in. If a WSL 2 host
+should support a daemon but
 `systemctl --user` is unavailable, enable systemd for that WSL distribution or
 use local-only caching.

@@ -421,7 +421,7 @@ cp:
 # On native Windows, run scripts\init.ps1 instead of invoking this recipe
 # directly: just needs bash AND cygpath on PATH before it can run any recipe,
 # so the "no shell environment" check has to happen outside just.
-init: _ensure-native-bash _ensure-build-deps _ensure-native-libs _ensure-kache _ensure-nextest _ensure-gitnexus
+init: _ensure-native-bash _ensure-build-deps _ensure-native-libs _ensure-nextest _ensure-gitnexus
     #!/usr/bin/env bash
     set -euo pipefail
     # Put cargo on PATH in case _ensure-build-deps just installed Rust
@@ -432,7 +432,6 @@ init: _ensure-native-bash _ensure-build-deps _ensure-native-libs _ensure-kache _
     echo
     (cd sniff && just install)
     sniff runtime
-    kache doctor
     (cd biscuit-terminal && just install)
     (cd darkmatter && just install)
     (cd playa && just install)
@@ -778,8 +777,16 @@ _ensure-native-libs area="":
     install_packages "${packages[@]}"
     echo "Native libraries installed."
 
-# ensure the repository-pinned Rust compiler cache is available
-_ensure-kache:
+# Deliberately not a dependency of `init`. kache's economics are decided by the
+# filesystem, not the OS: APFS/btrfs/XFS-reflink and ReFS clone blocks, while
+# ext4 and NTFS fall back to hardlink or copy, so the store becomes a second
+# copy of every artifact. Installing for everyone and activating for everyone
+# are different decisions; this recipe only does the first. See
+# `docs/initialization.md` for how to activate, and `docs/kache-strategy.md`
+# for the measured evidence.
+
+# install the repository-pinned Rust compiler cache (does NOT activate it)
+install-kache:
     #!/usr/bin/env bash
     set -euo pipefail
     source scripts/cargo-path.sh
@@ -805,12 +812,10 @@ _ensure-kache:
             kache
     fi
 
-    # Seed a default store config when the host has none. The tracked
-    # .cargo/config.toml makes kache the wrapper for every build in this repo,
-    # so the store needs a deliberate cap: an uncapped store thrashes (LRU can
-    # evict fresh entries before they score a hit). 100 GiB is the agreed
-    # starting point (docs/kache-strategy.md); never overwrite an existing
-    # config — hosts size against their own volume.
+    # Seed a default store config when the host has none. An uncapped store
+    # thrashes: LRU can evict fresh entries before they score a hit. 100 GiB is
+    # the agreed starting point (docs/kache-strategy.md); never overwrite an
+    # existing config — hosts size against their own volume.
     case "$(uname -s)" in
         MINGW*|MSYS*|CYGWIN*) kache_config_dir="$(cygpath "${APPDATA:?}")/kache" ;;
         *)                    kache_config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/kache" ;;
@@ -822,6 +827,12 @@ _ensure-kache:
     fi
 
     kache --version
+    echo
+    echo "Installed, NOT activated. Nothing uses kache until you set RUSTC_WRAPPER."
+    echo "  probe first : kache doctor   (confirm the store filesystem clones blocks)"
+    echo "  this shell  : export RUSTC_WRAPPER=kache"
+    echo "  host-wide   : kache init     (writes \$CARGO_HOME/config.toml — affects every repo)"
+    echo "  undo        : unset RUSTC_WRAPPER, or remove the wrapper from Cargo home"
 
 # ensure cargo-sweep is available for target/ hygiene (just sweep)
 _ensure-cargo-sweep:
