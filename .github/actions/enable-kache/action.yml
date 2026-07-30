@@ -7,22 +7,36 @@ description: >-
 
 # Gating lives on the `enabled` input rather than on the caller's `uses:` step,
 # because a step that combines `if: ${{ inputs.kache }}` with a LOCAL composite
-# `uses:` fails to load ("Unrecognized named-value: 'inputs'"). Callers pass
-# `enabled: ${{ inputs.kache && runner.os != 'Windows' }}`; when it is not 'true'
-# every step no-ops, so non-cache jobs never require RUSTC_WRAPPER=kache. Windows
-# is excluded because kache-action@v1 rejects win32-x64 ("Unsupported platform").
+# `uses:` fails to load ("Unrecognized named-value: 'inputs'").
+#
+# The tracked .cargo/config.toml pins rustc-wrapper = "kache" for every build,
+# so a leg that does NOT install kache must neutralize the wrapper or every
+# Cargo invocation fails ("failed to run `kache`"). That is exactly the Windows
+# situation: kache-action@v1 rejects win32-x64 ("Unsupported platform"), so
+# Windows legs build wrapper-free via an empty RUSTC_WRAPPER (which overrides
+# the config file) until Windows store persistence is designed — see
+# docs/kache-strategy.md ("Future ambitions").
 inputs:
   enabled:
-    description: "Install and activate kache when 'true'; otherwise no-op."
+    description: >-
+      Install and activate kache when 'true' (Linux/macOS); otherwise build
+      wrapper-free. Windows always builds wrapper-free regardless.
     required: false
     default: "true"
 
 runs:
   using: composite
   steps:
+    - name: Neutralize the tracked rustc wrapper
+      if: ${{ inputs.enabled != 'true' || runner.os == 'Windows' }}
+      shell: bash
+      run: |
+        echo "RUSTC_WRAPPER=" >>"$GITHUB_ENV"
+        echo "::notice title=kache::kache not installed on this leg; building wrapper-free (RUSTC_WRAPPER cleared)"
+
     - name: Resolve pinned kache version
       id: pinned
-      if: ${{ inputs.enabled == 'true' }}
+      if: ${{ inputs.enabled == 'true' && runner.os != 'Windows' }}
       shell: bash
       run: |
         set -euo pipefail
@@ -34,7 +48,7 @@ runs:
         echo "version=$version" >>"$GITHUB_OUTPUT"
 
     - name: Install and activate kache
-      if: ${{ inputs.enabled == 'true' }}
+      if: ${{ inputs.enabled == 'true' && runner.os != 'Windows' }}
       uses: kunobi-ninja/kache-action@v1
       with:
         version: ${{ steps.pinned.outputs.version }}
@@ -43,7 +57,7 @@ runs:
     # command runs in a later step. A mismatch fails this named bootstrap step
     # rather than silently building through an unexpected wrapper.
     - name: Verify kache executable and version
-      if: ${{ inputs.enabled == 'true' }}
+      if: ${{ inputs.enabled == 'true' && runner.os != 'Windows' }}
       shell: bash
       run: |
         set -euo pipefail

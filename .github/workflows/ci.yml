@@ -18,6 +18,13 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # kache is only installed in area legs (enable-kache composite action). Every
+  # other job here builds wrapper-free: the tracked .cargo/config.toml pins
+  # rustc-wrapper = "kache", and an empty RUSTC_WRAPPER overrides it
+  # (docs/kache-strategy.md).
+  RUSTC_WRAPPER: ""
+
 jobs:
   scope:
     name: Determine affected scope
