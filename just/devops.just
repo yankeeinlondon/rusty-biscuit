@@ -368,20 +368,59 @@ _run_all recipe specs *args="":
     # exactly what the archive path already does, so per-package JUnit staging
     # and the pass/fail summary are unchanged.
     #
-    # Skipped when any entry carries per-package build flags (`messenger
-    # --features desktop; messenger-cli`): a shared selection would have to
-    # union those flags across packages, which changes what each package is
-    # built with rather than merely when.
+    # A per-package `--features X` is NOT a reason to give up the shared scope:
+    # Cargo accepts package-qualified features in a multi-package invocation, so
+    # `sniff --features remote; sniff-cli --features test-fixtures` becomes
+    # `-p sniff -p sniff-cli -F sniff/remote -F sniff-cli/test-fixtures` —
+    # identical semantics, one feature resolution.
+    #
+    # `--all-features` and `--no-default-features` have no package-qualified
+    # form; in a multi-package invocation they apply to EVERY selected package,
+    # which would change what the siblings are built with rather than merely
+    # when. Those areas keep the per-package loop.
+    #
+    # Only `_test` opts in. `_lint` and `_sanity` share this engine but do not
+    # read the exported scope, so they must keep receiving their per-package
+    # flags directly.
     build_scope=""
-    scope_is_uniform=1
+    build_features=""
+    scope_translatable=1
     for entry in "${entries[@]}"; do
         # shellcheck disable=SC2206
         scope_parts=(${entry})
-        (( ${#scope_parts[@]} > 1 )) && scope_is_uniform=0
-        build_scope="${build_scope}${build_scope:+ }${scope_parts[0]}"
+        scope_pkg="${scope_parts[0]}"
+        build_scope="${build_scope}${build_scope:+ }${scope_pkg}"
+        idx=1
+        while (( idx < ${#scope_parts[@]} )); do
+            scope_arg="${scope_parts[$idx]}"
+            scope_vals=""
+            case "${scope_arg}" in
+                --features|-F)
+                    (( idx++ ))
+                    scope_vals="${scope_parts[$idx]:-}"
+                    ;;
+                --features=*) scope_vals="${scope_arg#--features=}" ;;
+                *)            scope_translatable=0 ;;
+            esac
+            if [[ -n "${scope_vals}" ]]; then
+                old_ifs="$IFS"
+                IFS=','
+                read -r -a scope_feats <<< "${scope_vals}"
+                IFS="${old_ifs}"
+                for scope_feat in "${scope_feats[@]}"; do
+                    [[ -n "${scope_feat}" ]] || continue
+                    build_features="${build_features}${build_features:+ }${scope_pkg}/${scope_feat}"
+                done
+            fi
+            (( idx++ ))
+        done
     done
-    if (( scope_is_uniform == 1 )) && (( ${#entries[@]} > 1 )); then
+
+    shared_scope=0
+    if [[ "{{ recipe }}" == "_test" ]] && (( scope_translatable == 1 )) && (( ${#entries[@]} > 1 )); then
+        shared_scope=1
         export BISCUIT_BUILD_SCOPE="${build_scope}"
+        export BISCUIT_BUILD_FEATURES="${build_features}"
     fi
 
     for entry in "${entries[@]}"; do
@@ -391,7 +430,12 @@ _run_all recipe specs *args="":
         package="${parts[0]}"
         current_package="${package}"
 
-        if (( ${#parts[@]} > 1 )); then
+        if (( shared_scope == 1 )); then
+            # Per-package flags were hoisted into BISCUIT_BUILD_FEATURES above;
+            # passing them again would apply an unqualified `--features` to a
+            # multi-package selection.
+            just {{ recipe }} "${package}" {{ args }}
+        elif (( ${#parts[@]} > 1 )); then
             just {{ recipe }} "${package}" "${parts[@]:1}" {{ args }}
         else
             just {{ recipe }} "${package}" {{ args }}
@@ -660,6 +704,11 @@ _test pkg *args="":
             selection=()
             for scope_pkg in ${BISCUIT_BUILD_SCOPE}; do
                 selection+=(-p "${scope_pkg}")
+            done
+            # Package-qualified, so each package still gets exactly the features
+            # its own spec asked for.
+            for scope_feat in ${BISCUIT_BUILD_FEATURES:-}; do
+                selection+=(-F "${scope_feat}")
             done
             filter="package({{ pkg }}) & (${filter})"
         fi
