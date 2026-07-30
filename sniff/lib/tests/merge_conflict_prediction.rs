@@ -30,6 +30,16 @@ impl Fixture {
         let mut options = RepositoryInitOptions::new();
         options.initial_head("main");
         let repo = Repository::init_opts(dir.path(), &options).expect("initialize repository");
+        {
+            let mut config = repo.config().expect("fixture repository config");
+            config.set_str("user.name", "Sniff Test").expect("fixture user name");
+            config
+                .set_str("user.email", "sniff-test@example.com")
+                .expect("fixture user email");
+            config
+                .set_bool("commit.gpgsign", false)
+                .expect("disable fixture commit signing");
+        }
         let fixture = Self { _dir: dir, repo };
         let changes = files
             .iter()
