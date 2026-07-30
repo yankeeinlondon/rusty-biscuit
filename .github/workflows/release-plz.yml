@@ -26,6 +26,10 @@ on:
       - closed
 
 env:
+  # release-plz shells out to `cargo package`/`publish`, which compiles; build
+  # wrapper-free by overriding the tracked .cargo/config.toml rustc-wrapper
+  # (docs/kache-strategy.md).
+  RUSTC_WRAPPER: ""
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 permissions:

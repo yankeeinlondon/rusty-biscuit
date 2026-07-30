@@ -144,9 +144,10 @@ jobs:
         uses: ./.github/actions/enable-kache
         with:
           # kache-action@v1 rejects win32-x64 ("Unsupported platform"), so the
-          # cache is Linux/macOS-only. Windows builds without it (D1: a missing
-          # cache must reduce performance, never make a platform's build fail).
-          enabled: ${{ inputs.kache && runner.os != 'Windows' }}
+          # composite action installs kache on Linux/macOS and neutralizes the
+          # tracked rustc-wrapper on Windows (D1: a missing cache must reduce
+          # performance, never make a platform's build fail).
+          enabled: ${{ inputs.kache }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -241,9 +242,10 @@ jobs:
         uses: ./.github/actions/enable-kache
         with:
           # kache-action@v1 rejects win32-x64 ("Unsupported platform"), so the
-          # cache is Linux/macOS-only. Windows builds without it (D1: a missing
-          # cache must reduce performance, never make a platform's build fail).
-          enabled: ${{ inputs.kache && runner.os != 'Windows' }}
+          # composite action installs kache on Linux/macOS and neutralizes the
+          # tracked rustc-wrapper on Windows (D1: a missing cache must reduce
+          # performance, never make a platform's build fail).
+          enabled: ${{ inputs.kache }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -398,9 +400,10 @@ jobs:
         uses: ./.github/actions/enable-kache
         with:
           # kache-action@v1 rejects win32-x64 ("Unsupported platform"), so the
-          # cache is Linux/macOS-only. Windows builds without it (D1: a missing
-          # cache must reduce performance, never make a platform's build fail).
-          enabled: ${{ inputs.kache && runner.os != 'Windows' }}
+          # composite action installs kache on Linux/macOS and neutralizes the
+          # tracked rustc-wrapper on Windows (D1: a missing cache must reduce
+          # performance, never make a platform's build fail).
+          enabled: ${{ inputs.kache }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -541,9 +544,10 @@ jobs:
         uses: ./.github/actions/enable-kache
         with:
           # kache-action@v1 rejects win32-x64 ("Unsupported platform"), so the
-          # cache is Linux/macOS-only. Windows builds without it (D1: a missing
-          # cache must reduce performance, never make a platform's build fail).
-          enabled: ${{ inputs.kache && runner.os != 'Windows' }}
+          # composite action installs kache on Linux/macOS and neutralizes the
+          # tracked rustc-wrapper on Windows (D1: a missing cache must reduce
+          # performance, never make a platform's build fail).
+          enabled: ${{ inputs.kache }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -620,9 +624,10 @@ jobs:
         uses: ./.github/actions/enable-kache
         with:
           # kache-action@v1 rejects win32-x64 ("Unsupported platform"), so the
-          # cache is Linux/macOS-only. Windows builds without it (D1: a missing
-          # cache must reduce performance, never make a platform's build fail).
-          enabled: ${{ inputs.kache && runner.os != 'Windows' }}
+          # composite action installs kache on Linux/macOS and neutralizes the
+          # tracked rustc-wrapper on Windows (D1: a missing cache must reduce
+          # performance, never make a platform's build fail).
+          enabled: ${{ inputs.kache }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"

@@ -1,11 +1,13 @@
 //! Durable CI/CD workflow contract tests.
 //!
 //! These guard the invariants established by the DevOps plan
-//! (`features/2026-07-24-devops/`): optional build acceleration is opt-in, kache
-//! has a single version authority, the primary workflow runs a bootstrap
-//! preflight that gates area fan-out, and release automation follows successful
-//! CI instead of racing it. They inspect the workflow/action source text so a
-//! regression fails locally without a live GitHub Actions run.
+//! (`features/2026-07-24-devops/`) and the cache strategy
+//! (`docs/kache-strategy.md`): kache is the rustc wrapper for every build, with
+//! a single version authority and a wrapper-free fallback where the binary is
+//! not installed; the primary workflow runs a bootstrap preflight that gates
+//! area fan-out; and release automation follows successful CI instead of
+//! racing it. They inspect the workflow/action source text so a regression
+//! fails locally without a live GitHub Actions run.
 
 use std::{fs, path::PathBuf};
 
@@ -20,8 +22,12 @@ fn repo_root() -> PathBuf {
 
 fn read(relative: &str) -> String {
     let path = repo_root().join(relative);
+    // Working trees on Windows check out CRLF (core.autocrlf=true) while the
+    // index holds LF; contract scanning must not depend on the host's checkout
+    // convention.
     fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()))
+        .replace("\r\n", "\n")
 }
 
 fn workflow(name: &str) -> String {
@@ -54,20 +60,18 @@ fn jobs(source: &str) -> Vec<String> {
     blocks
 }
 
-// --- D1/D2: optional acceleration is opt-in with one version authority --------
+// --- D1/D2: kache is always-on with one version authority ---------------------
 
 #[test]
-fn repository_ships_no_global_rustc_wrapper() {
-    // A fresh checkout must run Cargo without kache. The repo must not commit a
-    // global `rustc-wrapper` that names the optional binary.
-    let config = repo_root().join(".cargo/config.toml");
-    if config.exists() {
-        let source = fs::read_to_string(&config).expect("read .cargo/config.toml");
-        assert!(
-            !source.contains("rustc-wrapper"),
-            ".cargo/config.toml must not pin a global rustc-wrapper (kache is opt-in)"
-        );
-    }
+fn repository_pins_kache_as_the_rustc_wrapper() {
+    // kache is the compiler cache for every build in this repo, on every OS
+    // (docs/kache-strategy.md). The tracked config wires it in, so every leg
+    // that runs Cargo must either install kache or neutralize the wrapper.
+    let source = read(".cargo/config.toml");
+    assert!(
+        source.contains(r#"rustc-wrapper = "kache""#),
+        ".cargo/config.toml must pin rustc-wrapper = \"kache\" (kache is always-on)"
+    );
 }
 
 #[test]
@@ -105,12 +109,18 @@ fn area_ci_activates_kache_through_the_verified_composite_action() {
         !shared.contains("version: 0.8.0"),
         "area CI must not carry a duplicate hard-coded kache version literal"
     );
-    // Opt-in gating flows through the composite's `enabled` input, NOT an `if:`
-    // on the `uses:` step — a step that combines `if: ${{ inputs.kache }}` with a
-    // local composite `uses:` fails to load on the runner.
+    // Gating flows through the composite's `enabled` input, NOT an `if:` on the
+    // `uses:` step — a step that combines `if: ${{ inputs.kache }}` with a
+    // local composite `uses:` fails to load on the runner. The OS split lives
+    // INSIDE the action: kache-action@v1 rejects win32-x64, so Windows legs
+    // must not be asked to install.
     assert!(
-        shared.contains("enabled: ${{ inputs.kache && runner.os != 'Windows' }}"),
-        "kache must be opt-in AND Linux/macOS-only (kache-action@v1 rejects win32-x64)"
+        shared.contains("enabled: ${{ inputs.kache }}"),
+        "area CI must pass the kache input straight through; OS gating lives in the action"
+    );
+    assert!(
+        !shared.contains("inputs.kache && runner.os"),
+        "callers must not OS-gate — Windows legs need the action to neutralize the wrapper"
     );
 
     // The composite action is the single point that reads and verifies the pin,
@@ -132,6 +142,45 @@ fn area_ci_activates_kache_through_the_verified_composite_action() {
         action.contains("kache bootstrap"),
         "a missing or mismatched kache must fail a named bootstrap step"
     );
+    // The tracked .cargo/config.toml names kache as rustc-wrapper, so a leg
+    // without the binary (Windows: kache-action@v1 rejects win32-x64) must
+    // clear RUSTC_WRAPPER or every Cargo invocation fails.
+    assert!(
+        action.contains("RUSTC_WRAPPER=") && action.contains("$GITHUB_ENV"),
+        "enable-kache must neutralize the tracked wrapper on legs without the binary"
+    );
+    assert!(
+        action.contains("runner.os != 'Windows'"),
+        "enable-kache must skip installation on Windows (kache-action@v1 rejects win32-x64)"
+    );
+}
+
+#[test]
+fn every_cargo_workflow_installs_kache_or_neutralizes_the_wrapper() {
+    // The tracked .cargo/config.toml pins rustc-wrapper = "kache", so ANY
+    // workflow that can invoke Cargo (directly, via just, or via a tool like
+    // release-plz that shells out to it) fails unless it either installs kache
+    // (the enable-kache composite) or overrides the wrapper with an empty
+    // RUSTC_WRAPPER. Guard the invariant textually so a new workflow cannot
+    // forget it.
+    let workflows = repo_root().join(".github/workflows");
+    for entry in fs::read_dir(&workflows).expect("read .github/workflows") {
+        let path = entry.expect("workflow entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("yml") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        let source = read(&format!(".github/workflows/{name}"));
+        let touches_cargo = source.contains("cargo ") || source.contains("just ");
+        if !touches_cargo || source.contains("enable-kache") {
+            continue;
+        }
+        assert!(
+            source.contains("RUSTC_WRAPPER"),
+            "{name} can invoke Cargo but neither enables kache nor neutralizes \
+             the tracked rustc-wrapper"
+        );
+    }
 }
 
 // --- D3: bootstrap preflight gates area fan-out ------------------------------
