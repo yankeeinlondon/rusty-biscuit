@@ -318,9 +318,17 @@ fn create_relative_symlink(
         Ok(Some(symlink_path.to_path_buf()))
     }
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
     {
-        warnings.push("Symlinks are only supported on Unix-like systems".to_string());
+        std::os::windows::fs::symlink_dir(&target, symlink_path)
+            .map_err(PullError::SymlinkError)?;
+        info!("Created symlink: {:?} -> {}", symlink_path, target);
+        Ok(Some(symlink_path.to_path_buf()))
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        warnings.push("Symlinks are not supported on this platform".to_string());
         Ok(None)
     }
 }
@@ -437,6 +445,8 @@ mod tests {
         // Create symlink first
         #[cfg(unix)]
         std::os::unix::fs::symlink("../target/topic", &symlink_path).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir("../target/topic", &symlink_path).unwrap();
 
         // Try to create again
         let result = create_relative_symlink(&symlink_path, "../target", "topic", &mut warnings);
@@ -455,6 +465,8 @@ mod tests {
         // Create symlink with different target
         #[cfg(unix)]
         std::os::unix::fs::symlink("../other/path", &symlink_path).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir("../other/path", &symlink_path).unwrap();
 
         let result = create_relative_symlink(&symlink_path, "../target", "topic", &mut warnings);
 

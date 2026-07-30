@@ -172,12 +172,15 @@ pub fn create_skill_symlink(
     std::os::unix::fs::symlink(&absolute_source, symlink_location)
         .map_err(CreationError::SymlinkCreation)?;
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(&absolute_source, symlink_location)
+        .map_err(CreationError::SymlinkCreation)?;
+
+    #[cfg(not(any(unix, windows)))]
     {
-        // This should never happen as the project targets Unix-like systems
         return Err(CreationError::SymlinkCreation(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
-            "Symlink creation is only supported on Unix-like systems",
+            "Symlink creation is not supported on this platform",
         )));
     }
 
@@ -277,11 +280,15 @@ pub fn create_deep_dive_symlink(
     std::os::unix::fs::symlink(&absolute_source, symlink_location)
         .map_err(CreationError::SymlinkCreation)?;
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_file(&absolute_source, symlink_location)
+        .map_err(CreationError::SymlinkCreation)?;
+
+    #[cfg(not(any(unix, windows)))]
     {
         return Err(CreationError::SymlinkCreation(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
-            "Symlink creation is only supported on Unix-like systems",
+            "Symlink creation is not supported on this platform",
         )));
     }
 
@@ -476,6 +483,7 @@ mod tests {
         create_skill_symlink(&skill_dir, &symlink_location).unwrap();
 
         let target = fs::read_link(&symlink_location).unwrap();
+        let target = target.canonicalize().unwrap();
         let expected = skill_dir.canonicalize().unwrap();
         assert_eq!(target, expected);
     }
@@ -666,6 +674,7 @@ mod tests {
         create_deep_dive_symlink(&deep_dive, &symlink_location).unwrap();
 
         let target = fs::read_link(&symlink_location).unwrap();
+        let target = target.canonicalize().unwrap();
         let expected = deep_dive.canonicalize().unwrap();
         assert_eq!(target, expected);
     }

@@ -459,6 +459,8 @@ mod tests {
         let target = temp.path().join("target.md");
         #[cfg(unix)]
         std::os::unix::fs::symlink(&source, &target).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file(&source, &target).unwrap();
 
         let mut errors = Vec::new();
         let action =
