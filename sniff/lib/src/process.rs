@@ -1230,12 +1230,13 @@ mod tests {
             .expect("configured child should complete");
 
         assert!(output.status.success());
-        let expected = format!(
-            "{}|preserved",
-            working_dir.path().canonicalize().unwrap().display()
-        );
+        let expected_dir = working_dir.path().canonicalize().unwrap();
         assert!(
-            output.stdout_lossy().lines().any(|line| line == expected),
+            output.stdout_lossy().lines().any(|line| {
+                line.strip_suffix("|preserved").is_some_and(|dir| {
+                    std::fs::canonicalize(dir).is_ok_and(|d| d == expected_dir)
+                })
+            }),
             "configured child output should contain the preserved cwd and environment"
         );
     }

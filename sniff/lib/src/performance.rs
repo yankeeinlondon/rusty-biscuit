@@ -190,6 +190,9 @@ pub fn with_current_collector<T>(
     STAGE_BUFFER.with(|buf| buf.borrow_mut().clear());
     COUNTER_BUFFER.with(|buf| buf.borrow_mut().clear());
 
+    #[cfg(test)]
+    let _test_read_guard = collector.is_some().then(CollectorTestReadGuard::acquire);
+
     // The active count must survive a panic in `f`, or every later request in
     // the process would keep paying for instrumentation that records nothing.
     let _active = collector.is_some().then(ActiveGuard::acquire);
@@ -218,6 +221,68 @@ impl ActiveGuard {
 impl Drop for ActiveGuard {
     fn drop(&mut self) {
         ACTIVE_COLLECTORS.fetch_sub(1, Ordering::Release);
+    }
+}
+
+#[cfg(test)]
+static COLLECTOR_TEST_LOCK: std::sync::RwLock<()> = std::sync::RwLock::new(());
+
+#[cfg(test)]
+thread_local! {
+    static COLLECTOR_TEST_LOCK_HELD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Runs `f` while no collector is installed anywhere in the test binary.
+///
+/// The "uncollected path" tests assert on the process-global
+/// [`ACTIVE_COLLECTORS`] count, but that precondition is impossible to hold
+/// while sibling tests install collectors on other threads. Taking the write
+/// side of [`COLLECTOR_TEST_LOCK`] serializes against every
+/// [`with_current_collector`] call so the assertion observes a true negative.
+#[cfg(test)]
+pub(crate) fn without_any_collector<T>(f: impl FnOnce() -> T) -> T {
+    // Spin on try_write rather than queueing a blocking writer: a queued
+    // writer makes later read acquisitions block, and collector tests spawn
+    // scoped threads that call with_current_collector while their parent
+    // holds a read — a blocked child plus a joining parent is a deadlock.
+    let guard = loop {
+        match COLLECTOR_TEST_LOCK.try_write() {
+            Ok(guard) => break guard,
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => break poisoned.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => std::thread::yield_now(),
+        }
+    };
+    let _guard = guard;
+    f()
+}
+
+/// Read side of [`COLLECTOR_TEST_LOCK`], reentrant per thread because
+/// production code nests [`with_current_collector`] calls.
+#[cfg(test)]
+struct CollectorTestReadGuard(Option<std::sync::RwLockReadGuard<'static, ()>>);
+
+#[cfg(test)]
+impl CollectorTestReadGuard {
+    fn acquire() -> Self {
+        let already_held = COLLECTOR_TEST_LOCK_HELD.with(|held| held.replace(true));
+        if already_held {
+            Self(None)
+        } else {
+            Self(Some(
+                COLLECTOR_TEST_LOCK
+                    .read()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()),
+            ))
+        }
+    }
+}
+
+#[cfg(test)]
+impl Drop for CollectorTestReadGuard {
+    fn drop(&mut self) {
+        if self.0.is_some() {
+            COLLECTOR_TEST_LOCK_HELD.with(|held| held.set(false));
+        }
     }
 }
 
@@ -614,10 +679,12 @@ mod tests {
 
     #[test]
     fn nothing_is_collecting_by_default() {
-        assert!(
-            !is_collecting(),
-            "the default path must not pay for instrumentation"
-        );
+        without_any_collector(|| {
+            assert!(
+                !is_collecting(),
+                "the default path must not pay for instrumentation"
+            );
+        });
     }
 
     #[test]
@@ -634,7 +701,9 @@ mod tests {
 
     #[test]
     fn stage_timer_reads_no_clock_when_inactive() {
-        assert!(StageTimer::start(STAGE).started.is_none());
+        without_any_collector(|| {
+            assert!(StageTimer::start(STAGE).started.is_none());
+        });
         testing::measure(|| {
             assert!(StageTimer::start(STAGE).started.is_some());
         });

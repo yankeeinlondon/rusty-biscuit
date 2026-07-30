@@ -1664,7 +1664,7 @@ mod tests {
 
         #[test]
         fn test_get_path_dirs_parses_valid_dirs() {
-            let _lock = ENV_MUTEX.lock().unwrap();
+            let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
             let temp = TempDir::new().expect("should create temp dir");
             let dir1 = temp.path().join("bin1");
             let dir2 = temp.path().join("bin2");
@@ -1685,7 +1685,7 @@ mod tests {
 
         #[test]
         fn test_get_path_dirs_filters_nonexistent() {
-            let _lock = ENV_MUTEX.lock().unwrap();
+            let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
             let temp = TempDir::new().expect("should create temp dir");
             let existing = temp.path().join("exists");
             let nonexistent = temp.path().join("does_not_exist");
@@ -1705,7 +1705,7 @@ mod tests {
 
         #[test]
         fn test_get_path_dirs_handles_empty_entries() {
-            let _lock = ENV_MUTEX.lock().unwrap();
+            let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
             let temp = TempDir::new().expect("should create temp dir");
             let dir = temp.path().join("bin");
             fs::create_dir(&dir).expect("should create dir");
@@ -1734,7 +1734,7 @@ mod tests {
         #[test]
         #[cfg(target_os = "windows")]
         fn test_get_path_dirs_splits_semicolon_separated_entries() {
-            let _lock = ENV_MUTEX.lock().unwrap();
+            let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
             let temp = TempDir::new().expect("should create temp dir");
             let dir1 = temp.path().join("bin1");
             let dir2 = temp.path().join("bin2");
@@ -1768,7 +1768,7 @@ mod tests {
             use std::ffi::OsString;
             use std::os::unix::ffi::{OsStrExt, OsStringExt};
 
-            let _lock = ENV_MUTEX.lock().unwrap();
+            let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
             let temp = TempDir::new().expect("should create temp dir");
             let valid = temp.path().join("valid_bin");
             fs::create_dir(&valid).expect("should create valid dir");

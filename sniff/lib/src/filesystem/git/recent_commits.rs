@@ -855,7 +855,7 @@ fn commit_time_label(datetime_rfc3339: &str, today_local: NaiveDate) -> String {
 fn file_url(path: &Path) -> String {
     url::Url::from_file_path(path)
         .map(|u| u.to_string())
-        .unwrap_or_else(|()| format!("file://{}", path.to_string_lossy()))
+        .unwrap_or_else(|()| format!("file://{}", path.to_string_lossy().replace('\\', "/")))
 }
 
 // ---------------------------------------------------------------------------

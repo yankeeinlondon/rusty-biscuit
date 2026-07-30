@@ -486,6 +486,11 @@ pub fn render_repo_package_root(result: &sniff::SniffResult, base_dir: Option<&P
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
 
     repo.and_then(|r| r.package_for_dir(&dir))
-        .map(|pkg| pkg.path.display().to_string())
+        .map(|pkg| {
+            pkg.path
+                .display()
+                .to_string()
+                .replace(std::path::MAIN_SEPARATOR, "/")
+        })
         .unwrap_or_default()
 }
