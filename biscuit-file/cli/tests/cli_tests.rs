@@ -1,5 +1,6 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
+use std::path::PathBuf;
 
 fn bf() -> Command {
     assert_cmd::Command::cargo_bin("bf").unwrap()
@@ -7,6 +8,10 @@ fn bf() -> Command {
 
 fn fixture(name: &str) -> String {
     format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"))
+}
+
+fn manifest_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")
 }
 
 // ── Format conversion (file input) ──────────────────────────────────
@@ -426,8 +431,7 @@ fn reference_resolves_relative_path_to_absolute() {
         .arg("./Cargo.toml")
         .assert()
         .success()
-        .stdout(predicate::str::contains("biscuit-file/cli/Cargo.toml"))
-        .stdout(predicate::str::starts_with("/"));
+        .stdout(predicate::eq(format!("{}\n", manifest_path().display())));
 }
 
 #[test]
@@ -436,7 +440,7 @@ fn reference_alias_ref_works() {
         .arg("./Cargo.toml")
         .assert()
         .success()
-        .stdout(predicate::str::contains("biscuit-file/cli/Cargo.toml"));
+        .stdout(predicate::eq(format!("{}\n", manifest_path().display())));
 }
 
 #[test]
