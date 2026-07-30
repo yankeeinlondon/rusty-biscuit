@@ -370,7 +370,7 @@ mod tests {
     /// the kernel, so poisoning all three changes nothing.
     #[test]
     fn identity_ignores_username_environment_variables() {
-        let _lock = crate::test_helpers::ENV_MUTEX.lock().unwrap();
+        let _lock = crate::test_helpers::ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let baseline = current_user_id().expect("baseline discovery");
 
         let mut env = crate::test_helpers::ScopedEnv::new();
@@ -389,7 +389,7 @@ mod tests {
     /// Absent username variables must not push discovery onto a fallback.
     #[test]
     fn identity_survives_missing_username_environment_variables() {
-        let _lock = crate::test_helpers::ENV_MUTEX.lock().unwrap();
+        let _lock = crate::test_helpers::ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let baseline = current_user_id().expect("baseline discovery");
 
         let mut env = crate::test_helpers::ScopedEnv::new();

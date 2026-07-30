@@ -1870,12 +1870,14 @@ mod tests {
         use std::fs;
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        fs::write(root.join("gradlew"), "#!/bin/sh\necho 8.0\n").unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
+            fs::write(root.join("gradlew"), "#!/bin/sh\necho 8.0\n").unwrap();
             fs::set_permissions(root.join("gradlew"), fs::Permissions::from_mode(0o755)).unwrap();
         }
+        #[cfg(windows)]
+        fs::write(root.join("gradlew.bat"), "@echo off\r\necho 8.0\r\n").unwrap();
 
         let index = test_index_with(&["gradle"]);
         let resolved = resolve_acting_binary_with_version(
@@ -1888,7 +1890,8 @@ mod tests {
         let binary = resolved.unwrap();
         assert_eq!(binary.name, "gradle");
         assert_eq!(binary.source, BinarySource::Wrapper);
-        assert!(binary.path.as_ref().unwrap().ends_with("gradlew"));
+        let wrapper_name = if cfg!(windows) { "gradlew.bat" } else { "gradlew" };
+        assert!(binary.path.as_ref().unwrap().ends_with(wrapper_name));
     }
 
     #[test]

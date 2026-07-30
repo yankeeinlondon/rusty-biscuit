@@ -177,18 +177,23 @@ pub fn detect_network_with_request(request: &NetworkRequest) -> Result<NetworkIn
     std::thread::scope(|s| {
         let collector = performance::current_collector();
         let wan_handle = if request.include_wan_ip {
-            Some(s.spawn(move || {
-                performance::with_current_collector(collector, || {
-                    let started = Instant::now();
-                    let result = detect_wan_ip(request.force_refresh);
-                    performance::record_logged_stage(
-                        "network.wan_ip",
-                        started.elapsed(),
-                        Level::DEBUG,
-                    );
-                    result
-                })
-            }))
+            Some(
+                std::thread::Builder::new()
+                    .stack_size(8 * 1024 * 1024)
+                    .spawn_scoped(s, move || {
+                        performance::with_current_collector(collector, || {
+                            let started = Instant::now();
+                            let result = detect_wan_ip(request.force_refresh);
+                            performance::record_logged_stage(
+                                "network.wan_ip",
+                                started.elapsed(),
+                                Level::DEBUG,
+                            );
+                            result
+                        })
+                    })
+                    .expect("spawn WAN IP lookup thread"),
+            )
         } else {
             None
         };
@@ -465,13 +470,18 @@ impl WanIpDetector {
         // by hand or every counter recorded on it is silently discarded.
         if tokio::runtime::Handle::try_current().is_ok() {
             let mut worker = performance::WorkerCollector::inherit();
-            std::thread::spawn(move || {
-                worker.activate();
-                attempt_all()
-            })
-            .join()
-            .ok()
-            .flatten()
+            // The blocking client's TLS handshake is stack-hungry in debug
+            // builds; the default 2 MiB thread stack is not always enough.
+            std::thread::Builder::new()
+                .stack_size(8 * 1024 * 1024)
+                .spawn(move || {
+                    worker.activate();
+                    attempt_all()
+                })
+                .expect("spawn WAN IP client thread")
+                .join()
+                .ok()
+                .flatten()
         } else {
             attempt_all()
         }

@@ -542,7 +542,7 @@ fn build_git_status_items(
     // Add staged files
     for file in &staged {
         let path = file.path.display().to_string();
-        let absolute = git.repo_root.join(&file.path).display().to_string();
+        let absolute = git.repo_root.join(&file.path).display().to_string().replace(std::path::MAIN_SEPARATOR, "/");
         let linked_path = format_git_status_filepath(&path, &absolute);
         let action = file.action.label();
         // Only show diff stats for modified files (not created/deleted)
@@ -559,7 +559,7 @@ fn build_git_status_items(
     // Add unstaged files
     for file in &modified {
         let path = file.path.display().to_string();
-        let absolute = git.repo_root.join(&file.path).display().to_string();
+        let absolute = git.repo_root.join(&file.path).display().to_string().replace(std::path::MAIN_SEPARATOR, "/");
         let linked_path = format_git_status_filepath(&path, &absolute);
         let action = file.action.label();
         let diff_stats = format_diff_stats(file.lines_added, file.lines_removed);
@@ -571,7 +571,7 @@ fn build_git_status_items(
 
     for file in &untracked {
         let path = file.path.display().to_string();
-        let absolute = git.repo_root.join(&file.path).display().to_string();
+        let absolute = git.repo_root.join(&file.path).display().to_string().replace(std::path::MAIN_SEPARATOR, "/");
         let linked_path = format_git_status_filepath(&path, &absolute);
         let line = format!("<dim>untracked: {linked_path}</dim>");
         status_items.push(line);
@@ -585,7 +585,7 @@ fn build_git_status_items(
         .collect();
     for file in &conflicted {
         let path = file.path.display().to_string();
-        let absolute = git.repo_root.join(&file.path).display().to_string();
+        let absolute = git.repo_root.join(&file.path).display().to_string().replace(std::path::MAIN_SEPARATOR, "/");
         let linked_path = format_git_status_filepath(&path, &absolute);
         let line = format!("<red>conflicted: {linked_path}</red>");
         status_items.push(line);
@@ -620,7 +620,12 @@ fn render_header(title: &str, terminal: &Terminal) -> String {
 /// `../project`, or `.` instead of a home-abbreviated absolute path.
 fn worktree_path_link(path: &std::path::Path, current_worktree: &std::path::Path) -> String {
     let absolute = path.display().to_string();
-    let label = relative_path_between(current_worktree, path);
+    // Both sides must share one canonical form before prefix math: detection
+    // reports repo roots canonicalized (UNC-prefixed on Windows) while the
+    // current directory arrives verbatim, and the two forms share no
+    // components, which would degenerate the label to the absolute path.
+    let canon = |p: &std::path::Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let label = relative_path_between(&canon(current_worktree), &canon(path));
     format!("<blue><a href=\"{absolute}\">{label}</a></blue>")
 }
 
@@ -717,7 +722,7 @@ fn alias_path_with_case(
             continue;
         }
         let value = PathBuf::from(value);
-        if !value.is_absolute() || !path.starts_with(&value) {
+        if !(value.is_absolute() || value.has_root()) || !path.starts_with(&value) {
             continue;
         }
         let components = value.components().count();
@@ -755,7 +760,10 @@ fn join_alias(prefix: &str, rel: &Path) -> String {
     if rel.as_os_str().is_empty() {
         prefix.to_string()
     } else {
-        format!("{prefix}/{}", rel.display())
+        format!(
+            "{prefix}/{}",
+            rel.display().to_string().replace(std::path::MAIN_SEPARATOR, "/")
+        )
     }
 }
 
@@ -765,13 +773,15 @@ fn join_alias(prefix: &str, rel: &Path) -> String {
 /// segments and/or the remaining target components. Falls back to the target's
 /// absolute display when the paths do not share a common prefix.
 fn relative_path_between(base: &std::path::Path, target: &std::path::Path) -> String {
-    use std::path::{Component, MAIN_SEPARATOR_STR};
+    use std::path::Component;
 
     if let Ok(rel) = target.strip_prefix(base) {
         return if rel.as_os_str().is_empty() {
             ".".to_string()
         } else {
-            rel.display().to_string()
+            rel.display()
+                .to_string()
+                .replace(std::path::MAIN_SEPARATOR, "/")
         };
     }
 
@@ -779,7 +789,7 @@ fn relative_path_between(base: &std::path::Path, target: &std::path::Path) -> St
         let ups = rel.components().count();
         return std::iter::repeat_n("..", ups)
             .collect::<Vec<_>>()
-            .join(MAIN_SEPARATOR_STR);
+            .join("/");
     }
 
     let base_components: Vec<_> = base.components().collect();
@@ -814,7 +824,7 @@ fn relative_path_between(base: &std::path::Path, target: &std::path::Path) -> St
     if parts.is_empty() {
         ".".to_string()
     } else {
-        parts.join(MAIN_SEPARATOR_STR)
+        parts.join("/")
     }
 }
 

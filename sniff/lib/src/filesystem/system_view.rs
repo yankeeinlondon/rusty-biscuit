@@ -543,8 +543,10 @@ mod tests {
         let dir = fixture();
 
         // The default path: no collector installed anywhere.
-        assert!(!performance::is_collecting(), "no collector should be active here");
-        let view = build_filesystem_system_view(dir.path(), inventory_options());
+        let view = performance::without_any_collector(|| {
+            assert!(!performance::is_collecting(), "no collector should be active here");
+            build_filesystem_system_view(dir.path(), inventory_options())
+        });
         assert_eq!(
             view.inventory.expect("inventory").total_files_scanned,
             DIR_COUNT * FILES_PER_DIR,
