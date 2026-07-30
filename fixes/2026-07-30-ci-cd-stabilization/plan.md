@@ -1,5 +1,5 @@
 ---
-title: CI/CD stabilization — land three divergent branches and get real Windows evidence
+title: CI/CD stabilization — land the three-PR stack and get real Windows evidence
 status: draft
 created: 2026-07-30
 builds_on:
@@ -13,28 +13,42 @@ source_code:
   - .claude/skills/kache/installation.md
   - .github/actions/enable-kache/action.yml
   - .github/actions/report-kache/action.yml
+  - .github/ci/README.md
   - .github/kache-version
   - .github/ci/areas.json
   - .github/ci/ci-baseline.toml
   - .github/workflows/_area-ci.yml
+  - .github/workflows/_wsl-ci.yml
   - .github/workflows/ci.yml
+  - .github/workflows/pr-health.yml
+  - .gitignore
+  - Cargo.lock
+  - README.md
+  - docs/initialization.md
+  - docs/kache-strategy.md
+  - justfile
+  - scripts/init.ps1
   - scripts/ci/affected_scope.py
+  - scripts/ci/test_affected_scope.py
+  - tools/test-toolkit/tests/ci_workflow_contracts.rs
 ---
 
 # CI/CD stabilization
 
 ## Objective
 
-Get the three open branches merged in an order that produces **verified**
-cross-platform evidence, then burn down the Windows failures against that
-evidence. Configure kache to match the OS support policy instead of forcing one
-policy on every host.
+Land the three-PR stack in an order that produces **verified** cross-platform
+evidence, then burn down the Windows failures against that evidence. Configure
+kache to match host filesystem capability instead of forcing one policy on every
+host.
 
 Success is not "CI is green". Success is:
 
-1. Every area's Windows cell **reports** (pass or fail), rather than being
-   blocked, missing, or unscheduled.
-2. Every Windows fix already written has a cell proving it works.
+1. Every CI-gating area's declared Windows L1 and compile-check cells **report**
+   (pass or fail), rather than being blocked, missing, or unscheduled. Declared
+   policy gaps remain visible and are not counted as executed evidence.
+2. Every Windows fix already written has an applicable cell proving the changed
+   behavior, not merely a green job elsewhere in the same area.
 3. kache is either earning its keep on a leg or is off on that leg, with the
    decision backed by a measurement rather than an assumption.
 
@@ -43,9 +57,48 @@ Success is not "CI is green". Success is:
 | | PR 19 `docs/cross-platform-ci-plan` | PR 21 `fix/windows-sniff` | PR 22 `fix/unchained-hug-schematic` |
 |---|---|---|---|
 | Base | `main` | `main` | `fix/windows-sniff` |
-| Files changed | — | 195 | 15 |
+| Remote head | `b09b1f50e` | `02a89f149` | `f83c69da5` |
+| Files changed | 268 | 195 | 15 |
+| Ancestry | 34 commits on `8fc3adc3a` | 27 commits on `8fc3adc3a` | 6 commits on PR 21 |
 | CI jobs scheduled | 168 cells | **32 jobs, 0 area jobs** | **0 runs** |
 | Failures | 43 (all named) | 2 | unknown |
+
+Ancestry, branch heads, and pull-request metadata were verified through the
+GitHub API against a fully unshallowed clone. The Actions job counts and log
+conclusions are retained from the named runs below.
+
+### Ancestry is ordinary — an earlier "unrelated history" finding was a clone artifact
+
+An intermediate review of this plan recorded that PR 19 had no common ancestor
+with `main` and proposed a repair phase to reconstruct its tree. **That finding
+was wrong**, and the repair phase has been removed.
+
+The local clone was shallow. `.git/shallow` contained exactly
+`43056c8bcad232ce56228d9dbe086673f0af6c59` — the same commit the finding named as
+PR 19's "root". A shallow boundary makes Git treat that commit as parentless
+*locally*, so `git merge-base` fails, `git rev-list --max-parents=0` reports it as
+a root, and the branch appears to contain only 18 commits.
+
+Verified ancestry, after `git fetch --unshallow`:
+
+| Comparison | Merge base | Relationship |
+|---|---|---|
+| `main` ↔ PR 19 | `8fc3adc3a` | PR 19 is 34 ahead, 0 behind — `MERGEABLE` |
+| `main` ↔ PR 21 | `8fc3adc3a` | PR 21 is 27 ahead, 0 behind |
+| PR 19 ↔ PR 21 | `2d6a606d5` | diverged: PR 21 +12, PR 19 +19 |
+
+PR 21 branched from PR 19 at a **real shared commit**, `2d6a606d5`
+("docs(devops): record the silently-unscheduled-PR failure mode and its guard").
+Ordinary merges and rebases are safe. PR 19's `mergeStateStatus` is `BLOCKED`
+because the required `ci-verdict` check is failing, not because of conflicts or
+graph problems.
+
+**Operating rule for this repo:** check `.git/shallow` before drawing any
+conclusion from `git merge-base`, `git rev-list --count`, or
+`git rev-list --max-parents=0`. A shallow clone reports all three in ways that
+look like history corruption. Prefer the GitHub compare API
+(`gh api repos/<owner>/<repo>/compare/<base>...<head>`) as the authority, since it
+reads the full server-side graph.
 
 ### PR 21 has not tested its own content
 
@@ -70,18 +123,19 @@ operating system.
 `fix/windows-sniff`, so no `ci` run is created at all; only `pr-health` and
 Socket report. Five product fixes are unverified.
 
-This is the same *class* of defect `pr-health.yml` exists to catch (a PR that
-schedules no run), but not the same instance — `pr-health` checks that a run was
-created for PRs it observes, and a stacked PR legitimately has no `ci` workflow
-to create.
+This is the same *class* of defect `pr-health.yml` exists to catch (absence of a
+run), but the guard checks only whether GitHub can create a merge ref. Its push
+path can pass a mergeable stacked PR and print that CI can be scheduled without
+checking whether `ci.yml`'s base-branch filter excludes it. Phase 3 aligns those
+contracts.
 
-## Root cause of both PR 21 failures
+## Why PR 21's run failed
 
-`fix/windows-sniff` is a **rebase of the CI branch taken at an earlier point**,
-plus new work. It reverts nothing in git terms — it simply predates PR 19's last
-18 commits. Because both branches share `main` (`8fc3adc3a`) as their merge
-base, these are one-sided changes and git will resolve nearly all of them in
-PR 19's favour automatically.
+`fix/windows-sniff` branched from PR 19 at `2d6a606d5`, then added 12 commits of
+its own while PR 19 added 19 more. It does not revert those 19 changes — it
+simply predates them. Because the branch point is a real shared commit, Git can
+identify the earlier CI work as shared history, and the 12-commit range replays
+cleanly onto a merged PR 19.
 
 What PR 21 is missing, and what each omission costs:
 
@@ -90,7 +144,7 @@ What PR 21 is missing, and what each omission costs:
 | `43056c8bc` runtime `cargo_bin` | 56 `cargo_bin!` macro sites remain | **Causes the `biscuit-hash / wsl2` failure** |
 | removal of `-D warnings` from `check` | `_area-ci.yml:115` still sets it | **Causes the `playa / check (windows)` failure** |
 | `656299926` `node` capability | `areas.json` has no `node: true`; the config validator that made an undeclared pnpm user fail loudly is also gone | homelab's 22 frontend tests silently never run |
-| `0ecd4e45d` anchored tier filters | `test(/level2_/)` instead of `test(/(^|::)level2_/)` | Unanchored predicates match substrings anywhere in the path |
+| `0ecd4e45d` anchored tier filters | `test(/level2_/)` instead of an anchored tier predicate | Unanchored predicates match substrings anywhere in the path |
 | `9a01ba383` `report-kache` action | absent | No cache-effectiveness signal at all |
 | `61466f94e` committed `Cargo.lock` | `.gitignore:68` re-ignores `**/Cargo.lock` | CI re-resolves every dependency every run; a past run cannot be reproduced |
 | `eca67d517` baseline pruning | 6 retired entries restored | Now-passing cells stay masked |
@@ -138,11 +192,14 @@ modes.
 
 ### Phase 1 — Land PR 19
 
-PR 19 is the dependency of everything else. Its 43 red cells are the honest
-picture the branch was built to expose, not a regression.
+PR 19 is the dependency of everything else. It is an ordinary descendant of
+`main` and merges normally. Its 43 red cells are the honest picture the branch
+was built to expose, not a regression.
 
-**Approved route: one-time admin merge**, with the full failure set recorded in
-the PR body so it is recoverable without re-running CI.
+**Chosen route: one-time admin merge**, with the full failure set, source run,
+head SHA, and reason for the override recorded in the PR body. The person
+performing the merge must have explicit authority to bypass the required check;
+this plan does not turn a draft status into that authorization.
 
 Chosen over widening `ci-baseline.toml` deliberately. Baselining 43 cells to
 land the branch that *made them visible* would convert a one-time exception into
@@ -153,33 +210,94 @@ The baseline stays reserved for failures that are genuinely accepted for a
 period, and every such entry still needs `owner`, `reason`, `source_run`, and
 `expiry`.
 
+Before the override:
+
+- confirm branch protection still requires only `ci-verdict` — as of 2026-07-30
+  ruleset `protect-your-bacon` (id 19747338) lists it as the sole required check,
+  so this is a check, not a change;
+- confirm the head being merged is the head that was reviewed;
+- confirm `Cargo.lock` is tracked and the six stale baseline entries remain
+  retired;
+- pause unrelated merges until the post-merge `main` run reports, so a second
+  change cannot be confused with the accepted failure set.
+
 **Exit criteria:** PR 19 is on `main`; `ci-verdict` is the required check;
-`Cargo.lock` is tracked.
+`Cargo.lock` is tracked; the post-merge `main` run is linked from the PR.
 
-### Phase 2 — Rebase PR 21 onto the new `main`
+### Phase 2 — Replay PR 21's own 12 commits onto the new `main`
 
-Expect a mostly clean rebase: the eighteen missing commits are one-sided
-relative to the shared base.
+The branch point is real (`2d6a606d5`), so this is an ordinary rebase of a known
+range rather than a reconstruction. Use the range explicitly rather than a plain
+`git rebase main`: if PR 19 is squash-merged, its commits lose per-commit patch
+identity and Git cannot reliably skip PR 21's copies of the shared CI work.
 
-Verify after rebasing, before pushing:
+The PR 21-only range is exactly 12 commits (`47a550084^` resolves to
+`2d6a606d5`, the verified branch point):
 
-- `git grep -c 'cargo_bin!' -- '*/tests/*'` returns **0**
-- `grep -n RUSTFLAGS .github/workflows/_area-ci.yml` shows it only on `lint`
+```text
+git rebase --onto origin/main 2d6a606d5 fix/windows-sniff
+```
+
+It changes 81 files (1,924 insertions, 201 deletions) before conflict
+resolution. PR 19's tree is authoritative when an old policy and a later PR 19
+correction overlap. Record every dropped or rewritten hunk; do not resolve
+conflicts by taking an entire side.
+
+The replay also implements the kache policy in this plan. In particular, do not
+preserve `949e76016`'s tracked, unconditional `.cargo/config.toml` wrapper
+merely because it is part of the 12-commit range.
+
+Verify after the replay, before pushing:
+
+- `rg -n 'cargo_bin!' --glob '**/tests/**'` produces no matches
+- `rg -n RUSTFLAGS .github/workflows/_area-ci.yml` shows it only on `lint`
 - `.github/ci/areas.json` still carries `"node": true` for `homelab`
 - `just/devops.just` tier filters are anchored with `(^|::)`
-- `.github/actions/report-kache/action.yml` exists
-- root `Cargo.lock` is tracked and `.gitignore` does not re-ignore it
+- kache action calls, report steps, reusable-workflow inputs, and per-area
+  policy are absent
+- `git ls-files --error-unmatch Cargo.lock` succeeds and `.gitignore` does not
+  re-ignore it
 - `scripts/ci/affected_scope.py` retains `NODE_PROVISIONED_ENVIRONMENTS`, the
   `node` schema validation, and the justfile/pnpm drift guard, together with
   their tests in `test_affected_scope.py`
+- `.github/ci/README.md` agrees with `AREA_DEFAULTS`, including
+  `wsl2-ubuntu` in the default environment list (the PR 19 README currently
+  omits it)
+- the final diff from post-PR-19 `main` is the reviewed 12-commit intent plus
+  the explicitly listed conflict resolutions and kache-policy changes, with no
+  deletion of PR 19's later fixes or specs
+
+Update the PR branch with `--force-with-lease` against recorded head
+`02a89f149`. A changed 195-file GitHub count is expected because the PR will no
+longer carry the older CI stack; review the resulting inventory instead of
+treating the old count as a target.
 
 **Exit criteria:** the `playa` and `biscuit-terminal` Windows `check` cells pass,
 the canary stage succeeds, and **the area fan-out actually runs** — the first
 Windows evidence for the `sniff` work.
 
-### Phase 3 — Retarget PR 22 to `main`
+### Phase 3 — Make stacked CI explicit, rebuild PR 22, then retarget
 
-Once PR 21 lands, retarget so PR 22 gets a `ci` run.
+Include in rebased PR 21 a change making `ci.yml` run for pull requests
+against any base, rather than only `main`. `affected_scope.py` already uses the
+event's base and head SHAs, so a stacked PR naturally validates only its delta.
+The modest extra runner cost is the price of evidence before a parent branch
+lands.
+
+Update `pr-health.yml` in the same change. Today its `push` path can say a
+non-`main` PR "can schedule CI" after checking only mergeability, even though
+`ci.yml` filters that PR out. Once all PR bases are supported, the name and
+claim become true. Add a workflow-contract test so the two trigger policies
+cannot drift apart again.
+
+Rebuild PR 22 onto rebased PR 21 with the safe, genuinely shared range:
+
+```text
+02a89f149..f83c69da5
+```
+
+Equivalently, after recording both old heads, rebase the six PR 22 commits with
+`--onto <new-pr21-head> 02a89f149`. Use `--force-with-lease`.
 
 One known conflict: PR 22's `fa0087bcd fix(research): support symlinks on
 Windows` and PR 19's `ef1be90c1 fix(research): create symlinks on Windows
@@ -191,18 +309,24 @@ implementation; do not merge both.
 PR 22's `renderable` (rooted asset paths) and `queue` (native shell) fixes are
 **additive** — they close cells PR 19 leaves red.
 
-Separately, decide whether `ci.yml` should trigger on non-`main` bases. A
-stacked PR that silently runs no CI is a visibility gap regardless of how this
-particular stack resolves.
+Run CI while PR 22 still targets rebased PR 21. After PR 21 lands, retarget
+PR 22 to `main`. If PR 21 was squash- or rebase-merged and its rebuilt head is
+not an ancestor of `main`, rebase the six-child-commit range onto `origin/main`
+before retargeting; otherwise the PR diff will reintroduce its parent.
 
-**Exit criteria:** PR 22's changes have cells.
+**Exit criteria:** stacked PRs schedule `ci.yml`; `pr-health` and `ci.yml` agree
+on applicability; PR 22's `biscuit-file`, `queue`, `renderable`, `research`, and
+`unchained-ai` changes receive applicable CI cells before merge; the final
+retargeted diff contains only the six-child-commit intent and recorded conflict
+resolution.
 
 ### Phase 4 — Windows burn-down
 
-Baseline from PR 19's verdict (run 30489327076), the only run with full
-visibility:
+Baseline from PR 19's verdict (run 30489327076), the only measured run with full
+visibility. Numeric entries are failing-test counts, not job or rollup-cell
+counts; textual entries describe missing producer evidence:
 
-| Area | Windows | Other environments |
+| Area | Windows observation | Other environment observations |
 |---|---|---|
 | `sniff` | **394** | 5 ubuntu, 4 macOS |
 | `biscuit-terminal` | 36 | 2 ubuntu, 3 macOS |
@@ -219,20 +343,25 @@ visibility:
 | `claudine` | build failure + missing shards | 15+ ubuntu |
 | `darkmatter` | MISSING (timeout) | 26 ubuntu, 1 macOS |
 
-PR 21 and PR 22 plausibly address most of this. **None of it is verified**, which
-is the entire argument for Phases 2 and 3. Re-derive this table from the first
-post-rebase run before assigning any burn-down work.
+PR 21 and PR 22 may address much of this. **None of it is verified**, which is
+the entire argument for Phases 2 and 3. Re-derive this table from the first
+post-replay run before assigning any burn-down work, and separate test
+failures from build failures, timeouts, cancellations, missing artifacts, and
+policy gaps.
 
 Two items are independent of the Windows product bugs and should be tracked
 separately:
 
-- **`claudine` build-time budget.** ~20m45s of a 30-minute job is compilation;
-  the lib is rebuilt three times per job; sharding tests does not shard the
-  build; Windows has no compile cache. Options: raise `timeout-minutes`,
-  collapse the triple rebuild into one nextest invocation, or get a cache onto
-  Windows. The middle option is the real fix but interacts with per-package
-  JUnit staging.
-- **`darkmatter` Windows timeout.** Same class, different area.
+- **`claudine` build-time budget.** In the measured run, ~20m45s of a 30-minute
+  job was compilation and the library was built three times. Sharding tests
+  does not automatically shard compilation. Windows already has
+  `Swatinem/rust-cache`; it did not keep this cold/miss path inside the budget.
+  Raise `timeout-minutes` first so the next run produces evidence, then profile
+  whether invocations can share build work without breaking per-package JUnit
+  identity.
+- **`darkmatter` Windows timeout.** Diagnose it independently before calling it
+  the same class; a timeout alone does not prove duplicate compilation is the
+  cause.
 
 Already specced, to run after these merges:
 
@@ -259,7 +388,8 @@ From `report-kache` in run 30489327076:
 | `biscuit-hash` macOS | 100% (2 / 0) | 100% | 437ms |
 
 Against the local macOS measurement of **99.6% warm, 35.1 → 18.3 min**
-(`docs/kache-strategy.md`). CI is getting essentially nothing.
+(`docs/kache-strategy.md`). The measured CI legs are getting essentially
+nothing; do not generalize that result to a future backend or action version.
 
 ### Why
 
@@ -270,37 +400,46 @@ kache: no S3 remote configured — falling back to GitHub Actions cache
 GitHub cache key: kache-v0.8.0-linux-x64-49bb78f395f904c1
 ```
 
-**One key for the entire repository.** GitHub Actions cache entries are
-immutable and branch-scoped: the first job to finish wins the write, every other
-leg's save is discarded, and a PR branch's writes are invisible to other
-branches and deleted with the PR. The store cannot accumulate. The WSL2 leg also
-hit `Failed to restore: Cache service responded with 400` and a failed save,
-suggesting pressure against the 10 GB/repo quota.
+The action's GitHub-cache key is based on kache version, OS, architecture, and
+`Cargo.lock`, so it is not literally one key across every OS. It is still one
+exact key shared by all same-platform area jobs at the same lockfile state. An
+exact GitHub Actions cache entry is immutable, so the first successful save for
+that key wins and later jobs cannot accumulate their disjoint stores into it.
 
-Meanwhile `Swatinem/rust-cache@v2` runs alongside kache on every leg and is doing
-the caching that actually works.
+Pull-request caches are scoped to the PR merge ref. They can restore from their
+base/default branch, but caches they create are available only to reruns of that
+PR; they are not immediately deleted when the PR closes. They expire or are
+evicted under GitHub's retention and repository-size policy. See GitHub's
+[dependency caching reference](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching).
+
+The WSL2 leg also hit `Failed to restore: Cache service responded with 400` and
+a failed save. That is consistent with cache-service or quota pressure but does
+not prove the cause. Inspect the Actions cache inventory before attributing it
+to the default 10 GiB repository limit.
+
+`Swatinem/rust-cache@v2` already persists Cargo artifacts on every native leg
+and should remain while kache is disabled. The kache report does not measure
+`rust-cache`, so do not claim its hit rate without separate evidence.
 
 ### Target configuration
 
 | Target | Decision | Rationale |
 |---|---|---|
-| **macOS dev** | **Yes** | APFS reflink; measured 99.6% warm. kache's best case. |
-| **Linux dev** | **Yes, qualified** | ext4 is hardlink mode — the store is a genuine second copy and `gc` cannot reclaim blobs a live `target/` still links. Unqualified yes on btrfs / XFS-reflink. |
-| **Windows dev** | **No** | NTFS is copy-mode. Only a ReFS Dev Drive makes it worthwhile. |
-| **WSL2** | **No** | The WSL2 CI leg runs a prebuilt archive and compiles nothing. |
+| **macOS dev** | **Opt in after probe** | Measured 99.6% warm on the current APFS layout. Other store/target layouts must still prove clone support. |
+| **Linux dev** | **Opt in after probe** | ext4 is hardlink mode: store ingestion is a second copy and live target links limit reclamation. btrfs / XFS-reflink are stronger candidates. |
+| **Windows dev** | **Off by default** | NTFS defaults to copy restore. Opt in only after a ReFS Dev Drive (store and target together) is measured. |
+| **WSL2 dev** | **Qualified like Linux** | A normal distro root is commonly ext4 in a VHDX; measure storage and restore behavior. |
+| **WSL2 CI guest** | **No** | It executes a prebuilt nextest archive and compiles nothing inside the guest. |
 | **CI** | **Off for now** | Keep `rust-cache`. Revisit only with an S3/R2 backend. |
 
 ### Actions
 
 **K1 — Move the wrapper from repository policy to host policy.**
 
-The tracked `.cargo/config.toml` sets `[build] rustc-wrapper = "kache"`
-repo-wide and unconditionally, which forces kache onto every OS including
-Windows, where the answer is no. A Windows contributor who clones and runs
-`cargo build` before `just init` gets `failed to run 'kache'` on every command.
-It is also why `enable-kache` must *neutralize* the wrapper on five separate
-legs and why every other workflow sets `RUSTC_WRAPPER: ""` at workflow level —
-a lot of machinery to undo a decision the config file made too broadly.
+PR 21's tracked `.cargo/config.toml` sets
+`[build] rustc-wrapper = "kache"` repo-wide and unconditionally. A contributor
+who clones and runs Cargo before installing kache gets a hard failure. It also
+forces CI and unsupported filesystem layouts to opt out of repository policy.
 
 The kache skill added in PR 22 states the rule directly:
 
@@ -308,65 +447,80 @@ The kache skill added in PR 22 states the rule directly:
 > every developer OS. Prefer explicit CI activation and host-local opt-in when
 > filesystems differ across the team.
 
-Seed a host-local config from `just init` on macOS and Linux; drop the tracked
-wrapper. Cargo config has no conditionals, so the environment variable is the
-only mechanism that can express a per-host decision.
+Drop the tracked wrapper and do **not** silently activate it from `just init`.
+Automatic activation on every Linux host would contradict the filesystem probe
+required above, and `kache init` writes to `$CARGO_HOME/config.toml`, affecting
+other repositories on that host.
 
-**K2 — Disable kache in CI until a remote backend exists.**
+Remove `_ensure-kache` from `just init` and the native Windows initialization
+path. Keep it as an explicit pinned installer, then make activation a separate
+developer choice after `kache init --check`, `kache doctor`, and a store/target
+clone-mode probe. Document both supported activation scopes:
 
-The GitHub-cache fallback structurally cannot work with one shared key. If it
-is kept in the interim, give `kache-action` a per-area cache key so legs stop
-colliding.
+- per shell: `RUSTC_WRAPPER=kache`, the narrowest and easiest to undo;
+- host-wide: `kache init`, only with informed consent because it modifies Cargo
+  home configuration.
+
+Document rollback (`RUSTC_WRAPPER=""` for a shell, or remove the wrapper from
+Cargo home). Do not create an ignored repository `.cargo/config.toml`
+automatically; hidden local policy is difficult to diagnose.
+
+**K2 — Remove kache from CI until a remote backend experiment justifies it.**
+
+Keep `Swatinem/rust-cache@v2`, but remove the kache action calls, reporting
+steps, reusable-workflow inputs, and per-area `kache` policy rather than leaving
+a permanently false dead path. Keep `.github/kache-version` for developer
+installation.
+
+If a short experiment is needed before removal, the current action exposes
+`cache-key-prefix`; scope it by area and job/tier to stop same-platform writers
+colliding, then compare wall time and weighted hit rate against the no-kache
+control. Per-area keys trade collision for fragmentation and are not the target
+architecture.
 
 **K3 — Keep the version pin at 0.12.0.**
 
-`.github/kache-version` = **0.12.0** is the single authority and is correct.
-PR 19 still pins `0.8.0`; the merge must land on 0.12.0. The `enable-kache`
-verify step compares `kache --version` against the file and fails the bootstrap
-on a mismatch, so a stale pin surfaces loudly rather than silently building
-through an unexpected wrapper.
+`.github/kache-version` = **0.12.0** is the developer-install authority selected
+by PR 21; PR 19 still pins `0.8.0`. `_ensure-kache` must compare the installed
+version with the file and install that exact version on mismatch.
 
-0.12.0 is where `doctor` reports the store filesystem and where Windows block
-cloning exists, so the upgrade matters beyond the version string.
+Do not attribute Windows block cloning to 0.12.0: the repository's own kache
+research records ReFS support as present in 0.8.0. The 0.12.0 pin is still
+useful for the newer diagnostics used by this policy, but it must be validated
+as the intended release rather than justified by a feature-version claim that
+the same documentation contradicts.
 
-**K4 — `cargo binstall kache` is the install path on every OS.**
+**K4 — `cargo binstall` is the canonical developer install path on every OS.**
 
-Regardless of platform, install kache with:
-
-```sh
-cargo binstall kache
-```
-
-It fetches a prebuilt binary rather than compiling from source, and it honours
-an exact version, so it satisfies the single-authority requirement directly:
+It fetches a prebuilt binary rather than compiling kache from source. On every
+platform, the documented entry point is the explicit root installer recipe. The
+recipe, not a Bash-only command substitution in user documentation, resolves
+`.github/kache-version` and runs the equivalent of:
 
 ```sh
-cargo binstall kache@"$(tr -d '[:space:]' < .github/kache-version)"
+cargo binstall --no-confirm --force --version 0.12.0 kache
 ```
 
-The root justfile's `_ensure-kache` recipe already does this and should stay as
-the canonical developer path. Document it in the kache skill's
+The root justfile's `_ensure-kache` recipe already performs the pinned install
+and should stay as the canonical developer path, but no longer as a dependency
+of general initialization. Document it in the kache skill's
 `installation.md`, which currently leads with per-OS package managers (mise,
 brew, apt, AUR, winget, scoop, choco) — those become fallbacks, not the
 recommendation.
 
-This has a direct consequence for CI. `kunobi-ninja/kache-action@v1` is the
-**only** component that rejects `win32-x64`, and it is also what installed
-`0.8.0` against the older pin in run 30489327076. Replacing it with binstall
-would remove the Windows exclusion and guarantee the pinned version on every
-leg.
+This developer decision does not prescribe the future CI installer. The
+mutable `kunobi-ninja/kache-action@v1` used by the measured run rejected
+`win32-x64`, but its current official documentation now lists Windows x64 and
+arm64 as supported and exposes both `version` and `cache-key-prefix`. That drift
+is itself a reason not to encode the old limitation as permanent architecture.
 
-It would not, however, make kache worth running in CI on its own: the action
-also supplies the GitHub-cache-backed store persistence, and that backend is
-precisely what K2 finds worthless (one repo-wide key, immutable and
-branch-scoped entries). So the ordering is:
+The ordering is:
 
 1. Apply K2 — kache off in CI now.
-2. If and when a remote backend lands, re-enable CI kache as
-   **binstall + explicit `actions/cache` or S3**, not `kache-action@v1`. At that
-   point Windows CI becomes a policy decision (measure it) rather than a
-   platform limitation, and `docs/kache-strategy.md`'s "Option B" collapses to
-   the install step described here.
+2. If a remote backend lands, compare the official action with an explicit
+   installer/backend design. If the action is used, pin it to a reviewed commit
+   SHA, pass `.github/kache-version`, assign distinct manifest/namespace keys by
+   build variant, and measure Windows rather than assuming support or value.
 
 **K5 — Keep `cargo-sweep` regardless.**
 
@@ -380,20 +534,33 @@ above.
 Per repo policy, run gates only for the recorded scope — never
 `cargo build --workspace` or an unscoped root lifecycle recipe.
 
+- Before implementation gates, refresh GitNexus successfully, run impact
+  analysis for every changed symbol, and use `sniff repo packages` plus current
+  metadata to record affected packages, package areas, and downstream
+  consumers. Stale graph output is not valid dependency evidence.
+- Every force-updated branch requires ancestry, range, and changed-file
+  inventory checks before a push, and `--force-with-lease` pinned to the
+  recorded remote head.
+- Confirm the clone is not shallow (`.git/shallow` absent) before reasoning
+  about history; see the ancestry note above for why.
 - Phase 2 and 3 changes are CI configuration plus per-area product fixes; verify
-  with each affected area's `just build`, `just test`, `just lint`.
+  each recorded package area with `just build`, `just test`, and `just lint`.
 - Cross-platform compile checks on a macOS host use
   `cargo xwin check --target x86_64-pc-windows-msvc <area check_args> --all-targets`,
   with the area's declared `check_args` — not a bare `-p <lib>`, which silently
-  skips cfg-gated modules.
+  skips cfg-gated modules. This is compile evidence only; Windows runtime
+  behavior still requires a native Windows CI cell.
+- Run `actionlint` for workflow syntax and expression validation.
 - `scripts/ci/test_affected_scope.py` and
   `tools/test-toolkit/tests/ci_workflow_contracts.rs` guard the CI configuration
   itself and must pass before any workflow change is pushed.
+- Run the `ci-rollup` test suite whenever scope, artifact identity, baseline, or
+  verdict behavior changes.
 
 ## Non-goals
 
-- Fixing the Windows product bugs in this plan. Phase 4 sequences them; the
-  fixes belong to their area specs.
+- Authoring new Windows product fixes in this plan. Phases 2 and 3 integrate the
+  fixes already written; Phase 4 sequences any remaining work under area specs.
 - Redesigning the canary gate. It behaved correctly — blocking the fan-out on a
   canary failure is the intended contract, and the problem was the failure, not
   the gate.
@@ -403,22 +570,33 @@ Per repo policy, run gates only for the recorded scope — never
 
 ## Acceptance criteria
 
-- [ ] PR 19 is merged by admin override; its failure set is recorded in the PR
-      body, and no baseline entries were added to achieve the merge.
+- [ ] PR 19 is merged by an authorized admin override; its failure set, source
+      run, and head SHA are recorded in the PR body, and no baseline entries were
+      added merely to achieve the merge.
 - [ ] `Cargo.lock` is tracked on `main`.
-- [ ] PR 21 is rebased and every item in the Phase 2 verification list holds.
+- [ ] PR 21 is replayed from the 12-commit range (`2d6a606d5..02a89f149`) onto
+      post-PR-19 `main` and every item in the Phase 2 verification list holds.
 - [ ] `canary / playa / check (windows-latest)` passes.
 - [ ] `canary / biscuit-hash / wsl2 / test` passes.
 - [ ] The area fan-out runs on PR 21 — `matrix.area` is no longer `skipped`.
-- [ ] `sniff` has a Windows cell reporting a real result.
-- [ ] PR 22 targets `main` and has CI cells; the duplicate `research` symlink
-      implementation is resolved to one.
-- [ ] The Windows failure table is re-derived from a post-rebase run.
-- [ ] `.cargo/config.toml` no longer imposes a rustc wrapper on every host.
-- [ ] `cargo binstall kache` is documented as the install path on every OS, in
-      the kache skill's `installation.md` and wherever developer setup is
-      described.
-- [ ] kache is off in CI, or reports a weighted hit rate that justifies keeping
-      it on.
-- [ ] `.github/kache-version` is `0.12.0` on `main`, and the installed wrapper
-      matches it on every leg that installs kache.
+- [ ] `sniff` has Windows L1 and compile-check cells reporting real results.
+- [ ] `ci.yml` schedules stacked pull requests and `pr-health.yml` has the same
+      applicability contract, enforced by a workflow-contract test.
+- [ ] PR 22 runs CI while stacked, then targets `main` with only its intended
+      six-commit delta; the duplicate `research` symlink implementation is
+      resolved to one.
+- [ ] The Windows failure table is re-derived from a post-replay run,
+      with failures, timeouts, cancellations, missing evidence, and policy gaps
+      distinguished.
+- [ ] No tracked Cargo configuration imposes a rustc wrapper on every host, and
+      `just init` does not silently activate a host-wide wrapper.
+- [ ] The pinned `cargo binstall`-backed root recipe is documented as the
+      developer install path on every OS, in the kache skill's
+      `installation.md` and wherever developer setup is described.
+- [ ] kache action calls, reports, reusable-workflow inputs, and per-area policy
+      are removed from CI; `Swatinem/rust-cache@v2` remains.
+- [ ] `.github/kache-version` is `0.12.0` on `main`, and the developer installer
+      verifies the installed executable against it.
+- [ ] Any future kache CI experiment is separately scoped, uses a reviewed
+      commit-SHA-pinned action or explicit backend, and reports weighted hit rate
+      plus wall-clock comparison against a no-kache control.
