@@ -3,6 +3,30 @@
 Verified against the Kunobi installation docs, July 2026. Prerequisite: **Rust 1.95 or later**.
 kache ships as a self-contained binary with no runtime dependencies.
 
+## Preferred: `cargo binstall`, on every OS
+
+`cargo binstall` fetches a prebuilt binary rather than compiling from source, and it accepts an
+exact version — so it is the one path that works identically on macOS, Linux, and Windows *and*
+can honour a repository's pin:
+
+```bash
+cargo binstall --no-confirm --version <pinned> kache
+```
+
+Prefer it over the per-OS package managers below, which are fallbacks: each resolves its own
+version, so a team using several of them drifts apart.
+
+In **rusty-biscuit**, do not run this by hand — use the recipe, which reads the single version
+authority at `.github/kache-version`:
+
+```bash
+just install-kache
+```
+
+That installs and stops. Activation is a separate, deliberate step
+(`RUSTC_WRAPPER=kache` for one shell, or `kache init` host-wide), because whether kache pays off
+depends on the store's filesystem. See `docs/initialization.md` and `docs/kache-strategy.md`.
+
 ## macOS
 
 ```bash
