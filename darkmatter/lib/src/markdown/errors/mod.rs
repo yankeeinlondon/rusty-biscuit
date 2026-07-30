@@ -206,8 +206,8 @@ mod tests {
         let err = ShellExpansionError::ApprovalRequired {
             ctx: Box::new(test_ctx()),
             command: "gh repo list".into(),
-            whitelist_path: "/tmp/wl".into(),
-            blacklist_path: "/tmp/bl".into(),
+            whitelist_path: Box::new("/tmp/wl".into()),
+            blacklist_path: Box::new("/tmp/bl".into()),
             origin: ShellCommandOrigin::Body { line: 3 },
         };
         let out = render(&err);

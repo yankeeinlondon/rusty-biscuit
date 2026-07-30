@@ -976,7 +976,7 @@ fn compose_error_preserves_frontmatter_fence_mismatch_source() {
         "----\nname: x\n----\n".to_string(),
     );
     let md_err = MarkdownError::FrontmatterFenceMismatch {
-        ctx,
+        ctx: Box::new(ctx),
         found: "----".to_string(),
         line: 1,
     };

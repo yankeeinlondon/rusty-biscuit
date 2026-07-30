@@ -89,7 +89,7 @@ fn enrich_frontmatter_fence_mismatch_attaches_excerpt() {
         source.original_text.clone(),
     );
     let md_err = MarkdownError::FrontmatterFenceMismatch {
-        ctx,
+        ctx: Box::new(ctx),
         found: "----".to_string(),
         line: 1,
     };
@@ -113,7 +113,7 @@ fn enrich_frontmatter_fence_mismatch_highlights_line_one() {
         source.original_text.clone(),
     );
     let md_err = MarkdownError::FrontmatterFenceMismatch {
-        ctx,
+        ctx: Box::new(ctx),
         found: "----".to_string(),
         line: 1,
     };
