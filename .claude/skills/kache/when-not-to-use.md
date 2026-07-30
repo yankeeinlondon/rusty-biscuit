@@ -20,27 +20,34 @@ This makes kache a **dependency and cross-machine optimizer, not an inner-loop o
 
 If your day is dominated by iterating on one crate in one checkout, kache may be the wrong tool.
 
-## 2. Single worktree on a non-reflink filesystem
+## 2. Single worktree on a weak storage layout
 
-On ext4/NTFS, populating the store costs a real second copy, and with one worktree there's nothing
-to dedup against. You're paying storage for a cache whose flagship benefit — one blob, many links —
-has no consumers.
+On Linux ext4, populating the store costs a real second copy, though later hits can hardlink that
+blob into `target/`. With one worktree, the cross-worktree dedup benefit has no consumers.
+
+Windows NTFS is weaker: current kache safely restores hits by copy, so the store and live target
+also occupy independent blocks. Do not group NTFS with ext4 when estimating storage.
 
 Still worth it if you get value from: cheap re-cleaning (a warm store makes `clean` non-destructive
 in cost terms), CI/multi-machine sharing via S3, or you're about to start using worktrees.
 
 Not worth it if the machine is disk-constrained and does one thing.
 
+Do not treat `[cache] windows_hardlink = true` as the routine fix. It is safe only when restored
+outputs are never deleted, overwritten, stripped, or otherwise modified in place. Prefer ReFS or
+disable kache on that host.
+
 ## 3. Link-dominated builds
 
-kache **does not cache** binary crates, dynamic libraries, proc-macros (by default), link and
+kache **does not cache** user-facing binary crates and test harnesses by default, link and
 whole-program steps, multi-source or multi-arch invocations, response-file (`@file`) invocations,
-precompiled headers, modules, coverage, or split-DWARF.
+precompiled headers, modules, coverage, or split-DWARF. Dylibs, cdylibs, and proc-macros remain
+cacheable.
 
 A workspace whose build time is mostly linking many binaries and test executables — a big `nextest`
 suite, for example — sees a much smaller share of its work cached. `KACHE_CACHE_EXECUTABLES=1`
-extends coverage but those outputs are linker- and platform-sensitive (macOS code signing), so
-verify results before relying on it.
+extends coverage to user-facing executables, but those outputs are linker- and platform-sensitive,
+so verify results before relying on it.
 
 ## 4. C/C++ projects needing remote sharing
 
@@ -91,7 +98,7 @@ target dirs that *share storage*, which is what you actually wanted.
 Don't adopt if **all** of these hold:
 
 - One machine, one worktree, no CI
-- Non-reflink filesystem
+- Weak storage layout, especially Windows NTFS copy mode
 - Inner loop dominated by editing one crate
 - Disk already tight
 

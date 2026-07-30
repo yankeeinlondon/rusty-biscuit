@@ -86,7 +86,8 @@ The cargo integration is a single line, which you can also write by hand:
 rustc-wrapper = "kache"
 ```
 
-Or per-shell / per-CI-step: `export RUSTC_WRAPPER=kache`.
+Or per-shell / per-CI-step: `export RUSTC_WRAPPER=kache` (PowerShell:
+`$env:RUSTC_WRAPPER = "kache"`).
 
 Prefer the env var when you want kache active for one build or one agent only; prefer
 `~/.cargo/config.toml` for a machine-wide default. Note that `~/.cargo/config.toml` is often on a
@@ -139,3 +140,7 @@ kache purge                 # drop the store contents
 Then remove `rustc-wrapper` from `~/.cargo/config.toml` (or unset `RUSTC_WRAPPER`) and delete the
 store directory — see [platforms.md](platforms.md) for its location on each OS. Removing the wrapper
 re-enables cargo's incremental compilation on the next build.
+
+`KACHE_DISABLED=1` is not a full rollback: current kache still strips Cargo's incremental flags
+while acting as the wrapper. Remove or override the wrapper when comparing normal Cargo incremental
+builds with kache.
