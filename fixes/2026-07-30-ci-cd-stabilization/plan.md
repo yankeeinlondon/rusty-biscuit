@@ -568,6 +568,51 @@ Per repo policy, run gates only for the recorded scope — never
   as a separate piece of work.
 - Changing `ci-verdict` as the required status check.
 
+## Execution log — 2026-07-30
+
+| Phase | State | Evidence |
+|---|---|---|
+| 1 — land PR 19 | **done** | merge commit `53cfeec00`; admin override inside a restored-on-exit ruleset window; `enforcement=active`, `bypass_actors=0` after |
+| 2 — replay PR 21 | **done** | `git rebase --onto main 2d6a606d5`; 11 of 12 clean, one conflict; head `f2f600a9f` |
+| 3 — stacked CI + PR 22 | **done** | `ci.yml`/`pr-health.yml` base filters removed; PR 22 head `c3f8ae798`; first-ever `ci` run **30562649123** (112 jobs) |
+| 4 — Windows burn-down | not started | awaiting the first post-replay area fan-out |
+
+Recovery tags pushed to the remote: `recovery/pr19-pre-merge` (`b09b1f50e`),
+`recovery/pr21-pre-rebase` (`02a89f149`), `recovery/pr22-pre-rebase`
+(`f83c69da5`).
+
+**Both PR 21 canary failures are resolved**, in run 30562547696:
+`canary / playa / check (windows-latest)` and
+`canary / biscuit-hash / wsl2 / test (wsl2-ubuntu)` both pass, so the area
+fan-out is no longer gated.
+
+Conflicts resolved, both predicted by this plan:
+
+- `sniff/{lib,cli}/Cargo.toml` — kept PR 21's `default-features = false` with
+  PR 19's fuller comment and range ceiling, dropping PR 19's now-false remark
+  that `Cargo.lock` is gitignored.
+- `research/lib/src/{link/creation.rs,link/mod.rs,pull.rs}` — the duplicate
+  symlink fix. `creation.rs` was functionally identical; `pull.rs` was not.
+  PR 22's made any symlink failure fatal, PR 19's treats
+  `ERROR_PRIVILEGE_NOT_HELD` as a warning and continues. Kept PR 19's, because a
+  default Windows host without Developer Mode cannot create symlinks and the
+  framework aliases are non-essential. PR 22's commit dropped as empty.
+
+### Found during execution, not planned for
+
+`lockfiles_stay_gitignored_so_release_checkout_cannot_block` had been failing on
+`main` since PR 19 committed the lockfiles — that commit reversed the premise the
+test asserts without updating it. Replaced with the current policy.
+
+It exposed a live risk that is **not closed**: release-plz asserts a clean
+tracked worktree after release calculation, and a regenerated lock is now
+tracked, so that assertion will see it and fail the release. The path runs only
+on `main` after a green CI run and cannot be exercised from a branch. Recorded in
+`release-plz.yml`. When it fires, choose between committing the regenerated lock
+as part of the release commit or scoping the assertion to exclude lockfiles — do
+not simply re-ignore lockfiles, which would undo the reproducibility this branch
+bought.
+
 ## Acceptance criteria
 
 - [ ] PR 19 is merged by an authorized admin override; its failure set, source
