@@ -128,6 +128,7 @@ fn query_cursor_position(_timeout: Duration) -> Result<CursorPosition, String> {
 ///
 /// Expected format: `ESC[{row};{col}R`
 /// Searches backwards from the `R` terminator to handle echoed query noise.
+#[cfg(any(unix, test))]
 fn parse_cpr_response(data: &[u8]) -> Option<CursorPosition> {
     let text = std::str::from_utf8(data).ok()?;
 

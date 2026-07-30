@@ -131,6 +131,7 @@ pub fn window_size_pixels() -> Option<WindowSizePixels> {
 /// Parse the CSI 14 t response format.
 ///
 /// Expected format: `\x1b[4;height;widtht`
+#[cfg(any(unix, test))]
 fn parse_csi_14t_response(response: &[u8]) -> Option<WindowSizePixels> {
     // Find the CSI sequence start
     let esc_pos = response.iter().position(|&b| b == 0x1b)?;
