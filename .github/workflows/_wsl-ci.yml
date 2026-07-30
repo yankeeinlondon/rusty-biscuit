@@ -82,6 +82,9 @@ on:
         default: Ubuntu-24.04
 
 env:
+  # kache is not installed in this workflow; build wrapper-free by overriding
+  # the tracked .cargo/config.toml rustc-wrapper (docs/kache-strategy.md).
+  RUSTC_WRAPPER: ""
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   COLORTERM: truecolor
   NEXTEST_PROFILE: ci

@@ -16,6 +16,9 @@ permissions:
   contents: read
 
 env:
+  # kache is not installed in this workflow; build wrapper-free by overriding
+  # the tracked .cargo/config.toml rustc-wrapper (docs/kache-strategy.md).
+  RUSTC_WRAPPER: ""
   # Override the pinned toolchain with floating latest stable for this run only.
   # RUSTUP_TOOLCHAIN takes precedence over rust-toolchain.toml.
   RUSTUP_TOOLCHAIN: stable
