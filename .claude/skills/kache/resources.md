@@ -59,11 +59,12 @@ and `--help` is always true for the binary in front of you.
 
 ## Facts worth re-verifying over time
 
-These were true as of **July 2026, kache 0.7.0** and are the most likely to drift:
+These were reviewed against **kache 0.12.0 in July 2026** and are the most likely to drift:
 
 - Default `local_max_size` (50 GiB) and the CI action's `max-size` default
-- Whether proc-macros/executables remain excluded by default
+- Whether user-facing executables remain excluded by default
 - Whether C/C++ artifacts are still local-only
+- Windows NTFS copy fallback, `windows_hardlink` and `storage_layout_advice` semantics
 - Windows daemon service mechanism, and whether ReFS block cloning is used for restores
 - The planner service's status (preview at time of writing)
 - Whether incremental compilation remains disabled — the single fact most worth re-checking, since

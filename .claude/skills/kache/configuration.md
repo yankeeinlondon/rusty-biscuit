@@ -4,25 +4,40 @@
 
 | Item | Path |
 | --- | --- |
-| Config file | `~/.config/kache/config.toml` (verified on macOS; `kache config` opens it) |
+| Config file (macOS/Linux) | `~/.config/kache/config.toml` |
+| Config file (Windows) | `%APPDATA%\kache\config.toml` |
 | Store (macOS) | `~/Library/Caches/kache` + `index.db` |
 | Store (Linux) | `~/.cache/kache` |
-| Store (Windows) | under `%LOCALAPPDATA%` — confirm with `kache doctor` |
+| Store (Windows) | `%LOCALAPPDATA%\kache` by default — confirm with `kache doctor` |
 | Cargo wiring | `~/.cargo/config.toml` → `[build] rustc-wrapper = "kache"` |
 | Daemon service | launchd agent (macOS) / systemd user unit (Linux) |
 
-`kache doctor` prints the resolved paths — use it rather than guessing, especially if `~/.config`
-or `~/.cargo` is a synced or shared directory across hosts.
+`kache doctor` prints the resolved store and Cargo wiring. Use it rather than guessing, especially
+if the home directory or Cargo config is synced across hosts.
+
+## Host policy versus repository policy
+
+A tracked `.cargo/config.toml` makes kache mandatory for every contributor and operating system.
+Use that only when the repository intentionally supports and provisions kache on every host.
+Otherwise prefer:
+
+- explicit activation in CI;
+- `RUSTC_WRAPPER=kache` for one shell, build, or agent; or
+- a host-local Cargo config on machines whose filesystem and workflow justify it.
+
+This keeps APFS/btrfs/XFS/ReFS hosts on the strong path without forcing Windows NTFS hosts into copy
+mode. When repository docs disagree with the tracked Cargo config or CI workflow, report the drift
+instead of assuming either is current.
 
 ## Minimal config
 
 ```toml
 [cache]
-local_max_size = "100GiB"
+local_max_size = "50GiB" # Example only; size against this volume's working set and free space.
 ```
 
 The default store cap is **50 GiB** (matching the CI action's `max-size` default). Most tuning is
-this one key plus a gc cadence.
+this one key plus a gc cadence; the example is not a universal recommendation.
 
 ## Sizing the store — the rule that matters
 
@@ -40,6 +55,8 @@ Practical guidance:
 - Give headroom above the working set, especially after a **kache upgrade that bumps the key
   version** — every entry is invalidated at once and the store must repopulate while still holding
   the dead blobs.
+- Compare the requested cap with current free space. Never seed `100GiB` by habit on a volume that
+  cannot provide that headroom.
 - On a capped or shared filesystem, size against the *volume*, not habit. A 100 GiB store on a
   200 GB filesystem that also holds `target/` is a collision waiting to happen; 30 GiB is saner.
 - On hardlink filesystems, remember the cap bounds *unique* store bytes while live `target/` links
@@ -86,10 +103,10 @@ periodic sweep or clean job. Options, in rough order of preference:
 kache daemon start | stop | restart | install | uninstall | log | run
 ```
 
-There is **no `daemon status`** subcommand (as of 0.7.0) — use `kache doctor`, which reports
-reachability, or `kache stats`, whose last lines show `Daemon: offline|online` and whether a remote
-is configured. On macOS, `launchctl list | grep kunobi` showing `-` in the PID column means the
-agent is loaded but not running.
+In 0.12.0, run `kache daemon` with no subcommand to show status; there is no `daemon status`
+subcommand. `kache doctor` reports reachability, and `kache stats` shows whether the daemon and a
+remote are available. On macOS, `launchctl list | grep kunobi` showing `-` in the PID column means
+the agent is loaded but not running.
 
 The daemon handles remote sync and prefetch warming. `kache doctor` flags two common faults:
 
@@ -107,12 +124,13 @@ bottleneck. A gating wrapper in front of `kache` is one mitigation pattern if yo
 | Variable | Effect |
 | --- | --- |
 | `RUSTC_WRAPPER=kache` | Enable kache for this shell/step without editing cargo config |
-| `KACHE_CACHE_EXECUTABLES=1` | Also cache binary crates, dylibs and proc-macros (off by default) |
+| `KACHE_DISABLED=1` | Bypass cache lookup while retaining the wrapper; this does **not** restore Cargo incremental compilation |
+| `KACHE_CACHE_EXECUTABLES=1` | Also cache user-facing binaries and test harnesses (off by default) |
 | `KACHE_PLANNER_ENDPOINT` / `KACHE_PLANNER_TOKEN` | Point the daemon at a remote planner (preview) |
 
-`KACHE_CACHE_EXECUTABLES` is off by default because those outputs depend on linker behaviour and
-platform specifics like macOS code signing. Enable it only if you've verified the results, and
-expect it to grow the store noticeably.
+`KACHE_CACHE_EXECUTABLES` is off by default because user-facing outputs depend on linker behavior
+and platform specifics. Enable it only after verifying the results, and expect it to grow the store
+noticeably. Dylibs, cdylibs, and proc-macros are cacheable without this flag.
 
 ## Cache keys — what invalidates entries
 
@@ -135,6 +153,7 @@ component instead of leaving you to guess.
 
 ```bash
 kache stats --since 24h                          # hits, misses, bytes saved
+kache stats --since 7d                           # longer window; compare totals to detect a cold/new cache
 kache monitor                                    # live TUI during a build
 kache list --sort size|hits|age                  # what's actually in the store
 kache report --format markdown --since 7d        # shareable summary
@@ -143,3 +162,7 @@ kache report --format perfetto -o trace.json     # build trace for profiling
 
 `report` also emits `json`, `chrome-trace`, `github` and `text`, with `--top N` and `--root <path>`
 to scope to one build tree.
+
+For an adoption review, record the weighted hit rate and estimated time saved alongside store size,
+representative target size, free space, worktree count, and remote status. A young cache may deserve
+a measured warm-up period; severe disk pressure or a cap larger than available headroom does not.
