@@ -3,7 +3,6 @@
 //! Split out of the `wrap_commands.rs` god file; shared fixtures live in
 //! `common::wrap`.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::str::contains;
 use std::fs;
 use tempfile::tempdir;
@@ -13,7 +12,7 @@ use common::{augmented_path, strip_ansi, write_executable};
 
 #[test]
 fn compose_requires_positional_arg() {
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args(["compose"])
         .assert()
@@ -26,7 +25,7 @@ fn compose_requires_positional_arg() {
 
 #[test]
 fn compose_missing_file_with_setter_only() {
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args(["compose", "key=val"])
         .assert()
@@ -41,7 +40,7 @@ fn compose_missing_file_with_setter_only() {
 
 #[test]
 fn compose_empty_key_setter_errors() {
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args(["compose", "=foo"])
         .assert()
@@ -62,7 +61,7 @@ fn compose_multiple_file_candidates_errors() {
     fs::write(&a, "---\n---\nbody\n").unwrap();
     fs::write(&b, "---\n---\nbody\n").unwrap();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .args(["compose", a.to_str().unwrap(), b.to_str().unwrap()])
@@ -78,7 +77,7 @@ fn compose_multiple_file_candidates_errors() {
 
 #[test]
 fn compose_rejects_nonexistent_file() {
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args(["compose", "/nonexistent/path/to/file.md"])
         .assert()
@@ -91,7 +90,7 @@ fn compose_rejects_non_markdown_file() {
     let txt_file = workspace.path().join("file.txt");
     fs::write(&txt_file, "hello").unwrap();
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args(["compose", txt_file.to_str().unwrap()])
         .assert()
@@ -111,7 +110,7 @@ fn compose_missing_explicit_system_prompt_fails_visibly() {
 
     write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 0\n");
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
@@ -166,7 +165,7 @@ exit 0
     );
 
     // Explicitly select codex. It exits 42. No fallback to claude.
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
@@ -178,7 +177,7 @@ exit 0
 #[test]
 fn old_compose_inline_command_is_unknown() {
     // Verify that the old `compose-inline` command no longer exists
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args(["compose-inline", "file.md"])
         .assert()
@@ -187,7 +186,7 @@ fn old_compose_inline_command_is_unknown() {
 
 #[test]
 fn retired_compose_flag_rejected_in_wrapper() {
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args(["claude", "--compose", "file.md"])
         .assert()
@@ -198,7 +197,7 @@ fn retired_compose_flag_rejected_in_wrapper() {
 
 #[test]
 fn retired_frontmatter_prompt_flag_rejected_in_wrapper() {
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args(["claude", "--frontmatter-prompt", "file.md"])
         .assert()
@@ -209,7 +208,7 @@ fn retired_frontmatter_prompt_flag_rejected_in_wrapper() {
 
 #[test]
 fn retired_prompt_file_flag_rejected_in_wrapper() {
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args(["claude", "--prompt-file", "file.md"])
         .assert()
@@ -238,7 +237,7 @@ fn compose_dry_run_body_only_on_stdout_metadata_on_stderr() {
 
     write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -308,7 +307,7 @@ fn compose_dry_run_quiet_and_silent_are_no_op() {
 
         write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
 
-        let output = cargo_bin_cmd!("claudine")
+        let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
             .env("NO_COLOR", "1")
             .env("HOME", workspace.path())
             .env("PATH", augmented_path(&path_dir))
@@ -373,7 +372,7 @@ fn compose_initialize_when_evaluation_error_exits_non_zero() {
     // raise halts the run before it is ever launched.
     write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -434,7 +433,7 @@ fn compose_initialize_error_with_failure_raise_surfaces_failure_evaluation_error
     // error + failure raise halts the run before it is ever launched.
     write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -503,7 +502,7 @@ fn compose_success_when_evaluation_error_surfaces_before_finalize_marker() {
     // its first `when:` guard raises.
     write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -561,7 +560,7 @@ fn compose_dry_run_missing_file_errors_to_stderr_with_clean_stdout() {
 
     write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))

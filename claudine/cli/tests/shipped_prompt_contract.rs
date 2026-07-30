@@ -161,7 +161,6 @@ fn shipped_prompts_have_parseable_schemas_and_expressions() {
 #[cfg(unix)]
 #[test]
 fn feature_review_cli_preserves_numeric_iteration_and_dependent_paths() {
-    use assert_cmd::cargo::cargo_bin_cmd;
     use std::fs;
 
     use common::wrap::seed_minimal_config;
@@ -186,7 +185,7 @@ fn feature_review_cli_preserves_numeric_iteration_and_dependent_paths() {
     );
 
     let prompt = repo.join("prompts/_reviews/feature-review.md");
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &bin_dir)

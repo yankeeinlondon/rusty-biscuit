@@ -58,7 +58,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 struct Staged {
     workspace: tempfile::TempDir,
@@ -189,7 +189,7 @@ fn run_loop_in_tmux(staged: &Staged, expected_min_lines: usize) -> String {
 #[test]
 #[serial(level2_lifecycle_loop)]
 fn level2_lifecycle_loop_gate_order_and_finalize_count() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     // phase starts at 1; `until: phase > 2` exits after the gate sees phase 3.
     // Iterations: phase 1, 2, 3 → 3 finalize markers; gate records 1, 2, 3
@@ -275,7 +275,7 @@ Phase {{phase}}
 #[test]
 #[serial(level2_lifecycle_loop)]
 fn level2_lifecycle_loop_blocked_first_iteration_exits_before_gate() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let doc = r#"---
 title: lifecycle loop blocked
@@ -345,7 +345,7 @@ Phase {{phase}}
 #[test]
 #[serial(level2_lifecycle_loop)]
 fn level2_lifecycle_loop_initialize_skip_ends_run_before_iterating() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let doc = r#"---
 title: lifecycle loop init skip
@@ -408,7 +408,7 @@ Phase {{phase}}
 #[test]
 #[serial(level2_lifecycle_loop)]
 fn level2_lifecycle_loop_gate_error_fails_and_exits() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     // phase starts at 1; `until: phase > 5` would run many iterations, but the
     // gate's `error(...)` aborts after the first pass. The gate records

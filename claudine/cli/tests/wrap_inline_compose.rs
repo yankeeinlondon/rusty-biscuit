@@ -3,7 +3,6 @@
 //! Split out of the `wrap_commands.rs` god file; shared fixtures live in
 //! `common::wrap`.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use chrono::Local;
 use std::fs;
 use tempfile::tempdir;
@@ -13,7 +12,7 @@ use common::{augmented_path, strip_ansi, write_executable};
 
 #[test]
 fn inline_compose_requires_positional_arg() {
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args(["inline-compose"])
         .assert()
@@ -30,7 +29,7 @@ fn inline_compose_rejects_missing_prompt_property() {
     let md_file = workspace.path().join("test.md");
     fs::write(&md_file, "---\ntitle: No prompt\n---\nBody\n").unwrap();
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args(["inline-compose", md_file.to_str().unwrap()])
         .assert()
@@ -66,7 +65,7 @@ exit 0
 "#,
     );
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
@@ -107,7 +106,7 @@ exit 0
     );
 
     {
-        let assert = cargo_bin_cmd!("claudine")
+        let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
             .env("NO_COLOR", "1")
             .env("HOME", workspace.path())
             .env("PATH", &path_dir)
@@ -146,7 +145,7 @@ fn inline_compose_preserves_frontmatter() {
         &format!("#!/bin/sh\nprintf '%s' '{}'\nexit 0\n", escaped),
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
@@ -207,7 +206,7 @@ fn inline_compose_dry_run_leaves_file_unchanged_and_prints_prompt() {
         ),
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -281,7 +280,7 @@ printf '%s\n' '{"type":"result","subtype":"success","stop_reason":"end_turn","nu
 "##,
     );
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
@@ -333,7 +332,7 @@ exit 1
 "#,
     );
 
-    let _assert = cargo_bin_cmd!("claudine")
+    let _assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
@@ -366,7 +365,7 @@ fn inline_compose_dry_run_quiet_and_silent_are_no_op() {
 
         write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
 
-        let output = cargo_bin_cmd!("claudine")
+        let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
             .env("NO_COLOR", "1")
             .env("HOME", workspace.path())
             .env("PATH", augmented_path(&path_dir))
@@ -417,7 +416,7 @@ fn inline_compose_dry_run_schema_error_to_stderr_with_clean_stdout() {
 
     write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -472,7 +471,7 @@ exit 0
 "#,
         );
 
-        let assert = cargo_bin_cmd!("claudine")
+        let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
             .env("NO_COLOR", "1")
             .env("HOME", workspace.path())
             .env("PATH", &path_dir)
@@ -512,7 +511,7 @@ exit 0
 "#,
         );
 
-        cargo_bin_cmd!("claudine")
+        assert_cmd::Command::cargo_bin("claudine").unwrap()
             .env("NO_COLOR", "1")
             .env("PATH", &path_dir)
             .env("CLAUDINE_ARGS_FILE", &args_path)
@@ -538,7 +537,7 @@ exit 1
 "#,
         );
 
-        let assert = cargo_bin_cmd!("claudine")
+        let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
             .env("NO_COLOR", "1")
             .env("HOME", workspace.path())
             .env("PATH", &path_dir)
@@ -590,7 +589,7 @@ exit 0
 "#,
         );
 
-        cargo_bin_cmd!("claudine")
+        assert_cmd::Command::cargo_bin("claudine").unwrap()
             .env("NO_COLOR", "1")
             .env("HOME", workspace.path())
             .env("PATH", &path_dir)

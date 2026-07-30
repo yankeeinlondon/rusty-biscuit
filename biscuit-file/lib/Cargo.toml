@@ -25,7 +25,7 @@ lopdf = ["dep:lopdf"]
 pdfium = ["dep:pdfium-render"]
 
 # File reference resolution
-file-reference = ["dep:gix", "dep:cargo_metadata", "dep:walkdir", "dep:dirs", "url"]
+file-reference = ["dep:gix", "dep:cargo_metadata", "dep:walkdir", "dep:dirs", "dep:dunce", "url"]
 
 # URL support (automatically enabled by file-reference)
 url = ["dep:url"]
@@ -74,6 +74,9 @@ url = { version = "2.5", optional = true }
 # Cross-platform home directory (Windows-correct, unlike `$HOME` alone)
 dirs = { version = "6", optional = true }
 
+# Windows `\\?\` verbatim-prefix stripping (no-op on every other target)
+dunce = { version = "1", optional = true }
+
 # Remote fetch
 reqwest = { version = "0.13", optional = true, features = ["json"] }
 bytes = { version = "1", optional = true }
@@ -83,6 +86,9 @@ tokio = { version = "1", optional = true, features = ["rt"] }
 jsonschema = { version = "0.42", optional = true }
 
 [dev-dependencies]
+# Not inherited from `[dependencies]`: that entry is optional behind
+# `file-reference`, while integration tests need it under any feature set.
+dunce = "1"
 serde_json = "1.0"
 toml = "1.0"
 serde_yaml_ng = "0.10"

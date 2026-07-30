@@ -29,7 +29,7 @@ use serial_test::serial;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 mod common;
 use common::{
@@ -220,7 +220,7 @@ fn capture_command(harness: &mut TmuxHarness, staged: &Staged) -> CapturedFrame 
     // out-vote — see `common::clear_no_color`.
     clear_no_color(harness);
 
-    let claudine = cargo_bin!("claudine").display().to_string();
+    let claudine = cargo_bin("claudine").display().to_string();
     let home = staged.workspace.path().to_string_lossy().into_owned();
     let path = augmented_path(&staged.bin_dir);
     let path = path.to_string_lossy().into_owned();
@@ -256,7 +256,7 @@ fn capture_command(harness: &mut TmuxHarness, staged: &Staged) -> CapturedFrame 
 #[test]
 #[serial(level2_terminal)]
 fn level2_invalid_file_reference_renders_headline_excerpt_and_osc8_link_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let staged = stage("claudine-invalid-file-ref-l2");
@@ -346,7 +346,7 @@ fn level2_invalid_file_reference_renders_headline_excerpt_and_osc8_link_in_tmux(
 #[test]
 #[serial(level2_terminal)]
 fn level2_invalid_file_reference_renders_did_you_mean_suggestion_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let staged = stage_with(
@@ -399,7 +399,7 @@ fn level2_invalid_file_reference_renders_did_you_mean_suggestion_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_stale_directory_reference_renders_did_you_mean_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let staged = stage_with_nested_siblings(
@@ -450,7 +450,7 @@ fn level2_stale_directory_reference_renders_did_you_mean_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_invalid_file_reference_excerpt_includes_schema_parent_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let staged = stage_with(

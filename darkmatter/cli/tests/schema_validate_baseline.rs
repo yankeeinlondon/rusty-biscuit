@@ -11,7 +11,6 @@
 //! ordering, indentation, arm prefixes, line annotations, and the additive
 //! `description` sub-line — are compared exactly.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use std::path::Path;
 use tempfile::TempDir;
@@ -62,7 +61,7 @@ fn schema_validate_legacy_json_output_is_byte_identical() {
         let expected = read_snapshot(case, "expected.json");
         let expects_success = expected.contains("\"valid\":true");
 
-        let output = cargo_bin_cmd!("md")
+        let output = assert_cmd::Command::cargo_bin("md").unwrap()
             .current_dir(work.path())
             .args(["schema", "validate", "--format", "json", "doc.md"])
             .output()
@@ -95,7 +94,7 @@ fn schema_validate_legacy_pretty_output_is_byte_identical() {
         let canonical = fs::canonicalize(work.path().join("doc.md")).unwrap();
         let expected = template.replace("{DOC_URL}", &format!("file://{}", canonical.display()));
 
-        let output = cargo_bin_cmd!("md")
+        let output = assert_cmd::Command::cargo_bin("md").unwrap()
             .current_dir(work.path())
             .env("NO_COLOR", "1")
             .args(["schema", "validate", "doc.md"])

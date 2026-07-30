@@ -11,13 +11,12 @@
 //! rather than byte-exact strings so the suite stays stable across
 //! downstream rendering tweaks while still failing on real regressions.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use std::io::Write;
 
 /// Helper to create a `md` command from cargo bin.
 fn md_cmd() -> assert_cmd::Command {
-    cargo_bin_cmd!("md")
+    assert_cmd::Command::cargo_bin("md").unwrap()
 }
 
 /// Creates a temporary file with the given content and suffix.

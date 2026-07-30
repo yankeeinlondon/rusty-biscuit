@@ -1,6 +1,5 @@
 use std::fs;
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use serde_json::Value;
 mod common;
 use common::{TestWorkspace, write};
@@ -51,7 +50,7 @@ fn handle_json_includes_protect_decisions() {
       "tool_input":{"command":"rm -rf /tmp/protect-test"}
     }"#;
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("HOME", &home)
         .env("NO_COLOR", "1")
         .args(["handle", "before_tool", "--provider", "claude", "--json"])

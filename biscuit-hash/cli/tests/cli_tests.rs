@@ -5,7 +5,7 @@ use tempfile::TempDir;
 
 /// Helper to get the bh binary command
 fn hash_cmd() -> Command {
-    Command::new(assert_cmd::cargo::cargo_bin!("bh"))
+    Command::new(assert_cmd::cargo::cargo_bin("bh"))
 }
 
 mod xxhash_mode {

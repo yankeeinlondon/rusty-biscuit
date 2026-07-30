@@ -1,4 +1,3 @@
-use assert_cmd::cargo::cargo_bin_cmd;
 
 mod common;
 
@@ -32,7 +31,7 @@ fn providers_command_routes_to_stdout() {
     let home = workspace.path().join("home");
     seed_user_config(&home);
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("HOME", &home)
         .env("NO_COLOR", "1")
         .arg("providers")
@@ -57,7 +56,7 @@ fn hooks_support_command_routes_without_detected_agents() {
     let home = workspace.path().join("home");
     seed_user_config(&home);
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("HOME", &home)
         .env("NO_COLOR", "1")
         .env("TERM_WIDTH", "160")
@@ -89,7 +88,7 @@ fn actions_command_routes_and_reports_configured_events() {
     seed_user_config(&home);
 
     let stdout = String::from_utf8(
-        cargo_bin_cmd!("claudine")
+        assert_cmd::Command::cargo_bin("claudine").unwrap()
             .env("HOME", &home)
             .env("NO_COLOR", "1")
             .arg("actions")
@@ -112,7 +111,7 @@ fn agents_and_commands_route_to_empty_state_messages() {
     seed_user_config(&home);
 
     let agents_stdout = String::from_utf8(
-        cargo_bin_cmd!("claudine")
+        assert_cmd::Command::cargo_bin("claudine").unwrap()
             .env("HOME", &home)
             .env("NO_COLOR", "1")
             .arg("agents")
@@ -129,7 +128,7 @@ fn agents_and_commands_route_to_empty_state_messages() {
     );
 
     let commands_stdout = String::from_utf8(
-        cargo_bin_cmd!("claudine")
+        assert_cmd::Command::cargo_bin("claudine").unwrap()
             .env("HOME", &home)
             .env("NO_COLOR", "1")
             .arg("commands")
@@ -195,7 +194,7 @@ fn completions_emit_supplement_aware_bash_zsh_fish_scripts() {
             ],
         ),
     ] {
-        let output = cargo_bin_cmd!("claudine")
+        let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
             .env("NO_COLOR", "1")
             .args(["completions", shell])
             .assert()
@@ -243,7 +242,7 @@ fn completions_retain_legacy_bootstrap_for_powershell_and_elvish() {
         ),
         ("elvish", "eval (E:COMPLETE=elvish claudine | slurp)\n"),
     ] {
-        let output = cargo_bin_cmd!("claudine")
+        let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
             .env("NO_COLOR", "1")
             .args(["completions", shell])
             .assert()
@@ -271,7 +270,7 @@ fn no_color_and_plain_suppress_ansi_output() {
     seed_user_config(&home);
 
     let no_color_stdout = String::from_utf8(
-        cargo_bin_cmd!("claudine")
+        assert_cmd::Command::cargo_bin("claudine").unwrap()
             .env("HOME", &home)
             .env("NO_COLOR", "1")
             .env_remove("FORCE_COLOR")
@@ -286,7 +285,7 @@ fn no_color_and_plain_suppress_ansi_output() {
     assert_eq!(strip_ansi(&no_color_stdout), no_color_stdout);
 
     let plain_stdout = String::from_utf8(
-        cargo_bin_cmd!("claudine")
+        assert_cmd::Command::cargo_bin("claudine").unwrap()
             .env("HOME", &home)
             .env_remove("FORCE_COLOR")
             .arg("--plain")
@@ -303,7 +302,7 @@ fn no_color_and_plain_suppress_ansi_output() {
 
 #[test]
 fn force_color_enables_ansi_in_non_tty_context() {
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("FORCE_COLOR", "1")
         .env_remove("NO_COLOR")
         .args(["sequence", "/tmp/definitely-missing-sequence.md"])
@@ -322,7 +321,7 @@ fn force_color_enables_ansi_in_non_tty_context() {
 
 #[test]
 fn errors_stay_on_stderr_for_command_failures() {
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args(["sequence", "/tmp/definitely-missing-sequence.md"])
         .assert()

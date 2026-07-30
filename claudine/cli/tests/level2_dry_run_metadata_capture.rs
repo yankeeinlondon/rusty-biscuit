@@ -43,7 +43,7 @@ use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serial_test::serial;
 use std::fs;
 use std::time::Duration;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 mod common;
 use common::{TestWorkspace, clear_no_color, write_executable};
@@ -124,7 +124,7 @@ fn run_dry_run_compose<H: TerminalHarness>(harness: &mut H) -> DryRunCapture {
     let doc = workspace.path().join("doc.md");
     fs::write(&doc, FIXTURE_DOC).unwrap();
 
-    let claudine = cargo_bin!("claudine").display().to_string();
+    let claudine = cargo_bin("claudine").display().to_string();
     // Hermetic PATH: exactly the stub bin dir, so installed/not-installed is
     // a fact of the fixture, never of the host (a host-installed provider
     // must not flip the resolution state under test).
@@ -192,7 +192,7 @@ fn run_dry_run_compose_with_doc<H: TerminalHarness>(
     let doc = workspace.path().join("doc.md");
     fs::write(&doc, doc_content).unwrap();
 
-    let claudine = cargo_bin!("claudine").display().to_string();
+    let claudine = cargo_bin("claudine").display().to_string();
     // Hermetic PATH: exactly the stub bin dir, so installed/not-installed is
     // a fact of the fixture, never of the host (a host-installed provider
     // must not flip the resolution state under test).
@@ -572,7 +572,7 @@ fn assert_agent_cell_alignment(frame: &CapturedFrame, agent_label: &str) {
 #[test]
 #[serial(level2_terminal)]
 fn level2_dry_run_metadata_table_renders_styled_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let capture = run_dry_run_compose(&mut harness);
@@ -585,11 +585,7 @@ fn level2_dry_run_metadata_table_renders_styled_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_dry_run_document_cell_renders_osc8_link_in_wezterm() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut harness = WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm");
     let capture = run_dry_run_compose(&mut harness);
@@ -645,7 +641,7 @@ fn run_dry_run_compose_plain<H: TerminalHarness>(harness: &mut H) -> DryRunCaptu
     let doc = workspace.path().join("doc.md");
     fs::write(&doc, FIXTURE_DOC).unwrap();
 
-    let claudine = cargo_bin!("claudine").display().to_string();
+    let claudine = cargo_bin("claudine").display().to_string();
     // Hermetic PATH: exactly the stub bin dir, so installed/not-installed is
     // a fact of the fixture, never of the host (a host-installed provider
     // must not flip the resolution state under test).
@@ -703,7 +699,7 @@ fn run_dry_run_compose_plain<H: TerminalHarness>(harness: &mut H) -> DryRunCaptu
 #[test]
 #[serial(level2_terminal)]
 fn level2_dry_run_yaml_heading_structure_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let capture = run_dry_run_compose_plain(&mut harness);
@@ -721,7 +717,7 @@ fn level2_dry_run_yaml_heading_structure_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_dry_run_invalid_agent_renders_red_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let capture = run_dry_run_compose_with_doc(
@@ -754,7 +750,7 @@ fn level2_dry_run_invalid_agent_renders_red_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_dry_run_not_installed_renders_yellow_dim_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let capture = run_dry_run_compose_with_doc(
@@ -792,7 +788,7 @@ fn level2_dry_run_not_installed_renders_yellow_dim_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_dry_run_no_agent_multiline_alignment_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let capture = run_dry_run_compose_with_doc(

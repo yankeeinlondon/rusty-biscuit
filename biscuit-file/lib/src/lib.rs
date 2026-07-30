@@ -99,7 +99,12 @@ mod format;
 mod list_format;
 mod span;
 
-pub use span::SourceSpan;
+// `span_serde` is re-exported alongside the type it adapts: `Range` has no
+// serde implementation, so a consumer serializing a `SourceSpan` cannot supply
+// one itself. Without this the module was unreachable, which a dependent
+// crate's `-D warnings` lint surfaced as dead code — invisible to this crate's
+// own lint, whose `--all-targets` build includes the tests that exercise it.
+pub use span::{SourceSpan, span_serde};
 
 #[cfg(feature = "toml")]
 pub mod toml_impl;

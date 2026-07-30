@@ -10,7 +10,6 @@
 //! which found the diagnostic was only exercised by scanner-level unit tests and
 //! not at the user-observable CLI boundary.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use tempfile::tempdir;
 mod common;
@@ -63,7 +62,7 @@ fn assert_removed_key_rejected(
         ),
     );
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))

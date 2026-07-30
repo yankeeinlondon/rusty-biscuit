@@ -133,7 +133,439 @@ deps:
     echo
     sniff repo package-dependencies "$(sniff repo package-area)"
 
+# ---------------------------------------------------------------------------
+# JUnit report staging
+#
+# `.config/nextest.toml` writes every `ci`-profile run to the SAME
+# `<target>/nextest/ci/test-results.xml`, so a multi-package area recipe used to
+# upload only whichever package ran last. These two recipes bracket each nextest
+# invocation and preserve one XML document per invocation:
+#
+#     $STAGE/<tier>/<package>.xml   verbatim copy of that invocation's report
+#     $STAGE/manifest.jsonl         one JSON record per invocation, appended
+#
+# `$STAGE` is `$BISCUIT_JUNIT_STAGE_DIR` — absolute, or relative to the
+# workspace root — and defaults to `<workspace-root>/target/nextest/ci-reports`.
+# `<tier>` is one of `L1`, `L2`, `L3`, `browser`, `real`, `sanity`.
+#
+# The workspace root and target directory normally come from `cargo metadata`.
+# `BISCUIT_JUNIT_WORKSPACE_ROOT` / `BISCUIT_JUNIT_TARGET_DIR` supply them
+# directly, for environments that have no Cargo at all — the wsl2-ubuntu leg runs
+# a `nextest archive` inside a guest with only `just` and a standalone
+# `cargo-nextest`. When neither the overrides nor `cargo metadata` are available
+# staging still cannot fail the run, but it says so loudly; see
+# `_junit_staging_unavailable`.
+#
+# Each manifest record carries exactly these keys:
+#
+#     tier package xml exit_code area environment shard duration_s report_present
+#
+# `area` / `environment` / `shard` come from `$BISCUIT_CI_AREA`,
+# `$BISCUIT_CI_ENVIRONMENT` and `$BISCUIT_CI_SHARD` and are `""` when unset
+# (local dev) — never invented. `report_present` is `false` when nextest emitted
+# no XML at all (a compile failure, say). A MISSING report is signal for the
+# rollup, so the record is still written.
+#
+# `_stage_junit_reset` runs BEFORE the invocation rather than deleting the
+# report after copying it, for two reasons: a run that never reaches the report
+# stage cannot then be credited with its predecessor's XML, and the last
+# invocation's report survives at the legacy `target/nextest/ci/test-results.xml`
+# path that `_area-ci.yml` still uploads.
+# ---------------------------------------------------------------------------
+
+# Announce, unmissably, that JUnit staging is about to no-op.
+#
+# Staging must never change a test invocation's outcome, so both staging recipes
+# exit 0 when they cannot find their paths. Exiting 0 *silently* is the danger:
+# the run executes, stages nothing, and the rollup reports MISSING for a cell
+# that actually passed — indistinguishable from a job that never ran. The
+# wsl2-ubuntu leg hits this by construction (no cargo in the guest), which is why
+# `BISCUIT_JUNIT_WORKSPACE_ROOT` / `BISCUIT_JUNIT_TARGET_DIR` exist.
+_junit_staging_unavailable recipe missing:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    echo >&2
+    echo -e "⚠️  {{ yellow }}{{ bold }}JUnit staging skipped{{ reset }}{{ yellow }} in {{ recipe }}: {{ missing }} is unavailable{{ reset }}" >&2
+    echo "   No report and no manifest record will be produced for this invocation," >&2
+    echo "   so a CI rollup will score this cell MISSING even though the tests ran." >&2
+    echo -e "   Set {{ bold }}BISCUIT_JUNIT_WORKSPACE_ROOT{{ reset }} and {{ bold }}BISCUIT_JUNIT_TARGET_DIR{{ reset }} to skip the" >&2
+    echo "   cargo-metadata derivation entirely (see fixes/2026-07-27-refactor/wsl-archive-requirements.md)." >&2
+    echo >&2
+    exit 0
+
+# Discard any report left behind by a previous nextest invocation, so a run that
+# emits none is recorded as MISSING instead of inheriting a stale document.
+_stage_junit_reset:
+    #!/usr/bin/env bash
+    # Never let staging change a test invocation's outcome: this recipe always
+    # exits 0, including when cargo/jq are unavailable.
+    set -uo pipefail
+    target_dir="${BISCUIT_JUNIT_TARGET_DIR:-}"
+    if [[ -z "${target_dir}" ]]; then
+        meta_file="$(mktemp "${TMPDIR:-/tmp}/biscuit-junit-reset.XXXXXX")" || exit 0
+        trap 'rm -f "${meta_file}"' EXIT
+        if ! cargo metadata --no-deps --format-version 1 > "${meta_file}" 2>/dev/null; then
+            just _junit_staging_unavailable _stage_junit_reset "cargo metadata"
+            exit 0
+        fi
+        target_dir="$(jq -r '.target_directory // empty' "${meta_file}" 2>/dev/null)" || target_dir=""
+    fi
+    if [[ -z "${target_dir}" ]]; then
+        just _junit_staging_unavailable _stage_junit_reset "the target directory"
+        exit 0
+    fi
+    rm -f "${target_dir%/}/nextest/${NEXTEST_PROFILE:-default}/test-results.xml" 2>/dev/null || true
+    exit 0
+
+# Copy this invocation's JUnit report into `$STAGE/<tier>/<pkg>.xml` and append
+# its manifest record. See the block comment above for the full contract.
+_stage_junit tier pkg exit_code duration:
+    #!/usr/bin/env bash
+    set -uo pipefail
+
+    exit_code='{{ exit_code }}'
+    duration='{{ duration }}'
+    [[ "${exit_code}" =~ ^-?[0-9]+$ ]] || exit_code=0
+    [[ "${duration}" =~ ^[0-9]+$ ]] || duration=0
+
+    workspace_root="${BISCUIT_JUNIT_WORKSPACE_ROOT:-}"
+    target_dir="${BISCUIT_JUNIT_TARGET_DIR:-}"
+    if [[ -z "${workspace_root}" || -z "${target_dir}" ]]; then
+        meta_file="$(mktemp "${TMPDIR:-/tmp}/biscuit-junit-stage.XXXXXX")" || exit 0
+        trap 'rm -f "${meta_file}"' EXIT
+        if ! cargo metadata --no-deps --format-version 1 > "${meta_file}" 2>/dev/null; then
+            just _junit_staging_unavailable _stage_junit "cargo metadata"
+            exit 0
+        fi
+        [[ -n "${workspace_root}" ]] || workspace_root="$(jq -r '.workspace_root // empty' "${meta_file}" 2>/dev/null)"
+        [[ -n "${target_dir}" ]] || target_dir="$(jq -r '.target_directory // empty' "${meta_file}" 2>/dev/null)"
+    fi
+    if [[ -z "${workspace_root}" || -z "${target_dir}" ]]; then
+        just _junit_staging_unavailable _stage_junit "the workspace root / target directory"
+        exit 0
+    fi
+    if ! command -v jq >/dev/null 2>&1; then
+        just _junit_staging_unavailable _stage_junit "jq"
+        exit 0
+    fi
+
+    stage="${BISCUIT_JUNIT_STAGE_DIR:-target/nextest/ci-reports}"
+    case "${stage}" in
+        /* | ?:[/\\]*) ;;
+        *) stage="${workspace_root%/}/${stage}" ;;
+    esac
+    mkdir -p "${stage}/{{ tier }}" 2>/dev/null || exit 0
+
+    relative_xml="{{ tier }}/{{ pkg }}.xml"
+    report="${target_dir%/}/nextest/${NEXTEST_PROFILE:-default}/test-results.xml"
+    report_present=false
+    if [[ -f "${report}" ]] && cp "${report}" "${stage}/${relative_xml}" 2>/dev/null; then
+        report_present=true
+    fi
+
+    jq -c -n \
+        --arg tier '{{ tier }}' \
+        --arg package '{{ pkg }}' \
+        --arg xml "${relative_xml}" \
+        --argjson exit_code "${exit_code}" \
+        --arg area "${BISCUIT_CI_AREA:-}" \
+        --arg environment "${BISCUIT_CI_ENVIRONMENT:-}" \
+        --arg shard "${BISCUIT_CI_SHARD:-}" \
+        --argjson duration_s "${duration}" \
+        --argjson report_present "${report_present}" \
+        '{tier: $tier, package: $package, xml: $xml, exit_code: $exit_code, area: $area, environment: $environment, shard: $shard, duration_s: $duration_s, report_present: $report_present}' \
+        >> "${stage}/manifest.jsonl" 2>/dev/null || exit 0
+    exit 0
+
+# Run one canonical tier recipe across several packages, continuing past a
+# failing package instead of abandoning the ones after it.
+#
+# `just` aborts a recipe at its first failing line, so the old
+# `@just _test a` / `@just _test b` form silently never tested `b` once `a`
+# failed — and the run carried no evidence of the gap.
+#
+# `specs` is a whitespace-separated list of package names, or — when it contains
+# a `;` — a `;`-separated list of `<package> [extra args…]` entries, which is how
+# an area keeps a per-package flag (`sniff --features remote`). `args` are
+# appended to every package.
+#
+# Exits 0 when every package passed, 1 when any failed, and 130 immediately on
+# Ctrl+C so `just check-test-interrupts` keeps holding.
+_run_all recipe specs *args="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+
+    passed_packages=()
+    failed_packages=()
+    failed_codes=()
+    current_package=""
+
+    print_summary() {
+        echo
+        echo "================================================"
+        echo "{{ recipe }} summary"
+        echo "================================================"
+        echo -e "{{ green }}Passed{{ reset }} (${#passed_packages[@]}): ${passed_packages[*]:-(none)}"
+        echo -e "{{ red }}Failed{{ reset }} (${#failed_packages[@]}):"
+        if (( ${#failed_packages[@]} == 0 )); then
+            echo "  (none)"
+        else
+            local i
+            for ((i = 0; i < ${#failed_packages[@]}; i++)); do
+                echo "  - ${failed_packages[$i]} (exit ${failed_codes[$i]})"
+            done
+        fi
+        echo "================================================"
+        echo
+    }
+
+    on_interrupt() {
+        trap - INT
+        echo
+        echo "Interrupted (Ctrl+C)${current_package:+ while running {{ recipe }} for ${current_package}}; remaining packages were not run."
+        print_summary
+        exit 130
+    }
+    trap on_interrupt INT
+
+    specs='{{ specs }}'
+    entries=()
+    if [[ "${specs}" == *";"* ]]; then
+        old_ifs="$IFS"
+        IFS=';'
+        read -r -a raw_entries <<< "${specs}"
+        IFS="$old_ifs"
+        for entry in "${raw_entries[@]}"; do
+            entry="${entry#"${entry%%[![:space:]]*}"}"
+            entry="${entry%"${entry##*[![:space:]]}"}"
+            [[ -n "${entry}" ]] && entries+=("${entry}")
+        done
+    else
+        for entry in ${specs}; do
+            entries+=("${entry}")
+        done
+    fi
+
+    if (( ${#entries[@]} == 0 )); then
+        echo "No packages given to {{ recipe }}." >&2
+        exit 1
+    fi
+
+    for entry in "${entries[@]}"; do
+        # Word-splitting is the point: an entry is `<package> [extra args…]`.
+        # shellcheck disable=SC2206
+        parts=(${entry})
+        package="${parts[0]}"
+        current_package="${package}"
+
+        if (( ${#parts[@]} > 1 )); then
+            just {{ recipe }} "${package}" "${parts[@]:1}" {{ args }}
+        else
+            just {{ recipe }} "${package}" {{ args }}
+        fi
+        exit_code=$?
+
+        if (( exit_code == 130 )); then
+            on_interrupt
+        elif (( exit_code == 0 )); then
+            passed_packages+=("${package}")
+        else
+            failed_packages+=("${package}")
+            failed_codes+=("${exit_code}")
+        fi
+        current_package=""
+    done
+
+    print_summary
+
+    if (( ${#failed_packages[@]} > 0 )); then
+        exit 1
+    fi
+
+# Level-1 tests across several packages, continuing past failures. See `_run_all`.
+_test_all specs *args="":
+    @just _run_all _test "{{ specs }}" {{ args }}
+
+# Sanity tier across several packages, continuing past failures. See `_run_all`.
+_sanity_all specs *args="":
+    @just _run_all _sanity "{{ specs }}" {{ args }}
+
+# Level-2 tier across several packages, continuing past failures. See `_run_all`.
+#
+# Owns the backend-execution-proof bracket for the WHOLE tier: `reset` runs once
+# here, before the first package, and `verify` once after the last. Exporting
+# `BISCUIT_BACKEND_PROOF_OWNER` tells the `_test_l2` invocations underneath not
+# to bracket themselves — a per-package `reset` would erase the evidence of
+# every package that already ran, making the verdict depend on which package
+# happened to go last. See `_backend_proof`.
+_test_l2_all specs *args="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+
+    required="${BISCUIT_TEST_REQUIRED_BACKENDS:-}"
+    proof_owner=0
+    if [[ -n "${required//[[:space:]]/}" ]]; then
+        proof_owner=1
+        export BISCUIT_BACKEND_PROOF_OWNER=1
+        just _backend_proof reset || exit $?
+    fi
+
+    exit_code=0
+    just _run_all _test_l2 "{{ specs }}" {{ args }} || exit_code=$?
+
+    # Ctrl+C: the run is incomplete, so an unproven backend says nothing. Keep
+    # 130 so `just check-test-interrupts` holds.
+    if (( exit_code == 130 )); then
+        exit 130
+    fi
+
+    if (( proof_owner == 1 )); then
+        proof_code=0
+        just _backend_proof verify || proof_code=$?
+        if (( proof_code != 0 )); then
+            echo
+            echo -e "❌ {{ red }}Level-2 backend proof failed{{ reset }}"
+            # A real test failure keeps its own status; the proof only promotes
+            # an otherwise-clean run to a failure.
+            if (( exit_code == 0 )); then
+                exit_code="${proof_code}"
+            fi
+        fi
+    fi
+
+    exit "${exit_code}"
+
+# Run one `backend-proof` subcommand against the shared evidence file.
+#
+# `BISCUIT_TEST_REQUIRED_BACKENDS` only hard-fails a backend that is *missing*.
+# A backend that is installed but never exercised still yields a green tier that
+# verified nothing — an installed `tmux` plus zero tmux tests is not evidence.
+# `require_level!` therefore appends one execution record per gated test to
+# `$STAGE/backend-executions.jsonl`, `reset` discards the previous run's records
+# before the tier (stale evidence would satisfy the check), and `verify` fails
+# when a required backend produced no executed test.
+#
+# `--stage-dir` / `--required` are not passed: the checker reads the same
+# `BISCUIT_JUNIT_STAGE_DIR` and `BISCUIT_TEST_REQUIRED_BACKENDS` the tests do.
+#
+# Exit codes: 0 proved (or nothing required), 1 a required backend is unproven,
+# 2 bad configuration or unreadable evidence.
+_backend_proof command:
+    @cargo run -q -p test-toolkit --features backend-proof --bin backend-proof -- {{ command }}
+
+# Print the nextest filter expression a tier selects with.
+#
+# Single source of truth. `_expected_manifest` has to reproduce a tier's
+# selection exactly — expected and observed are only comparable if they were
+# chosen by the same expression — and a hand-maintained second copy of these
+# strings is precisely the drift that would make an expected-test manifest lie.
+#
+# `pkg` matters only for L1: `worktree-cli` additionally excludes its `perf_` SLA
+# tests, which assert wall-clock budgets and belong to `just test-perf`.
+# `BISCUIT_TEST_FILTER` replaces the L1 expression wholesale — only areas whose
+# L1 contract genuinely differs should set it (darkmatter runs its `slow_` tests
+# as part of `just test`).
+#
+# ## A tier marker is a prefix, not a substring
+#
+# `test(/…/)` is an unanchored regex search over the *test name*
+# (`module::path::test_name` — nextest does not match it against the binary id),
+# so a bare `test(/browser_/)` also matched `unresolved_browser_feature_…` and
+# `image_emits_typed_browser_attributes`. Those are ordinary in-process unit
+# tests; the marker was never meant to be readable mid-word. Every predicate
+# therefore anchors to a path-segment boundary with `(^|::)`. `renderable` lost
+# 8 tests to this — excluded from L1, and its `test-browser` is a stub, so they
+# ran nowhere. `just check-tier-coverage` now fails on that combination.
+_tier_filter tier pkg="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    base='!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))'
+    case '{{ tier }}' in
+        L1|l1)
+            filter="${base}"
+            if [[ '{{ pkg }}' == "worktree-cli" ]]; then
+                filter='!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/) + test(/(^|::)perf_/))'
+            fi
+            printf '%s\n' "${BISCUIT_TEST_FILTER:-${filter}}"
+            ;;
+        sanity)  printf '%s\n' "${base}" ;;
+        L2|l2)       printf '%s\n' 'test(/(^|::)level2_/)' ;;
+        L3|l3)       printf '%s\n' 'test(/(^|::)level3_/)' ;;
+        browser)     printf '%s\n' 'test(/(^|::)browser_/)' ;;
+        real)        printf '%s\n' 'test(/(^|::)real_/)' ;;
+        *)
+            echo "_tier_filter: unknown tier '{{ tier }}' (expected L1, L2, L3, browser, real, sanity)" >&2
+            exit 1
+            ;;
+    esac
+
+# Print the arguments that survive an archive-mode nextest invocation, one per
+# line; report the dropped ones on stderr.
+#
+# `--archive-file` is mutually exclusive with *every* Cargo build flag, because
+# the binaries already exist — nextest rejects the combination outright rather
+# than ignoring it. An area that carries a per-package build flag
+# (`_test_all "messenger --features desktop; messenger-cli"`) would therefore be
+# unable to use the archive path at all. The features are not lost by dropping
+# them here: they were baked into the archive at build time, which is why
+# `areas.json` carries them on `check_args` and `_wsl-ci.yml` passes `check_args`
+# to `cargo nextest archive`.
+_archive_drop_build_flags *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    supplied=({{ args }})
+    kept=()
+    dropped=()
+    skip_next=0
+    for arg in ${supplied[@]+"${supplied[@]}"}; do
+        if (( skip_next == 1 )); then
+            skip_next=0
+            dropped+=("${arg}")
+            continue
+        fi
+        case "${arg}" in
+            --features|--target|--target-dir|--cargo-profile|--build-jobs)
+                skip_next=1
+                dropped+=("${arg}")
+                ;;
+            --features=*|--target=*|--target-dir=*|--cargo-profile=*|--build-jobs=*)
+                dropped+=("${arg}")
+                ;;
+            --all-features|--no-default-features|--release|--lib|--bins|--tests|--benches|--examples|--all-targets)
+                dropped+=("${arg}")
+                ;;
+            *)
+                kept+=("${arg}")
+                ;;
+        esac
+    done
+    if (( ${#dropped[@]} > 0 )); then
+        echo -e "  {{ dim }}archive mode: dropped build-only flag(s) ${dropped[*]} — already baked into the archive{{ reset }}" >&2
+    fi
+    for arg in ${kept[@]+"${kept[@]}"}; do
+        printf '%s\n' "${arg}"
+    done
+
 # Run tests with `cargo test` or `cargo nextest run`
+#
+# ## Archive mode
+#
+# Passing `--archive-file` (with `--workspace-remap`) runs pre-built binaries
+# from a `cargo nextest archive` instead of compiling. The wsl2-ubuntu leg builds
+# `x86_64-unknown-linux-gnu` once on `ubuntu-latest` and executes the archive
+# inside a WSL2 guest that has no rustup, no cargo, and no rustc — only `just`
+# and a standalone `cargo-nextest`. Two things follow:
+#
+#   * `BISCUIT_NEXTEST_BIN` (default `cargo nextest`) drives BOTH the
+#     availability probe and the invocation. Without it the probe fails in the
+#     guest, the recipe falls back to `cargo test`, and the leg dies with
+#     `cargo: command not found`.
+#   * `-p <pkg>` cannot be used with `--archive-file`, so the package selection
+#     moves into the filterset. See `_archive_drop_build_flags` for the build
+#     flags that go the same way.
+#
+# A `cargo test` fallback cannot consume an archive at all — it would recompile —
+# so a missing nextest in archive mode is a hard error, never a fallback.
 _test pkg *args="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -161,14 +593,42 @@ _test pkg *args="":
     echo -e "Testing {{ bold }}{{ pkg }}{{ reset }} package"
     echo
 
+    # One overridable nextest invocation for both the probe and the run.
+    read -r -a nextest_bin <<< "${BISCUIT_NEXTEST_BIN:-cargo nextest}"
+
+    forwarded=({{ args }})
+    archive_mode=0
+    for arg in ${forwarded[@]+"${forwarded[@]}"}; do
+        case "${arg}" in
+            --archive-file|--archive-file=*) archive_mode=1 ;;
+        esac
+    done
+
+    if (( archive_mode == 1 )) && ! "${nextest_bin[@]}" --version >/dev/null 2>&1; then
+        echo -e "❌ {{ red }}--archive-file requires cargo-nextest{{ reset }}" >&2
+        echo "   '${nextest_bin[*]} --version' failed, and the cargo test fallback cannot" >&2
+        echo "   consume an archive — it recompiles, which is the whole thing an archive avoids." >&2
+        echo -e "   Set {{ bold }}BISCUIT_NEXTEST_BIN{{ reset }} (the WSL leg uses \"cargo-nextest nextest\")." >&2
+        exit 1
+    fi
+
+    just _stage_junit_reset
+
     exit_code=0
-    if cargo nextest --version >/dev/null 2>&1; then
-        echo -e "ℹ️ using {{ green }}cargo nextest run{{ reset }}"
-        filter='!(test(/level2_/) + test(/level3_/) + test(/browser_/) + test(/real_/) + test(/slow_/))'
-        if [[ "{{ pkg }}" == "worktree-cli" ]]; then
-            filter='!(test(/level2_/) + test(/level3_/) + test(/browser_/) + test(/real_/) + test(/slow_/) + test(/perf_/))'
+    if "${nextest_bin[@]}" --version >/dev/null 2>&1; then
+        echo -e "ℹ️ using {{ green }}${nextest_bin[*]} run{{ reset }}"
+        filter="$(just _tier_filter L1 '{{ pkg }}')"
+        selection=(-p '{{ pkg }}')
+        run_args=(${forwarded[@]+"${forwarded[@]}"})
+        if (( archive_mode == 1 )); then
+            selection=()
+            filter="package({{ pkg }}) & (${filter})"
+            run_args=()
+            while IFS= read -r kept_arg; do
+                run_args+=("${kept_arg}")
+            done < <(just _archive_drop_build_flags ${forwarded[@]+"${forwarded[@]}"})
         fi
-        cargo nextest run -p {{ pkg }} -E "$filter" --no-tests=pass {{ args }} || exit_code=$?
+        "${nextest_bin[@]}" run ${selection[@]+"${selection[@]}"} -E "$filter" --no-tests=pass ${run_args[@]+"${run_args[@]}"} || exit_code=$?
     else
         echo -e "ℹ️ using {{ green }}cargo test{{ reset }}"
         skip_args=(--skip level2_ --skip level3_ --skip browser_ --skip real_ --skip slow_)
@@ -179,6 +639,7 @@ _test pkg *args="":
     fi
 
     duration=$SECONDS
+    just _stage_junit L1 "{{ pkg }}" "${exit_code}" "${duration}"
     commit_hash=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
 
     case $exit_code in
@@ -210,6 +671,151 @@ _test pkg *args="":
     echo
     echo -e "✅ {{ green }} all tests passing in {{ bold }}{{ pkg }}{{ reset }}{{ green }} package{{ reset }}"
     echo
+
+# Emit the expected-test manifest that `ci-rollup --expected-manifest` consumes.
+#
+# A JUnit report cannot distinguish a test that does not exist on this
+# environment (compile-time `#[cfg]`) from a test that silently stopped running:
+# both are simply absent. Absence must therefore never be *inferred* from the
+# report — the rollup marks every skip-budgeted cell `skip-evidence-degraded`
+# until something tells it what the compiled binaries on this environment
+# actually contain. `cargo nextest list` is that something, which is why the
+# manifest has to be generated ON the target environment.
+#
+# The hazard it closes is live: `_test` passes `--no-tests=pass`, so a tier that
+# selects zero tests exits 0 and stages a valid, empty report. The rollup renders
+# that `N/A` — correct in isolation, since a tier with no tests is N/A rather
+# than PASS — so a drifted filter expression would quietly downgrade a real area
+# to N/A with nothing anywhere failing. Comparing against the manifest turns that
+# into N absent tests.
+#
+# `tier` is `L1` / `L2` / `L3` / `browser` / `real` / `sanity`. `specs` follows
+# `_run_all`: whitespace-separated package names, or — when it contains a `;` —
+# `;`-separated `<package> [extra args…]` entries. The filter comes from
+# `_tier_filter`, the same source the tier recipe reads, so expected and observed
+# are selected by one expression rather than two that can drift apart.
+#
+# Writes `$STAGE/expected-<tier>.json`, where `$STAGE` is the staging directory
+# `_stage_junit` uses. `environment` comes from `$BISCUIT_CI_ENVIRONMENT` — the
+# same value the manifest records carry, because the rollup keys expectations by
+# `{environment, tier}` and has no other way to join the two.
+#
+# Deliberately takes no `--partition`: the rollup aggregates every shard of a
+# cell, so each shard's expectation is the cell's whole compiled test set.
+_expected_manifest tier specs *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    environment="${BISCUIT_CI_ENVIRONMENT:-}"
+    if [[ -z "${environment}" ]]; then
+        echo "_expected_manifest: BISCUIT_CI_ENVIRONMENT must be set." >&2
+        echo "  The manifest is keyed by {environment, tier} and asserts what THIS" >&2
+        echo "  environment compiled; an unlabelled one cannot be joined to any cell." >&2
+        exit 1
+    fi
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "_expected_manifest: jq is required." >&2
+        exit 1
+    fi
+
+    read -r -a nextest_bin <<< "${BISCUIT_NEXTEST_BIN:-cargo nextest}"
+
+    forwarded=({{ args }})
+    archive_mode=0
+    for arg in ${forwarded[@]+"${forwarded[@]}"}; do
+        case "${arg}" in
+            --archive-file|--archive-file=*) archive_mode=1 ;;
+        esac
+    done
+
+    workspace_root="${BISCUIT_JUNIT_WORKSPACE_ROOT:-}"
+    if [[ -z "${workspace_root}" ]]; then
+        meta_file="$(mktemp "${TMPDIR:-/tmp}/biscuit-expected-meta.XXXXXX")"
+        cargo metadata --no-deps --format-version 1 > "${meta_file}"
+        workspace_root="$(jq -r '.workspace_root // empty' "${meta_file}")"
+        rm -f "${meta_file}"
+    fi
+    stage="${BISCUIT_JUNIT_STAGE_DIR:-target/nextest/ci-reports}"
+    case "${stage}" in
+        /* | ?:[/\\]*) ;;
+        *) stage="${workspace_root%/}/${stage}" ;;
+    esac
+    mkdir -p "${stage}"
+
+    specs='{{ specs }}'
+    entries=()
+    if [[ "${specs}" == *";"* ]]; then
+        old_ifs="$IFS"
+        IFS=';'
+        read -r -a raw_entries <<< "${specs}"
+        IFS="$old_ifs"
+        for entry in "${raw_entries[@]}"; do
+            entry="${entry#"${entry%%[![:space:]]*}"}"
+            entry="${entry%"${entry##*[![:space:]]}"}"
+            [[ -n "${entry}" ]] && entries+=("${entry}")
+        done
+    else
+        for entry in ${specs}; do
+            entries+=("${entry}")
+        done
+    fi
+    if (( ${#entries[@]} == 0 )); then
+        echo "_expected_manifest: no packages given." >&2
+        exit 1
+    fi
+
+    parts_file="$(mktemp "${TMPDIR:-/tmp}/biscuit-expected-parts.XXXXXX")"
+    listing="$(mktemp "${TMPDIR:-/tmp}/biscuit-expected-list.XXXXXX")"
+    trap 'rm -f "${parts_file}" "${listing}"' EXIT
+
+    for entry in "${entries[@]}"; do
+        # Word-splitting is the point: an entry is `<package> [extra args…]`.
+        # shellcheck disable=SC2206
+        parts=(${entry})
+        package="${parts[0]}"
+        extra=(${parts[@]+"${parts[@]:1}"})
+
+        filter="$(just _tier_filter '{{ tier }}' "${package}")"
+        selection=(-p "${package}")
+        list_args=(${extra[@]+"${extra[@]}"} ${forwarded[@]+"${forwarded[@]}"})
+        if (( archive_mode == 1 )); then
+            selection=()
+            filter="package(${package}) & (${filter})"
+            list_args=()
+            while IFS= read -r kept_arg; do
+                list_args+=("${kept_arg}")
+            done < <(just _archive_drop_build_flags ${extra[@]+"${extra[@]}"} ${forwarded[@]+"${forwarded[@]}"})
+        fi
+
+        echo -e "🧾 Listing {{ bold }}{{ tier }}{{ reset }} tests for {{ bold }}${package}{{ reset }} on {{ bold }}${environment}{{ reset }}"
+        "${nextest_bin[@]}" list ${selection[@]+"${selection[@]}"} -E "${filter}" \
+            --message-format json ${list_args[@]+"${list_args[@]}"} > "${listing}"
+
+        # `list` reports EVERY discovered test with a `filter-match` verdict, so
+        # the manifest must keep only `matches` — an `#[ignore]`d or
+        # filtered-out test is not expected to produce a result. Identity is
+        # `<binary-id>::<test name>`, which is exactly how the rollup rebuilds it
+        # from JUnit `<testsuite name>` + `<testcase name>`.
+        jq -c --arg pkg "${package}" '
+            { ($pkg): [ .["rust-suites"]
+                        | to_entries[]
+                        | . as $suite
+                        | select($suite.value["package-name"] == $pkg)
+                        | $suite.value.testcases
+                        | to_entries[]
+                        | select(.value["filter-match"].status == "matches")
+                        | ($suite.value["binary-id"] + "::" + .key)
+                      ] | unique }
+        ' "${listing}" >> "${parts_file}"
+    done
+
+    out="${stage}/expected-{{ tier }}.json"
+    jq -s --arg environment "${environment}" --arg tier '{{ tier }}' \
+        '{schema_version: 1, environment: $environment, tier: $tier, packages: (add // {})}' \
+        "${parts_file}" > "${out}"
+
+    total="$(jq '[.packages[] | length] | add // 0' "${out}")"
+    echo -e "✅ {{ green }}expected-test manifest{{ reset }} ${out} {{ dim }}(${total} tests){{ reset }}"
 
 # Run Level-1 tests for every workspace package, continuing after failures.
 #
@@ -392,6 +998,163 @@ _check_test_interrupts:
         exit 1
     fi
 
+# Fail when a tier filter strands tests behind a stub recipe.
+#
+# A tier marker takes a test OUT of L1 unconditionally; only the area's own
+# `test-<tier>` recipe can put it back IN. When that recipe is a stub —
+# `@echo "…: not applicable…"` — the two halves disagree and every test the
+# filter caught runs in no tier at all. Nothing else reports that: the L1 run is
+# green because it never saw them, and the stub exits 0 because it does nothing.
+#
+# `renderable` sat in exactly that state with 16 tests, 8 of them ordinary unit
+# tests the then-unanchored filter matched mid-name (`…_browser_…`). This guard
+# would have failed the day the first one was written.
+#
+# Selection comes from `_tier_filter`, so the guard asks precisely the question
+# the tier recipe would have asked.
+#
+# Cost is why this is its own recipe and not part of `test`, `lint`, or a
+# pre-push hook: answering it needs `cargo nextest list`, which builds the area's
+# test binaries. Areas that stub no tier are skipped before any cargo runs, and a
+# stubbing area is listed only for the tiers it stubs. All of an area's packages
+# go into ONE `list` per tier, which also pins the feature resolution — listing
+# `-p biscuit-icon` and `-p biscuit-icon-cli` separately unifies features
+# differently each time and rebuilds the world between them.
+#
+# Known blind spot: the listing uses default features, because an area's real
+# feature flags live in its own recipe arguments and are not recoverable from
+# here. A stranded test behind a non-default feature is invisible. That only
+# hides a violation when EVERY stranded test in a tier is feature-gated; one
+# ungated sibling still fails the area.
+#
+# Optional `args` restrict the run to named area directories.
+_check_tier_coverage *args="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "_check_tier_coverage: jq is required." >&2
+        exit 2
+    fi
+
+    # A stub is a recipe whose every non-blank body line says "not applicable".
+    # The body runs from the header to the first line back at column 0.
+    #
+    # The pipeline's exit status is deliberately ignored: `sed … q` closes the
+    # pipe as soon as it sees that line, so under `pipefail` the whole
+    # substitution reports its upstream's SIGPIPE (141) on a perfectly good read.
+    # The captured text is the only signal here.
+    is_stub_recipe() {
+        local justfile="$1" recipe="$2" body
+        body="$(sed -n "/^${recipe}[ :]/,\$p" "${justfile}" \
+            | tail -n +2 \
+            | sed '/^[^[:space:]]/q' \
+            | sed '/^[^[:space:]]/d' \
+            | grep -v '^[[:space:]]*$')"
+        [[ -n "${body}" ]] || return 1
+        ! grep -qv 'not applicable' <<< "${body}"
+    }
+
+    declare -a target_areas=()
+    if [[ -n "{{ args }}" ]]; then
+        read -r -a target_areas <<< "{{ args }}"
+    else
+        while IFS= read -r justfile; do
+            area="${justfile%/justfile}"
+            # The root justfile has no directory component and owns no packages.
+            [[ "${area}" == "${justfile}" ]] && continue
+            target_areas+=("${area}")
+        done < <(rg --files -g justfile | sort)
+    fi
+
+    meta_file="$(mktemp "${TMPDIR:-/tmp}/biscuit-tier-meta.XXXXXX")"
+    listing="$(mktemp "${TMPDIR:-/tmp}/biscuit-tier-list.XXXXXX")"
+    # bash runs an inherited EXIT trap when a `$(…)` subshell finishes, so an
+    # unguarded `rm` here deletes both scratch files partway through the first
+    # command substitution and the rest of the run reads empty ones. `BASHPID`
+    # is per-process where `$$` is not, so it distinguishes the two.
+    main_pid="${BASHPID}"
+    trap '[[ "${BASHPID}" == "${main_pid}" ]] && rm -f "${meta_file}" "${listing}"' EXIT
+    cargo metadata --no-deps --format-version 1 > "${meta_file}" || exit 2
+    workspace_root="$(jq -r '.workspace_root' "${meta_file}")"
+
+    failures=()
+    checked=()
+    skipped=()
+
+    for area in "${target_areas[@]}"; do
+        justfile="${area}/justfile"
+        [[ -f "${justfile}" ]] || continue
+
+        stubbed=()
+        for tier in l2 l3 browser real; do
+            if is_stub_recipe "${justfile}" "test-${tier}"; then
+                stubbed+=("${tier}")
+            fi
+        done
+        if (( ${#stubbed[@]} == 0 )); then
+            skipped+=("${area}")
+            continue
+        fi
+
+        packages=()
+        while IFS= read -r pkg; do
+            [[ -n "${pkg}" ]] && packages+=("${pkg}")
+        done < <(jq -r --arg prefix "${workspace_root%/}/${area}/" \
+            '.packages[] | select(.manifest_path | startswith($prefix)) | .name' "${meta_file}")
+        if (( ${#packages[@]} == 0 )); then
+            skipped+=("${area}")
+            continue
+        fi
+
+        selection=()
+        for package in "${packages[@]}"; do
+            selection+=(-p "${package}")
+        done
+
+        echo -e "🔎 {{ bold }}${area}{{ reset }} {{ dim }}stubs: ${stubbed[*]} — listing ${packages[*]}{{ reset }}"
+        for tier in "${stubbed[@]}"; do
+            filter="$(just _tier_filter "${tier}")"
+            if ! cargo nextest list "${selection[@]}" -E "${filter}" \
+                --message-format json > "${listing}" 2>/dev/null; then
+                echo -e "  {{ red }}❌ could not list ${area} for ${tier}{{ reset }}"
+                failures+=("${area} (${tier}: listing failed)")
+                continue
+            fi
+            stranded=()
+            while IFS= read -r line; do
+                [[ -n "${line}" ]] && stranded+=("${line}")
+            done < <(jq -r '
+                .["rust-suites"][]?
+                | ."binary-id" as $binary
+                | (.testcases // {})
+                | to_entries[]
+                | select(.value["filter-match"].status == "matches")
+                | "\($binary)::\(.key)"
+            ' "${listing}")
+            (( ${#stranded[@]} == 0 )) && continue
+            echo -e "  {{ red }}❌ ${#stranded[@]} test(s) match the ${tier} tier, but test-${tier} is a stub{{ reset }}"
+            printf '      %s\n' "${stranded[@]}"
+            failures+=("${area} (${tier}: ${#stranded[@]} stranded)")
+        done
+        checked+=("${area}")
+    done
+
+    echo
+    echo "Tier coverage"
+    echo "================================================"
+    echo -e "{{ dim }}No stubbed tier (not listed): ${#skipped[@]}{{ reset }}"
+    echo -e "Listed (${#checked[@]}): ${checked[*]:-(none)}"
+    echo -e "{{ red }}Stranded{{ reset }} (${#failures[@]}): ${failures[*]:-(none)}"
+    echo "================================================"
+    echo
+
+    if (( ${#failures[@]} > 0 )); then
+        echo "A stranded test runs in no tier. Either rename it so it carries no tier"
+        echo "marker, or give the area a real test-<tier> recipe."
+        exit 1
+    fi
+
 # ---------------------------------------------------------------------------
 # Canonical lifecycle recipes (testing-best-practices spec, Phase 2).
 #
@@ -443,9 +1206,15 @@ _sanity pkg *args="":
         echo -e "{{ yellow }}skipping sanity for {{ pkg }}: no lib or bin targets{{ reset }}"
         exit 0
     fi
-    cargo nextest run -p {{ pkg }} "${targets[@]}" \
-        -E '!(test(/level2_/) + test(/level3_/) + test(/browser_/) + test(/real_/) + test(/slow_/))' \
-        --no-tests=pass {{ args }}
+    SECONDS=0
+    just _stage_junit_reset
+    read -r -a nextest_bin <<< "${BISCUIT_NEXTEST_BIN:-cargo nextest}"
+    exit_code=0
+    "${nextest_bin[@]}" run -p {{ pkg }} "${targets[@]}" \
+        -E "$(just _tier_filter sanity '{{ pkg }}')" \
+        --no-tests=pass {{ args }} || exit_code=$?
+    just _stage_junit sanity "{{ pkg }}" "${exit_code}" "${SECONDS}"
+    exit "${exit_code}"
 
 # Level 2 tier: real terminal / PTY / harness tests.
 #
@@ -501,6 +1270,53 @@ _test_l2 pkg *args="":
     echo -e "🖥  Level-2 tests for {{ bold }}{{ pkg }}{{ reset }}"
     echo
 
+    read -r -a nextest_bin <<< "${BISCUIT_NEXTEST_BIN:-cargo nextest}"
+
+    # Every nextest invocation below is bracketed so its JUnit report is staged
+    # before the next one can overwrite it — including a failing invocation.
+    run_l2() {
+        just _stage_junit_reset
+        local code=0
+        SECONDS=0
+        "$@" || code=$?
+        just _stage_junit L2 "{{ pkg }}" "${code}" "${SECONDS}"
+        return "${code}"
+    }
+
+    # Backend-execution proof. Scope is the TIER, not the package: when
+    # `_test_l2_all` drives several packages it owns the bracket and exports
+    # `BISCUIT_BACKEND_PROOF_OWNER`, and this recipe leaves it alone. See
+    # `_backend_proof` for what is being proved.
+    #
+    # Entirely inert when no backend is required — the guard is on the env var,
+    # so a local run pays neither the `cargo run` startup nor any file I/O.
+    required_backends="${BISCUIT_TEST_REQUIRED_BACKENDS:-}"
+    proof_owner=0
+    if [[ -n "${required_backends//[[:space:]]/}" && -z "${BISCUIT_BACKEND_PROOF_OWNER:-}" ]]; then
+        proof_owner=1
+        just _backend_proof reset
+    fi
+
+    # Single exit point for every branch below, so the proof runs exactly once
+    # however the tier finished. A genuine test failure keeps its own exit code
+    # and is never masked; an unproven backend promotes an otherwise-clean run
+    # to a failure. Ctrl+C (130) skips the proof — the run is incomplete.
+    finish() {
+        local code="${1}"
+        if (( proof_owner == 1 )) && (( code != 130 )); then
+            local proof_code=0
+            just _backend_proof verify || proof_code=$?
+            if (( proof_code != 0 )); then
+                echo
+                echo -e "❌ {{ red }}Level-2 backend proof failed{{ reset }} for {{ bold }}{{ pkg }}{{ reset }}"
+                if (( code == 0 )); then
+                    code="${proof_code}"
+                fi
+            fi
+        fi
+        exit "${code}"
+    }
+
     # Parallel self-spawn mode: no shared pane, no broker, `-j N`. Every
     # test self-isolates via `shared_or_spawn()`'s owned fallback, so
     # there is nothing to contend for. See the recipe comment above.
@@ -508,8 +1324,9 @@ _test_l2 pkg *args="":
     if [[ "${l2_threads}" != "1" ]]; then
         echo -e "  {{ dim }}parallel self-spawn mode: -j ${l2_threads}, no shared pane{{ reset }}"
         echo
-        cargo nextest run -p {{ pkg }} -E 'test(/level2_/)' --no-tests=pass -j "${l2_threads}" {{ args }}
-        exit $?
+        exit_code=0
+        run_l2 "${nextest_bin[@]}" run -p {{ pkg }} -E "$(just _tier_filter L2)" --no-tests=pass -j "${l2_threads}" {{ args }} || exit_code=$?
+        finish "${exit_code}"
     fi
 
     # Build the broker once (no-op if already up to date) and resolve
@@ -532,8 +1349,9 @@ _test_l2 pkg *args="":
     broker="${target_dir}/debug/biscuit-harness-broker${bin_suffix}"
     if [[ ! -x "${broker}" ]]; then
         echo -e "{{ yellow }}warning: ${broker} not executable; falling back to per-test spawning{{ reset }}"
-        cargo nextest run -p {{ pkg }} -E 'test(/level2_/)' --no-tests=pass {{ args }}
-        exit $?
+        exit_code=0
+        run_l2 "${nextest_bin[@]}" run -p {{ pkg }} -E "$(just _tier_filter L2)" --no-tests=pass {{ args }} || exit_code=$?
+        finish "${exit_code}"
     fi
 
     # Registry of (backend id) pairs the trap uses to tear down panes
@@ -566,7 +1384,9 @@ _test_l2 pkg *args="":
         echo -e "  {{ dim }}spawned apple-terminal window ${id}{{ reset }}"
     fi
 
-    cargo nextest run -p {{ pkg }} -E 'test(/level2_/)' --no-tests=pass -j 1 {{ args }}
+    exit_code=0
+    run_l2 "${nextest_bin[@]}" run -p {{ pkg }} -E "$(just _tier_filter L2)" --no-tests=pass -j 1 {{ args }} || exit_code=$?
+    finish "${exit_code}"
 
 # Level 3 tier: OS keyboard/mouse injection tests. Always opt-in via
 # RUN_LEVEL3=1; the recipe sets the variable so the gate trips cleanly.
@@ -612,7 +1432,13 @@ _test_l3 pkg *args="":
     # events and so compete for the single global frontmost window + pointer;
     # `#[serial]` cannot serialize them because nextest runs each test in a
     # separate process — mirror the browser tier and serialize the tier itself.
-    RUN_LEVEL3=1 cargo nextest run -p {{ pkg }} -j 1 -E 'test(/level3_/)' --no-tests=pass {{ args }}
+    SECONDS=0
+    just _stage_junit_reset
+    exit_code=0
+    read -r -a nextest_bin <<< "${BISCUIT_NEXTEST_BIN:-cargo nextest}"
+    RUN_LEVEL3=1 "${nextest_bin[@]}" run -p {{ pkg }} -j 1 -E "$(just _tier_filter L3)" --no-tests=pass {{ args }} || exit_code=$?
+    just _stage_junit L3 "{{ pkg }}" "${exit_code}" "${SECONDS}"
+    exit "${exit_code}"
 
 # Browser tier: headless browser tests. Skip-clean if Chrome absent unless
 # BISCUIT_BROWSER_REQUIRED=1 is set in the environment.
@@ -626,7 +1452,13 @@ _test_browser pkg *args="":
     # Chrome; `#[serial(browser)]` cannot serialize them because nextest runs
     # each test in a separate process. Concurrent Chromes overwhelm teardown and
     # trip nextest's leak detector — mirror the L2 tier and serialize the tier.
-    cargo nextest run -p {{ pkg }} -j 1 -E 'test(/browser_/)' --no-tests=pass {{ args }}
+    SECONDS=0
+    just _stage_junit_reset
+    exit_code=0
+    read -r -a nextest_bin <<< "${BISCUIT_NEXTEST_BIN:-cargo nextest}"
+    "${nextest_bin[@]}" run -p {{ pkg }} -j 1 -E "$(just _tier_filter browser)" --no-tests=pass {{ args }} || exit_code=$?
+    just _stage_junit browser "{{ pkg }}" "${exit_code}" "${SECONDS}"
+    exit "${exit_code}"
 
 # Real-resource tier: external services/devices. Selecting the set is harmless;
 # tests themselves are responsible for skipping when the resource is absent.
@@ -636,7 +1468,13 @@ _test_real pkg *args="":
     echo
     echo -e "🔌 Real-resource tests for {{ bold }}{{ pkg }}{{ reset }}"
     echo
-    cargo nextest run -p {{ pkg }} -E 'test(/real_/)' --no-tests=pass {{ args }}
+    SECONDS=0
+    just _stage_junit_reset
+    exit_code=0
+    read -r -a nextest_bin <<< "${BISCUIT_NEXTEST_BIN:-cargo nextest}"
+    "${nextest_bin[@]}" run -p {{ pkg }} -E "$(just _tier_filter real)" --no-tests=pass {{ args }} || exit_code=$?
+    just _stage_junit real "{{ pkg }}" "${exit_code}" "${SECONDS}"
+    exit "${exit_code}"
 
 # Doctests. Nextest does not run doctests, so this recipe shells out to
 # `cargo test --doc`. Skips packages that have no lib target (bin-only

@@ -17,7 +17,7 @@ use serial_test::serial;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 mod common;
 use common::{
@@ -96,7 +96,7 @@ fn capture_command(harness: &mut TmuxHarness, staged: &Staged) -> CapturedFrame 
     // out-vote — see `common::clear_no_color`.
     clear_no_color(harness);
 
-    let claudine = cargo_bin!("claudine").display().to_string();
+    let claudine = cargo_bin("claudine").display().to_string();
     let home = staged.workspace.path().to_string_lossy().into_owned();
     let path = augmented_path(&staged.bin_dir);
     let path = path.to_string_lossy().into_owned();
@@ -158,7 +158,7 @@ fn row_truecolor_backgrounds(raw: &str, needle: &str) -> Vec<String> {
 #[test]
 #[serial(level2_terminal)]
 fn level2_schema_parse_renders_highlighted_excerpt_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let staged = stage("claudine-schema-parse-l2");

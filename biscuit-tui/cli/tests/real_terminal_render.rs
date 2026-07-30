@@ -64,10 +64,10 @@ use common::real_terminal::{
     TerminalHarness, kitty::KittyHarness, tmux::TmuxHarness, wezterm::WezTermHarness,
 };
 use serial_test::serial;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 fn question_binary() -> String {
-    assert_cmd::cargo::cargo_bin!("question")
+    assert_cmd::cargo::cargo_bin("question")
         .to_str()
         .expect("question binary path is utf-8")
         .to_string()
@@ -149,7 +149,7 @@ static SHARED_TMUX: SharedHarness<TmuxHarness> = SharedHarness::new();
 #[test]
 #[serial(level2)]
 fn level2_wezterm_renders_option_labels() {
-    require_level!(Level::L2, WezTermHarness::available(), "WezTerm");
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
@@ -177,7 +177,7 @@ fn level2_wezterm_renders_option_labels() {
 #[test]
 #[serial(level2)]
 fn level2_kitty_renders_option_labels() {
-    require_level!(Level::L2, KittyHarness::available(), "kitty");
+    require_level!(Level::L2, KittyHarness::available(), Backend::Kitty);
 
     let mut guard = SHARED_KITTY
         .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
@@ -205,7 +205,7 @@ fn level2_kitty_renders_option_labels() {
 #[test]
 #[serial(level2)]
 fn level2_tmux_renders_option_labels() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
@@ -242,7 +242,7 @@ fn level2_tmux_renders_option_labels() {
 #[test]
 #[serial(level2)]
 fn level2_tmux_ctrl_space_reveals_badges() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
@@ -317,7 +317,7 @@ fn sgr_param_present(haystack: &str, param: &str) -> bool {
 #[test]
 #[serial(level2)]
 fn level2_tmux_ctrl_held_badge_uses_orange_bold_black_sgr() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
@@ -384,7 +384,7 @@ fn level2_tmux_ctrl_held_badge_uses_orange_bold_black_sgr() {
 #[test]
 #[serial(level2)]
 fn level2_tmux_ctrl_c_exits_130() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
@@ -448,7 +448,7 @@ fn level2_tmux_ctrl_c_exits_130() {
 #[serial(level2)]
 #[cfg(target_os = "macos")]
 fn level2_wezterm_bare_ctrl_kitty_bytes_reveal_badges() {
-    require_level!(Level::L2, WezTermHarness::available(), "WezTerm");
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
@@ -526,7 +526,7 @@ fn level2_wezterm_bare_ctrl_kitty_bytes_reveal_badges() {
 #[test]
 #[serial(level2)]
 fn level2_tmux_arrow_down_moves_active_marker() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
@@ -562,7 +562,7 @@ fn level2_tmux_arrow_down_moves_active_marker() {
 #[test]
 #[serial(level2)]
 fn level2_tmux_ctrl_r_chord_selects_red() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
@@ -604,7 +604,7 @@ fn level2_tmux_ctrl_r_chord_selects_red() {
 #[test]
 #[serial(level2)]
 fn level2_tmux_alt_r_chord_selects_red() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
@@ -653,7 +653,7 @@ fn level2_tmux_alt_r_chord_selects_red() {
 #[test]
 #[serial(level2)]
 fn level2_tmux_alt_shift_r_chord_selects_red() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
@@ -711,7 +711,7 @@ fn level2_tmux_alt_shift_r_chord_selects_red() {
 #[serial(level2)]
 #[cfg(target_os = "macos")]
 fn level2_wezterm_ctrl_shift_r_kitty_bytes_select_red() {
-    require_level!(Level::L2, WezTermHarness::available(), "WezTerm");
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
@@ -773,7 +773,7 @@ fn level2_wezterm_ctrl_shift_r_kitty_bytes_select_red() {
 #[test]
 #[serial(level2)]
 fn level2_tmux_alt_shift_r_chord_selects_red_choose_many() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
@@ -819,7 +819,7 @@ fn level2_tmux_alt_shift_r_chord_selects_red_choose_many() {
 #[serial(level2)]
 #[cfg(target_os = "macos")]
 fn level2_wezterm_ctrl_shift_r_kitty_bytes_select_red_choose_many() {
-    require_level!(Level::L2, WezTermHarness::available(), "WezTerm");
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));

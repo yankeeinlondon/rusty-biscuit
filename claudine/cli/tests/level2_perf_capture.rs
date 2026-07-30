@@ -41,7 +41,7 @@ use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serial_test::serial;
 use std::fs;
 use std::time::Duration;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 mod common;
 use common::{TestWorkspace, augmented_path, clear_no_color, write_executable};
@@ -84,7 +84,7 @@ fn run_perf_compose<H: TerminalHarness>(harness: &mut H) -> PerfCapture {
     let doc = workspace.path().join("doc.md");
     fs::write(&doc, FIXTURE_DOC).unwrap();
 
-    let claudine = cargo_bin!("claudine").display().to_string();
+    let claudine = cargo_bin("claudine").display().to_string();
     let path = augmented_path(&bin_dir);
     let path = path.to_string_lossy().into_owned();
     let home = workspace.path().to_string_lossy().into_owned();
@@ -255,7 +255,7 @@ fn assert_tree_structure(frame: &CapturedFrame) {
 #[test]
 #[serial(level2_terminal)]
 fn level2_perf_tree_renders_styled_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     // This fixture asserts a *colored* surface under `FORCE_COLOR=1`, which an
@@ -291,11 +291,7 @@ fn level2_perf_tree_renders_styled_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_perf_tree_renders_styled_in_wezterm() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut harness = WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm");
     // This fixture asserts a *colored* surface under `FORCE_COLOR=1`, which an

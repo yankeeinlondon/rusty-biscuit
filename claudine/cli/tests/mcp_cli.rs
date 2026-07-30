@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use claudine::mcp::types::{
     McpCatalog, McpDefaults, McpOrigin, McpProviderState, McpServer, McpServerMetadata,
     McpTransport, ProviderScopeEntries, ProviderStateEntry, RepoProviderState,
@@ -125,7 +124,7 @@ fn mcp_show_json_includes_provenance() {
         &home.join(".codex/config.toml"),
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("HOME", &home)
         .env("NO_COLOR", "1")
         .args(["mcp", "show", "calendar", "--json"])
@@ -148,7 +147,7 @@ fn mcp_config_json_uses_new_command_name() {
     server.aliases.push("gcal".into());
     seed_catalog(&home, std::slice::from_ref(&server));
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("HOME", &home)
         .env("NO_COLOR", "1")
         .args(["mcp", "config", "gcal", "--json"])
@@ -170,7 +169,7 @@ fn mcp_check_json_reports_invalid_servers() {
     invalid.command = None;
     seed_catalog(&home, &[invalid]);
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("HOME", &home)
         .env("NO_COLOR", "1")
         .args(["mcp", "check", "--json"])
@@ -200,7 +199,7 @@ fn mcp_default_repo_uses_repo_root_from_nested_directory() {
         return;
     }
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&nested)
         .env("HOME", &home)
         .env("NO_COLOR", "1")
@@ -256,7 +255,7 @@ args = ["-y", "@test/google-calendar"]
         &codex_config,
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&nested)
         .env("HOME", &home)
         .env("NO_COLOR", "1")
@@ -288,7 +287,7 @@ fn codex_wrapper_mcp_dry_run_shows_cleaned_prompt_and_shadow_file() {
     seed_catalog(&home, &[make_server("calendar")]);
     seed_defaults(&home, &["calendar"]);
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("HOME", &home)
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
@@ -324,7 +323,7 @@ fn gemini_and_opencode_wrapper_mcp_dry_run_show_provider_specific_injection() {
     seed_catalog(&home, &[make_server("linear"), make_server("github")]);
     seed_defaults(&home, &[]);
 
-    let gemini = cargo_bin_cmd!("claudine")
+    let gemini = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("HOME", &home)
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
@@ -344,7 +343,7 @@ fn gemini_and_opencode_wrapper_mcp_dry_run_show_provider_specific_injection() {
     assert!(gemini_stderr.contains("--allowed-mcp-server-names linear"));
     assert!(gemini_stderr.contains(".gemini/settings.json"));
 
-    let opencode = cargo_bin_cmd!("claudine")
+    let opencode = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("HOME", &home)
         .env("NO_COLOR", "1")
         .env("OPENCODE_MODEL", "test-model")
@@ -378,7 +377,7 @@ fn claude_wrapper_mcp_reports_sync_guidance() {
     seed_catalog(&home, &[make_server("calendar")]);
     seed_defaults(&home, &["calendar"]);
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("HOME", &home)
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
@@ -403,7 +402,7 @@ fn mcp_list_outside_repo_returns_no_repo_defaults() {
     seed_catalog(&home, &[make_server("calendar")]);
     seed_defaults(&home, &["calendar"]);
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&non_repo)
         .env("HOME", &home)
         .env("NO_COLOR", "1")
@@ -426,7 +425,7 @@ fn mcp_default_repo_fails_outside_repo() {
     fs::create_dir_all(&home).unwrap();
     fs::create_dir_all(&non_repo).unwrap();
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&non_repo)
         .env("HOME", &home)
         .env("NO_COLOR", "1")
@@ -454,7 +453,7 @@ fn mcp_remove_cascades_to_user_defaults() {
     seed_defaults(&home, &["calendar", "slack"]);
 
     // Remove calendar (--json to skip interactive confirmation)
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&non_repo)
         .env("HOME", &home)
         .env("NO_COLOR", "1")
@@ -503,7 +502,7 @@ fn mcp_remove_cascades_to_repo_defaults() {
         },
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&repo_root)
         .env("HOME", &home)
         .env("NO_COLOR", "1")
@@ -535,7 +534,7 @@ fn mcp_sync_rejects_positional_provider() {
     let home = workspace.path().join("home");
     fs::create_dir_all(&home).unwrap();
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("HOME", &home)
         .env("NO_COLOR", "1")
         .args(["mcp", "sync", "codex"])
@@ -573,7 +572,7 @@ fn effective_defaults_repo_replaces_user() {
     );
 
     // List from repo context — active defaults should be repo-only, not user-only
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&repo_root)
         .env("HOME", &home)
         .env("NO_COLOR", "1")
@@ -607,7 +606,7 @@ fn strict_mode_errors_on_missing_tag() {
     seed_catalog(&home, &[make_server("calendar")]);
     seed_defaults(&home, &["calendar"]);
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("HOME", &home)
         .env("NO_COLOR", "1")
         .env("OPENCODE_MODEL", "test-model")
@@ -641,7 +640,7 @@ fn strict_mode_errors_on_ambiguous_tag() {
     );
     seed_defaults(&home, &[]);
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("HOME", &home)
         .env("NO_COLOR", "1")
         .env("OPENCODE_MODEL", "test-model")
@@ -673,7 +672,7 @@ fn mcp_remove_alias_reports_owner_and_remaining() {
     server.aliases = vec!["gcal".into(), "cal".into()];
     seed_catalog(&home, std::slice::from_ref(&server));
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("HOME", &home)
         .env("NO_COLOR", "1")
         .args(["mcp", "remove", "gcal", "--json"])

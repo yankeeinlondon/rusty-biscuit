@@ -1213,7 +1213,7 @@ mod tests {
     }
 
     #[test]
-    fn browser_attrs_match_their_node_kind() {
+    fn valid_browser_attrs_match_their_node_kind() {
         use crate::tree::{
             BrowserAttrs, DataAttrName, ImageBrowserAttrs, ImageLoading, LinkBrowserAttrs,
             LinkTarget,

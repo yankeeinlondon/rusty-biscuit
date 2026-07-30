@@ -485,7 +485,7 @@ impl RegisterStore {
         }
 
         let expected_peer = owner_peer_id(doc_id.owner_node_id());
-        for (peer, _counter) in staged_doc.oplog_vv().iter() {
+        for peer in staged_doc.oplog_vv().keys() {
             if *peer != expected_peer {
                 return Err(RegisterError::ForeignWriter {
                     doc: key,

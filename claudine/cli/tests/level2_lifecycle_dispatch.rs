@@ -54,7 +54,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 /// A staged lifecycle run: a git-repo workspace, a fake `goose` provider on
 /// `PATH`, the prompt document, and the side-effect log the lifecycle stacks
@@ -288,7 +288,7 @@ fn pane_has(pane: &str, needle: &str) -> bool {
 #[test]
 #[serial(level2_lifecycle)]
 fn level2_lifecycle_success_path_event_order() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let doc = format!(
         "---\ntitle: lifecycle success\n{init}{start}{success}{blocked}{failure}{finalize}---\nBody\n",
@@ -323,7 +323,7 @@ fn level2_lifecycle_success_path_event_order() {
 #[test]
 #[serial(level2_lifecycle)]
 fn level2_lifecycle_failure_path_event_order() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let doc = format!(
         "---\ntitle: lifecycle failure\n{init}{start}{success}{blocked}{failure}{finalize}---\nBody\n",
@@ -375,7 +375,7 @@ fn level2_lifecycle_failure_path_event_order() {
 #[test]
 #[serial(level2_lifecycle)]
 fn level2_lifecycle_blocked_preflight_shell_audit_fires_blocked_and_finalize_stacks() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     // `start.stack` carries a blacklisted shell command, so composition
     // preflight shell-audit denies it and routes the run to `blocked` —
@@ -436,7 +436,7 @@ fn level2_lifecycle_blocked_preflight_shell_audit_fires_blocked_and_finalize_sta
 #[test]
 #[serial(level2_lifecycle)]
 fn level2_lifecycle_dry_run_fires_no_lifecycle_events_and_no_proxy_traversal() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let start = "start:\n  stack:\n    - action: {shell: \"rm -rf /tmp/nonexistent\"}\n";
     let init = "initialize:\n  stack:\n    \
@@ -507,7 +507,7 @@ fn level2_lifecycle_dry_run_fires_no_lifecycle_events_and_no_proxy_traversal() {
 #[test]
 #[serial(level2_lifecycle)]
 fn level2_lifecycle_success_top_level_fires_with_stack() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     // `success` carries a top-level `info:` AND a stack side effect.
     let success = "success:\n  info: \"SUCCESS_TOPLEVEL_MARK\"\n  \
@@ -548,7 +548,7 @@ fn level2_lifecycle_success_top_level_fires_with_stack() {
 #[test]
 #[serial(level2_lifecycle)]
 fn level2_lifecycle_success_stack_error_downgrades_keeps_success_comm() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     // `success` has a top-level `info:` and a stack whose final action is
     // `{error: "bad"}`, downgrading the run to `failure`.
@@ -602,7 +602,7 @@ fn level2_lifecycle_success_stack_error_downgrades_keeps_success_comm() {
 #[test]
 #[serial(level2_lifecycle)]
 fn level2_lifecycle_failure_stack_observes_err_payload() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let failure = err_marker("failure", &["kind", "variant", "msg"]);
     let doc = format!(
@@ -676,7 +676,7 @@ fn level2_lifecycle_failure_stack_observes_err_payload() {
 #[test]
 #[serial(level2_lifecycle)]
 fn level2_lifecycle_blocked_stack_observes_err_payload() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let start = "start:\n  stack:\n    - action: {shell: \"rm -rf /tmp/nonexistent\"}\n";
     let blocked = err_marker("blocked", &["kind", "variant"]);
@@ -731,7 +731,7 @@ fn level2_lifecycle_blocked_stack_observes_err_payload() {
 #[test]
 #[serial(level2_lifecycle)]
 fn level2_lifecycle_finalize_stack_observes_err_after_blocked() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let start = "start:\n  stack:\n    - action: {shell: \"rm -rf /tmp/nonexistent\"}\n";
     // `finalize.stack` guards an `err.variant` append with `when: "err"`, then
@@ -797,7 +797,7 @@ fn level2_lifecycle_finalize_stack_observes_err_after_blocked() {
 #[test]
 #[serial(level2_lifecycle)]
 fn level2_lifecycle_finalize_stack_observes_err_after_failure() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     // `finalize.stack` guards an err.msg append with `when: "err"`, then
     // appends a trailing `finalize` marker the polling loop awaits.
@@ -847,7 +847,7 @@ fn level2_lifecycle_finalize_stack_observes_err_after_failure() {
 #[test]
 #[serial(level2_lifecycle)]
 fn level2_lifecycle_failure_retry_recovers_to_success() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let failure = "failure:\n  stack:\n    \
         - action: {append_line: [\"events.log\", \"failure\"]}\n    \

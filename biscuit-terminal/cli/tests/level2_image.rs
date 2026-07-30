@@ -36,7 +36,7 @@ use common::pane_geometry::{
 use common::send_bt_command;
 use serial_test::serial;
 use std::time::Duration;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 /// Process-shared WezTerm pane reused across the WezTerm image tests.
 /// A `clear` is sent before each test's first interaction so prior
@@ -89,11 +89,7 @@ fn has_image_protocol_bytes(raw: &str) -> bool {
 #[test]
 #[serial(level2_terminal)]
 fn level2_image_renders_in_wezterm() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
@@ -140,11 +136,7 @@ fn level2_image_renders_in_wezterm() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_image_renders_in_kitty() {
-    require_level!(
-        Level::L2,
-        KittyHarness::available(),
-        "Kitty remote control (set KITTY_LISTEN_ON)",
-    );
+    require_level!(Level::L2, KittyHarness::available(), Backend::Kitty);
 
     let mut guard = SHARED_KITTY
         .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
@@ -170,11 +162,7 @@ fn level2_image_renders_in_kitty() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_image_scroll_compensation_at_bottom_margin() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
@@ -257,11 +245,7 @@ fn level2_image_scroll_compensation_at_bottom_margin() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_warp_uses_floor_rounding() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
@@ -324,11 +308,7 @@ fn level2_warp_uses_floor_rounding() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_image_default_uses_ceil_rounding() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
@@ -377,11 +357,7 @@ fn level2_image_default_uses_ceil_rounding() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_image_meta_to_stderr() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
@@ -422,11 +398,7 @@ fn level2_image_meta_to_stderr() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_image_kitty_row_advance() {
-    require_level!(
-        Level::L2,
-        KittyHarness::available(),
-        "Kitty remote control (set KITTY_LISTEN_ON)",
-    );
+    require_level!(Level::L2, KittyHarness::available(), Backend::Kitty);
 
     let mut guard = SHARED_KITTY
         .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));

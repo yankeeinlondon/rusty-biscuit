@@ -1,0 +1,119 @@
+set dotenv-load
+set positional-arguments
+
+# set allow-duplicate-recipes
+
+set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+
+import "../just/lifecycle.just"
+import "../just/plan.just"
+import "../just/review.just"
+import "../just/notify.just"
+import "../just/ai.just"
+import "../just/devops.just"
+
+BOLD := '\033[1m'
+DIM := '\033[2m'
+ITALIC := '\033[3m'
+RESET := '\033[0m'
+RED := '\033[31m'
+GREEN := '\033[32m'
+YELLOW := '\033[33m'
+BLUE := '\033[34m'
+MAGENTA := '\033[35m'
+CYAN := '\033[36m'
+PACKAGE := "Biscuit Browser Harness"
+LIBRARY := "biscuit-browser-harness"
+
+default:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if command -v md &> /dev/null && [ -f just.md ]; then
+        md just.md
+    else
+        echo
+        echo -e "{{ BOLD }}{{ PACKAGE }}{{ RESET }} (headless Chrome harness library)"
+        echo "======================================================================================"
+        echo
+    fi
+
+    just --list | grep -v 'default'
+    echo
+
+# build the library
+build *args="":
+    @just _build {{ LIBRARY }} "Biscuit Browser Harness" {{ args }}
+
+# --- Canonical lifecycle recipe set (testing-best-practices Phase 2) -------
+
+# Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
+sanity:
+    @just _sanity {{ LIBRARY }}
+
+# Level-1 tests for the library. The `browser_*`-named tests are selected by
+# `test-browser`, not by this tier.
+test *args="":
+    @just _test {{ LIBRARY }} {{ args }}
+
+# not applicable: biscuit-browser-harness has no real-terminal (Level-2) tests
+test-l2:
+    @echo "test-l2: not applicable for biscuit-browser-harness"
+
+# not applicable: biscuit-browser-harness has no OS-keyboard-injection (Level-3) tests
+test-l3:
+    @echo "test-l3: not applicable for biscuit-browser-harness"
+
+# Browser tier. This crate owns `browser_*`-prefixed tests, so the tier is real:
+# the `test(/browser_/)` filterset excludes them from `sanity` and `test`, and
+# only this recipe runs them.
+test-browser *args="":
+    @just _test_browser {{ LIBRARY }} {{ args }}
+
+# not applicable: biscuit-browser-harness has no real-resource tier
+test-real:
+    @echo "test-real: not applicable for biscuit-browser-harness"
+
+# Clippy + fmt check for the library.
+lint:
+    @just _lint {{ LIBRARY }}
+
+# not applicable: biscuit-browser-harness has no criterion benches
+bench:
+    @echo "bench: not applicable for biscuit-browser-harness"
+
+# Per-package LCOV coverage for the library.
+coverage *args="":
+    @just _coverage {{ LIBRARY }} {{ args }}
+
+# Doctests for the library.
+doctest *args="":
+    @just _doctest {{ LIBRARY }} {{ args }}
+
+# not applicable: biscuit-browser-harness has no cargo-fuzz targets
+fuzz:
+    @echo "fuzz: not applicable for biscuit-browser-harness"
+
+# Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
+all:
+    @just sanity
+    @just lint
+    @just doctest
+    @just test
+    @just test-l2
+    @just test-browser
+
+# ----------------------------------------------------------------------------
+
+# Lint (and fix) the library
+lint-fix:
+    @just _lint {{ LIBRARY }} || just _fix_lint {{ LIBRARY }}
+
+# Validate the source code without doing a full build
+check:
+    @cargo check -p {{ LIBRARY }}
+
+# No-op recipe: reference color vars so linters won't report them as unused.
+# Run `just _colors` if you want to exercise this (it does nothing).
+_colors:
+    @: {{ BOLD }} {{ ITALIC }} {{ RESET }} {{ RED }} {{ DIM }} {{ YELLOW }} {{ BLUE }} {{ MAGENTA }} {{ CYAN }} {{ GREEN }} >/dev/null || true

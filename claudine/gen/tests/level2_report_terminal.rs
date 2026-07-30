@@ -54,7 +54,7 @@ use claudine_gen::generate::{CheckOutcome, Generation, Provenance, ResolvedField
 use claudine_gen::offerings::OfferingJoinReport;
 use claudine_gen::report;
 use serial_test::serial;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 /// Selects the probe mode when this binary is re-exec'd inside the pane.
 /// Unset in a normal test run, which makes the probe entrypoint a no-op.
@@ -237,7 +237,7 @@ fn assert_styled(frame: &CapturedFrame, needle: &str, code: &str) {
 #[test]
 #[serial(level2_terminal)]
 fn level2_report_status_styled_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_probe("status", 100, 60);
     let lines = report_lines(&frame);
 
@@ -297,7 +297,7 @@ fn level2_report_status_styled_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_report_provenance_wraps_and_keeps_placeholder_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let cols = 100usize;
     let frame = capture_probe("provenance", cols as u32, 40);
     let lines = report_lines(&frame);

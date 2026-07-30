@@ -110,73 +110,67 @@ pub fn extract_frontmatter(content: &str) -> Option<(String, String)> {
     // Find the position after the opening ---
     let after_opening = &content[3..];
 
-    // Skip the rest of the first line (in case there's content after opening ---)
-    let after_opening = if let Some(pos) = after_opening.find('\n') {
-        &after_opening[pos + 1..]
-    } else {
-        // No newline after opening --- means malformed
-        return None;
-    };
+    // Skip the rest of the first line (in case there's content after opening ---).
+    // No newline after the opening --- means malformed.
+    let first_newline = after_opening.find('\n')?;
+    let after_opening = &after_opening[first_newline + 1..];
 
     // Find the closing ---
     // We need to find --- at the start of a line, and it must be ONLY --- (not "--- FILE:" etc.)
     let mut search_pos = 0;
     loop {
-        if let Some(pos) = after_opening[search_pos..].find("---") {
-            let absolute_pos = search_pos + pos;
+        // Running out of --- means there is no closing delimiter.
+        let pos = after_opening[search_pos..].find("---")?;
+        let absolute_pos = search_pos + pos;
 
-            // Check if this --- is at the start of a line
-            let is_line_start =
-                absolute_pos == 0 || after_opening.as_bytes()[absolute_pos - 1] == b'\n';
+        // Check if this --- is at the start of a line
+        let is_line_start =
+            absolute_pos == 0 || after_opening.as_bytes()[absolute_pos - 1] == b'\n';
 
-            if is_line_start {
-                // Check if this is ONLY --- (closing delimiter) or something like "--- FILE:"
-                let after_dashes = &after_opening[absolute_pos + 3..];
-                let is_pure_delimiter = after_dashes.is_empty()
-                    || after_dashes.starts_with('\n')
-                    || after_dashes.starts_with("\r\n")
-                    || after_dashes
-                        .chars()
-                        .next()
-                        .map(|c| c.is_whitespace() && c != ' ')
-                        .unwrap_or(false);
+        if is_line_start {
+            // Check if this is ONLY --- (closing delimiter) or something like "--- FILE:"
+            let after_dashes = &after_opening[absolute_pos + 3..];
+            let is_pure_delimiter = after_dashes.is_empty()
+                || after_dashes.starts_with('\n')
+                || after_dashes.starts_with("\r\n")
+                || after_dashes
+                    .chars()
+                    .next()
+                    .map(|c| c.is_whitespace() && c != ' ')
+                    .unwrap_or(false);
 
-                // Also allow "---" followed by only whitespace until end of line
-                let is_pure_delimiter = is_pure_delimiter || {
-                    if let Some(newline_pos) = after_dashes.find('\n') {
-                        after_dashes[..newline_pos].trim().is_empty()
-                    } else {
-                        after_dashes.trim().is_empty()
-                    }
+            // Also allow "---" followed by only whitespace until end of line
+            let is_pure_delimiter = is_pure_delimiter || {
+                if let Some(newline_pos) = after_dashes.find('\n') {
+                    after_dashes[..newline_pos].trim().is_empty()
+                } else {
+                    after_dashes.trim().is_empty()
+                }
+            };
+
+            if is_pure_delimiter {
+                // Found closing delimiter
+                let yaml_content = &after_opening[..absolute_pos];
+
+                // Body starts after the closing --- and its newline
+                let body_start = absolute_pos + 3;
+                let body = if body_start < after_opening.len() {
+                    // Skip the newline after closing ---
+                    let body_content = &after_opening[body_start..];
+                    body_content
+                        .strip_prefix("\r\n")
+                        .or_else(|| body_content.strip_prefix('\n'))
+                        .unwrap_or(body_content)
+                } else {
+                    ""
                 };
 
-                if is_pure_delimiter {
-                    // Found closing delimiter
-                    let yaml_content = &after_opening[..absolute_pos];
-
-                    // Body starts after the closing --- and its newline
-                    let body_start = absolute_pos + 3;
-                    let body = if body_start < after_opening.len() {
-                        // Skip the newline after closing ---
-                        let body_content = &after_opening[body_start..];
-                        body_content
-                            .strip_prefix("\r\n")
-                            .or_else(|| body_content.strip_prefix('\n'))
-                            .unwrap_or(body_content)
-                    } else {
-                        ""
-                    };
-
-                    return Some((yaml_content.to_string(), body.to_string()));
-                }
+                return Some((yaml_content.to_string(), body.to_string()));
             }
-
-            // Not a valid closing delimiter, continue searching
-            search_pos = absolute_pos + 3;
-        } else {
-            // No more --- found
-            return None;
         }
+
+        // Not a valid closing delimiter, continue searching
+        search_pos = absolute_pos + 3;
     }
 }
 

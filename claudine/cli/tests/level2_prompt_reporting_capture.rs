@@ -63,7 +63,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 mod common;
 use common::{TestWorkspace, augmented_path, clear_no_color, write_executable};
@@ -199,7 +199,7 @@ fn send_compose<H: TerminalHarness>(
     cols: u32,
     extra_args: &[&str],
 ) -> CapturedFrame {
-    let claudine = cargo_bin!("claudine").display().to_string();
+    let claudine = cargo_bin("claudine").display().to_string();
     let path = augmented_path(&fx.bin_dir);
     let path = path.to_string_lossy().into_owned();
     let home = fx.workspace.path().to_string_lossy().into_owned();
@@ -268,7 +268,7 @@ fn raw_line<'a>(frame: &'a CapturedFrame, needle: &str) -> Option<&'a str> {
 #[test]
 #[serial(level2_terminal)]
 fn level2_prompt_reporting_block_quote_colors_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let fx = Fixture::new(Some(SYSTEM_PROMPT_SHORT), USER_PROMPT_SHORT);
     let frame = capture_compose_tmux(&fx, 100, 40, &[]);
@@ -319,7 +319,7 @@ fn level2_prompt_reporting_block_quote_colors_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_prompt_reporting_body_wraps_and_reserves_chrome_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let sp = system_prompt_long_paragraph();
     let fx = Fixture::new(Some(&sp), USER_PROMPT_SHORT);
@@ -360,7 +360,7 @@ fn level2_prompt_reporting_body_wraps_and_reserves_chrome_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_prompt_reporting_front_back_truncation_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let body = numbered_lines(50);
     let fx = Fixture::new(None, &body);
@@ -391,11 +391,7 @@ fn level2_prompt_reporting_front_back_truncation_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_prompt_reporting_system_link_osc8_in_wezterm() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let fx = Fixture::new(Some(SYSTEM_PROMPT_SHORT), USER_PROMPT_SHORT);
     let mut harness = WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm");

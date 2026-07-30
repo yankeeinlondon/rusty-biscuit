@@ -33,7 +33,7 @@ use serial_test::serial;
 #[test]
 #[serial]
 fn perf_full_command_non_image_meets_sla() {
-    let bin = cargo_bin!("wt").display().to_string();
+    let bin = cargo_bin("wt").display().to_string();
 
     let run = || {
         std::process::Command::new(bin.as_str())

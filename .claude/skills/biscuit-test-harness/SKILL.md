@@ -84,8 +84,40 @@ via `skip_with_reason("<X>")` when it returns `false`. No `#[ignore]`.
 | `xdotool` (L3, Linux) | Linux, `xdotool` on `$PATH`, **and** `DISPLAY` set. Wayland reports unavailable and skips. |
 | `win_input` (L3, Windows) | Windows and a working `powershell`. |
 
-`BISCUIT_TEST_LEVEL_REQUIRED=2` (or `3`) flips skips into hard failures — set
-on hosts where the tooling *must* be present.
+`BISCUIT_TEST_LEVEL_REQUIRED=2` (or `3`) flips skips into hard failures, but
+all-or-nothing: it also panics the GUI backends a headless runner cannot host.
+Prefer **`BISCUIT_TEST_REQUIRED_BACKENDS`** for L2 — a comma-separated,
+case-insensitive list of the stable identifiers `tmux`, `wezterm`, `kitty`,
+`apple-terminal`. Named backends hard-fail when unavailable; every other backend
+still skips cleanly. Identifiers match exactly (`wez` is an error, not a
+near-miss), and the same spellings appear in `.github/ci/areas.json`.
+
+```bash
+BISCUIT_TEST_REQUIRED_BACKENDS=tmux just test-l2   # tmux fatal, GUI backends skip
+```
+
+Naming a backend requires the gate to carry that backend's identity, so pass a
+`Backend` rather than a bare label:
+
+```rust
+use test_toolkit::{require_level, Backend, Level};
+
+require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+```
+
+A plain string label still works, and remains correct for composite or
+non-backend requirements — `"PTY (/dev/ptmx)"`, `"WezTerm + cliclick"` — where
+no single backend applies. Those gates contribute no execution evidence by
+design and can neither satisfy nor block the variable.
+
+**Availability is not execution.** A host with `tmux` installed and zero
+tmux-backed tests selected still exits 0, having verified nothing. When
+`BISCUIT_TEST_REQUIRED_BACKENDS` is set, each gate therefore appends a
+`{backend, test, decision}` record to `$STAGE/backend-executions.jsonl`, and
+`just test-l2` brackets the tier with `backend-proof reset` / `backend-proof
+verify` (`tools/test-toolkit`, `--features backend-proof`) so a required backend
+that ran no test fails the tier. Recording is off — no file I/O at all — when
+the variable is unset. See the `rust-testing` skill for the full contract.
 
 ## The "which terminal am I running inside" gotcha
 

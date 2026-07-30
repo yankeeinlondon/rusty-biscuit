@@ -18,10 +18,9 @@ pub(super) fn classify_malformed_asset(record: &OpenCodeLogRecord) -> Option<Log
 
     let (asset_type, error_text) = if let Some(kind) = detect_asset_suffix(err) {
         (kind, err.to_string())
-    } else if let Some(kind) = detect_asset_suffix(&record.message) {
-        (kind, record.message.clone())
     } else {
-        return None;
+        let kind = detect_asset_suffix(&record.message)?;
+        (kind, record.message.clone())
     };
 
     let path = match asset_type {

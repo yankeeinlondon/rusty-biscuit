@@ -97,6 +97,81 @@ fn my_test() {
 }
 ```
 
+### `require_level!` and `Backend` — per-backend L2 enforcement
+
+`require_level!` takes the level, an availability probe, and a description of
+what the test needs. Pass a `Backend` rather than a bare string wherever the
+requirement is one of the four real-terminal harnesses:
+
+```rust
+use test_toolkit::{Backend, Level, require_level};
+
+#[test]
+fn level2_renders_in_real_terminal() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+}
+```
+
+A `&str` still works and is the right choice for requirements with no backend
+identity (`"PTY (/dev/ptmx)"`, `"WezTerm + cliclick"`), but such a test can
+never be demanded by CI and contributes no execution evidence.
+
+`Backend::as_str()` returns the stable identifier — `tmux`, `wezterm`, `kitty`,
+`apple-terminal` — shared verbatim with `scripts/ci/affected_scope.py`'s
+`KNOWN_L2_BACKENDS` and the `backends` arrays in `.github/ci/areas.json`.
+`Backend::label()` is the separate human-readable name used in diagnostics, so
+rewording a skip message cannot break a CI policy file.
+
+#### `BISCUIT_TEST_REQUIRED_BACKENDS`
+
+`BISCUIT_TEST_LEVEL_REQUIRED=2` turns every L2 skip into a panic, which is
+unusable on a headless runner that can host tmux but not a GUI emulator.
+`BISCUIT_TEST_REQUIRED_BACKENDS` scopes the same force to named backends:
+
+```bash
+BISCUIT_TEST_REQUIRED_BACKENDS=tmux            # one
+BISCUIT_TEST_REQUIRED_BACKENDS=tmux,wezterm    # several
+```
+
+- a listed backend that is unavailable → panic
+- an unlisted backend that is unavailable → clean skip, as before
+- entries are trimmed and lowercased, and matched **exactly**: `tmux2` and
+  `wez` are errors, not near-misses
+- an unknown or empty entry panics even when the harness is present, because a
+  silently dropped requirement can never fail again
+- unset or blank means no requirement; it composes with, and does not replace,
+  `BISCUIT_TEST_LEVEL_REQUIRED`
+
+#### `backend-proof` binary — execution evidence
+
+An installed `tmux` plus zero tmux tests is not evidence. While
+`BISCUIT_TEST_REQUIRED_BACKENDS` is set, every gate decision is appended to
+`backend-executions.jsonl` in the staging directory (`$BISCUIT_JUNIT_STAGE_DIR`,
+else `target/nextest/ci-reports` under the workspace root), one JSON object per
+line:
+
+```json
+{"backend":"tmux","test":"level2_dirty_tree::level2_dirty_tree_renders_in_tmux","decision":"run"}
+```
+
+`decision` is `run`, `skip`, or `panic`. Each line is a single `O_APPEND` write,
+so the concurrent test processes nextest spawns cannot interleave. Recording is
+a no-op when no backend is required, so local development pays nothing.
+
+`backend-proof` then asserts that each required backend produced at least one
+`run`:
+
+```bash
+cargo run -p test-toolkit --features backend-proof --bin backend-proof -- reset
+just test-l2 <area>
+cargo run -p test-toolkit --features backend-proof --bin backend-proof -- verify
+```
+
+`reset` must precede the run, or stale evidence satisfies the check. Exit codes:
+`0` proved (or nothing required), `1` a required backend executed no test, `2`
+bad configuration or unreadable evidence. `--stage-dir` and `--required`
+override the environment.
+
 ### `leak-sweep` binary — post-run orphan detector
 
 A cross-platform (macOS / Windows / Linux) helper that runs a command, then

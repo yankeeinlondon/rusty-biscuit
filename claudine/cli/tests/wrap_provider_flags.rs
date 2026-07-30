@@ -3,7 +3,6 @@
 //! Split out of the `wrap_commands.rs` god file; shared fixtures live in
 //! `common::wrap`.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::str::contains;
 use std::fs;
 use tempfile::tempdir;
@@ -28,7 +27,7 @@ exit 0
 "#,
     );
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
@@ -64,7 +63,7 @@ exit 0
 "#,
     );
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
@@ -94,7 +93,7 @@ exit 0
 "#,
     );
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
@@ -152,7 +151,7 @@ exit 0
 "#,
     );
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
@@ -211,7 +210,7 @@ exit 0
 "#,
     );
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)

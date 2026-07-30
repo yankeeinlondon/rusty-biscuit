@@ -54,19 +54,19 @@ build *args="":
 
 # --- Canonical lifecycle recipe set (testing-best-practices Phase 3) -------
 
+# `--all-features` on schematic-define throughout: `default = []`, and the
+# `openapi` feature gates 233 of its 535 tests. Both in-area consumers
+# (schematic-gen, schematic-definitions) enable it, so the default set is a
+# configuration nobody builds — running it reports 302 tests as the whole suite.
+# Same reasoning as biscuit-visualized's `--all-features`.
+
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity schematic-define
-    @just _sanity schematic-definitions
-    @just _sanity schematic-gen
-    @just _sanity schematic-oauth
+    @just _sanity_all "schematic-define --all-features; schematic-definitions; schematic-gen; schematic-oauth"
 
 # run tests for schematic packages
 test *args="":
-    @just _test schematic-define {{ args }}
-    @just _test schematic-gen {{ args }}
-    @just _test schematic-definitions {{ args }}
-    @just _test schematic-oauth {{ args }}
+    @just _test_all "schematic-define --all-features; schematic-gen; schematic-definitions; schematic-oauth" {{ args }}
 
 # test the generated schematic-schema crate (excluded from the workspace; uses its generated manifest)
 test-schema *args="":
@@ -109,14 +109,14 @@ bench:
 
 # Per-package LCOV coverage for schematic crates.
 coverage *args="":
-    @just _coverage schematic-define {{ args }}
+    @just _coverage schematic-define --all-features {{ args }}
     @just _coverage schematic-definitions {{ args }}
     @just _coverage schematic-gen {{ args }}
     @just _coverage schematic-oauth {{ args }}
 
 # Doctests for schematic crates.
 doctest *args="":
-    @just _doctest schematic-define {{ args }}
+    @just _doctest schematic-define --all-features {{ args }}
     @just _doctest schematic-definitions {{ args }}
     @just _doctest schematic-gen {{ args }}
     @just _doctest schematic-oauth {{ args }}

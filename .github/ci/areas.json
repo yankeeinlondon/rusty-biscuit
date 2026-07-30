@@ -17,11 +17,45 @@
     "check_args": "-p biscuit-terminal -p biscuit-terminal-cli",
     "l2": true,
     "browser": true,
-    "backends": ["tmux", "wezterm", "kitty", "apple-terminal"]
+    "backends": ["tmux", "wezterm", "kitty", "apple-terminal"],
+    "policy_gaps": [
+      {
+        "tier": "L2",
+        "environments": ["windows-latest"],
+        "reason": "no L2 terminal backend is provisionable on Windows: TmuxHarness::available() is which(\"tmux\") and tmux has no Windows port, while WezTerm/Kitty/Apple Terminal need a live GUI session. The headless wezterm-mux-server spike (plan 2.3) is deferred, separately scoped work.",
+        "owner": "@yankeeinlondon",
+        "expiry": "2027-01-31"
+      },
+      {
+        "tier": "L2",
+        "environments": ["wsl2-ubuntu"],
+        "reason": "the WSL2 leg runs a prebuilt nextest archive (plan 2.2): the guest has no cargo or rustc, so it cannot build the biscuit-harness-broker binary the L2 tier needs, and no terminal server runs there. Installing tmux in the guest would satisfy which(\"tmux\") while executing zero L2 tests — the non-evidence plan 1.1 rejects. Closes when the broker ships inside the archive and the guest starts a tmux server; tractable without solving the Windows backend problem, hence the earlier expiry.",
+        "owner": "@yankeeinlondon",
+        "expiry": "2026-12-31"
+      }
+    ]
   },
   {
     "area": "biscuit-tui",
-    "check_args": "-p biscuit-tui -p biscuit-tui-cli"
+    "check_args": "-p biscuit-tui -p biscuit-tui-cli",
+    "l2": true,
+    "backends": ["tmux", "wezterm", "kitty"],
+    "policy_gaps": [
+      {
+        "tier": "L2",
+        "environments": ["windows-latest"],
+        "reason": "no L2 terminal backend is provisionable on Windows: TmuxHarness::available() is which(\"tmux\") and tmux has no Windows port, while WezTerm/Kitty need a live GUI session. The headless wezterm-mux-server spike (plan 2.3) is deferred, separately scoped work.",
+        "owner": "@yankeeinlondon",
+        "expiry": "2027-01-31"
+      },
+      {
+        "tier": "L2",
+        "environments": ["wsl2-ubuntu"],
+        "reason": "the WSL2 leg runs a prebuilt nextest archive (plan 2.2): the guest has no cargo or rustc, so it cannot build the biscuit-harness-broker binary the L2 tier needs, and no terminal server runs there. Installing tmux in the guest would satisfy which(\"tmux\") while executing zero L2 tests — the non-evidence plan 1.1 rejects. Closes when the broker ships inside the archive and the guest starts a tmux server; tractable without solving the Windows backend problem, hence the earlier expiry.",
+        "owner": "@yankeeinlondon",
+        "expiry": "2026-12-31"
+      }
+    ]
   },
   {
     "area": "schematic",
@@ -29,8 +63,7 @@
   },
   {
     "area": "biscuit-file",
-    "check_args": "-p biscuit-file -p biscuit-file-cli",
-    "soft_os": []
+    "check_args": "-p biscuit-file -p biscuit-file-cli"
   },
   {
     "area": "unchained-ai",
@@ -46,21 +79,71 @@
   },
   {
     "area": "tree-hugger",
-    "check_args": "-p tree-hugger -p tree-hugger-cli"
+    "check_args": "-p tree-hugger -p tree-hugger-cli",
+    "l2": true,
+    "backends": ["tmux", "wezterm", "kitty"],
+    "policy_gaps": [
+      {
+        "tier": "L2",
+        "environments": ["windows-latest"],
+        "reason": "no L2 terminal backend is provisionable on Windows: TmuxHarness::available() is which(\"tmux\") and tmux has no Windows port, while WezTerm/Kitty need a live GUI session. The headless wezterm-mux-server spike (plan 2.3) is deferred, separately scoped work.",
+        "owner": "@yankeeinlondon",
+        "expiry": "2027-01-31"
+      },
+      {
+        "tier": "L2",
+        "environments": ["wsl2-ubuntu"],
+        "reason": "the WSL2 leg runs a prebuilt nextest archive (plan 2.2): the guest has no cargo or rustc, so it cannot build the biscuit-harness-broker binary the L2 tier needs, and no terminal server runs there. Installing tmux in the guest would satisfy which(\"tmux\") while executing zero L2 tests — the non-evidence plan 1.1 rejects. Closes when the broker ships inside the archive and the guest starts a tmux server; tractable without solving the Windows backend problem, hence the earlier expiry.",
+        "owner": "@yankeeinlondon",
+        "expiry": "2026-12-31"
+      }
+    ]
   },
   {
     "area": "darkmatter",
     "check_args": "-p darkmatter -p darkmatter-cli -p dmls",
     "shards": ["1/4", "2/4", "3/4", "4/4"],
-    "soft_os": [],
     "l2": true,
     "browser": true,
-    "backends": ["tmux", "wezterm"]
+    "backends": ["tmux", "wezterm"],
+    "policy_gaps": [
+      {
+        "tier": "L2",
+        "environments": ["windows-latest"],
+        "reason": "no L2 terminal backend is provisionable on Windows: TmuxHarness::available() is which(\"tmux\") and tmux has no Windows port, while WezTerm needs a live GUI session. The headless wezterm-mux-server spike (plan 2.3) is deferred, separately scoped work.",
+        "owner": "@yankeeinlondon",
+        "expiry": "2027-01-31"
+      },
+      {
+        "tier": "L2",
+        "environments": ["wsl2-ubuntu"],
+        "reason": "the WSL2 leg runs a prebuilt nextest archive (plan 2.2): the guest has no cargo or rustc, so it cannot build the biscuit-harness-broker binary the L2 tier needs, and no terminal server runs there. Installing tmux in the guest would satisfy which(\"tmux\") while executing zero L2 tests — the non-evidence plan 1.1 rejects. Closes when the broker ships inside the archive and the guest starts a tmux server; tractable without solving the Windows backend problem, hence the earlier expiry.",
+        "owner": "@yankeeinlondon",
+        "expiry": "2026-12-31"
+      }
+    ]
   },
   {
     "area": "sniff",
     "check_args": "-p sniff -p sniff-cli --features sniff/remote",
-    "full_os": ["ubuntu-latest", "windows-latest", "macos-latest"]
+    "l2": true,
+    "backends": ["tmux"],
+    "policy_gaps": [
+      {
+        "tier": "L2",
+        "environments": ["windows-latest"],
+        "reason": "sniff's two L2 tests are tmux-only, and tmux has no Windows port (TmuxHarness::available() is which(\"tmux\")). The headless wezterm-mux-server spike (plan 2.3) is deferred, separately scoped work.",
+        "owner": "@yankeeinlondon",
+        "expiry": "2027-01-31"
+      },
+      {
+        "tier": "L2",
+        "environments": ["wsl2-ubuntu"],
+        "reason": "the WSL2 leg runs a prebuilt nextest archive (plan 2.2): the guest has no cargo or rustc, so it cannot build the biscuit-harness-broker binary the L2 tier needs, and no terminal server runs there. Installing tmux in the guest would satisfy which(\"tmux\") while executing zero L2 tests — the non-evidence plan 1.1 rejects. Closes when the broker ships inside the archive and the guest starts a tmux server; tractable without solving the Windows backend problem, hence the earlier expiry.",
+        "owner": "@yankeeinlondon",
+        "expiry": "2026-12-31"
+      }
+    ]
   },
   {
     "area": "model-citizen",
@@ -68,12 +151,27 @@
   },
   {
     "area": "claudine",
-    "check_args": "-p claudine-catalog-types -p claudine -p claudine-contract -p claudine-cli -p claudine-gen",
+    "check_args": "-p claudine-catalog-types -p claudine -p claudine-contract -p claudine-cli -p claudine-gen -p rendezvous-core -p rendezvous-client -p rendezvous-daemon",
     "shards": ["1/4", "2/4", "3/4", "4/4"],
-    "soft_os": [],
     "l2": true,
     "ai_provider_stubs": true,
-    "backends": ["tmux", "wezterm"]
+    "backends": ["tmux", "wezterm"],
+    "policy_gaps": [
+      {
+        "tier": "L2",
+        "environments": ["windows-latest"],
+        "reason": "no L2 terminal backend is provisionable on Windows: TmuxHarness::available() is which(\"tmux\") and tmux has no Windows port, while WezTerm needs a live GUI session. The headless wezterm-mux-server spike (plan 2.3) is deferred, separately scoped work.",
+        "owner": "@yankeeinlondon",
+        "expiry": "2027-01-31"
+      },
+      {
+        "tier": "L2",
+        "environments": ["wsl2-ubuntu"],
+        "reason": "the WSL2 leg runs a prebuilt nextest archive (plan 2.2): the guest has no cargo or rustc, so it cannot build the biscuit-harness-broker binary the L2 tier needs, and no terminal server runs there. Installing tmux in the guest would satisfy which(\"tmux\") while executing zero L2 tests — the non-evidence plan 1.1 rejects. Closes when the broker ships inside the archive and the guest starts a tmux server; tractable without solving the Windows backend problem, hence the earlier expiry.",
+        "owner": "@yankeeinlondon",
+        "expiry": "2026-12-31"
+      }
+    ]
   },
   {
     "area": "research",
@@ -85,7 +183,8 @@
   },
   {
     "area": "homelab",
-    "check_args": "-p homelab -p homelab-cli -p homelab-server -p unfolded-integration-helper -p arcam-amp-integration -p eversolo-integration -p sony-receiver-integration"
+    "check_args": "-p homelab -p homelab-cli -p homelab-server -p unfolded-integration-helper -p arcam-amp-integration -p eversolo-integration -p sony-receiver-integration",
+    "node": true
   },
   {
     "area": "biscuit-contract",
@@ -95,7 +194,23 @@
     "area": "biscuit-icon",
     "check_args": "-p biscuit-icon -p biscuit-icon-cli",
     "l2": true,
-    "backends": ["tmux", "wezterm"]
+    "backends": ["tmux", "wezterm"],
+    "policy_gaps": [
+      {
+        "tier": "L2",
+        "environments": ["windows-latest"],
+        "reason": "no L2 terminal backend is provisionable on Windows: TmuxHarness::available() is which(\"tmux\") and tmux has no Windows port, while WezTerm needs a live GUI session. The headless wezterm-mux-server spike (plan 2.3) is deferred, separately scoped work.",
+        "owner": "@yankeeinlondon",
+        "expiry": "2027-01-31"
+      },
+      {
+        "tier": "L2",
+        "environments": ["wsl2-ubuntu"],
+        "reason": "the WSL2 leg runs a prebuilt nextest archive (plan 2.2): the guest has no cargo or rustc, so it cannot build the biscuit-harness-broker binary the L2 tier needs, and no terminal server runs there. Installing tmux in the guest would satisfy which(\"tmux\") while executing zero L2 tests — the non-evidence plan 1.1 rejects. Closes when the broker ships inside the archive and the guest starts a tmux server; tractable without solving the Windows backend problem, hence the earlier expiry.",
+        "owner": "@yankeeinlondon",
+        "expiry": "2026-12-31"
+      }
+    ]
   },
   {
     "area": "renderable",
@@ -105,27 +220,59 @@
     "area": "worktree",
     "check_args": "-p worktree -p worktree-cli",
     "l2": true,
-    "backends": ["tmux", "kitty"]
+    "backends": ["tmux", "kitty"],
+    "policy_gaps": [
+      {
+        "tier": "L2",
+        "environments": ["windows-latest"],
+        "reason": "no L2 terminal backend is provisionable on Windows: TmuxHarness::available() is which(\"tmux\") and tmux has no Windows port, while Kitty needs a live GUI session (KITTY_LISTEN_ON). The headless wezterm-mux-server spike (plan 2.3) is deferred, separately scoped work.",
+        "owner": "@yankeeinlondon",
+        "expiry": "2027-01-31"
+      },
+      {
+        "tier": "L2",
+        "environments": ["wsl2-ubuntu"],
+        "reason": "the WSL2 leg runs a prebuilt nextest archive (plan 2.2): the guest has no cargo or rustc, so it cannot build the biscuit-harness-broker binary the L2 tier needs, and no terminal server runs there. Installing tmux in the guest would satisfy which(\"tmux\") while executing zero L2 tests — the non-evidence plan 1.1 rejects. Closes when the broker ships inside the archive and the guest starts a tmux server; tractable without solving the Windows backend problem, hence the earlier expiry.",
+        "owner": "@yankeeinlondon",
+        "expiry": "2026-12-31"
+      }
+    ]
   },
   {
     "area": "tools",
     "ci": false,
-    "reason": "internal test infrastructure (test-toolkit), not public-facing; exercised transitively by every area that dev-depends on it"
+    "check_args": "-p test-toolkit",
+    "reason": "63 L1 tests that currently run in NO CI job. Promotion is blocked on the canonical just recipe set (check-canonical) for tools/; the transitive-coverage argument was never true — a consumer area's suite exercises the harness code paths it happens to call, not test-toolkit's own tests.",
+    "exclusion_class": "promotion-pending",
+    "owner": "@yankeeinlondon",
+    "expiry": "2026-10-31"
   },
   {
     "area": "biscuit-test-harness",
     "ci": false,
-    "reason": "shared L2/L3 real-terminal test harness; exercised transitively by consumer areas"
+    "check_args": "-p biscuit-test-harness",
+    "reason": "92 L1 tests that currently run in NO CI job. Promotion is blocked on the canonical just recipe set (check-canonical) for biscuit-test-harness/; transitive exercise by consumer areas is not the same as running these tests.",
+    "exclusion_class": "promotion-pending",
+    "owner": "@yankeeinlondon",
+    "expiry": "2026-10-31"
   },
   {
     "area": "biscuit-browser-harness",
     "ci": false,
-    "reason": "shared browser-test harness; exercised transitively by consumer areas"
+    "check_args": "-p biscuit-browser-harness",
+    "reason": "6 L1 tests plus 7 browser-tier tests that currently run in NO CI job. Promotion is blocked on the canonical just recipe set (check-canonical) for biscuit-browser-harness/, and on deciding whether it also gates the browser tier.",
+    "exclusion_class": "promotion-pending",
+    "owner": "@yankeeinlondon",
+    "expiry": "2026-10-31"
   },
   {
     "area": "messenger",
     "ci": false,
-    "reason": "covered by the messenger-desktop specialized job; promotion to the matrix is blocked on completing the canonical just recipe set (has only test/lint)",
+    "check_args": "-p messenger -p messenger-cli --features messenger/desktop",
+    "reason": "564 tests, covered only by the bespoke messenger-desktop specialized job (cargo test, not the canonical recipe, and outside the area rollup). Promotion is blocked on the canonical just recipe set — messenger/ defines only test and lint. Its bespoke WSL1 job was deleted 2026-07-27; wsl2-ubuntu coverage arrives with promotion, via _wsl-ci.yml.",
+    "exclusion_class": "promotion-pending",
+    "owner": "@yankeeinlondon",
+    "expiry": "2026-10-31",
     "native": {
       "ubuntu-latest": ["libdbus-1-dev"]
     }
@@ -133,12 +280,19 @@
   {
     "area": "biscuit-visualized",
     "ci": false,
-    "reason": "real area to be promoted; blocked on completing the canonical just recipe set (has only test/lint)"
+    "check_args": "-p biscuit-visualized",
+    "reason": "71 tests that currently run in NO CI job. Promotion is blocked on the canonical just recipe set — biscuit-visualized/ defines only test and lint.",
+    "exclusion_class": "promotion-pending",
+    "owner": "@yankeeinlondon",
+    "expiry": "2026-10-31"
   },
   {
     "area": "visualizer",
     "ci": false,
-    "reason": "not fully working/tested yet; CI deferred until stabilized",
+    "reason": "Tauri 2 scaffold with zero tests, so there is nothing for a matrix entry to gate. Revisit when the crate gains its first test.",
+    "exclusion_class": "time-bounded",
+    "owner": "@yankeeinlondon",
+    "expiry": "2027-01-31",
     "native": {
       "ubuntu-latest": ["libgtk-3-dev", "libwebkit2gtk-4.1-dev", "libdbus-1-dev"]
     }
@@ -146,21 +300,34 @@
   {
     "area": "biscuit-clipboard",
     "ci": false,
-    "reason": "not fully working/tested yet; CI deferred until stabilized"
+    "check_args": "-p biscuit-clipboard -p biscuit-clipboard-cli -p biscuit-clipboard-service",
+    "reason": "201 tests that currently run in NO CI job, across three packages — biscuit-clipboard-service is covered by no record today. Promotion is blocked on the canonical just recipe set and on confirming headless-runner clipboard behavior (no X11/Wayland display).",
+    "exclusion_class": "promotion-pending",
+    "owner": "@yankeeinlondon",
+    "expiry": "2026-10-31"
   },
   {
     "area": "reaper",
     "ci": false,
-    "reason": "not fully working/tested yet; CI deferred until stabilized"
+    "reason": "zero tests despite carrying 10 of the 12 canonical recipes, so a matrix entry would gate nothing. Revisit when the crate gains its first test.",
+    "exclusion_class": "time-bounded",
+    "owner": "@yankeeinlondon",
+    "expiry": "2027-01-31"
   },
   {
     "area": "agent-sandbox",
     "ci": false,
-    "reason": "experimental tool; not stabilized, no dedicated CI yet"
+    "reason": "experimental tool with zero tests, so a matrix entry would gate nothing. Revisit when the crate gains its first test.",
+    "exclusion_class": "time-bounded",
+    "owner": "@yankeeinlondon",
+    "expiry": "2027-01-31"
   },
   {
     "area": "tabby",
     "ci": false,
-    "reason": "not developed yet (a stub); nothing to gate on"
+    "reason": "a stub with a single test. Revisit when tabby has a suite worth gating.",
+    "exclusion_class": "time-bounded",
+    "owner": "@yankeeinlondon",
+    "expiry": "2027-01-31"
   }
 ]

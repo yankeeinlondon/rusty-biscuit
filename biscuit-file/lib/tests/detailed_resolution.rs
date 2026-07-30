@@ -34,10 +34,19 @@ fn candidate_paths(detailed: &biscuit_file::DetailedResolution) -> Vec<std::path
         .collect()
 }
 
+/// Canonicalize into the spelling the resolver reports.
+///
+/// `std::fs::canonicalize` returns a `\\?\` verbatim path on Windows; the
+/// resolver reduces every anchor to the legacy form before joining, so
+/// expectations must be built in that same form.
+fn canonical(path: &Path) -> std::path::PathBuf {
+    dunce::canonicalize(path).expect("canonicalize")
+}
+
 #[test]
 fn detailed_success_retains_ordered_candidates_and_provenance() {
     let tmp = TempDir::new().unwrap();
-    let repo = tmp.path().canonicalize().unwrap();
+    let repo = canonical(tmp.path());
     git_init(&repo);
 
     // File exists only in the base sub-directory; the repository root lacks it,
@@ -45,7 +54,7 @@ fn detailed_success_retains_ordered_candidates_and_provenance() {
     // source candidate.
     let base = repo.join("pkg");
     fs::create_dir_all(&base).unwrap();
-    let base = base.canonicalize().unwrap();
+    let base = canonical(&base);
     fs::write(base.join("notes.md"), b"local").unwrap();
 
     let ctx = ctx_with_repo(&base, &repo);
@@ -78,12 +87,12 @@ fn detailed_success_retains_ordered_candidates_and_provenance() {
 #[test]
 fn detailed_no_match_retains_candidates_and_repository_root() {
     let tmp = TempDir::new().unwrap();
-    let repo = tmp.path().canonicalize().unwrap();
+    let repo = canonical(tmp.path());
     git_init(&repo);
 
     let base = repo.join("pkg");
     fs::create_dir_all(&base).unwrap();
-    let base = base.canonicalize().unwrap();
+    let base = canonical(&base);
 
     let ctx = ctx_with_repo(&base, &repo);
     let detailed = FileReference::new("missing.md")
@@ -118,12 +127,12 @@ fn detailed_no_match_retains_candidates_and_repository_root() {
 #[test]
 fn candidate_plan_matches_the_probed_order() {
     let tmp = TempDir::new().unwrap();
-    let repo = tmp.path().canonicalize().unwrap();
+    let repo = canonical(tmp.path());
     git_init(&repo);
 
     let base = repo.join("pkg");
     fs::create_dir_all(&base).unwrap();
-    let base = base.canonicalize().unwrap();
+    let base = canonical(&base);
 
     let file_ref = FileReference::new("missing.md").unwrap();
     let ctx = ctx_with_repo(&base, &repo);
@@ -141,12 +150,12 @@ fn candidate_plan_matches_the_probed_order() {
 #[test]
 fn explicit_relative_plan_is_exactly_one_source_candidate() {
     let tmp = TempDir::new().unwrap();
-    let repo = tmp.path().canonicalize().unwrap();
+    let repo = canonical(tmp.path());
     git_init(&repo);
 
     let base = repo.join("pkg");
     fs::create_dir_all(&base).unwrap();
-    let base = base.canonicalize().unwrap();
+    let base = canonical(&base);
 
     let ctx = ctx_with_repo(&base, &repo);
     let plan = FileReference::new("./x.md")
@@ -162,7 +171,7 @@ fn explicit_relative_plan_is_exactly_one_source_candidate() {
 #[test]
 fn rooted_magic_payloads_never_reach_planning_or_resolution() {
     let tmp = TempDir::new().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical(tmp.path());
     let ctx = FileResolutionContext::new(&base)
         .with_repository_root(&base)
         .with_home_dir(&base);
@@ -193,12 +202,12 @@ fn rooted_magic_payloads_never_reach_planning_or_resolution() {
 #[test]
 fn legacy_projection_agrees_with_detailed_outcome() {
     let tmp = TempDir::new().unwrap();
-    let repo = tmp.path().canonicalize().unwrap();
+    let repo = canonical(tmp.path());
     git_init(&repo);
     fs::write(repo.join("hit.md"), b"x").unwrap();
     let base = repo.join("pkg");
     fs::create_dir_all(&base).unwrap();
-    let base = base.canonicalize().unwrap();
+    let base = canonical(&base);
 
     // Match case: convenience Ok(Some) equals the detailed matched path.
     let hit = FileReference::new("hit.md").unwrap();
@@ -221,7 +230,7 @@ fn legacy_projection_agrees_with_detailed_outcome() {
 #[test]
 fn non_file_candidate_advances_the_search() {
     let tmp = TempDir::new().unwrap();
-    let repo = tmp.path().canonicalize().unwrap();
+    let repo = canonical(tmp.path());
     git_init(&repo);
 
     // A *directory* named like the target sits at the repository root (the
@@ -230,7 +239,7 @@ fn non_file_candidate_advances_the_search() {
     let base = repo.join("pkg");
     fs::create_dir_all(&base).unwrap();
     fs::create_dir_all(repo.join("thing.md")).unwrap();
-    let base = base.canonicalize().unwrap();
+    let base = canonical(&base);
     fs::write(base.join("thing.md"), b"real").unwrap();
 
     let ctx = ctx_with_repo(&base, &repo);
@@ -260,7 +269,7 @@ fn io_probe_failure_stops_with_typed_error_identifying_candidate() {
     // non-`NotFound` I/O failure. It must stop the search with a typed
     // `FileReferenceError::Io` naming the candidate, not be misread as absence.
     let tmp = TempDir::new().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical(tmp.path());
 
     // `blocker` is a regular file; the candidate path descends into it.
     fs::write(base.join("blocker"), b"not a directory").unwrap();
@@ -308,7 +317,7 @@ fn direct_symlink_to_regular_file_is_selected() {
     use std::os::unix::fs::symlink;
 
     let tmp = TempDir::new().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical(tmp.path());
 
     fs::write(base.join("target.md"), b"real").unwrap();
     symlink(base.join("target.md"), base.join("link.md")).unwrap();
@@ -334,7 +343,7 @@ fn supplied_repository_root_anchors_and_suppresses_ancestor_discovery() {
     // supplied root is `outer/linked`, which shadows a same-named file at
     // `outer`.
     let tmp = TempDir::new().unwrap();
-    let outer = tmp.path().canonicalize().unwrap();
+    let outer = canonical(tmp.path());
     git_init(&outer);
     fs::write(outer.join("x.md"), b"outer").unwrap();
 
@@ -343,8 +352,8 @@ fn supplied_repository_root_anchors_and_suppresses_ancestor_discovery() {
     fs::write(linked.join("x.md"), b"linked").unwrap();
     let sub = linked.join("sub");
     fs::create_dir_all(&sub).unwrap();
-    let sub = sub.canonicalize().unwrap();
-    let linked = linked.canonicalize().unwrap();
+    let sub = canonical(&sub);
+    let linked = canonical(&linked);
 
     let ctx = ctx_with_repo(&sub, &linked);
     let detailed = FileReference::new("x.md").unwrap().resolve_detailed(&ctx);
@@ -376,7 +385,7 @@ fn workspace_error_carries_a_chainable_source() {
     // therefore drives the ambient `resolve_from` path, where the Cargo probe --
     // and its chainable error -- still occurs.
     let tmp = TempDir::new().unwrap();
-    let repo = tmp.path().canonicalize().unwrap();
+    let repo = canonical(tmp.path());
     git_init(&repo);
     fs::write(repo.join("Cargo.toml"), b"this is not valid toml : : :").unwrap();
 
@@ -404,7 +413,7 @@ fn workspace_error_carries_a_chainable_source() {
 #[test]
 fn explicit_package_reference_consumes_supplied_package_area() {
     let tmp = TempDir::new().unwrap();
-    let repo = tmp.path().canonicalize().unwrap();
+    let repo = canonical(tmp.path());
     git_init(&repo);
     // A malformed manifest would make any Cargo probe fail; it must not run.
     fs::write(repo.join("Cargo.toml"), b"this is not valid toml : : :").unwrap();
@@ -442,7 +451,7 @@ fn explicit_package_reference_consumes_supplied_package_area() {
 #[test]
 fn explicit_package_reference_without_anchor_is_missing_context() {
     let tmp = TempDir::new().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical(tmp.path());
 
     let ctx = FileResolutionContext::new(base);
     let detailed = FileReference::new("!README.md").unwrap().resolve_detailed(&ctx);
@@ -488,14 +497,14 @@ fn explicit_implicit_reference_does_not_discover_repository_root() {
 #[test]
 fn recursive_reference_records_search_roots_with_provenance() {
     let tmp = TempDir::new().unwrap();
-    let repo = tmp.path().canonicalize().unwrap();
+    let repo = canonical(tmp.path());
     git_init(&repo);
 
     fs::create_dir_all(repo.join("a/b")).unwrap();
     fs::write(repo.join("a/b/deep.md"), b"deep").unwrap();
     let base = repo.join("pkg");
     fs::create_dir_all(&base).unwrap();
-    let base = base.canonicalize().unwrap();
+    let base = canonical(&base);
 
     let ctx = ctx_with_repo(&base, &repo);
     let detailed = FileReference::new("%deep.md").unwrap().resolve_detailed(&ctx);
@@ -524,7 +533,7 @@ fn invalid_context_is_a_typed_missing_context_failure() {
     // A repository root that does not contain the base is rejected before any
     // probing, as a typed missing-context failure.
     let tmp = TempDir::new().unwrap();
-    let root = tmp.path().canonicalize().unwrap();
+    let root = canonical(tmp.path());
     let outside = root.join("outside");
     let repo = root.join("repo");
     fs::create_dir_all(&outside).unwrap();

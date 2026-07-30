@@ -34,13 +34,11 @@ build *args="":
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity queue
-    @just _sanity queue-cli
+    @just _sanity_all "queue queue-cli"
 
 # test library and CLI
 test *args="":
-    @just _test queue {{ args }}
-    @just _test queue-cli {{ args }}
+    @just _test_all "queue queue-cli" {{ args }}
 
 # not applicable: queue has no real-terminal (Level-2) tests
 test-l2:

@@ -288,7 +288,12 @@ fn create_relative_symlink(
         // Check if it points to the same target
         if let Ok(existing_target) = fs::read_link(symlink_path) {
             let existing_str = existing_target.to_string_lossy();
-            if existing_str == target {
+            // Compared as paths, not strings: Windows may report a link target
+            // it stored as `..\target\topic` for the `../target/topic` we wrote,
+            // and a string compare would then call every re-run a conflict.
+            // `Path` equality is component-wise and treats both separators
+            // alike there, while remaining exact on Unix.
+            if existing_target.as_path() == Path::new(&target) {
                 debug!(
                     "Symlink already exists with correct target: {:?}",
                     symlink_path
@@ -318,17 +323,77 @@ fn create_relative_symlink(
         Ok(Some(symlink_path.to_path_buf()))
     }
 
-    #[cfg(not(unix))]
+    // The skill itself was already copied into `.claude/skills/`; these
+    // framework entries are aliases onto that copy. So a Windows host that
+    // withholds symlink privilege loses the aliases, not the pull — hence a
+    // warning rather than an error. The alias names a directory, so
+    // `symlink_dir` is the required call.
+    #[cfg(windows)]
     {
-        warnings.push("Symlinks are only supported on Unix-like systems".to_string());
+        match std::os::windows::fs::symlink_dir(&target, symlink_path) {
+            Ok(()) => {
+                info!("Created symlink: {:?} -> {}", symlink_path, target);
+                Ok(Some(symlink_path.to_path_buf()))
+            }
+            Err(error) if is_symlink_privilege_error(&error) => {
+                warnings.push(format!(
+                    "Symlink {:?} not created: Windows requires Developer Mode or \
+                     SeCreateSymbolicLinkPrivilege to create symlinks",
+                    symlink_path
+                ));
+                Ok(None)
+            }
+            Err(error) => Err(PullError::SymlinkError(error)),
+        }
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        warnings.push("Symlinks are not supported on this platform".to_string());
         Ok(None)
     }
+}
+
+/// Whether an error is Windows refusing symlink creation for lack of privilege.
+///
+/// Windows raises `ERROR_PRIVILEGE_NOT_HELD` (1314) unless the process holds
+/// `SeCreateSymbolicLinkPrivilege` or the machine is in Developer Mode. Older
+/// releases surface it as a plain permission error, so both are matched.
+#[cfg(windows)]
+fn is_symlink_privilege_error(error: &std::io::Error) -> bool {
+    error.kind() == std::io::ErrorKind::PermissionDenied || error.raw_os_error() == Some(1314)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    /// Whether this process is permitted to create symlinks.
+    ///
+    /// Windows grants symlink creation only under Developer Mode or
+    /// `SeCreateSymbolicLinkPrivilege`. That is a runtime privilege no `cfg`
+    /// can answer, so this probes it for real. Tests below skip when it is
+    /// withheld, because the OS refusing the syscall is not a defect in the
+    /// code under test — every other failure still fails the test.
+    fn symlinks_supported() -> bool {
+        #[cfg(not(windows))]
+        {
+            true
+        }
+
+        #[cfg(windows)]
+        {
+            let Ok(probe) = TempDir::new() else {
+                return false;
+            };
+            let target = probe.path().join("probe_target");
+            if fs::create_dir(&target).is_err() {
+                return false;
+            }
+            std::os::windows::fs::symlink_dir(&target, probe.path().join("probe_link")).is_ok()
+        }
+    }
 
     fn setup_test_environment() -> (TempDir, TempDir) {
         let git_repo = TempDir::new().unwrap();
@@ -412,6 +477,9 @@ mod tests {
 
     #[test]
     fn test_create_relative_symlink() {
+        if !symlinks_supported() {
+            return;
+        }
         let temp = TempDir::new().unwrap();
         let symlink_path = temp.path().join("link");
         let mut warnings = Vec::new();
@@ -425,7 +493,9 @@ mod tests {
         // Verify symlink exists and has correct target
         assert!(symlink_path.is_symlink());
         let target = fs::read_link(&symlink_path).unwrap();
-        assert_eq!(target.to_string_lossy(), "../target/topic");
+        // Compared as a path so a Windows-normalized `..\target\topic` still
+        // matches; component-wise equality stays exact about the target itself.
+        assert_eq!(target.as_path(), Path::new("../target/topic"));
     }
 
     #[test]
@@ -434,9 +504,15 @@ mod tests {
         let symlink_path = temp.path().join("link");
         let mut warnings = Vec::new();
 
+        if !symlinks_supported() {
+            return;
+        }
+
         // Create symlink first
         #[cfg(unix)]
         std::os::unix::fs::symlink("../target/topic", &symlink_path).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir("../target/topic", &symlink_path).unwrap();
 
         // Try to create again
         let result = create_relative_symlink(&symlink_path, "../target", "topic", &mut warnings);
@@ -452,9 +528,15 @@ mod tests {
         let symlink_path = temp.path().join("link");
         let mut warnings = Vec::new();
 
+        if !symlinks_supported() {
+            return;
+        }
+
         // Create symlink with different target
         #[cfg(unix)]
         std::os::unix::fs::symlink("../other/path", &symlink_path).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir("../other/path", &symlink_path).unwrap();
 
         let result = create_relative_symlink(&symlink_path, "../target", "topic", &mut warnings);
 

@@ -9,7 +9,6 @@
 
 #![cfg(unix)]
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use std::path::Path;
 use tempfile::tempdir;
@@ -28,7 +27,7 @@ fn fake_goose(workspace: &Path) -> std::path::PathBuf {
 }
 
 fn run(workspace: &Path, path_dir: &Path, args: &[&str]) -> (String, String, i32) {
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace)
         .env("PATH", augmented_path(path_dir))
@@ -50,7 +49,7 @@ fn run(workspace: &Path, path_dir: &Path, args: &[&str]) -> (String, String, i32
 /// when neither stream is a TTY; without it the palette collapses and a body
 /// line cannot be matched to its header by color.
 fn run_in_color(workspace: &Path, path_dir: &Path, args: &[&str]) -> (String, String, i32) {
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("FORCE_COLOR", "1")
         // `NO_COLOR` is absolute for this CLI (`log::colors_disabled`), so
         // `FORCE_COLOR` cannot out-vote an inherited one the way it does in
@@ -997,7 +996,7 @@ Body.
     )
     .unwrap();
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -1084,7 +1083,7 @@ Body.
     )
     .unwrap();
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))

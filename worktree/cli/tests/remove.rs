@@ -1,4 +1,3 @@
-use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use std::fs;
 
@@ -40,7 +39,7 @@ fn add_worktree(repo: &std::path::Path, branch: &str, path: &str) {
 
 #[test]
 fn remove_help_shows_usage() {
-    cargo_bin_cmd!("wt")
+    assert_cmd::Command::cargo_bin("wt").unwrap()
         .args(["remove", "--help"])
         .assert()
         .success()
@@ -51,7 +50,7 @@ fn remove_help_shows_usage() {
 
 #[test]
 fn remove_missing_name_fails() {
-    cargo_bin_cmd!("wt")
+    assert_cmd::Command::cargo_bin("wt").unwrap()
         .args(["remove"])
         .assert()
         .failure()
@@ -61,7 +60,7 @@ fn remove_missing_name_fails() {
 #[test]
 fn remove_nonexistent_worktree_fails() {
     let repo = temp_repo();
-    cargo_bin_cmd!("wt")
+    assert_cmd::Command::cargo_bin("wt").unwrap()
         .current_dir(repo.path())
         .args(["remove", "no-such-worktree"])
         .assert()
@@ -79,7 +78,7 @@ fn remove_clean_worktree_with_force() {
     let wt_path = repo.path().join("wt-test");
     add_worktree(repo.path(), "feat/test", wt_path.to_str().unwrap());
 
-    cargo_bin_cmd!("wt")
+    assert_cmd::Command::cargo_bin("wt").unwrap()
         .current_dir(repo.path())
         .args(["remove", "feat/test", "-f"])
         .assert()
@@ -95,7 +94,7 @@ fn remove_clean_worktree_with_ff() {
     let wt_path = repo.path().join("wt-test");
     add_worktree(repo.path(), "feat/ff", wt_path.to_str().unwrap());
 
-    cargo_bin_cmd!("wt")
+    assert_cmd::Command::cargo_bin("wt").unwrap()
         .current_dir(repo.path())
         .args(["remove", "feat/ff", "-ff"])
         .assert()
@@ -114,7 +113,7 @@ fn remove_dirty_worktree_with_ff() {
     // Create an uncommitted file inside the worktree
     fs::write(wt_path.join("dirty.txt"), "dirty content\n").unwrap();
 
-    cargo_bin_cmd!("wt")
+    assert_cmd::Command::cargo_bin("wt").unwrap()
         .current_dir(repo.path())
         .args(["remove", "feat/dirty", "-ff"])
         .assert()
@@ -130,7 +129,7 @@ fn remove_with_branch_flag_deletes_branch() {
     let wt_path = repo.path().join("wt-branch");
     add_worktree(repo.path(), "feat/branch", wt_path.to_str().unwrap());
 
-    cargo_bin_cmd!("wt")
+    assert_cmd::Command::cargo_bin("wt").unwrap()
         .current_dir(repo.path())
         .args(["remove", "feat/branch", "-ff", "-b"])
         .assert()
@@ -144,7 +143,7 @@ fn remove_with_branch_flag_deletes_branch() {
 fn remove_main_worktree_is_rejected() {
     let repo = temp_repo();
 
-    cargo_bin_cmd!("wt")
+    assert_cmd::Command::cargo_bin("wt").unwrap()
         .current_dir(repo.path())
         .args(["remove", "base", "-ff"])
         .assert()
@@ -161,7 +160,7 @@ fn remove_dirty_worktree_with_f_non_source_bypasses() {
     // Create a single non-source dirty file (< 10 files, no source)
     fs::write(wt_path.join("notes.txt"), "notes\n").unwrap();
 
-    cargo_bin_cmd!("wt")
+    assert_cmd::Command::cargo_bin("wt").unwrap()
         .current_dir(repo.path())
         .args(["remove", "feat/bypass", "-f"])
         .assert()
@@ -182,7 +181,7 @@ fn remove_preserves_unmerged_branch() {
     run_git(&wt_path, &["add", "unique.md"]);
     run_git(&wt_path, &["commit", "-m", "diverge"]);
 
-    cargo_bin_cmd!("wt")
+    assert_cmd::Command::cargo_bin("wt").unwrap()
         .current_dir(repo.path())
         .args(["remove", "feat/unmerged", "-ff", "-b"])
         .assert()

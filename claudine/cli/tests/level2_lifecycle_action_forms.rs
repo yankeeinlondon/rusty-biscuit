@@ -47,7 +47,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 /// A staged compose run: a git-repo workspace, a fake `goose` provider on
 /// `PATH`, the prompt document, the side-effect log the lifecycle stacks write
@@ -193,7 +193,7 @@ fn state_contents(staged: &Staged) -> String {
 #[test]
 #[serial(level2_lifecycle)]
 fn level2_action_forms_mixed_success_stack_writes_frontmatter() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let doc = r#"---
 title: ACTFORMS_TITLE
@@ -255,7 +255,7 @@ Body
 #[test]
 #[serial(level2_lifecycle)]
 fn level2_action_forms_typed_argument_write_through() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let doc = r#"---
 title: typed write-through
@@ -304,7 +304,7 @@ Body
 #[test]
 #[serial(level2_lifecycle)]
 fn level2_action_forms_keyvalue_literal_default() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let doc = r#"---
 title: LITDEFAULT_TITLE

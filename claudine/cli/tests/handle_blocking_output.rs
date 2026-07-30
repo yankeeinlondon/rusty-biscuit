@@ -1,5 +1,4 @@
 #[cfg(unix)]
-use assert_cmd::cargo::cargo_bin_cmd;
 #[cfg(unix)]
 use serde_json::Value;
 
@@ -35,7 +34,7 @@ fn handle_flushes_blocking_payload_before_nonzero_exit() {
         &serde_json::to_string_pretty(&config).unwrap(),
     );
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
         .args(["handle", "turn_complete", "--provider", "gemini"])

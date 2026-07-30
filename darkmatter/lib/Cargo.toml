@@ -130,6 +130,9 @@ serial_test = "3.0"
 gix = { version = "=0.84.0", default-features = false, features = ["sha1"] }
 # Builds committed branch-tip fixtures for `predict_conflicts()` integration tests.
 git2 = "0.20.3"
+# libgit2-sys >= 0.18.6 bundles PCRE2 with unprefixed symbols, which collide at MSVC
+# link time with pcre2-sys (reached via sniff -> hyperpolyglot). See sniff-lib's note.
+libgit2-sys = ">=0.18.3, <0.18.6"
 proptest = "1.6"
 criterion = { version = "0.5", features = ["html_reports"] }
 biscuit-test-harness = { path = "../../biscuit-test-harness" }

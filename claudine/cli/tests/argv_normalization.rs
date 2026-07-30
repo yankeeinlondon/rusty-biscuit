@@ -9,7 +9,6 @@
 //!
 //! Feature: `2026-04-17-cli-pre-processing`.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use tempfile::tempdir;
 
@@ -55,7 +54,7 @@ fn headline_compose_with_interleaved_flag_renders_help() {
     let workspace = tempdir().unwrap();
     let fixture = write_fixture(workspace.path(), "greet.md");
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args([
             "compose",
@@ -108,7 +107,7 @@ fn headline_compose_with_trailing_help_renders_help() {
     let workspace = tempdir().unwrap();
     let fixture = write_fixture(workspace.path(), "simple.md");
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args(["compose", fixture.to_str().unwrap(), "--help"])
         .assert()
@@ -135,7 +134,7 @@ fn headline_compose_with_fuzzy_provider_resolves_to_claude() {
     let workspace = tempdir().unwrap();
     let fixture = write_fixture(workspace.path(), "fuzzy.md");
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args([
             "compose",
@@ -172,7 +171,7 @@ fn headline_compose_with_plain_setter_behaves_as_before() {
     let workspace = tempdir().unwrap();
     let fixture = write_fixture(workspace.path(), "plain.md");
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args([
             "compose",
@@ -213,7 +212,7 @@ fn headline_compose_with_setter_then_late_flags_preserves_flag_semantics() {
     let empty_path = workspace.path().join("empty-path");
     fs::create_dir(&empty_path).unwrap();
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("TERM_WIDTH", "120")
         .env("PATH", empty_path)
@@ -264,7 +263,7 @@ fn headline_compose_with_setter_before_late_flags_preserves_flag_semantics() {
     let empty_path = workspace.path().join("empty-path");
     fs::create_dir(&empty_path).unwrap();
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("TERM_WIDTH", "120")
         .env("PATH", empty_path)
@@ -314,7 +313,7 @@ fn headline_compose_with_setter_before_late_flags_preserves_flag_semantics() {
 /// must not touch it.
 #[test]
 fn passthrough_version_flag_still_prints_version_string() {
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .arg("--version")
         .assert()
@@ -333,7 +332,7 @@ fn passthrough_version_flag_still_prints_version_string() {
 /// grouped help screen through Claudine's custom help handler.
 #[test]
 fn passthrough_root_help_renders_custom_help_screen() {
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .arg("--help")
         .assert()
@@ -368,7 +367,7 @@ fn non_composition_subcommands_accept_help_flag() {
         "providers",
         "agents",
     ] {
-        let output = cargo_bin_cmd!("claudine")
+        let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
             .env("NO_COLOR", "1")
             .args([sub, "--help"])
             .assert()
@@ -390,7 +389,7 @@ fn non_composition_subcommands_accept_help_flag() {
 /// here; Rules 1 and 2 have nothing to rewrite.
 #[test]
 fn passthrough_hooks_describe_still_runs() {
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args(["hooks", "--describe"])
         .assert()
@@ -440,7 +439,7 @@ fn passthrough_hooks_describe_still_runs() {
 /// Code CLI and the assertion would fail noisily.
 #[test]
 fn complete_env_short_circuits_before_argv_normalization() {
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("COMPLETE", "bash")
         .assert()
@@ -468,7 +467,7 @@ fn complete_env_short_circuits_wrapper_argv_without_launching_provider() {
     // through to the wrapper launch path and either spawn the Claude
     // Code binary or fail with a "claude not found" error on stderr.
     // The short-circuit is what keeps shell completion setup cheap.
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("COMPLETE", "bash")
         .args(["claude", "--some-passthrough-flag"])
@@ -499,7 +498,7 @@ fn non_owned_flag_after_file_is_forwarded_to_agent() {
     let workspace = tempdir().unwrap();
     let fixture = write_fixture(workspace.path(), "near-miss.md");
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args([
             "compose",
@@ -534,7 +533,7 @@ fn non_owned_flag_before_file_errors_with_ordering_guidance() {
     let workspace = tempdir().unwrap();
     let fixture = write_fixture(workspace.path(), "near-miss.md");
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args(["compose", "--claud", fixture.to_str().unwrap()])
         .assert()

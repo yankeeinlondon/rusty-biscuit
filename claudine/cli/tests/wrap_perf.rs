@@ -3,7 +3,6 @@
 //! Split out of the `wrap_commands.rs` god file; shared fixtures live in
 //! `common::wrap`.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use tempfile::tempdir;
 mod common;
@@ -25,7 +24,7 @@ exit 0
 "#,
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
@@ -66,7 +65,7 @@ exit 1
 "#,
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
@@ -107,7 +106,7 @@ fn compose_perf_emits_report_to_stderr() {
         "#!/bin/sh\necho 'Agent response'\nexit 0\n",
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -154,7 +153,7 @@ fn composition_setup_and_provider_handoff_order_matches_phase_1_baseline() {
         "#!/bin/sh\nprintf 'phase:provider cwd=%s\\n' \"$PWD\"\n",
     );
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(workspace.path())
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
@@ -225,7 +224,7 @@ fn compose_perf_stdout_matches_non_perf() {
         "#!/bin/sh\necho 'Agent response'\nexit 0\n",
     );
 
-    let perf_assert = cargo_bin_cmd!("claudine")
+    let perf_assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -233,7 +232,7 @@ fn compose_perf_stdout_matches_non_perf() {
         .assert()
         .success();
 
-    let plain_assert = cargo_bin_cmd!("claudine")
+    let plain_assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -270,7 +269,7 @@ fn inline_compose_perf_emits_report_to_stderr() {
         "#!/bin/sh\necho 'Replacement body'\nexit 0\n",
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -319,7 +318,7 @@ fn inline_compose_perf_stdout_matches_non_perf() {
         "#!/bin/sh\necho 'Replacement body'\nexit 0\n",
     );
 
-    let perf_assert = cargo_bin_cmd!("claudine")
+    let perf_assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -332,7 +331,7 @@ fn inline_compose_perf_stdout_matches_non_perf() {
         .assert()
         .success();
 
-    let plain_assert = cargo_bin_cmd!("claudine")
+    let plain_assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -365,7 +364,7 @@ fn compose_dry_run_perf_renders_report_without_agent_execution() {
         "#!/bin/sh\necho 'should not run'\nexit 0\n",
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -419,7 +418,7 @@ fn perf_arg_parsing_includes_clap_time() {
         "#!/bin/sh\necho 'Agent response'\nexit 0\n",
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))

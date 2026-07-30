@@ -49,15 +49,21 @@ build *args="":
 
 # --- Canonical lifecycle recipe set (testing-best-practices Phase 3) -------
 
+# `--features playa` on the library throughout: `default = []`, so the whole
+# playback path and its 23 tests (357 of 380) are cfg'd out of a default-feature
+# run. Its two in-repo consumers — biscuit-speaks-cli (the shipped `so-you-say`
+# binary) and claudine — both enable it, so the default set is a configuration
+# nobody ships. The feature costs no audio device: playa's own `default = []`,
+# and biscuit-speaks asks only for `playa/async`, so no rodio/CoreAudio/ALSA
+# backend is compiled in.
+
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity biscuit-speaks
-    @just _sanity biscuit-speaks-cli
+    @just _sanity_all "biscuit-speaks --features playa; biscuit-speaks-cli"
 
 # Test both library and CLI.
 test *args="":
-    @just _test biscuit-speaks {{args}}
-    @just _test biscuit-speaks-cli {{args}}
+    @just _test_all "biscuit-speaks --features playa; biscuit-speaks-cli" {{args}}
 
 # not applicable: biscuit-speaks has no real-terminal (Level-2) tests
 test-l2:
@@ -87,12 +93,12 @@ bench:
 
 # Per-package LCOV coverage for the library and CLI.
 coverage *args="":
-    @just _coverage biscuit-speaks {{args}}
+    @just _coverage biscuit-speaks --features playa {{args}}
     @just _coverage biscuit-speaks-cli {{args}}
 
 # Doctests for the library and CLI.
 doctest *args="":
-    @just _doctest biscuit-speaks {{args}}
+    @just _doctest biscuit-speaks --features playa {{args}}
     @just _doctest biscuit-speaks-cli {{args}}
 
 # not applicable: no cargo-fuzz targets

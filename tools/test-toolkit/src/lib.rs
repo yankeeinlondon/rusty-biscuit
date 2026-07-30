@@ -23,9 +23,33 @@
 //!   available).
 //! - `BISCUIT_TEST_LEVEL_REQUIRED=2|3` — CI use. When set and the harness
 //!   for the matching level is unavailable, [`require_level!`] panics
-//!   instead of skipping.
+//!   instead of skipping. All-or-nothing: it cannot demand `tmux` while
+//!   letting a GUI backend skip.
+//! - `BISCUIT_TEST_REQUIRED_BACKENDS=tmux[,wezterm…]` — per-backend
+//!   granularity for the same enforcement. See [`backend`].
 //! - `RUN_LEVEL3=1` — explicit opt-in for Level 3 tests, on top of the
 //!   normal availability probe. Level 3 tests skip when this is unset.
+//!
+//! ## Proving execution
+//!
+//! A provisioned backend that no test exercised is not evidence of anything.
+//! When `BISCUIT_TEST_REQUIRED_BACKENDS` is set, every gate decision is
+//! appended to a JSON Lines file (see [`evidence`]) and the `backend-proof`
+//! binary asserts after the run that each required backend produced at least
+//! one executed test.
+
+pub mod backend;
+pub mod evidence;
+
+pub use backend::{
+    BISCUIT_TEST_REQUIRED_BACKENDS, Backend, BackendParseError, HarnessSpec, RequiredBackendsError,
+    parse_required_backends, required_backends,
+};
+pub use evidence::{
+    BACKEND_EXECUTIONS_FILE, BISCUIT_JUNIT_STAGE_DIR, ExecutionDecision, ExecutionRecord,
+    append_backend_execution, backend_executions_path, decision_counts, read_backend_executions,
+    normalize_test_name, record_backend_execution, stage_dir, unproven_backends, workspace_root,
+};
 
 use std::env;
 use std::ffi::{OsStr, OsString};
@@ -87,24 +111,59 @@ pub enum LevelDecision {
 }
 
 /// Decide whether a test at `level` should run, skip, or panic, given a
-/// harness-availability result.
+/// harness-availability result and a bare diagnostic label.
 ///
-/// `available` is the result of the test's local probe (e.g.
-/// `WezTermHarness::available()`). `harness_label` is a short string used
-/// in skip/panic messages (e.g. `"WezTerm"`, `"Chrome"`).
-///
-/// Decision rules:
-///
-/// 1. If `BISCUIT_TEST_LEVEL=N` is set and `level > N`, return
-///    `Skip("BISCUIT_TEST_LEVEL=N")`.
-/// 2. If `level == L3` and `RUN_LEVEL3` is not `1`, return
-///    `Skip("set RUN_LEVEL3=1")`.
-/// 3. If `available == false`:
-///     - If `BISCUIT_TEST_LEVEL_REQUIRED == level`, return `Panic(...)`.
-///     - Otherwise return `Skip("harness unavailable")`.
-/// 4. Otherwise return `Run`.
+/// Equivalent to [`evaluate_harness`] with a label-only [`HarnessSpec`], which
+/// carries no machine identity and so can never satisfy
+/// [`BISCUIT_TEST_REQUIRED_BACKENDS`]. Prefer passing a [`Backend`].
 #[must_use]
 pub fn evaluate_level(level: Level, available: bool, harness_label: &str) -> LevelDecision {
+    evaluate_harness(level, available, harness_label)
+}
+
+/// Decide whether a test at `level` should run, skip, or panic.
+///
+/// `available` is the result of the test's local probe (e.g.
+/// `WezTermHarness::available()`). `harness` is either a [`Backend`] (stable
+/// identity plus label) or a `&str` label for a requirement that has no
+/// backend identity, such as a PTY device.
+///
+/// Decision rules, in order:
+///
+/// 1. If `BISCUIT_TEST_REQUIRED_BACKENDS` is set but malformed, return
+///    `Panic(...)`. A typo is rejected even when the harness is present,
+///    because a misspelled requirement can otherwise never fail again.
+/// 2. If `BISCUIT_TEST_LEVEL=N` is set and `level > N`, return
+///    `Skip("BISCUIT_TEST_LEVEL=N")`.
+/// 3. If `level == L3` and `RUN_LEVEL3` is not `1`, return
+///    `Skip("set RUN_LEVEL3=1")`.
+/// 4. If `available == false`:
+///     - If this harness's backend is in `BISCUIT_TEST_REQUIRED_BACKENDS`,
+///       return `Panic(...)`.
+///     - If `BISCUIT_TEST_LEVEL_REQUIRED == level`, return `Panic(...)`.
+///     - Otherwise return `Skip("harness unavailable")`.
+/// 5. Otherwise return `Run`.
+///
+/// ## Notes
+///
+/// Rules 2 and 3 precede the enforcement checks, so an explicit
+/// `BISCUIT_TEST_LEVEL` ceiling still wins — configuring a required backend
+/// out of the selected level range yields no `run` evidence and is caught by
+/// `backend-proof verify` rather than by a per-test panic.
+#[must_use]
+pub fn evaluate_harness<'a>(
+    level: Level,
+    available: bool,
+    harness: impl Into<HarnessSpec<'a>>,
+) -> LevelDecision {
+    let harness = harness.into();
+    let harness_label = harness.label();
+
+    let required_backends = match required_backends() {
+        Ok(set) => set,
+        Err(err) => return LevelDecision::Panic(err.to_string()),
+    };
+
     if let Some(max) = read_level_env(BISCUIT_TEST_LEVEL)
         && level.as_u8() > max
     {
@@ -121,6 +180,16 @@ pub fn evaluate_level(level: Level, available: bool, harness_label: &str) -> Lev
     }
 
     if !available {
+        if let Some(backend) = harness.backend()
+            && required_backends.contains(&backend)
+        {
+            return LevelDecision::Panic(format!(
+                "{BISCUIT_TEST_REQUIRED_BACKENDS} lists `{}` but {harness_label} is unavailable. \
+                 Provision the backend in this environment or drop it from the list.",
+                backend.as_str()
+            ));
+        }
+
         if let Some(required) = read_level_env(BISCUIT_TEST_LEVEL_REQUIRED)
             && required == level.as_u8()
         {
@@ -133,6 +202,16 @@ pub fn evaluate_level(level: Level, available: bool, harness_label: &str) -> Lev
     }
 
     LevelDecision::Run
+}
+
+/// Record a gate decision when the requirement carries a [`Backend`].
+///
+/// Called by [`require_level!`]; exposed so bespoke gates can contribute the
+/// same evidence.
+pub fn record_decision(harness: HarnessSpec<'_>, test: &str, decision: ExecutionDecision) {
+    if let Some(backend) = harness.backend() {
+        record_backend_execution(backend, test, decision);
+    }
 }
 
 fn read_level_env(key: &str) -> Option<u8> {
@@ -149,10 +228,16 @@ fn is_truthy(value: Option<&str>) -> bool {
 /// `$level` is a [`Level`] value (`Level::L1` / `Level::L2` / `Level::L3`).
 /// `$available` is an expression returning `bool` — typically the test's
 /// harness availability probe (e.g. `WezTermHarness::available()`).
-/// `$label` is a short string describing what the test needs, used in
-/// the skip/panic message (e.g. `"WezTerm"`, `"Chrome/Chromium"`).
+/// `$harness` is anything convertible into a [`HarnessSpec`]:
 ///
-/// The macro evaluates [`evaluate_level`] and either:
+/// - a [`Backend`] — preferred. Carries the stable identity that
+///   `BISCUIT_TEST_REQUIRED_BACKENDS` matches on and that execution evidence
+///   is keyed by.
+/// - a `&str` label — for requirements with no backend identity (a PTY
+///   device, a permission). These can never be demanded per-backend.
+///
+/// The macro evaluates [`evaluate_harness`], records the decision when the
+/// requirement names a backend, and either:
 ///
 /// - emits a `skipping: ...` line to stderr and `return`s from the
 ///   enclosing function, or
@@ -162,18 +247,18 @@ fn is_truthy(value: Option<&str>) -> bool {
 /// ## Examples
 ///
 /// ```ignore
-/// use test_toolkit::{require_level, Level};
+/// use test_toolkit::{require_level, Backend, Level};
 ///
 /// #[test]
 /// fn level2_renders_in_real_terminal() {
-///     require_level!(Level::L2, WezTermHarness::available(), "WezTerm");
+///     require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 ///     // ... test body runs only when WezTerm is available.
 /// }
 /// ```
 #[macro_export]
 macro_rules! require_level {
-    ($level:expr, $available:expr, $label:expr $(,)?) => {{
-        match $crate::evaluate_level($level, $available, $label) {
+    ($level:expr, $available:expr, $harness:expr $(,)?) => {{
+        match $crate::decide_harness!($level, $available, $harness) {
             $crate::LevelDecision::Run => {}
             $crate::LevelDecision::Skip(msg) => {
                 eprintln!("{}", msg);
@@ -183,6 +268,58 @@ macro_rules! require_level {
                 panic!("{}", msg);
             }
         }
+    }};
+}
+
+/// Evaluate a gate and record its execution evidence, yielding the
+/// [`LevelDecision`] instead of acting on it.
+///
+/// [`require_level!`] is the normal entry point. Reach for this only where the
+/// gate lives in a helper whose signature cannot be `return`ed from — a
+/// `-> Option<T>` fixture builder, for example. Calling [`evaluate_harness`]
+/// directly in such a helper skips the recording and leaves the backend
+/// unproven even though its tests ran.
+#[macro_export]
+macro_rules! decide_harness {
+    ($level:expr, $available:expr, $harness:expr $(,)?) => {{
+        let __test_toolkit_harness: $crate::HarnessSpec<'_> =
+            ::core::convert::Into::into($harness);
+        let __test_toolkit_decision =
+            $crate::evaluate_harness($level, $available, __test_toolkit_harness);
+        $crate::record_decision(
+            __test_toolkit_harness,
+            $crate::current_test_name!(),
+            match __test_toolkit_decision {
+                $crate::LevelDecision::Run => $crate::ExecutionDecision::Run,
+                $crate::LevelDecision::Skip(_) => $crate::ExecutionDecision::Skip,
+                $crate::LevelDecision::Panic(_) => $crate::ExecutionDecision::Panic,
+            },
+        );
+        __test_toolkit_decision
+    }};
+}
+
+/// Fully qualified name of the enclosing function, for execution evidence.
+///
+/// ## Notes
+///
+/// Derived from `type_name` of a locally defined probe function, which is the
+/// only stable way to learn the enclosing item's path — `module_path!` stops
+/// at the module and there is no `function!` in `core`. Inside a closure the
+/// path gains a `::{{closure}}` suffix.
+#[macro_export]
+macro_rules! current_test_name {
+    () => {{
+        fn __test_toolkit_probe() {}
+        fn __test_toolkit_name_of<T>(_: T) -> &'static str {
+            ::core::any::type_name::<T>()
+        }
+        let __test_toolkit_full = __test_toolkit_name_of(__test_toolkit_probe);
+        $crate::normalize_test_name(
+            __test_toolkit_full
+                .strip_suffix("::__test_toolkit_probe")
+                .unwrap_or(__test_toolkit_full),
+        )
     }};
 }
 
@@ -412,8 +549,8 @@ fn previous_value(key: &OsStr) -> PreviousEnvValue {
 #[cfg(test)]
 mod tests {
     use super::{
-        BISCUIT_TEST_LEVEL, BISCUIT_TEST_LEVEL_REQUIRED, EnvGuard, Level, LevelDecision, RUN_LEVEL3,
-        evaluate_level, init_test_tracing,
+        BISCUIT_TEST_LEVEL, BISCUIT_TEST_LEVEL_REQUIRED, BISCUIT_TEST_REQUIRED_BACKENDS, EnvGuard,
+        Level, LevelDecision, RUN_LEVEL3, evaluate_level, init_test_tracing,
     };
     use std::env;
     use std::sync::{Arc, Mutex};
@@ -591,6 +728,7 @@ mod tests {
         let _g1 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL);
         let _g2 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL_REQUIRED);
         let _g3 = EnvGuard::remove_safe(RUN_LEVEL3);
+        let _g4 = EnvGuard::remove_safe(BISCUIT_TEST_REQUIRED_BACKENDS);
 
         assert_eq!(
             evaluate_level(Level::L2, true, "WezTerm"),
@@ -604,6 +742,7 @@ mod tests {
         let _g1 = EnvGuard::set_safe(BISCUIT_TEST_LEVEL, "1");
         let _g2 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL_REQUIRED);
         let _g3 = EnvGuard::remove_safe(RUN_LEVEL3);
+        let _g4 = EnvGuard::remove_safe(BISCUIT_TEST_REQUIRED_BACKENDS);
 
         match evaluate_level(Level::L2, true, "WezTerm") {
             LevelDecision::Skip(msg) => assert!(msg.contains("BISCUIT_TEST_LEVEL=1")),
@@ -617,6 +756,7 @@ mod tests {
         let _g1 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL);
         let _g2 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL_REQUIRED);
         let _g3 = EnvGuard::remove_safe(RUN_LEVEL3);
+        let _g4 = EnvGuard::remove_safe(BISCUIT_TEST_REQUIRED_BACKENDS);
 
         match evaluate_level(Level::L2, false, "WezTerm") {
             LevelDecision::Skip(msg) => assert!(msg.contains("WezTerm")),
@@ -630,6 +770,7 @@ mod tests {
         let _g1 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL);
         let _g2 = EnvGuard::set_safe(BISCUIT_TEST_LEVEL_REQUIRED, "2");
         let _g3 = EnvGuard::remove_safe(RUN_LEVEL3);
+        let _g4 = EnvGuard::remove_safe(BISCUIT_TEST_REQUIRED_BACKENDS);
 
         match evaluate_level(Level::L2, false, "WezTerm") {
             LevelDecision::Panic(msg) => {
@@ -646,6 +787,7 @@ mod tests {
         let _g1 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL);
         let _g2 = EnvGuard::set_safe(BISCUIT_TEST_LEVEL_REQUIRED, "3");
         let _g3 = EnvGuard::set_safe(RUN_LEVEL3, "1");
+        let _g4 = EnvGuard::remove_safe(BISCUIT_TEST_REQUIRED_BACKENDS);
 
         // Level 2 unavailable, but REQUIRED=3 → should skip, not panic.
         match evaluate_level(Level::L2, false, "WezTerm") {
@@ -660,6 +802,7 @@ mod tests {
         let _g1 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL);
         let _g2 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL_REQUIRED);
         let _g3 = EnvGuard::remove_safe(RUN_LEVEL3);
+        let _g4 = EnvGuard::remove_safe(BISCUIT_TEST_REQUIRED_BACKENDS);
 
         match evaluate_level(Level::L3, true, "cliclick") {
             LevelDecision::Skip(msg) => assert!(msg.contains("RUN_LEVEL3")),
@@ -673,6 +816,7 @@ mod tests {
         let _g1 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL);
         let _g2 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL_REQUIRED);
         let _g3 = EnvGuard::set_safe(RUN_LEVEL3, "1");
+        let _g4 = EnvGuard::remove_safe(BISCUIT_TEST_REQUIRED_BACKENDS);
 
         assert_eq!(
             evaluate_level(Level::L3, true, "cliclick"),
@@ -687,6 +831,7 @@ mod tests {
         let _g1 = EnvGuard::set_safe(BISCUIT_TEST_LEVEL, "1");
         let _g2 = EnvGuard::set_safe(BISCUIT_TEST_LEVEL_REQUIRED, "2");
         let _g3 = EnvGuard::remove_safe(RUN_LEVEL3);
+        let _g4 = EnvGuard::remove_safe(BISCUIT_TEST_REQUIRED_BACKENDS);
 
         match evaluate_level(Level::L2, false, "WezTerm") {
             LevelDecision::Skip(_) => {}

@@ -17,8 +17,35 @@ pub mod pty;
 #[cfg(unix)]
 pub mod real_terminal;
 
+/// Whether the `expect` driver [`run_question_in_pty`] shells out to is
+/// reachable.
+///
+/// `expect` is a provisioned external tool, not something the test can supply:
+/// macOS ships it, GitHub's Linux runners do not, and Windows has no port. Its
+/// absence must therefore skip cleanly rather than fail.
+///
+/// ## Notes
+///
+/// These tests were green in CI for a long time only because their names contain
+/// `real_tty`, which the then-unanchored `test(/real_/)` filterset matched by
+/// accident. Anchoring that predicate to a path-segment boundary removed the
+/// accident and exposed the dependency — they had never actually run.
+pub fn expect_driver_available() -> bool {
+    Command::new("expect")
+        .arg("-v")
+        .output()
+        .is_ok_and(|output| output.status.success())
+}
+
+/// Drive `question` through a real PTY using the `expect` script driver.
+///
+/// ## Panics
+///
+/// Panics if `expect` is not on `PATH`. Callers must gate on
+/// [`expect_driver_available`] via `require_level!(Level::L2, …)` first — the
+/// resource is a real terminal, which is L2 by the tier taxonomy.
 pub fn run_question_in_pty(args: &[&str], send_sequence: &str, expected_code: i32) -> Output {
-    let binary = assert_cmd::cargo::cargo_bin!("question");
+    let binary = assert_cmd::cargo::cargo_bin("question");
     let script = build_expect_script(
         binary
             .to_str()

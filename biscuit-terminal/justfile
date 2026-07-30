@@ -55,21 +55,29 @@ install *args="":
 
 # --- Canonical lifecycle recipe set (testing-best-practices Phase 2) -------
 
+# `--features image` on the library throughout: biscuit-terminal declares no
+# `default` feature set, and `image` gates 137 of its 3004 tests (the resvg
+# rasterization path plus the mermaid / graph-expression / horizontal-rule
+# parity suites). Every consumer that renders artifacts enables it —
+# biscuit-terminal-cli, darkmatter, worktree-cli, sniff-cli — so the
+# no-feature build is a configuration nobody ships.
+#
+# NOT `--all-features`: the `serde` feature's test module does not compile
+# (its `renderable::tree::graphics::horizontal_rule_svg` calls are one
+# argument behind that function's signature), and `clap` gates no tests.
+
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity {{ LIBRARY }}
-    @just _sanity {{ CLI }}
+    @just _sanity_all "{{ LIBRARY }} --features image; {{ CLI }}"
 
 # Test both library and CLI (Level-1 only — `test-l2` runs real-terminal tests).
 test *args="":
-    @just _test {{ LIBRARY }} {{ args }}
-    @just _test {{ CLI }} {{ args }}
+    @just _test_all "{{ LIBRARY }} --features image; {{ CLI }}" {{ args }}
 
 # Level-2 real-terminal tests. Skips cleanly if the harness is unavailable
 # unless `BISCUIT_TEST_LEVEL_REQUIRED=2` is set in the environment.
 test-l2 *args="":
-    @just _test_l2 {{ LIBRARY }} {{ args }}
-    @just _test_l2 {{ CLI }} {{ args }}
+    @just _test_l2_all "{{ LIBRARY }} {{ CLI }}" {{ args }}
 
 # not applicable: biscuit-terminal has no OS-keyboard-injection (Level-3) tests
 test-l3 *args="":
@@ -91,12 +99,12 @@ lint:
 
 # Per-package LCOV coverage for the library and CLI.
 coverage *args="":
-    @just _coverage {{ LIBRARY }} {{ args }}
+    @just _coverage {{ LIBRARY }} --features image {{ args }}
     @just _coverage {{ CLI }} {{ args }}
 
 # Doctests for the library and CLI.
 doctest *args="":
-    @just _doctest {{ LIBRARY }} {{ args }}
+    @just _doctest {{ LIBRARY }} --features image {{ args }}
     @just _doctest {{ CLI }} {{ args }}
 
 # not applicable: biscuit-terminal has no cargo-fuzz targets (Phase 5 scope)

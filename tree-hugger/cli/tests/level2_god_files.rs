@@ -29,7 +29,7 @@ use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
 use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serial_test::serial;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 /// Absolute path to the built `hug` binary, injected by cargo for this crate's
 /// integration tests. Driving the real binary keeps the test honest about the
@@ -232,7 +232,7 @@ fn assert_moderate_report(frame: &CapturedFrame, expect_osc8: bool) {
 #[test]
 #[serial(level2_terminal)]
 fn level2_god_files_pretty_report_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let dir = tempfile::TempDir::new().unwrap();
     write_god_fixture(dir.path());
@@ -254,11 +254,7 @@ fn level2_god_files_pretty_report_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_god_files_pretty_report_in_wezterm() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let dir = tempfile::TempDir::new().unwrap();
     write_god_fixture(dir.path());
@@ -282,11 +278,7 @@ fn level2_god_files_pretty_report_in_wezterm() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_god_files_pretty_report_in_kitty() {
-    require_level!(
-        Level::L2,
-        KittyHarness::available(),
-        "Kitty remote control (set KITTY_LISTEN_ON)",
-    );
+    require_level!(Level::L2, KittyHarness::available(), Backend::Kitty);
 
     let dir = tempfile::TempDir::new().unwrap();
     write_god_fixture(dir.path());

@@ -59,7 +59,7 @@ use common::{augmented_path, pty_available, write_executable};
 /// user config.
 fn compose_command(workspace_dir: &std::path::Path, bin_dir: &std::path::Path, md_file: &std::path::Path) -> Command {
     stage_default_config(workspace_dir);
-    let mut cmd = Command::new(cargo_bin!("claudine"));
+    let mut cmd = Command::new(cargo_bin("claudine"));
     cmd.args(["compose", "--goose", md_file.to_str().unwrap()]);
     cmd.env("HOME", workspace_dir);
     cmd.env("PATH", augmented_path(bin_dir));
@@ -304,7 +304,7 @@ fn level2_pty_schema_silent_suppresses_prompt_under_tty() {
     // suppress it and surface the typed `MissingProperties` error
     // instead.
     stage_default_config(workspace.path());
-    let mut cmd = Command::new(cargo_bin!("claudine"));
+    let mut cmd = Command::new(cargo_bin("claudine"));
     cmd.args([
         "compose",
         "--goose",
@@ -453,7 +453,7 @@ fn level2_pty_schema_prompt_precedes_provider_launch_with_interactive_flag() {
     .unwrap();
 
     stage_default_config(workspace.path());
-    let mut cmd = Command::new(cargo_bin!("claudine"));
+    let mut cmd = Command::new(cargo_bin("claudine"));
     cmd.args(["compose", "-i", "--goose", md_file.to_str().unwrap()]);
     cmd.env("HOME", workspace.path());
     cmd.env("PATH", augmented_path(&bin_dir));
@@ -599,7 +599,7 @@ fn level2_pty_schema_prompt_appears_even_when_no_interactive_overrides_frontmatt
     .unwrap();
 
     stage_default_config(workspace.path());
-    let mut cmd = Command::new(cargo_bin!("claudine"));
+    let mut cmd = Command::new(cargo_bin("claudine"));
     cmd.args([
         "compose",
         "--no-interactive",
@@ -745,7 +745,7 @@ fn level2_pty_inline_compose_interactive_flag_collects_before_launch() {
     .unwrap();
 
     stage_default_config(workspace.path());
-    let mut cmd = Command::new(cargo_bin!("claudine"));
+    let mut cmd = Command::new(cargo_bin("claudine"));
     cmd.args([
         "inline-compose",
         "-i",
@@ -794,7 +794,7 @@ fn level2_pty_inline_compose_frontmatter_interactive_collects_before_launch() {
     .unwrap();
 
     stage_default_config(workspace.path());
-    let mut cmd = Command::new(cargo_bin!("claudine"));
+    let mut cmd = Command::new(cargo_bin("claudine"));
     cmd.args(["inline-compose", "--codex", md_file.to_str().unwrap()]);
     cmd.env("HOME", workspace.path());
     cmd.env("PATH", augmented_path(&bin_dir));

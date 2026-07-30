@@ -7,7 +7,15 @@ use std::path::Path;
 /// - prefix match (pattern ends with `/*` or pattern is a parent directory)
 /// - simple glob with `*` as a single-segment wildcard
 /// - `**` as a multi-segment wildcard
+/// ## Notes
+///
+/// Every directory-scoped branch below tests for a `/` byte at the segment
+/// boundary, so on Windows — where the path uses `\` — they all return `false`.
+/// A caller cannot distinguish that from a genuine non-match, and for a *deny*
+/// rule the false answer means the denial never applies. The caller is warned
+/// once; see `protect::path::warn_windows_path_matching_is_broken`.
 pub fn path_matches(path: &Path, pattern: &str) -> bool {
+    crate::protect::path::warn_windows_path_matching_is_broken();
     let path_str = path.to_string_lossy();
     let pattern = pattern.trim();
 

@@ -47,16 +47,71 @@ build *args="":
     @just _build messenger "Messenger" {{ args }}
     @just _build messenger-cli "Messenger CLI" {{ args }}
 
+# --- Canonical lifecycle recipe set (testing-best-practices Phase 2) -------
+
+# Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
+#
+# `--features desktop` for the library only: messenger's default feature set
+# omits the desktop implementation its test contract covers (the same
+# special case `_test_workspace` encodes for the root `just test`).
+sanity:
+    @just _sanity_all "messenger --features desktop; messenger-cli"
+
 # Test both library and CLI
-test:
-    @just _test messenger --features desktop
-    @just _test messenger-cli
+test *args="":
+    @just _test_all "messenger --features desktop; messenger-cli" {{ args }}
+
+# not applicable: messenger has no real-terminal (Level-2) tests
+test-l2:
+    @echo "test-l2: not applicable for messenger"
+
+# not applicable: messenger has no OS-keyboard-injection (Level-3) tests
+test-l3:
+    @echo "test-l3: not applicable for messenger"
+
+# not applicable: messenger renders Markdown for providers, not for a browser
+test-browser:
+    @echo "test-browser: not applicable for messenger"
+
+# not applicable: messenger has no real-resource tier — provider transports are
+# covered by stub binaries and wiremock, never by a live account
+test-real:
+    @echo "test-real: not applicable for messenger"
 
 # Lint both the library and CLI
 lint:
     @echo "Linting {{ BOLD }}messenger{{ RESET }} (features: desktop)"
     @cargo clippy -p messenger --features desktop --all-targets -- -D warnings
     @just _lint messenger-cli
+
+# not applicable: messenger has no criterion benches
+bench:
+    @echo "bench: not applicable for messenger"
+
+# Per-package LCOV coverage for the library and CLI.
+coverage *args="":
+    @just _coverage {{ LIBRARY }} {{ args }}
+    @just _coverage {{ CLI }} {{ args }}
+
+# Doctests for the library and CLI.
+doctest *args="":
+    @just _doctest {{ LIBRARY }} --features desktop {{ args }}
+    @just _doctest {{ CLI }} {{ args }}
+
+# not applicable: messenger has no cargo-fuzz targets
+fuzz:
+    @echo "fuzz: not applicable for messenger"
+
+# Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
+all:
+    @just sanity
+    @just lint
+    @just doctest
+    @just test
+    @just test-l2
+    @just test-browser
+
+# ----------------------------------------------------------------------------
 
 lint-fix:
     @cargo clippy -p messenger --features desktop --all-targets -- -D warnings || just _lint_fix messenger

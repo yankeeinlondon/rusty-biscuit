@@ -9,7 +9,6 @@
 
 use std::fs;
 
-use assert_cmd::cargo::cargo_bin_cmd;
 
 mod common;
 use common::{TestWorkspace, write};
@@ -34,7 +33,7 @@ const ATOMIC_STYLE_TOKENS: &[&str] = &[
 /// Run `claudine` with `NO_COLOR` set and an isolated `HOME`, returning
 /// stdout as a string. Asserts the command exited successfully.
 fn run_hooks(home: &std::path::Path, args: &[&str]) -> String {
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("HOME", home)
         .env("NO_COLOR", "1")
         .args(args)
@@ -196,7 +195,7 @@ fn hooks_views_emit_no_atomic_style_tokens() {
 
 /// Run `claudine` with color forced on, returning stdout.
 fn run_hooks_colored(home: &std::path::Path, args: &[&str]) -> String {
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("HOME", home)
         .env("FORCE_COLOR", "1")
         .env_remove("NO_COLOR")

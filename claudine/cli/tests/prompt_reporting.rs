@@ -3,7 +3,6 @@
 //! Verifies visual layout, token counting, markdown formatting, and
 //! suppression behaviour across standard `compose` workflows.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use tempfile::tempdir;
 
@@ -64,7 +63,7 @@ fn make_workspace_with_goose_and_verbose_system_prompt() -> (
 fn compose_default_shows_summary_and_short_user_prompt() {
     let (workspace, path_dir, md_file, sp_file) = make_workspace_with_goose_and_system_prompt();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -111,7 +110,7 @@ fn compose_default_shows_summary_and_short_user_prompt() {
 fn compose_verbose_shows_full_prompts() {
     let (workspace, path_dir, md_file, sp_file) = make_workspace_with_goose_and_system_prompt();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -159,7 +158,7 @@ fn compose_quiet_shows_system_summary_and_full_agent_prompt() {
     // no-op for the User Prompt — header and body still render.
     let (workspace, path_dir, md_file, sp_file) = make_workspace_with_goose_and_system_prompt();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -208,7 +207,7 @@ fn compose_quiet_shows_system_summary_and_full_agent_prompt() {
 fn compose_silent_suppresses_all_prompt_reporting() {
     let (workspace, path_dir, md_file, sp_file) = make_workspace_with_goose_and_system_prompt();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -270,7 +269,7 @@ exit 0
     let md_file = workspace.path().join("prompt.md");
     fs::write(&md_file, format!("# Long Prompt\n\n{long_prompt}\n")).unwrap();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -311,7 +310,7 @@ exit 0
 fn compose_system_prompt_summary_shows_token_count() {
     let (workspace, path_dir, md_file, sp_file) = make_workspace_with_goose_and_system_prompt();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -343,7 +342,7 @@ fn compose_system_prompt_summary_shows_token_count() {
 fn compose_env_var_verbose_shows_full_system_prompt() {
     let (workspace, path_dir, md_file, sp_file) = make_workspace_with_goose_and_system_prompt();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -376,7 +375,7 @@ fn compose_env_var_verbose_shows_full_system_prompt() {
 fn compose_env_var_quiet_shows_summary_only() {
     let (workspace, path_dir, md_file, sp_file) = make_workspace_with_goose_and_system_prompt();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -413,7 +412,7 @@ fn compose_env_var_quiet_shows_summary_only() {
 fn compose_env_var_silent_suppresses_system_prompt() {
     let (workspace, path_dir, md_file, sp_file) = make_workspace_with_goose_and_system_prompt();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -461,7 +460,7 @@ exit 0
     let md_file = workspace.path().join("prompt.md");
     fs::write(&md_file, &body).unwrap();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -514,7 +513,7 @@ exit 0
     let md_file = workspace.path().join("prompt.md");
     fs::write(&md_file, &body).unwrap();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -541,7 +540,7 @@ fn compose_frontmatter_verbose_shows_full_system_prompt() {
     let (workspace, path_dir, md_file, sp_file) =
         make_workspace_with_goose_and_verbose_system_prompt();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))

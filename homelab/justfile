@@ -58,24 +58,22 @@ build *args="":
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity homelab
-    @just _sanity homelab-cli
-    @just _sanity homelab-server
-    @just _sanity unfolded-integration-helper
-    @just _sanity arcam-amp-integration
-    @just _sanity eversolo-integration
-    @just _sanity sony-receiver-integration
+    @just _sanity_all "homelab homelab-cli homelab-server unfolded-integration-helper arcam-amp-integration eversolo-integration sony-receiver-integration"
 
 # run tests for Homelab packages
+#
+# The frontend suite runs even when a Rust package failed, so one red crate
+# cannot hide a red frontend; the recipe returns the combined status.
 test *args="":
-    @just _test homelab {{ args }}
-    @just _test homelab-cli {{ args }}
-    @just _test homelab-server {{ args }}
-    @just _test unfolded-integration-helper {{ args }}
-    @just _test arcam-amp-integration {{ args }}
-    @just _test eversolo-integration {{ args }}
-    @just _test sony-receiver-integration {{ args }}
-    @just test-frontend
+    #!/usr/bin/env bash
+    set -uo pipefail
+    exit_code=0
+    just _test_all "homelab homelab-cli homelab-server unfolded-integration-helper arcam-amp-integration eversolo-integration sony-receiver-integration" {{ args }} || exit_code=$?
+    if (( exit_code == 130 )); then
+        exit 130
+    fi
+    just test-frontend || exit_code=1
+    exit "${exit_code}"
 
 # not applicable: homelab has no real-terminal (Level-2) tests
 test-l2:
@@ -318,12 +316,55 @@ lint-frontend:
     @echo ""
     @cd server/frontend && pnpm lint
 
-# run frontend unit tests
+# run frontend unit tests (Vue + Vitest under jsdom)
+#
+# Self-gating on the pnpm capability, the way `require_level!` self-gates on a
+# terminal backend: one recipe everywhere, which decides for itself whether the
+# host can run it. CI declares the capability as `"node": true` in
+# `.github/ci/areas.json`; `_area-ci.yml` provisions it on ubuntu-latest only,
+# because this suite has no native dependency and four installs would exercise
+# identical code paths.
+#
+# The two absent-pnpm paths are deliberately asymmetric:
+#
+#   - not declared (a developer host, a Windows/macOS/WSL leg) — announce loudly
+#     and exit 0. Nobody is blocked, and nobody can read the run as having
+#     covered the frontend.
+#   - declared, via BISCUIT_FRONTEND_REQUIRED — hard fail. A provisioning gap on
+#     the one leg that promised the capability must never read as success.
+#
+# A silent skip is what hid this suite: `pnpm: command not found` killed `just
+# test` AFTER every Rust package had passed, and the rollup parses Rust JUnit
+# only, so `homelab` rendered PASS 222/0/0 on three environments while every
+# `homelab / test` job was red (run 30427703024).
 test-frontend:
-    @echo ""
-    @echo "Testing Frontend"
-    @echo ""
-    @cd ./server/frontend && pnpm test
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v pnpm >/dev/null 2>&1; then
+        echo ""
+        echo "================================================================"
+        echo "  !! FRONTEND TEST SUITE DID NOT RUN !!"
+        echo ""
+        echo "  pnpm is not on PATH, so homelab/server/frontend's Vue + Vitest"
+        echo "  suite was SKIPPED. Nothing else in this run covers it."
+        echo ""
+        echo "  Install pnpm (https://pnpm.io/installation) to run it here."
+        echo "================================================================"
+        echo ""
+        if [ -n "${BISCUIT_FRONTEND_REQUIRED:-}" ]; then
+            echo "BISCUIT_FRONTEND_REQUIRED is set, so this environment DECLARED the" >&2
+            echo "node capability (\"node\": true in .github/ci/areas.json). A missing" >&2
+            echo "pnpm here is a PROVISIONING FAILURE, not an absent capability." >&2
+            exit 1
+        fi
+        exit 0
+    fi
+    echo ""
+    echo "Testing Frontend"
+    echo ""
+    cd ./server/frontend
+    pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+    pnpm test
 
 # typecheck frontend
 typecheck-frontend:

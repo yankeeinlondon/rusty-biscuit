@@ -13,7 +13,6 @@
 //! escape byte) and by the L1 render tests in
 //! `claudine/lib/src/composition/error.rs`.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use tempfile::tempdir;
 mod common;
@@ -41,7 +40,7 @@ fn normalize_ws(input: &str) -> String {
 /// the **raw** stderr bytes plus whether the process failed. Piped stderr is
 /// never a TTY, so this always exercises the non-TTY (YAML-withheld) branch.
 fn run_inline_compose_raw(md_file: &std::path::Path) -> (Vec<u8>, bool) {
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args(["inline-compose", md_file.to_str().unwrap()])
         .assert();
@@ -339,7 +338,7 @@ fn prompt_with_null_sequence_proceeds_to_ordinary_behavior() {
     )
     .unwrap();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&bin_dir))
@@ -367,7 +366,7 @@ fn prompt_without_sequence_retains_inline_behavior() {
     let md_file = workspace.path().join("doc.md");
     fs::write(&md_file, "---\nprompt: Do something\n---\nbody\n").unwrap();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&bin_dir))
@@ -399,7 +398,7 @@ fn override_cannot_suppress_authored_mismatch() {
     )
     .unwrap();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args([
             "inline-compose",
@@ -427,7 +426,7 @@ fn override_cannot_create_mismatch() {
     let md_file = workspace.path().join("doc.md");
     fs::write(&md_file, "---\nprompt: Do something\n---\nbody\n").unwrap();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&bin_dir))
@@ -483,7 +482,7 @@ fn rejection_has_no_side_effects() {
     );
     fs::write(&md_file, &original).unwrap();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&bin_dir))

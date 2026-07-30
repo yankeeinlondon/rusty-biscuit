@@ -18,7 +18,7 @@ use biscuit_test_harness::wezterm::WezTermHarness;
 use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use common::send_bt_command;
 use serial_test::serial;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 use unicode_width::UnicodeWidthStr;
 
 /// Process-shared WezTerm pane reused across the WezTerm prose tests.
@@ -36,11 +36,7 @@ static SHARED_KITTY: SharedHarness<KittyHarness> = SharedHarness::new();
 #[test]
 #[serial(level2_terminal)]
 fn level2_prose_emits_sgr_in_real_terminal() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     // `WezTermHarness::new()` spawns into a dedicated background
     // workspace, so the pane never grabs focus or steals the desktop.
@@ -87,11 +83,7 @@ fn level2_prose_emits_sgr_in_real_terminal() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_prose_osc8_link_renders() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
@@ -111,11 +103,7 @@ fn level2_prose_osc8_link_renders() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_no_color_strips_sgr_in_real_terminal() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
@@ -141,11 +129,7 @@ fn level2_no_color_strips_sgr_in_real_terminal() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_prose_emits_sgr_in_kitty() {
-    require_level!(
-        Level::L2,
-        KittyHarness::available(),
-        "Kitty remote control (set KITTY_LISTEN_ON)",
-    );
+    require_level!(Level::L2, KittyHarness::available(), Backend::Kitty);
 
     // `KittyHarness::new()` passes `--keep-focus` so the spawned OS
     // window never steals focus from the developer's session.
@@ -183,11 +167,7 @@ fn level2_prose_emits_sgr_in_kitty() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_prose_osc8_link_renders_in_kitty() {
-    require_level!(
-        Level::L2,
-        KittyHarness::available(),
-        "Kitty remote control (set KITTY_LISTEN_ON)",
-    );
+    require_level!(Level::L2, KittyHarness::available(), Backend::Kitty);
 
     let mut guard = SHARED_KITTY
         .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
@@ -211,11 +191,7 @@ fn level2_prose_osc8_link_renders_in_kitty() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_pad_columns_respect_actual_pane_width() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
@@ -262,11 +238,7 @@ fn level2_pad_columns_respect_actual_pane_width() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_columns_word_wrap_in_pane() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
@@ -441,11 +413,7 @@ fn assert_rich_prose_sgr<H: TerminalHarness>(harness: &mut H) {
 #[test]
 #[serial(level2_terminal)]
 fn level2_prose_rich_styling_emits_sgr_in_wezterm() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
@@ -458,11 +426,7 @@ fn level2_prose_rich_styling_emits_sgr_in_wezterm() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_prose_rich_styling_emits_sgr_in_kitty() {
-    require_level!(
-        Level::L2,
-        KittyHarness::available(),
-        "Kitty remote control (set KITTY_LISTEN_ON)",
-    );
+    require_level!(Level::L2, KittyHarness::available(), Backend::Kitty);
 
     let mut guard = SHARED_KITTY
         .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
@@ -562,11 +526,7 @@ fn segment_selects_red(segment: &str) -> bool {
 #[test]
 #[serial(level2_terminal)]
 fn level2_prose_code_block_restores_parent_style_in_wezterm() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
@@ -579,11 +539,7 @@ fn level2_prose_code_block_restores_parent_style_in_wezterm() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_prose_code_block_restores_parent_style_in_kitty() {
-    require_level!(
-        Level::L2,
-        KittyHarness::available(),
-        "Kitty remote control (set KITTY_LISTEN_ON)",
-    );
+    require_level!(Level::L2, KittyHarness::available(), Backend::Kitty);
 
     let mut guard = SHARED_KITTY
         .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
@@ -596,11 +552,7 @@ fn level2_prose_code_block_restores_parent_style_in_kitty() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_prose_nested_emphasis_visible_text_in_wezterm() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
@@ -667,11 +619,7 @@ fn assert_prose_inverse_sgr<H: TerminalHarness>(harness: &mut H) {
 #[test]
 #[serial(level2_terminal)]
 fn level2_prose_inverse_emits_sgr_in_wezterm() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
@@ -684,11 +632,7 @@ fn level2_prose_inverse_emits_sgr_in_wezterm() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_prose_inverse_emits_sgr_in_kitty() {
-    require_level!(
-        Level::L2,
-        KittyHarness::available(),
-        "Kitty remote control (set KITTY_LISTEN_ON)",
-    );
+    require_level!(Level::L2, KittyHarness::available(), Backend::Kitty);
 
     let mut guard = SHARED_KITTY
         .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
@@ -705,11 +649,7 @@ fn level2_prose_inverse_emits_sgr_in_kitty() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_prose_hidden_renders_as_literal_text_in_wezterm() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));

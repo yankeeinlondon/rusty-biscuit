@@ -5,7 +5,6 @@
 //! errors, per-step `step_timeout` override, and post-shell-expansion
 //! schema validation.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::str::contains;
 use std::fs;
 use tempfile::tempdir;
@@ -52,7 +51,7 @@ Step about {{topic}}.
         ),
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -132,7 +131,7 @@ Working on {{topic}} ({{state}}).
         "#!/bin/sh\ncat > /dev/null\nexit 0\n",
     );
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -190,7 +189,7 @@ Step about {{config}}.
         ),
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -318,7 +317,7 @@ exit 0
     );
 
     let run_start = std::time::Instant::now();
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", &fake_home)
         .env("PATH", augmented_path(&path_dir))
@@ -398,7 +397,7 @@ Step {{state}} with tier {{tier}}.
         ),
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -467,7 +466,7 @@ Step {{{{ state.name }}}}: {{{{ loaded_title }}}}
         ),
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))

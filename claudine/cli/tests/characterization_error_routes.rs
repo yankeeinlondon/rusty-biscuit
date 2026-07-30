@@ -39,7 +39,6 @@
 //! disqualifying: Checkpoint 1 forbids proceeding on a flaky baseline, because
 //! a flaky baseline cannot prove D10 neutrality.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::path::{Path, PathBuf};
 
 mod common;
@@ -130,7 +129,7 @@ fn run_route(doc_body: &str, provider_exit: i32, extra_args: &[&str]) -> RouteOu
     let doc_arg = doc.to_str().unwrap().to_string();
     args.push(&doc_arg);
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("PATH", augmented_path(&bin_dir))
         .current_dir(root)

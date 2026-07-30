@@ -65,13 +65,11 @@ build *args="":
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity research
-    @just _sanity research-cli
+    @just _sanity_all "research research-cli"
 
 # Test both library and CLI
 test *args="":
-    @just _test research {{args}}
-    @just _test research-cli {{args}}
+    @just _test_all "research research-cli" {{args}}
 
 # not applicable: research has no real-terminal (Level-2) tests
 test-l2:

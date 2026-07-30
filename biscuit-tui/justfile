@@ -41,13 +41,11 @@ build *args="":
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity {{LIBRARY}}
-    @just _sanity {{CLI}}
+    @just _sanity_all "{{LIBRARY}} {{CLI}}"
 
 # Full L1 suite for library and CLI.
 test *args="":
-    @just _test {{LIBRARY}} {{args}}
-    @just _test {{CLI}} {{args}}
+    @just _test_all "{{LIBRARY}} {{CLI}}" {{args}}
 
 # Level-2 (real-terminal) tests for the CLI. Library has no L2 tests.
 #

@@ -20,7 +20,6 @@
 //! whose output contract depends on a real terminal (TTY vs `NO_COLOR` vs
 //! `FORCE_COLOR`, OSC 8 links, SGR).
 
-use assert_cmd::cargo::cargo_bin_cmd;
 
 mod common;
 use common::{TestWorkspace, augmented_path, strip_ansi, write, write_executable};
@@ -68,7 +67,7 @@ fn compose_stderr(doc_body: &str, extra_args: &[&str]) -> String {
     let doc_arg = doc.to_str().unwrap().to_string();
     args.push(&doc_arg);
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("PATH", augmented_path(&bin_dir))
         .current_dir(root)
@@ -209,7 +208,7 @@ Body
 "#,
     );
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("PATH", augmented_path(&bin_dir))
         .current_dir(root)
@@ -256,7 +255,7 @@ fn status_block_is_plain_and_informative_when_piped() {
             &doc,
             "---\ntitle: t\ninitialize:\n  stack:\n    - action: {proxy: \"no/such/target.md\"}\n---\nBody\n",
         );
-        let output = cargo_bin_cmd!("claudine")
+        let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
             .env("NO_COLOR", "1")
             .env("PATH", augmented_path(&bin_dir))
             .current_dir(root)

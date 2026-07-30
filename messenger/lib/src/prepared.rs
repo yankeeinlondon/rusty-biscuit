@@ -114,7 +114,7 @@ impl PreparedMessage {
     pub fn render_rich(&self, provider: ProviderKind) -> Option<String> {
         use crate::markdown::render_for_provider;
         match (&self.message.body, &self.markdown_nodes) {
-            (Some(MessageBody::Summarized { markdown: _, .. }), Some(nodes)) => {
+            (Some(MessageBody::Summarized { .. }), Some(nodes)) => {
                 Some(render_nodes_for_provider(nodes, provider))
             }
             (Some(MessageBody::Summarized { markdown, .. }), None) => {

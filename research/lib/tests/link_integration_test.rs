@@ -157,6 +157,32 @@ fn create_skill_with_deep_dive(library: &Path, name: &str, topic_type: &str) {
     .unwrap();
 }
 
+/// Whether this process is permitted to create symlinks.
+///
+/// Windows grants symlink creation only under Developer Mode or
+/// `SeCreateSymbolicLinkPrivilege`. That is a runtime privilege no `cfg` can
+/// answer, so this probes it for real. Tests below skip when it is withheld,
+/// because the OS refusing the syscall is not a defect in the code under test —
+/// every other failure still fails the test.
+fn symlinks_supported() -> bool {
+    #[cfg(not(windows))]
+    {
+        true
+    }
+
+    #[cfg(windows)]
+    {
+        let Ok(probe) = TempDir::new() else {
+            return false;
+        };
+        let target = probe.path().join("probe_target");
+        if fs::create_dir(&target).is_err() {
+            return false;
+        }
+        std::os::windows::fs::symlink_dir(&target, probe.path().join("probe_link")).is_ok()
+    }
+}
+
 /// Helper to create a broken symlink
 #[cfg(unix)]
 fn create_broken_symlink(dir: &Path, name: &str) {
@@ -273,6 +299,9 @@ async fn test_error_handling_continues_when_one_symlink_fails() {
 #[tokio::test]
 #[serial]
 async fn test_asymmetric_failure_claude_succeeds_opencode_fails() {
+    if !symlinks_supported() {
+        return;
+    }
     let temp = TempDir::new().unwrap();
     let library = create_test_researchrary(temp.path());
     let (_claude_skills, opencode_skills, _roo_skills) = setup_temp_home_dirs(temp.path());
@@ -409,6 +438,9 @@ async fn test_topic_has_no_skill_directory_verification() {
 #[tokio::test]
 #[serial]
 async fn test_idempotency_running_twice_produces_same_result() {
+    if !symlinks_supported() {
+        return;
+    }
     let temp = TempDir::new().unwrap();
     let library = create_test_researchrary(temp.path());
     let _ = setup_temp_home_dirs(temp.path());
@@ -593,6 +625,9 @@ async fn test_combined_glob_and_type_filters() {
 #[tokio::test]
 #[serial]
 async fn test_symlinks_created_are_accessible() {
+    if !symlinks_supported() {
+        return;
+    }
     let temp = TempDir::new().unwrap();
     let library = create_test_researchrary(temp.path());
     let (claude_skills, _opencode_skills, _roo_skills) = setup_temp_home_dirs(temp.path());
@@ -766,6 +801,9 @@ async fn test_working_symlinks_are_not_removed() {
 #[tokio::test]
 #[serial]
 async fn test_deep_dive_symlinks_created_with_topic_name() {
+    if !symlinks_supported() {
+        return;
+    }
     let temp = TempDir::new().unwrap();
     let library = create_test_researchrary(temp.path());
     let (_, claude_docs, _, opencode_docs, _, _roo_docs) =
@@ -836,6 +874,9 @@ async fn test_deep_dive_symlinks_created_with_topic_name() {
 #[tokio::test]
 #[serial]
 async fn test_deep_dive_links_are_idempotent() {
+    if !symlinks_supported() {
+        return;
+    }
     let temp = TempDir::new().unwrap();
     let library = create_test_researchrary(temp.path());
     let (_, claude_docs, _, _, _, _) = setup_temp_home_dirs_with_docs(temp.path());
@@ -934,6 +975,9 @@ async fn test_no_deep_dive_results_in_none_doc_action() {
 #[tokio::test]
 #[serial]
 async fn test_multiple_topics_get_distinct_doc_names() {
+    if !symlinks_supported() {
+        return;
+    }
     let temp = TempDir::new().unwrap();
     let library = create_test_researchrary(temp.path());
     let (_, claude_docs, _, _, _, _) = setup_temp_home_dirs_with_docs(temp.path());

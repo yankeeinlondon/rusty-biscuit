@@ -4129,7 +4129,7 @@ mod tests {
     /// event-handler attribute through the typed extension maps — the spec's
     /// "no attribute injection" contract.
     #[test]
-    fn browser_attr_name_newtypes_reject_injection_vectors() {
+    fn attr_name_newtypes_reject_injection_vectors() {
         for forbidden in ["href", "src", "style", "onclick", "onload"] {
             // A `data-`/`aria-` prefix is always prepended, so even an accepted
             // name cannot become a bare `href`/`src`/`style`/`onclick`. The
@@ -5542,7 +5542,7 @@ mod tests {
     }
 
     #[test]
-    fn browser_renderer_lowers_layout_to_css() {
+    fn renderer_lowers_layout_to_css() {
         use crate::layout::{Alignment, Layout, Length, Edges, TargetValue};
 
         let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
@@ -5573,7 +5573,7 @@ mod tests {
     }
 
     #[test]
-    fn browser_renderer_lowers_vertical_margin_to_lh() {
+    fn renderer_lowers_vertical_margin_to_lh() {
         use crate::layout::{Layout, Length, Edges};
 
         let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);

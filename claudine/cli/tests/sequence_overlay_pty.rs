@@ -78,7 +78,7 @@ fn sequence_command(
     md_file: &std::path::Path,
 ) -> Command {
     stage_default_config(workspace_dir);
-    let mut cmd = Command::new(cargo_bin!("claudine"));
+    let mut cmd = Command::new(cargo_bin("claudine"));
     cmd.args(["sequence", "--goose", md_file.to_str().unwrap()]);
     cmd.env("HOME", workspace_dir);
     cmd.env("PATH", augmented_path(bin_dir));
@@ -374,7 +374,7 @@ fn pty_sequence_status_report_honors_setter_supplied_required() {
     // `tier=gold` after the file argument so only `topic` should remain
     // missing once the overlay/setter merge has run.
     stage_default_config(workspace.path());
-    let mut cmd = Command::new(cargo_bin!("claudine"));
+    let mut cmd = Command::new(cargo_bin("claudine"));
     cmd.args([
         "sequence",
         "--goose",
@@ -449,7 +449,7 @@ fn sequence_command_no_provider(
     md_file: &std::path::Path,
 ) -> Command {
     stage_default_config(workspace_dir);
-    let mut cmd = Command::new(cargo_bin!("claudine"));
+    let mut cmd = Command::new(cargo_bin("claudine"));
     cmd.args(["sequence", md_file.to_str().unwrap()]);
     cmd.env("HOME", workspace_dir);
     cmd.env("PATH", bin_dir);
@@ -627,7 +627,7 @@ fn pty_sequence_stderr_tty_with_stdout_redirected_prompts() {
     .unwrap();
 
     let out_file = workspace.path().join("out.md");
-    let claudine_bin = cargo_bin!("claudine");
+    let claudine_bin = cargo_bin("claudine");
 
     // Drive through `/bin/sh -c` so the shell, not expectrl, owns the `>`
     // redirect: the child claudine inherits stderr+stdin from the PTY but

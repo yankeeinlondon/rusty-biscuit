@@ -72,7 +72,7 @@ fn run_mismatch_under_pty() -> (String, std::path::PathBuf) {
     let md_file = workspace.path().join("doc.md");
     std::fs::write(&md_file, MISMATCH_FIXTURE).expect("write fixture");
 
-    let mut cmd = Command::new(cargo_bin!("claudine"));
+    let mut cmd = Command::new(cargo_bin("claudine"));
     cmd.arg("inline-compose").arg(&md_file);
     // Force a known-good color terminal so SGR + OSC 8 are emitted regardless of
     // the inherited environment; strip anything that would suppress color.

@@ -1,12 +1,11 @@
 //! Integration tests for `md schema about`.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use darkmatter::markdown::schemas::schema_type_descriptors;
 use darkmatter::testing::strip_ansi_codes;
 use predicates::prelude::*;
 
 fn md_cmd() -> assert_cmd::Command {
-    cargo_bin_cmd!("md")
+    assert_cmd::Command::cargo_bin("md").unwrap()
 }
 
 /// Whether `keyword` renders as the left-most (`Type`) column cell of a row in

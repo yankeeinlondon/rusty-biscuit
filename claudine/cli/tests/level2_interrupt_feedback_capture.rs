@@ -48,7 +48,7 @@ use std::fs;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
-use test_toolkit::{require_level, Level};
+use test_toolkit::{Backend, Level, require_level};
 
 /// Drive a wrapped, long-running child in a tmux pane, deliver one `SIGINT` to
 /// the wrapper once it is running, and assert the visible interrupt feedback
@@ -58,7 +58,7 @@ use test_toolkit::{require_level, Level};
 #[test]
 #[serial(level2_terminal)]
 fn level2_interrupt_feedback_renders_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     static SEQ: AtomicU32 = AtomicU32::new(0);
 

@@ -40,7 +40,7 @@ use serial_test::serial;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 mod common;
 use common::{TestWorkspace, augmented_path, clear_no_color, init_git_repo, write, write_executable};
@@ -196,7 +196,7 @@ fn run_in_pane(harness: &mut TmuxHarness, staged: &Staged) -> Capture {
     // out-vote — see `common::clear_no_color`.
     clear_no_color(harness);
 
-    let claudine = cargo_bin!("claudine").display().to_string();
+    let claudine = cargo_bin("claudine").display().to_string();
     let home = staged.workspace.path().to_string_lossy().into_owned();
     let path = augmented_path(&staged.bin_dir);
     let path = path.to_string_lossy().into_owned();
@@ -239,7 +239,7 @@ fn has_status_block(frame: &CapturedFrame) -> bool {
 #[test]
 #[serial(level2_terminal)]
 fn level2_implicit_reference_resolves_repository_first_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let staged = stage("claudine-l2-fileres-implicit", IMPLICIT_ROUTER_DOC);
@@ -276,7 +276,7 @@ fn level2_implicit_reference_resolves_repository_first_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_explicit_reference_stays_source_relative_and_fails_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let staged = stage("claudine-l2-fileres-explicit", EXPLICIT_ROUTER_DOC);
@@ -326,7 +326,7 @@ fn level2_explicit_reference_stays_source_relative_and_fails_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_implicit_no_match_lists_two_ordered_candidates_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let staged = stage("claudine-l2-fileres-nomatch", NO_MATCH_ROUTER_DOC);

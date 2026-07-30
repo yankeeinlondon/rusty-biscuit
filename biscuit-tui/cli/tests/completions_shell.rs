@@ -52,7 +52,7 @@ fn skip_if_not_enabled() -> bool {
 }
 
 fn question_binary() -> PathBuf {
-    assert_cmd::cargo::cargo_bin!("question").to_path_buf()
+    assert_cmd::cargo::cargo_bin("question").to_path_buf()
 }
 
 fn generate_completion_script(shell: &str) -> String {

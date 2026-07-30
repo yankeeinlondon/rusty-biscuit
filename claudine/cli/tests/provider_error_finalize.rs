@@ -2,7 +2,6 @@
 
 mod common;
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use common::wrap::seed_minimal_config;
 use common::{augmented_path, write, write_executable};
 use std::fs;
@@ -70,7 +69,7 @@ Research remains invalid.
         ),
     );
 
-    let assertion = cargo_bin_cmd!("claudine")
+    let assertion = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(workspace.path())
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())

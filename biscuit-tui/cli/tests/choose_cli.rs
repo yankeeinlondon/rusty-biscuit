@@ -24,7 +24,6 @@
 //!    behind `QUESTION_INTERACTIVE_PTY=1` so CI runs without a
 //!    controlling terminal skip them by default.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 
 #[path = "common/mod.rs"]
@@ -32,7 +31,7 @@ mod common;
 
 #[test]
 fn choose_one_reads_from_stdin() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one"])
         .write_stdin("alpha\nbeta\ngamma\n")
         .assert()
@@ -43,7 +42,7 @@ fn choose_one_reads_from_stdin() {
 
 #[test]
 fn choose_many_reads_from_stdin() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-many"])
         .write_stdin("alpha\nbeta\ngamma\n")
         .assert()
@@ -54,7 +53,7 @@ fn choose_many_reads_from_stdin() {
 
 #[test]
 fn choose_one_accepts_positional_args() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "alpha", "beta", "gamma"])
         .assert()
         .failure()
@@ -64,7 +63,7 @@ fn choose_one_accepts_positional_args() {
 
 #[test]
 fn choose_many_accepts_positional_args() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-many", "alpha", "beta", "gamma"])
         .assert()
         .failure()
@@ -74,7 +73,7 @@ fn choose_many_accepts_positional_args() {
 
 #[test]
 fn delimiter_separates_label_and_value() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "--delimiter", ":", "Apple:1", "Berry:2"])
         .assert()
         .failure()
@@ -84,7 +83,7 @@ fn delimiter_separates_label_and_value() {
 
 #[test]
 fn choose_one_empty_stdin_errors_with_no_options_message() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one"])
         .write_stdin("")
         .assert()
@@ -94,7 +93,7 @@ fn choose_one_empty_stdin_errors_with_no_options_message() {
 
 #[test]
 fn choose_one_selected_and_initial_conflict() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args([
             "choose-one",
             "--csv",
@@ -111,7 +110,7 @@ fn choose_one_selected_and_initial_conflict() {
 
 #[test]
 fn choose_one_initial_flag_is_hidden_from_help() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "--help"])
         .assert()
         .success()
@@ -121,7 +120,7 @@ fn choose_one_initial_flag_is_hidden_from_help() {
 
 #[test]
 fn choose_many_initial_flag_is_hidden_from_help() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-many", "--help"])
         .assert()
         .success()
@@ -131,7 +130,7 @@ fn choose_many_initial_flag_is_hidden_from_help() {
 
 #[test]
 fn choose_one_help_lists_filter_opt_out() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "--help"])
         .assert()
         .success()
@@ -140,7 +139,7 @@ fn choose_one_help_lists_filter_opt_out() {
 
 #[test]
 fn choose_many_help_lists_filter_opt_out() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-many", "--help"])
         .assert()
         .success()
@@ -149,7 +148,7 @@ fn choose_many_help_lists_filter_opt_out() {
 
 #[test]
 fn choose_one_help_lists_border_flags() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "--help"])
         .assert()
         .success()
@@ -160,7 +159,7 @@ fn choose_one_help_lists_border_flags() {
 
 #[test]
 fn choose_many_help_lists_border_flags() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-many", "--help"])
         .assert()
         .success()
@@ -171,7 +170,7 @@ fn choose_many_help_lists_border_flags() {
 
 #[test]
 fn choose_one_border_style_rejects_unknown_value() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "a", "b", "--border-style", "wonky"])
         .assert()
         .failure()
@@ -183,7 +182,7 @@ fn choose_one_border_flag_reaches_event_loop() {
     // Without a TTY the event loop bails out — we only assert the
     // CLI parsed and accepted `--border`. The exit code is 1 (Esc /
     // ABORTED) because `event::read` fails immediately.
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "a", "b", "c", "--border"])
         .assert()
         .failure()
@@ -193,7 +192,7 @@ fn choose_one_border_flag_reaches_event_loop() {
 
 #[test]
 fn choose_one_border_label_reaches_event_loop() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "a", "b", "c", "--border-label", "Pick"])
         .assert()
         .failure()
@@ -203,7 +202,7 @@ fn choose_one_border_label_reaches_event_loop() {
 
 #[test]
 fn choose_one_border_style_double_reaches_event_loop() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "a", "b", "c", "--border-style", "double"])
         .assert()
         .failure()
@@ -213,7 +212,7 @@ fn choose_one_border_style_double_reaches_event_loop() {
 
 #[test]
 fn choose_many_border_flag_reaches_event_loop() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-many", "a", "b", "c", "--border"])
         .assert()
         .failure()
@@ -231,7 +230,7 @@ fn sort_inverse_is_accepted_and_reaches_event_loop() {
     // pass it through to the event loop. Without a TTY the loop bails
     // out with code 1 — that signal is enough to confirm clap parsed
     // the value successfully.
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "Alpha", "Beta", "Gamma", "--sort", "inverse"])
         .assert()
         .failure()
@@ -241,7 +240,7 @@ fn sort_inverse_is_accepted_and_reaches_event_loop() {
 
 #[test]
 fn sort_inverse_is_accepted_for_choose_many() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-many", "a", "b", "c", "--sort", "inverse"])
         .assert()
         .failure()
@@ -255,7 +254,7 @@ fn sort_reverse_is_a_hidden_alias_still_accepted() {
     // must accept it without an "invalid value" diagnostic — we assert
     // the failure mode is the no-TTY exit (code 1) rather than a clap
     // parse failure.
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "Alpha", "Beta", "Gamma", "--sort", "reverse"])
         .assert()
         .failure()
@@ -266,7 +265,7 @@ fn sort_reverse_is_a_hidden_alias_still_accepted() {
 
 #[test]
 fn sort_rejects_unknown_value() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "a", "b", "--sort", "wonky"])
         .assert()
         .failure()
@@ -281,7 +280,7 @@ fn choose_one_help_lists_inverse_not_reverse_for_sort() {
     // long-help renders the values as `<value>: <doc>` bullets, so we
     // anchor on `inverse:` to confirm `inverse` is the canonical
     // variant the user sees.
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "--help"])
         .assert()
         .success()
@@ -294,7 +293,7 @@ fn choose_one_help_lists_inverse_not_reverse_for_sort() {
 
 #[test]
 fn choose_many_help_lists_inverse_not_reverse_for_sort() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-many", "--help"])
         .assert()
         .success()
@@ -311,7 +310,7 @@ fn choose_many_help_lists_inverse_not_reverse_for_sort() {
 
 #[test]
 fn cli_accepts_active_color_grey() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "Alpha", "Beta", "--active-color", "grey"])
         .assert()
         .failure()
@@ -321,7 +320,7 @@ fn cli_accepts_active_color_grey() {
 
 #[test]
 fn cli_accepts_active_color_green() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "Alpha", "Beta", "--active-color", "green"])
         .assert()
         .failure()
@@ -330,7 +329,7 @@ fn cli_accepts_active_color_green() {
 
 #[test]
 fn cli_accepts_active_color_yellow() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "Alpha", "Beta", "--active-color", "yellow"])
         .assert()
         .failure()
@@ -339,7 +338,7 @@ fn cli_accepts_active_color_yellow() {
 
 #[test]
 fn cli_accepts_active_color_red() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-many", "Alpha", "Beta", "--active-color", "red"])
         .assert()
         .failure()
@@ -348,7 +347,7 @@ fn cli_accepts_active_color_red() {
 
 #[test]
 fn cli_active_color_rejects_unknown_value() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "a", "b", "--active-color", "purple"])
         .assert()
         .failure()
@@ -357,7 +356,7 @@ fn cli_active_color_rejects_unknown_value() {
 
 #[test]
 fn choose_one_help_lists_active_color_values() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "--help"])
         .assert()
         .success()
@@ -370,7 +369,7 @@ fn choose_one_help_lists_active_color_values() {
 
 #[test]
 fn choose_many_help_lists_active_color_values() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-many", "--help"])
         .assert()
         .success()
@@ -381,7 +380,7 @@ fn choose_many_help_lists_active_color_values() {
 
 #[test]
 fn choose_one_help_lists_margin_flags() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "--help"])
         .assert()
         .success()
@@ -394,7 +393,7 @@ fn choose_one_help_lists_margin_flags() {
 
 #[test]
 fn choose_many_help_lists_margin_flags() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-many", "--help"])
         .assert()
         .success()
@@ -407,7 +406,7 @@ fn choose_many_help_lists_margin_flags() {
 
 #[test]
 fn choose_one_margin_rejects_non_integer_value() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "a", "b", "--margin", "wobbly"])
         .assert()
         .failure()
@@ -416,7 +415,7 @@ fn choose_one_margin_rejects_non_integer_value() {
 
 #[test]
 fn choose_one_margin_flag_reaches_event_loop() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "a", "b", "c", "--margin", "2"])
         .assert()
         .failure()
@@ -426,7 +425,7 @@ fn choose_one_margin_flag_reaches_event_loop() {
 
 #[test]
 fn choose_one_margin_with_per_side_overrides_reaches_event_loop() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "a", "b", "c", "--margin", "2", "--mt", "0"])
         .assert()
         .failure()
@@ -436,7 +435,7 @@ fn choose_one_margin_with_per_side_overrides_reaches_event_loop() {
 
 #[test]
 fn choose_many_margin_flag_reaches_event_loop() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-many", "a", "b", "c", "--margin", "1"])
         .assert()
         .failure()
@@ -446,7 +445,7 @@ fn choose_many_margin_flag_reaches_event_loop() {
 
 #[test]
 fn choose_many_per_side_margin_flags_reach_event_loop() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args([
             "choose-many",
             "a",
@@ -468,7 +467,7 @@ fn choose_many_per_side_margin_flags_reach_event_loop() {
 
 #[test]
 fn choose_one_help_lists_height_flag() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "--help"])
         .assert()
         .success()
@@ -477,7 +476,7 @@ fn choose_one_help_lists_height_flag() {
 
 #[test]
 fn choose_many_help_lists_height_flag() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-many", "--help"])
         .assert()
         .success()
@@ -486,7 +485,7 @@ fn choose_many_help_lists_height_flag() {
 
 #[test]
 fn choose_one_height_rejects_non_numeric_value() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "a", "b", "--height", "tall"])
         .assert()
         .failure()
@@ -495,7 +494,7 @@ fn choose_one_height_rejects_non_numeric_value() {
 
 #[test]
 fn choose_one_height_rejects_zero_cells() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "a", "b", "--height", "0"])
         .assert()
         .failure()
@@ -504,7 +503,7 @@ fn choose_one_height_rejects_zero_cells() {
 
 #[test]
 fn choose_one_height_rejects_zero_percent() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "a", "b", "--height", "0%"])
         .assert()
         .failure()
@@ -513,7 +512,7 @@ fn choose_one_height_rejects_zero_percent() {
 
 #[test]
 fn choose_one_height_rejects_percent_above_100() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "a", "b", "--height", "101%"])
         .assert()
         .failure()
@@ -545,7 +544,7 @@ fn choose_one_height_rejects_percent_above_100() {
 /// attach a TTY).
 #[test]
 fn choose_one_positional_args() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "alpha", "beta", "gamma"])
         .assert()
         .failure()
@@ -569,7 +568,7 @@ fn choose_one_file_json_object_array_reaches_event_loop() {
         "choose_cli_phase3_one.json",
         r#"[{"label":"Red","value":"apple","hotkey":"CTRL+R"},{"label":"Blue","value":"sky"}]"#,
     );
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "--file", path.to_string_lossy().as_ref()])
         .assert()
         .failure()
@@ -584,7 +583,7 @@ fn choose_one_file_yaml_object_array_reaches_event_loop() {
         "choose_cli_phase3_one.yaml",
         "- label: Red\n  value: apple\n  hotkey: CTRL+R\n- label: Blue\n  value: sky\n",
     );
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "--file", path.to_string_lossy().as_ref()])
         .assert()
         .failure()
@@ -599,7 +598,7 @@ fn choose_one_file_toml_options_array_reaches_event_loop() {
         "choose_cli_phase2_one.toml",
         "options = [{ label = \"Red\", value = \"apple\", hotkey = \"CTRL+R\" }, { label = \"Blue\", value = \"sky\" }]\n",
     );
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "--file", path.to_string_lossy().as_ref()])
         .assert()
         .failure()
@@ -614,7 +613,7 @@ fn choose_one_file_csv_three_columns_reaches_event_loop() {
         "choose_cli_phase3_one.csv",
         "Red,apple,CTRL+R\nBlue,sky,ALT+B\n",
     );
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "--file", path.to_string_lossy().as_ref()])
         .assert()
         .failure()
@@ -629,7 +628,7 @@ fn choose_one_file_jsonl_object_lines_reaches_event_loop() {
         "choose_cli_phase3_one.jsonl",
         "{\"label\":\"Red\",\"value\":\"apple\",\"hotkey\":\"CTRL+R\"}\n{\"label\":\"Blue\",\"value\":\"sky\"}\n",
     );
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "--file", path.to_string_lossy().as_ref()])
         .assert()
         .failure()
@@ -644,7 +643,7 @@ fn choose_one_file_ndjson_object_lines_reaches_event_loop() {
         "choose_cli_phase3_one.ndjson",
         "{\"label\":\"Red\",\"value\":\"apple\",\"hotkey\":\"CTRL+R\"}\n",
     );
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "--file", path.to_string_lossy().as_ref()])
         .assert()
         .failure()
@@ -659,7 +658,7 @@ fn choose_many_file_json_object_array_reaches_event_loop() {
         "choose_cli_phase3_many.json",
         r#"[{"label":"Red","value":"apple"},{"label":"Blue","value":"sky"}]"#,
     );
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-many", "--file", path.to_string_lossy().as_ref()])
         .assert()
         .failure()
@@ -674,7 +673,7 @@ fn choose_one_md_frontmatter_object_array_reaches_event_loop() {
         "choose_cli_phase3_one.md",
         "---\nitems:\n  - label: Red\n    value: apple\n    hotkey: CTRL+R\n  - label: Blue\n    value: sky\n---\n",
     );
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args([
             "choose-one",
             "--md",
@@ -691,7 +690,7 @@ fn choose_one_md_frontmatter_object_array_reaches_event_loop() {
 #[test]
 fn choose_one_file_txt_extension_errors() {
     let path = write_fixture("choose_cli_unsupported_one.txt", "Red\nGreen\nBlue\n");
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "--file", path.to_string_lossy().as_ref()])
         .assert()
         .failure()
@@ -707,7 +706,7 @@ fn choose_one_file_unknown_extension_errors() {
         "choose_cli_unsupported_one.dat",
         r#"["Red","Green","Blue"]"#,
     );
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "--file", path.to_string_lossy().as_ref()])
         .assert()
         .failure()
@@ -728,7 +727,7 @@ fn explicit_explicit_hotkey_collision_errors() {
     // Two user-supplied [CTRL+R] bindings on the same chord — the
     // user explicitly asked for an impossible state; this is the
     // only collision shape the CLI rejects.
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "[CTRL+R] Red", "[CTRL+R] Rose"])
         .assert()
         .failure()
@@ -739,7 +738,7 @@ fn explicit_explicit_hotkey_collision_errors() {
 fn plain_label_with_explicit_hotkey_companion_passes() {
     // The user only supplied [CTRL+R] on Rose; plain `Red` has no
     // hotkey at all. No collision possible.
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "Red", "[CTRL+R] Rose"])
         .assert()
         .stderr(predicate::str::contains("duplicate hotkey").not());
@@ -749,7 +748,7 @@ fn plain_label_with_explicit_hotkey_companion_passes() {
 fn three_plain_labels_pass_normalization() {
     // Plain labels never produce hotkeys. Three labels in any
     // shape never collide.
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "bar", "baz", "bax"])
         .assert()
         .stderr(predicate::str::contains("duplicate hotkey").not());
@@ -759,7 +758,7 @@ fn three_plain_labels_pass_normalization() {
 fn one_explicit_plus_three_plain_passes() {
     // The user-reported case: `question choose-one "[CTRL+f]foo"
     // bar baz bax`. `foo` gets `Ctrl+F`; the rest have no hotkey.
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "[CTRL+f]foo", "bar", "baz", "bax"])
         .assert()
         .stderr(predicate::str::contains("duplicate hotkey").not());
@@ -767,7 +766,7 @@ fn one_explicit_plus_three_plain_passes() {
 
 #[test]
 fn choose_many_one_explicit_plus_three_plain_passes() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-many", "[CTRL+f]foo", "bar", "baz", "bax"])
         .assert()
         .stderr(predicate::str::contains("duplicate hotkey").not());
@@ -823,7 +822,7 @@ mod pty {
     }
 
     fn spawn_question(args: &[&str]) -> OsSession {
-        let binary = assert_cmd::cargo::cargo_bin!("question");
+        let binary = assert_cmd::cargo::cargo_bin("question");
         let mut command = Command::new(binary);
         command.args(args);
         let mut p = Session::spawn(command).expect("spawn question under PTY");

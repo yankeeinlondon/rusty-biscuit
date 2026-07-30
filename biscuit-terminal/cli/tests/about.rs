@@ -1,6 +1,5 @@
 //! Integration tests for the `bt about [APP]` command.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 
 fn about_kitty_without_config() -> assert_cmd::Command {
@@ -12,7 +11,7 @@ fn about_kitty_without_config() -> assert_cmd::Command {
 }
 
 fn about_kitty_as_non_current() -> assert_cmd::Command {
-    let mut cmd = cargo_bin_cmd!("bt");
+    let mut cmd = assert_cmd::Command::cargo_bin("bt").unwrap();
     cmd.env("TERM_PROGRAM", "WezTerm")
         .env_remove("TERM")
         .env_remove("KITTY_PID")
@@ -25,7 +24,7 @@ fn about_kitty_as_non_current() -> assert_cmd::Command {
 }
 
 fn about_kitty_as_current() -> assert_cmd::Command {
-    let mut cmd = cargo_bin_cmd!("bt");
+    let mut cmd = assert_cmd::Command::cargo_bin("bt").unwrap();
     cmd.env("TERM_PROGRAM", "kitty")
         .env_remove("TERM")
         .env("KITTY_PID", "12345")
@@ -41,7 +40,7 @@ fn setting_value<'a>(parsed: &'a serde_json::Value, key: &str) -> Option<&'a str
 
 #[test]
 fn test_about_kitty_plain_renders_report() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["about", "kitty", "--plain"])
         .assert()
         .success()
@@ -52,7 +51,7 @@ fn test_about_kitty_plain_renders_report() {
 
 #[test]
 fn test_about_kitty_plain_has_no_ansi_escapes() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["about", "kitty", "--plain"])
         .assert()
         .success()
@@ -79,7 +78,7 @@ fn test_about_kitty_plain_includes_setting_locators_without_config() {
 
 #[test]
 fn test_about_alacritty_plain_includes_config_candidates_per_os_target() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .env_remove("TERM")
         .args(["about", "alacritty", "--plain"])
         .assert()
@@ -95,7 +94,7 @@ fn test_about_alacritty_plain_includes_config_candidates_per_os_target() {
 
 #[test]
 fn test_about_alacritty_plain_reports_xdg_config_home_override() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .env_remove("TERM")
         .env_remove("XDG_CONFIG_HOME")
         .args(["about", "alacritty", "--plain"])
@@ -110,7 +109,7 @@ fn test_about_alacritty_plain_reports_xdg_config_home_override() {
 
 #[test]
 fn test_about_kitty_json_outputs_valid_report() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["about", "kitty", "--json"])
         .output()
         .expect("Failed to execute command");
@@ -216,7 +215,7 @@ fn test_about_kitty_json_uses_nested_config_contract() {
 
 #[test]
 fn test_about_alacritty_json_reports_xdg_config_home_location_env() {
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .env_remove("TERM")
         .env_remove("XDG_CONFIG_HOME")
         .args(["about", "alacritty", "--json"])
@@ -255,7 +254,7 @@ fn test_about_alacritty_json_extracts_legacy_yaml_candidate() {
     )
     .expect("write alacritty yaml config");
 
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .env("XDG_CONFIG_HOME", config_home.path())
         .env("HOME", config_home.path())
         .env_remove("TERM")
@@ -284,7 +283,7 @@ fn test_about_warp_json_resolves_directory_without_none_format() {
     let warp_dir = home.path().join(".warp");
     std::fs::create_dir_all(&warp_dir).expect("warp config dir");
 
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .env("HOME", home.path())
         .env_remove("TERM")
         .args(["about", "warp", "--json"])
@@ -331,7 +330,7 @@ fn test_about_warp_json_resolves_directory_without_none_format() {
 
 #[test]
 fn test_about_prefix_match() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["about", "ki", "--plain"])
         .assert()
         .success()
@@ -340,7 +339,7 @@ fn test_about_prefix_match() {
 
 #[test]
 fn test_about_alias_match() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["about", "VSCode", "--plain"])
         .assert()
         .success()
@@ -349,7 +348,7 @@ fn test_about_alias_match() {
 
 #[test]
 fn test_about_invalid_app_exits_with_code_2() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["about", "notreal"])
         .assert()
         .failure()
@@ -360,7 +359,7 @@ fn test_about_invalid_app_exits_with_code_2() {
 
 #[test]
 fn test_about_defaults_to_current_terminal() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt").unwrap()
         .env("TERM_PROGRAM", "kitty")
         .env_remove("TERM")
         .args(["about", "--plain"])

@@ -30,7 +30,7 @@ use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
 use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serial_test::serial;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 mod common;
 use common::{TestWorkspace, augmented_path, init_git_repo, write_executable};
@@ -865,7 +865,7 @@ fn run_schema_detail_test<H: KeySender>(harness: &mut H) {
 #[test]
 #[serial(level2_terminal)]
 fn level2_tmux_operation_file_single_match_shows_confirmation() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let mut harness = TmuxHarness::new();
     harness.spawn_shell().expect("tmux harness");
     harness.resize(80, 24).ok();
@@ -875,7 +875,7 @@ fn level2_tmux_operation_file_single_match_shows_confirmation() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_tmux_operation_file_enter_accepts_single_match() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let ws = stage_workspace(true);
     let mut harness = TmuxHarness::new();
     harness.spawn_shell().expect("tmux harness");
@@ -891,7 +891,7 @@ fn level2_tmux_operation_file_enter_accepts_single_match() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_tmux_operation_file_y_accepts_single_match() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let ws = stage_workspace(true);
     let mut harness = TmuxHarness::new();
     harness.spawn_shell().expect("tmux harness");
@@ -907,7 +907,7 @@ fn level2_tmux_operation_file_y_accepts_single_match() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_tmux_operation_file_multi_match_uses_choose_one() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let mut harness = TmuxHarness::new();
     harness.spawn_shell().expect("tmux harness");
     harness.resize(80, 24).ok();
@@ -917,7 +917,7 @@ fn level2_tmux_operation_file_multi_match_uses_choose_one() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_tmux_operation_file_arrow_navigation_selects_in_chooser() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let ws = stage_workspace(false);
     let mut harness = TmuxHarness::new();
     harness.spawn_shell().expect("tmux harness");
@@ -927,7 +927,7 @@ fn level2_tmux_operation_file_arrow_navigation_selects_in_chooser() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_tmux_operation_file_chooser_detail_right_in_wide_terminal() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let mut harness = TmuxHarness::new();
     harness.spawn_shell().expect("tmux harness");
     harness
@@ -939,7 +939,7 @@ fn level2_tmux_operation_file_chooser_detail_right_in_wide_terminal() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_tmux_operation_file_chooser_detail_above_in_tall_terminal() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let mut harness = TmuxHarness::new();
     harness.spawn_shell().expect("tmux harness");
     harness
@@ -951,7 +951,7 @@ fn level2_tmux_operation_file_chooser_detail_above_in_tall_terminal() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_tmux_sequence_yaml_single_match_shows_confirmation() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let mut harness = TmuxHarness::new();
     harness.spawn_shell().expect("tmux harness");
     harness.resize(80, 24).ok();
@@ -961,7 +961,7 @@ fn level2_tmux_sequence_yaml_single_match_shows_confirmation() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_tmux_sequence_yaml_enter_accepts_single_match() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let ws = stage_yaml_sequence_workspace(true);
     let mut harness = TmuxHarness::new();
     harness.spawn_shell().expect("tmux harness");
@@ -977,7 +977,7 @@ fn level2_tmux_sequence_yaml_enter_accepts_single_match() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_tmux_sequence_yaml_y_accepts_single_match() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let ws = stage_yaml_sequence_workspace(true);
     let mut harness = TmuxHarness::new();
     harness.spawn_shell().expect("tmux harness");
@@ -993,7 +993,7 @@ fn level2_tmux_sequence_yaml_y_accepts_single_match() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_tmux_sequence_yaml_multi_match_uses_choose_one() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let mut harness = TmuxHarness::new();
     harness.spawn_shell().expect("tmux harness");
     harness.resize(80, 24).ok();
@@ -1003,7 +1003,7 @@ fn level2_tmux_sequence_yaml_multi_match_uses_choose_one() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_tmux_sequence_yaml_arrow_navigation_selects_in_chooser() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let ws = stage_yaml_sequence_workspace(false);
     let mut harness = TmuxHarness::new();
     harness.spawn_shell().expect("tmux harness");
@@ -1013,7 +1013,7 @@ fn level2_tmux_sequence_yaml_arrow_navigation_selects_in_chooser() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_tmux_sequence_yaml_chooser_detail_right_in_wide_terminal() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let mut harness = TmuxHarness::new();
     harness.spawn_shell().expect("tmux harness");
     harness
@@ -1025,7 +1025,7 @@ fn level2_tmux_sequence_yaml_chooser_detail_right_in_wide_terminal() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_tmux_sequence_yaml_chooser_detail_above_in_tall_terminal() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let mut harness = TmuxHarness::new();
     harness.spawn_shell().expect("tmux harness");
     harness
@@ -1037,7 +1037,7 @@ fn level2_tmux_sequence_yaml_chooser_detail_above_in_tall_terminal() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_tmux_operation_file_schema_detail_renders_faithfully() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let mut harness = TmuxHarness::new();
     harness.spawn_shell().expect("tmux harness");
     harness.resize(120, 50).expect("resize tmux pane large");
@@ -1051,11 +1051,7 @@ fn level2_tmux_operation_file_schema_detail_renders_faithfully() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_wezterm_operation_file_single_match_shows_confirmation() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
     let mut harness = WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm");
     run_single_match_test(&mut harness);
 }
@@ -1063,11 +1059,7 @@ fn level2_wezterm_operation_file_single_match_shows_confirmation() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_wezterm_operation_file_multi_match_uses_choose_one() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
     let mut harness = WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm");
     run_multi_match_test(&mut harness);
 }
@@ -1075,11 +1067,7 @@ fn level2_wezterm_operation_file_multi_match_uses_choose_one() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_wezterm_sequence_yaml_single_match_shows_confirmation() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
     let mut harness = WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm");
     run_yaml_single_match_test(&mut harness);
 }
@@ -1087,11 +1075,7 @@ fn level2_wezterm_sequence_yaml_single_match_shows_confirmation() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_wezterm_sequence_yaml_multi_match_uses_choose_one() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
     let mut harness = WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm");
     run_yaml_multi_match_test(&mut harness);
 }

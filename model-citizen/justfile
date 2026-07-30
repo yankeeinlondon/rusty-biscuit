@@ -52,13 +52,11 @@ build *args="":
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity model-citizen
-    @just _sanity model-citizen-cli
+    @just _sanity_all "model-citizen model-citizen-cli"
 
 # Test both library and CLI.
 test *args="":
-    @just _test model-citizen {{args}}
-    @just _test model-citizen-cli {{args}}
+    @just _test_all "model-citizen model-citizen-cli" {{args}}
 
 # not applicable: model-citizen has no real-terminal (Level-2) tests
 test-l2:

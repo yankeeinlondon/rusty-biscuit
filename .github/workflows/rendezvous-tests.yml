@@ -10,9 +10,10 @@ name: rendezvous-tests
 #      UDS, Linux UDS, Windows named pipes — and a compile check cannot observe
 #      socket modes, DACLs, stale-endpoint reclamation, or teardown. All three
 #      OSes run the suite.
-#   2. That block defaults Windows to `continue-on-error`. The named-pipe server
-#      is the half of this contract with no other coverage, so a soft-failing
-#      Windows leg would mean shipping it untested. This leg gates.
+#   2. That block used to default Windows to `continue-on-error`. That policy
+#      (`soft_os`) is retired and every shared L1 leg now gates, but this leg's
+#      requirement predates it: the named-pipe server is the half of this
+#      contract with no other coverage, so it must never be soft-failed.
 #
 # Sniff's stable-user detector keeps its three-OS runtime matrix in `ci.yml`;
 # it is not duplicated here. What this workflow adds for Sniff is the

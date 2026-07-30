@@ -13,7 +13,6 @@
 //! Layout/type-driven chooser coverage lives in the Level-2/Level-3 harness
 //! tests; this file covers the subprocess-visible contract.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 
 mod common;
 use common::TestWorkspace;
@@ -29,7 +28,7 @@ use common::completion::{
 fn completions_subcommand_outputs_bootstrap_script() {
     // `claudine completions <shell>` must print a registration script that
     // shells out to the hidden `__complete` subcommand on every `<TAB>`.
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args(["completions", "bash"])
         .output()
@@ -46,7 +45,7 @@ fn completions_subcommand_outputs_bootstrap_script() {
 #[test]
 fn completions_subcommand_supports_all_three_shells() {
     for shell in ["bash", "zsh", "fish"] {
-        let output = cargo_bin_cmd!("claudine")
+        let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
             .env("NO_COLOR", "1")
             .args(["completions", shell])
             .output()

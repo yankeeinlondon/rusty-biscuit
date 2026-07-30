@@ -57,9 +57,7 @@ build *args="":
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity {{ LIBRARY }}
-    @just _sanity {{ CLI }}
-    @just _sanity {{ DMLS }}
+    @just _sanity_all "{{ LIBRARY }} {{ CLI }} {{ DMLS }}"
 
 # Test both library and CLI. Level-1 only: the slow tiers (real-terminal,
 # headless-browser, real-resource) are excluded here and run via their own
@@ -68,31 +66,17 @@ sanity:
 # `browser_`/`level2_` filter terms, so the whole binary is skipped.
 test *args="":
     #!/usr/bin/env bash
-    set -euo pipefail
-    filter='!(test(/level2_/) + test(/level3_/) + test(/browser_/) + test(/real_/))'
-    echo
-    echo -e "Testing {{ BOLD }}{{ LIBRARY }}{{ RESET }} package"
-    echo
-    cargo nextest run -p {{ LIBRARY }} -E "$filter" {{ args }}
-    echo
-    echo -e "✅ {{ GREEN }} all tests passing in {{ BOLD }}{{ LIBRARY }}{{ RESET }}{{ GREEN }} package{{ RESET }}"
-    echo
-    echo
-    echo -e "Testing {{ BOLD }}{{ CLI }}{{ RESET }} package"
-    echo
-    cargo nextest run -p {{ CLI }} -E "$filter" {{ args }}
-    echo
-    echo -e "✅ {{ GREEN }} all tests passing in {{ BOLD }}{{ CLI }}{{ RESET }}{{ GREEN }} package{{ RESET }}"
-    echo
-    echo
-    echo -e "Testing {{ BOLD }}{{ DMLS }}{{ RESET }} package"
-    echo
-    cargo nextest run -p {{ DMLS }} -E "$filter" {{ args }}
-    echo
-    echo -e "✅ {{ GREEN }} all tests passing in {{ BOLD }}{{ DMLS }}{{ RESET }}{{ GREEN }} package{{ RESET }}"
-    echo
+    set -uo pipefail
+    # Unlike the shared default, darkmatter's L1 contract keeps `slow_` tests.
+    export BISCUIT_TEST_FILTER='!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/))'
+    exit_code=0
+    just _test_all "{{ LIBRARY }} {{ CLI }} {{ DMLS }}" {{ args }} || exit_code=$?
+    if (( exit_code == 130 )); then
+        exit 130
+    fi
     echo -e "👀 {{ BOLD }}Note:{{ RESET }} {{ BLUE }}just test{{ RESET }} runs Level-1 only; use {{ BLUE }}just test-l2{{ RESET }} / {{ BLUE }}just test-browser{{ RESET }} for the slow tiers"
     echo
+    exit "${exit_code}"
 
 # Level-2 (real-terminal) render-tree tests for both crates.
 #
@@ -104,9 +88,7 @@ test-l2 *args="":
     @echo -e "Running {{ BOLD }}Level-2{{ RESET }} render-tree terminal tests"
     @echo -e "{{ DIM }}- export BISCUIT_TEST_LEVEL_REQUIRED=2 to hard-fail on missing harness{{ RESET }}"
     @echo
-    @just _test_l2 {{ LIBRARY }} {{ args }}
-    @just _test_l2 {{ CLI }} {{ args }}
-    @just _test_l2 {{ DMLS }} {{ args }}
+    @just _test_l2_all "{{ LIBRARY }} {{ CLI }} {{ DMLS }}" {{ args }}
 
 # darkmatter Level-3 tests
 test-l3 *args="":

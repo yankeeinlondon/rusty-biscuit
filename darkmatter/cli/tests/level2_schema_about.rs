@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 use syntect::easy::HighlightLines;
 use syntect::highlighting::Color;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 static SHARED_TMUX: SharedHarness<TmuxHarness> = SharedHarness::new();
 static SENTINEL_COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -168,7 +168,7 @@ fn raw_line_anywhere(frame: &CapturedFrame, needle: &str) -> Option<String> {
 #[test]
 #[serial(level2_terminal)]
 fn level2_schema_about_constraint_table_renders_striped_row() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
@@ -260,7 +260,7 @@ fn assert_schema_about_yaml_uses_theme(frame: &CapturedFrame, expected_mode: Col
 #[test]
 #[serial(level2_terminal)]
 fn level2_schema_about_dark_terminal_uses_light_code_theme() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
@@ -273,7 +273,7 @@ fn level2_schema_about_dark_terminal_uses_light_code_theme() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_schema_about_light_terminal_uses_dark_code_theme() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));

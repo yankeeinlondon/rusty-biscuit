@@ -1,4 +1,3 @@
-use assert_cmd::cargo::cargo_bin_cmd;
 use darkmatter::markdown::Markdown;
 use std::path::{Path, PathBuf};
 
@@ -82,7 +81,7 @@ exit 0
     let root = workspace_root();
     let router = root.join("prompts/implement.md");
     let spec_arg = format!("spec={}", spec.display());
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", fixture.path())
         .env("PATH", augmented_path(&bin_dir))

@@ -5,7 +5,6 @@
 //! that the CLI's top-level cause-chain walker surfaces a rich darkmatter
 //! `BlockError` report (path, line number, hint) instead of flat text.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use tempfile::tempdir;
 
@@ -58,7 +57,7 @@ fn compose_shell_expansion_failure_renders_rich_block() {
         successful_provider_shim(),
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("PATH", augmented_path(&path_dir))
         .args(["compose", "--claude", md_file.to_str().unwrap()])
@@ -109,7 +108,7 @@ fn compose_shell_execution_failure_renders_rich_block() {
     // `--silent` suppresses the execution header so the only stderr output
     // is the structured error block, letting us assert the full captured
     // stderr is ANSI-free under `NO_COLOR=1`.
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("PATH", augmented_path(&path_dir))
         .args(["compose", "--yolo", "--silent", "--claude", md_file.to_str().unwrap()])
@@ -171,7 +170,7 @@ fn compose_system_prompt_shell_failure_renders_rich_block() {
     // reaches system-prompt resolution.
     write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 0\n");
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
         .args([
@@ -220,7 +219,7 @@ fn compose_transclusion_cycle_renders_file_chain() {
     // reaches transclusion resolution.
     write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("PATH", augmented_path(&path_dir))
         .args(["compose", "--claude", a.to_str().unwrap()])

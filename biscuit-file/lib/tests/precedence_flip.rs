@@ -25,12 +25,22 @@ fn ctx_with_repo(base: &Path, repo: &Path) -> FileResolutionContext {
     FileResolutionContext::new(base.to_path_buf()).with_repository_root(repo.to_path_buf())
 }
 
+/// Canonicalize into the spelling the resolver reports.
+///
+/// `std::fs::canonicalize` returns a `\\?\` verbatim path on Windows. The
+/// resolver reduces every anchor to the legacy form, and these fixtures also
+/// join `/`-separated sub-paths, which Win32 refuses to normalize under a
+/// verbatim prefix.
+fn canonical(path: &Path) -> std::path::PathBuf {
+    dunce::canonicalize(path).unwrap()
+}
+
 /// A base sub-directory inside `repo`, both canonicalized.
 fn repo_and_base(tmp: &TempDir) -> (std::path::PathBuf, std::path::PathBuf) {
-    let repo = tmp.path().canonicalize().unwrap();
+    let repo = canonical(tmp.path());
     let base = repo.join("pkg");
     fs::create_dir_all(&base).unwrap();
-    let base = base.canonicalize().unwrap();
+    let base = canonical(&base);
     (repo, base)
 }
 
@@ -80,7 +90,7 @@ fn implicit_only_source_exists_falls_back_to_base() {
 #[test]
 fn implicit_without_git_root_uses_base_only() {
     let tmp = TempDir::new().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical(tmp.path());
     fs::write(base.join("loose.md"), b"loose").unwrap();
 
     // No repository root supplied: the base is the only candidate.
@@ -124,7 +134,7 @@ fn explicit_relative_yields_one_base_candidate_and_never_falls_back() {
 #[test]
 fn implicit_when_base_is_repository_root_dedupes_to_one_candidate() {
     let tmp = TempDir::new().unwrap();
-    let repo = tmp.path().canonicalize().unwrap();
+    let repo = canonical(tmp.path());
     fs::write(repo.join("top.md"), b"top").unwrap();
 
     // Base and repository root are the same directory: a single candidate, not
@@ -349,6 +359,63 @@ fn recursive_interpolation_injecting_a_sigil_is_rejected_before_root_planning() 
             Some(FileReferenceError::InvalidSyntax(_))
         ));
     }
+}
+
+/// Windows callers routinely anchor a context with `std::fs::canonicalize`,
+/// which yields a `\\?\` verbatim path. Win32 skips path normalization under
+/// that prefix, so the reference's own `/` would stay a literal filename
+/// character; the resolver must reduce the anchor before joining.
+#[cfg(windows)]
+#[test]
+fn verbatim_anchor_resolves_a_slash_separated_reference() {
+    let tmp = TempDir::new().unwrap();
+    let verbatim = std::fs::canonicalize(tmp.path()).unwrap();
+    assert!(
+        verbatim.as_os_str().to_string_lossy().starts_with(r"\\?\"),
+        "fixture is only meaningful with a verbatim anchor, got {verbatim:?}",
+    );
+    let plain = dunce::simplified(&verbatim).to_path_buf();
+
+    let base = plain.join("pkg");
+    fs::create_dir_all(&base).unwrap();
+    fs::create_dir_all(plain.join("docs")).unwrap();
+    fs::write(plain.join("docs/readme.md"), b"doc").unwrap();
+
+    let ctx = ctx_with_repo(&verbatim.join("pkg"), &verbatim);
+    let resolved = FileReference::new("docs/readme.md")
+        .unwrap()
+        .resolve_in_context(&ctx)
+        .unwrap();
+
+    assert_eq!(
+        resolved.as_deref(),
+        Some(plain.join("docs/readme.md").as_path()),
+        "a verbatim anchor must resolve and report the legacy spelling",
+    );
+}
+
+/// A caller-supplied repository root and base commonly reach the resolver from
+/// different producers (`gix` discovery yields legacy, `canonicalize` yields
+/// verbatim). Two spellings of one directory must not become two candidates.
+#[cfg(windows)]
+#[test]
+fn verbatim_and_legacy_spellings_of_one_root_dedupe_to_one_candidate() {
+    let tmp = TempDir::new().unwrap();
+    let verbatim = std::fs::canonicalize(tmp.path()).unwrap();
+    let plain = dunce::simplified(&verbatim).to_path_buf();
+    assert_ne!(verbatim, plain, "fixture needs two distinct spellings");
+    fs::write(plain.join("top.md"), b"top").unwrap();
+
+    let ctx = ctx_with_repo(&verbatim, &plain);
+    let detailed = FileReference::new("top.md").unwrap().resolve_detailed(&ctx);
+
+    let candidates = detailed.candidates();
+    assert_eq!(candidates.len(), 1, "one directory yields one candidate");
+    assert_eq!(
+        candidates[0].candidate().provenance(),
+        RootProvenance::Repository,
+    );
+    assert_eq!(detailed.matched_path(), Some(plain.join("top.md").as_path()));
 }
 
 #[test]

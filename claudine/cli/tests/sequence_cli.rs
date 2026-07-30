@@ -9,7 +9,6 @@
 //! validation and `step_timeout` in `sequence_schema.rs`, and inline
 //! `prompt`-property behavior in `sequence_prompt_property.rs`.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::str::contains;
 use std::fs;
 use tempfile::tempdir;
@@ -22,7 +21,7 @@ use common::{augmented_path, strip_ansi, write_executable};
 
 #[test]
 fn sequence_requires_positional_arg() {
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args(["sequence"])
         .assert()
@@ -35,7 +34,7 @@ fn sequence_requires_positional_arg() {
 
 #[test]
 fn sequence_missing_file_with_setter_only() {
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args(["sequence", "topic=async"])
         .assert()
@@ -58,7 +57,7 @@ fn sequence_errors_when_source_has_no_sequence_property() {
     )
     .unwrap();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args(["sequence", md_file.to_str().unwrap()])
         .assert()
@@ -82,7 +81,7 @@ fn sequence_malformed_root_frontmatter_fence_surfaces_typed_parse_error() {
     )
     .unwrap();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args(["sequence", md_file.to_str().unwrap()])
         .assert()
@@ -145,7 +144,7 @@ exit 7
 "#,
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -216,7 +215,7 @@ exit 0
 "#,
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -273,7 +272,7 @@ exit 0
 "#,
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -337,7 +336,7 @@ exit 3
 "#,
     );
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -406,7 +405,7 @@ exit 0
 "#,
     );
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -475,7 +474,7 @@ exit 0
     );
 
     // Setter placed BEFORE the file reference to exercise the positional parser.
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -531,7 +530,7 @@ exit 0
 "#,
     );
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -601,7 +600,7 @@ exit 0
 "#,
     );
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -678,7 +677,7 @@ Step {{state}}: ::shell echo approved
 
     // Successful exit means every step's pre-flight accepted the
     // whitelisted `echo` command without a TTY.
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -711,7 +710,7 @@ fn sequence_summary_emits_final_line() {
         "#!/bin/sh\ncat > /dev/null\nexit 0\n",
     );
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -773,7 +772,7 @@ exit 0
 "#,
     );
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -823,7 +822,7 @@ exit 0
 "#,
     );
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -858,7 +857,7 @@ fn sequence_with_a_static_empty_list_still_fails() {
     )
     .unwrap();
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .current_dir(workspace.path())
@@ -886,7 +885,7 @@ fn sequence_rejects_the_retired_list_shape() {
     )
     .unwrap();
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .current_dir(workspace.path())
@@ -927,7 +926,7 @@ sequence:
     // Every step carries an executable, so a bodyless YAML source is valid.
     // Phase 4 only has to resolve the plan; execution of `shell:` steps lands
     // in phase 7, so this asserts the shape is *accepted*, not that it runs.
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -979,7 +978,7 @@ fn run_preflight(
     let file_arg = file.to_str().unwrap();
     args.push(file_arg);
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace)
         .env("PATH", augmented_path(&path_dir))
