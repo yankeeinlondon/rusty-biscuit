@@ -537,6 +537,20 @@ fn commit_touches_path(
 /// A root commit reports `None`, which callers diff against the empty tree.
 /// Only the first parent is considered, so a merge commit is compared against
 /// its mainline — the pre-existing behavior of the file listing.
+///
+/// ## Notes
+///
+/// A commit at a **shallow boundary** also reports `None`. It names a parent
+/// that the object database does not contain, so `try_find_object` returns
+/// `None` rather than an error, and the commit is treated exactly as a root:
+/// every file in its tree reads as added. That is the honest answer when the
+/// preceding history is absent, and it is the only answer available.
+///
+/// This matters because a shallow clone is the *normal* CI checkout —
+/// `actions/checkout@v4` fetches depth 1 by default. Resolving the parent with
+/// `find_object` made `sniff repo --json` abort with "An object with id … could
+/// not be found" on every runner, while `sniff repo` and `--plain` succeeded
+/// because they do not collect commit history.
 fn commit_trees(
     repo: &gix::Repository,
     commit_id: gix::ObjectId,
@@ -550,16 +564,22 @@ fn commit_trees(
 
     let parent_tree = match commit.parent_ids().next() {
         Some(parent_id) => {
-            let parent_commit = repo
-                .find_object(parent_id.detach())
-                .map_err(|e| SniffError::git("object", e))?
-                .try_into_commit()
+            let parent_object = repo
+                .try_find_object(parent_id.detach())
                 .map_err(|e| SniffError::git("object", e))?;
-            Some(
-                parent_commit
-                    .tree()
-                    .map_err(|e| SniffError::git("tree", e))?,
-            )
+            match parent_object {
+                Some(object) => {
+                    let parent_commit = object
+                        .try_into_commit()
+                        .map_err(|e| SniffError::git("object", e))?;
+                    Some(
+                        parent_commit
+                            .tree()
+                            .map_err(|e| SniffError::git("tree", e))?,
+                    )
+                }
+                None => None,
+            }
         }
         None => None,
     };
