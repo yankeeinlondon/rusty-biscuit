@@ -28,10 +28,13 @@ name: pr-health
 # through the API. Keep it that way; do not add `actions/checkout` of the head
 # ref here.
 
+# No `branches:` filter, matching `ci.yml`. These two must agree on which pull
+# requests are in scope: if this guard watched a PR that `ci.yml` filtered out,
+# it would report "CI can be scheduled" about a run that was never going to
+# exist — the exact false reassurance it was built to prevent.
 on:
   pull_request_target:
     types: [opened, reopened, synchronize, ready_for_review]
-    branches: [main]
   push:
     branches-ignore: [main]
 
