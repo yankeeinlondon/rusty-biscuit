@@ -82,8 +82,8 @@ fn blacklisted_shows_reason() {
 fn approval_required_names_whitelist_paths() {
     let err = ShellExpansionError::ApprovalRequired {
         command: "gh repo list".into(),
-        whitelist_path: PathBuf::from("/tmp/wl"),
-        blacklist_path: PathBuf::from("/tmp/bl"),
+        whitelist_path: Box::new(PathBuf::from("/tmp/wl")),
+        blacklist_path: Box::new(PathBuf::from("/tmp/bl")),
         origin: body_origin(),
         ctx: Box::new(test_ctx("", "doc.md")),
     };
