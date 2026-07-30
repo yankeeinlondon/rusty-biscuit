@@ -2149,6 +2149,9 @@ fn create_merge_conflict_repo() -> (tempfile::TempDir, PathBuf) {
         let status = Command::new("git")
             .args(args)
             .current_dir(dir)
+            .env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", "commit.gpgsign")
+            .env("GIT_CONFIG_VALUE_0", "false")
             .status()
             .unwrap();
         assert!(status.success(), "git {:?} failed with {:?}", args, status);

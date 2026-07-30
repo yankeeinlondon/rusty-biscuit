@@ -361,7 +361,7 @@ fn is_executable(path: &std::path::Path) -> bool {
             return false;
         };
         let dot_ext = format!(".{}", ext.to_ascii_lowercase());
-        get_pathext_extensions().iter().any(|pe| *pe == dot_ext)
+        get_pathext_extensions().contains(&dot_ext)
     }
 }
 
@@ -527,7 +527,7 @@ mod tests {
         use std::fs;
         use tempfile::tempdir;
 
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempdir().unwrap();
         let non_exec = dir.path().join("not-a-program");
         fs::write(&non_exec, "data").unwrap();
@@ -559,7 +559,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         use tempfile::tempdir;
 
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempdir().unwrap();
         let exec = dir.path().join("test-exec-prog");
         fs::write(&exec, "#!/bin/sh\ntrue").unwrap();
@@ -585,7 +585,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         use tempfile::tempdir;
 
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempdir().unwrap();
 
         for name in ["eager-a", "eager-b", "eager-c"] {
@@ -649,7 +649,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         use tempfile::tempdir;
 
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let dir_first = tempdir().unwrap();
         let dir_second = tempdir().unwrap();
 
@@ -700,7 +700,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         use tempfile::tempdir;
 
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempdir().unwrap();
         let exec = dir.path().join("eager-lookup-test");
         fs::write(&exec, "#!/bin/sh\ntrue").unwrap();
@@ -763,7 +763,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         use tempfile::tempdir;
 
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempdir().unwrap();
         let exec = dir.path().join("scan-once-shim");
         fs::write(&exec, "#!/bin/sh\ntrue").unwrap();
@@ -824,7 +824,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         use tempfile::tempdir;
 
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempdir().unwrap();
         let exec = dir.path().join("agreement-shim");
         fs::write(&exec, "#!/bin/sh\ntrue").unwrap();

@@ -1331,7 +1331,7 @@ pub(crate) fn make_relative_path(path: &Path, root: &Path) -> String {
     path.strip_prefix(root)
         .ok()
         .and_then(|rel| rel.to_str())
-        .map(|s| s.to_string())
+        .map(|s| s.replace('\\', "/"))
         .unwrap_or_else(|| {
             path.file_name()
                 .map(|n| n.to_string_lossy().to_string())
@@ -1355,7 +1355,7 @@ pub(crate) fn canonicalize_path(path: &Path) -> PathBuf {
 /// Cleans up `.` and `..` components and resolves relative paths against
 /// the current working directory when needed.
 pub(crate) fn normalize_path(path: &Path) -> PathBuf {
-    if path.is_absolute() {
+    if path.is_absolute() || path.has_root() {
         let mut normalized = PathBuf::new();
         for component in path.components() {
             match component {

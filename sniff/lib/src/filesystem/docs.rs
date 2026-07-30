@@ -405,7 +405,7 @@ where
             entry
                 .path()
                 .strip_prefix(repo_root)
-                .map(|rel| path_filter(&rel.to_string_lossy()))
+                .map(|rel| path_filter(&rel.to_string_lossy().replace('\\', "/")))
                 .unwrap_or(false)
         })
         .map(|entry| entry.path().to_path_buf())
@@ -596,7 +596,7 @@ where
                 entry
                     .path()
                     .strip_prefix(repo_root)
-                    .map(|rel| path_filter(&rel.to_string_lossy()))
+                .map(|rel| path_filter(&rel.to_string_lossy().replace('\\', "/")))
                     .unwrap_or(false)
             })
             .map(|entry| entry.path().to_path_buf())
@@ -693,7 +693,7 @@ fn parse_markdown_meta_with_ownership(
     mode: DocParseMode,
 ) -> Option<MarkdownMeta> {
     let relative_path = path.strip_prefix(repo_root).ok()?;
-    let relative = relative_path.to_string_lossy().to_string();
+    let relative = relative_path.to_string_lossy().replace('\\', "/");
     let package = ownership_index
         .and_then(|index| determine_package_with_index(relative_path, packages, index));
 
@@ -961,7 +961,7 @@ fn normalize_blast_radius_path(raw: &str, repo_root: &Path) -> PathBuf {
     let p = Path::new(raw);
 
     // Try stripping repo root from absolute paths
-    if p.is_absolute()
+    if (p.is_absolute() || p.has_root())
         && let Ok(relative) = p.strip_prefix(repo_root)
     {
         return normalize_relative_components(relative);

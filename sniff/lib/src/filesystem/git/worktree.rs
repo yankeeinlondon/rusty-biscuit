@@ -202,7 +202,14 @@ pub(crate) fn list_worktrees_from_gix(
         if path.as_os_str().is_empty() {
             return Err(SniffError::git("worktree_base", "worktree path is empty").into());
         }
-        let canonical = std::fs::canonicalize(&path).unwrap_or(path);
+        let canonical = std::fs::canonicalize(&path).unwrap_or_else(|_| {
+            match (path.parent(), path.file_name()) {
+                (Some(parent), Some(name)) => std::fs::canonicalize(parent)
+                    .map(|canonical_parent| canonical_parent.join(name))
+                    .unwrap_or(path),
+                _ => path,
+            }
+        });
 
         let (branch, is_detached) = resolve_linked_branch_and_detached(proxy.git_dir());
 

@@ -1820,6 +1820,9 @@ fn stage_raw_path(repo: &git2::Repository, bytes: &[u8], content: &[u8]) {
     index.write().unwrap();
 }
 
+// Windows filenames are UTF-16, so a raw invalid-UTF-8 index path cannot
+// exist there; gix's worktree status rightfully rejects it on that platform.
+#[cfg(unix)]
 #[test]
 fn phase3_non_utf8_path_resolves_exact_index_entry_for_stats() {
     let dir = TempDir::new().unwrap();
@@ -1849,6 +1852,7 @@ fn phase3_non_utf8_path_resolves_exact_index_entry_for_stats() {
     assert_eq!(change.lines_removed, 3);
 }
 
+#[cfg(unix)]
 #[test]
 fn phase3_distinct_non_utf8_paths_do_not_collide() {
     let dir = TempDir::new().unwrap();
