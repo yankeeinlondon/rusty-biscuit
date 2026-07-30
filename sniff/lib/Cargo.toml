@@ -82,13 +82,14 @@ winreg = "0.55"
 criterion = { version = "0.5", features = ["html_reports"] }
 # Fixture writes gix has no API for (worktree-snapshot commits, checkout,
 # linked-worktree creation) + the libgit2 parity oracle. See note above.
-git2 = "0.20.3"
+git2 = { version = "0.20.3", default-features = false }
 # libgit2-sys >= 0.18.6 (libgit2 1.9.6) swapped its bundled regex backend from PCRE1
 # to PCRE2 and exports it unprefixed. pcre2-sys — reached from this crate's own
 # `hyperpolyglot` dependency — defines the same `pcre2_*_8` symbols, so MSVC's linker
 # rejects the duplicates (LNK2005 -> LNK1169) in every test target that links both.
-# Unix linkers tolerate it, so this is a Windows-only build break. Cargo.lock is
-# gitignored, so CI re-resolves to the newest match unless the ceiling is stated here.
+# Unix linkers tolerate it, so this is a Windows-only build break. `git2` is a
+# dev-dependency with network transports disabled, so the ceiling costs nothing
+# until upstream isolates its bundled symbols.
 libgit2-sys = ">=0.18.3, <0.18.6"
 proptest = "1"
 serial_test = "3"
