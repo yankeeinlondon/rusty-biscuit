@@ -338,8 +338,8 @@ pub(crate) fn prepare_directive(
             return Err(ShellExpansionError::ApprovalRequired {
                 ctx: Box::new(directive.ctx.clone()),
                 command: display_command,
-                whitelist_path: policy_paths.whitelist.clone(),
-                blacklist_path: policy_paths.blacklist.clone(),
+                whitelist_path: Box::new(policy_paths.whitelist.clone()),
+                blacklist_path: Box::new(policy_paths.blacklist.clone()),
                 origin: directive.origin.clone(),
             });
         }
@@ -447,8 +447,8 @@ pub(crate) fn prepare_directive(
         Err(ShellExpansionError::ApprovalRequired {
             ctx: Box::new(directive.ctx.clone()),
             command: display_command,
-            whitelist_path: policy_paths.whitelist.clone(),
-            blacklist_path: policy_paths.blacklist.clone(),
+            whitelist_path: Box::new(policy_paths.whitelist.clone()),
+            blacklist_path: Box::new(policy_paths.blacklist.clone()),
             origin: directive.origin.clone(),
         })
     }

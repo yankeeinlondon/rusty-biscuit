@@ -541,8 +541,11 @@ pub enum ShellExpansionError {
     ApprovalRequired {
         ctx: Box<SourceContext>,
         command: String,
-        whitelist_path: PathBuf,
-        blacklist_path: PathBuf,
+        /// Boxed to keep `ShellExpansionError` under the `result_large_err`
+        /// threshold, matching the boxing convention of the other heavy fields.
+        whitelist_path: Box<PathBuf>,
+        /// Boxed for the same size reason as `whitelist_path`.
+        blacklist_path: Box<PathBuf>,
         origin: ShellCommandOrigin,
     },
 
