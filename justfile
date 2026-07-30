@@ -417,11 +417,15 @@ cp:
     @echo
 
 # install rusty-biscuit and third-party CLIs used for development
-init: _ensure-build-deps _ensure-native-libs _ensure-kache _ensure-nextest _ensure-gitnexus
+#
+# On native Windows, run scripts\init.ps1 instead of invoking this recipe
+# directly: just needs bash AND cygpath on PATH before it can run any recipe,
+# so the "no shell environment" check has to happen outside just.
+init: _ensure-native-bash _ensure-build-deps _ensure-native-libs _ensure-kache _ensure-nextest _ensure-gitnexus
     #!/usr/bin/env bash
     set -euo pipefail
-    # Source cargo env in case _ensure-build-deps just installed Rust
-    [[ -f "$HOME/.cargo/env" ]] && source "$HOME/.cargo/env"
+    # Put cargo on PATH in case _ensure-build-deps just installed Rust
+    source scripts/cargo-path.sh
     echo -e "Initializing the {{ RED }}rusty-biscuit{{ RESET }} monorepo"
     echo
     echo -e "First step is to ensure CLIs used for development are installed"
@@ -434,11 +438,126 @@ init: _ensure-build-deps _ensure-native-libs _ensure-kache _ensure-nextest _ensu
     (cd playa && just install)
     (cd biscuit-speaks && just install)
 
+# "Accidental WSL" guard. Must be a LINEWISE recipe: just runs shebang recipes
+# through the cygpath-translated interpreter (Cygwin/Git Bash), but linewise
+# recipes through `set shell`'s bare `bash` — which on Windows can resolve to
+# the WSL launcher (WindowsApps sorts before a real bash on PATH). Recipes then
+# run in Linux against a /mnt/c checkout and fail confusingly ("cargo: command
+# not found" even though Rust is installed on the Windows side). Intentional
+# WSL development keeps the checkout in the Linux filesystem, so only /mnt/*
+# is rejected.
+_ensure-native-bash:
+    @if grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null && [ "${PWD#/mnt/}" != "$PWD" ]; then \
+        echo "just is running recipes inside WSL against a Windows-mounted checkout ($PWD)." >&2; \
+        echo "This happens when 'bash' on the Windows PATH resolves to the WSL launcher" >&2; \
+        echo "(WindowsApps\bash.exe) instead of Cygwin or Git Bash." >&2; \
+        echo "" >&2; \
+        echo "If you intended to run this in native Windows (most likely), then:" >&2; \
+        echo "  - run scripts\init.ps1 instead of 'just init', or" >&2; \
+        echo "  - reorder your PATH so C:\cygwin64\bin (or Git's bin) sorts BEFORE" >&2; \
+        echo "    %LOCALAPPDATA%\Microsoft\WindowsApps, then open a new terminal." >&2; \
+        echo "If you meant to work in WSL: clone the repo inside the WSL filesystem" >&2; \
+        echo "  (e.g. ~/rusty-biscuit) and run 'just init' from there." >&2; \
+        exit 1; \
+    fi
+
 # ensure Rust, cargo, and C build tools are available
 _ensure-build-deps:
     #!/usr/bin/env bash
     set -euo pipefail
+    source scripts/cargo-path.sh
 
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*)
+            # --- native Windows -------------------------------------------
+            if ! command -v rustc &> /dev/null || ! command -v cargo &> /dev/null; then
+                echo -e "{{ RED }}Missing Rust toolchain{{ RESET }} (rustc/cargo not found)"
+                # sh.rustup.rs misdetects under Cygwin/MSYS (it picks the GNU
+                # triple and downloads with Cygwin paths a native curl cannot
+                # write), so on Windows we fetch rustup-init.exe directly for
+                # the host's MSVC triple instead.
+                case "$(uname -m)" in
+                    x86_64)        host_triple="x86_64-pc-windows-msvc" ;;
+                    aarch64|arm64) host_triple="aarch64-pc-windows-msvc" ;;
+                    i686)          host_triple="i686-pc-windows-msvc" ;;
+                    *)
+                        echo "Unsupported CPU architecture for automatic Rust install: $(uname -m)" >&2
+                        echo "Download rustup manually from https://rustup.rs and re-run just init." >&2
+                        exit 1
+                        ;;
+                esac
+                # TEMP is a native Windows path, writable by both Cygwin's
+                # curl and the System32 curl (which cannot write /tmp paths).
+                win_tmp="${TEMP:-${TMP:-/tmp}}"
+                installer="$win_tmp/rustup-init.exe"
+                echo "Downloading rustup for $host_triple..."
+                curl --proto '=https' --tlsv1.2 -sSfL -o "$installer" \
+                    "https://static.rust-lang.org/rustup/dist/$host_triple/rustup-init.exe"
+                echo "Installing Rust (stable toolchain, MSVC host)..."
+                "$installer" -y --default-toolchain stable
+                rm -f "$installer"
+                source scripts/cargo-path.sh
+                cargo --version
+            fi
+
+            if rustc -vV 2>/dev/null | grep -q 'host: .*windows-gnu'; then
+                echo -e "{{ RED }}Warning{{ RESET }}: the active toolchain targets windows-gnu."
+                echo "This repo's Windows builds expect the MSVC toolchain; switch with:"
+                echo "  rustup default stable-x86_64-pc-windows-msvc"
+            fi
+
+            # The Windows linker is link.exe from the Visual Studio C++
+            # workload, not `cc`; vswhere is the supported detector. Detect
+            # the compiler COMPONENT (present in every SKU from Build Tools
+            # to Community) rather than the Build-Tools-only workload ID.
+            case "$(uname -m)" in
+                aarch64|arm64) vc_component="Microsoft.VisualStudio.Component.VC.Tools.arm64" ;;
+                *)             vc_component="Microsoft.VisualStudio.Component.VC.Tools.x86.x64" ;;
+            esac
+            pf86="$(printenv 'ProgramFiles(x86)' 2>/dev/null || echo 'C:\Program Files (x86)')"
+            vswhere="$(cygpath -u "$pf86")/Microsoft Visual Studio/Installer/vswhere.exe"
+
+            have_vc_tools() {
+                [[ -x "$vswhere" ]] && [[ -n "$("$vswhere" -latest -products '*' \
+                    -requires "$vc_component" \
+                    -property installationPath 2>/dev/null | tr -d '\r' | head -n1)" ]]
+            }
+
+            if ! have_vc_tools; then
+                echo -e "{{ RED }}Missing C++ linker{{ RESET }} (no Visual Studio with the 'Desktop development with C++' workload)"
+                echo "Installing Visual Studio 2022 Build Tools (C++ workload)..."
+                echo "This is a multi-GB download and will prompt for administrator approval."
+                if command -v winget &> /dev/null; then
+                    winget install --id Microsoft.VisualStudio.2022.BuildTools \
+                        --accept-source-agreements --accept-package-agreements \
+                        --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+                else
+                    win_tmp="${TEMP:-${TMP:-/tmp}}"
+                    vs_installer="$win_tmp/vs_BuildTools.exe"
+                    curl --proto '=https' --tlsv1.2 -sSfL -o "$vs_installer" \
+                        "https://aka.ms/vs/17/release/vs_BuildTools.exe"
+                    "$vs_installer" --quiet --wait --norestart \
+                        --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended
+                    rm -f "$vs_installer"
+                fi
+            fi
+
+            if ! have_vc_tools; then
+                echo -e "{{ RED }}C++ build tools are still not detected.{{ RESET }}" >&2
+                echo "Install 'Visual Studio 2022 Build Tools' with the 'Desktop development" >&2
+                echo "with C++' workload from an ELEVATED terminal, then re-run just init:" >&2
+                echo "  winget install --id Microsoft.VisualStudio.2022.BuildTools --interactive" >&2
+                echo "or download https://aka.ms/vs/17/release/vs_BuildTools.exe" >&2
+                exit 1
+            fi
+            echo "C++ build tools found: $("$vswhere" -latest -products '*' \
+                -requires "$vc_component" \
+                -property installationPath | tr -d '\r' | head -n1)"
+            exit 0
+            ;;
+    esac
+
+    # --- Linux / macOS ------------------------------------------------------
     # Check for Rust and cargo
     if ! command -v rustc &> /dev/null || ! command -v cargo &> /dev/null; then
         echo -e "{{ RED }}Missing Rust toolchain{{ RESET }} (rustc/cargo not found)"
@@ -504,13 +623,46 @@ _ensure-native-libs area="":
         esac
     }
 
+    areas_json="{{ justfile_directory() }}/.github/ci/areas.json"
+
     if ! command -v jq &> /dev/null; then
-        if [[ -z "$pm" ]]; then
+        if [[ "$runner_key" == "windows-latest" ]]; then
+            # No apt/brew here; winget is the only system package manager.
+            if command -v winget &> /dev/null; then
+                echo "Installing jq (needed to read .github/ci/areas.json)..."
+                winget install --id jqlang.jq -e --silent \
+                    --accept-source-agreements --accept-package-agreements || true
+                hash -r
+            fi
+            if ! command -v jq &> /dev/null; then
+                # No area currently declares windows-latest native packages;
+                # scan only the "native" blocks so a declaration added later
+                # is not silently skipped on a jq-less host.
+                awk_bin="$(command -v awk || command -v gawk || true)"
+                if [[ -n "$awk_bin" ]] && "$awk_bin" '
+                        /"native"[[:space:]]*:[[:space:]]*\{/ { inblock=1 }
+                        inblock && /windows-latest/           { found=1 }
+                        inblock && /^[[:space:]]*\}/          { inblock=0 }
+                        END { exit(found ? 1 : 0) }' "$areas_json"; then
+                    echo "no native prerequisites declared for Windows — skipping"
+                    exit 0
+                fi
+                if [[ -z "$awk_bin" ]]; then
+                    echo "Cannot verify Windows native prerequisites: neither jq nor awk/gawk is installed." >&2
+                    echo "Install jq (winget install jqlang.jq) or the Cygwin gawk package, then re-run just init." >&2
+                else
+                    echo "Windows native prerequisites are declared in .github/ci/areas.json but jq is not installed." >&2
+                    echo "Install jq with: winget install jqlang.jq — then re-run just init." >&2
+                fi
+                exit 1
+            fi
+        elif [[ -z "$pm" ]]; then
             echo "Could not detect a package manager; install jq, then run just init again." >&2
             exit 1
+        else
+            echo "Installing jq (needed to read .github/ci/areas.json)..."
+            install_packages jq
         fi
-        echo "Installing jq (needed to read .github/ci/areas.json)..."
-        install_packages jq
     fi
 
     # `.github/ci/areas.json` declares EVERY area -- gating or not -- and is the
@@ -518,7 +670,6 @@ _ensure-native-libs area="":
     # installer. A requirement is declared once, on the area that needs it, and
     # reaches both developer hosts and CI from there. Declarations are per-OS, so
     # a Linux-only dependency never touches a macOS or Windows host.
-    areas_json="{{ justfile_directory() }}/.github/ci/areas.json"
     area="{{ area }}"
 
     if [[ -n "$area" ]] && ! jq -e --arg a "$area" 'any(.[]; .area == $a)' "$areas_json" > /dev/null; then
@@ -631,31 +782,72 @@ _ensure-native-libs area="":
 _ensure-kache:
     #!/usr/bin/env bash
     set -euo pipefail
-    [[ -f "$HOME/.cargo/env" ]] && source "$HOME/.cargo/env"
+    source scripts/cargo-path.sh
 
     installed_version=""
     if command -v kache &> /dev/null; then
-        installed_version=$(kache --version | awk '{print $2}')
+        installed_version=$(kache --version | cut -d' ' -f2)
     fi
 
-    if [[ "$installed_version" == "{{ KACHE_VERSION }}" ]]; then
-        exit 0
-    fi
+    if [[ "$installed_version" != "{{ KACHE_VERSION }}" ]]; then
+        # cargo-binstall is the install path on every OS: it fetches a prebuilt
+        # kache binary instead of compiling from source. Install it first when
+        # absent (that one install is from source).
+        if ! command -v cargo-binstall &> /dev/null; then
+            echo "Installing cargo-binstall (used to fetch prebuilt kache binaries)..."
+            RUSTC_WRAPPER="" cargo install --locked cargo-binstall
+        fi
 
-    if command -v cargo-binstall &> /dev/null; then
         RUSTC_WRAPPER="" cargo binstall \
             --no-confirm \
-            --version "{{ KACHE_VERSION }}" \
-            kache
-    else
-        RUSTC_WRAPPER="" cargo install \
-            --locked \
             --force \
             --version "{{ KACHE_VERSION }}" \
             kache
     fi
 
+    # Seed a default store config when the host has none. The tracked
+    # .cargo/config.toml makes kache the wrapper for every build in this repo,
+    # so the store needs a deliberate cap: an uncapped store thrashes (LRU can
+    # evict fresh entries before they score a hit). 100 GiB is the agreed
+    # starting point (docs/kache-strategy.md); never overwrite an existing
+    # config — hosts size against their own volume.
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*) kache_config_dir="$(cygpath "${APPDATA:?}")/kache" ;;
+        *)                    kache_config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/kache" ;;
+    esac
+    if [[ ! -f "$kache_config_dir/config.toml" ]]; then
+        mkdir -p "$kache_config_dir"
+        printf '[cache]\nlocal_max_size = "100GiB"\n' > "$kache_config_dir/config.toml"
+        echo "Wrote default kache store cap (100GiB) to $kache_config_dir/config.toml"
+    fi
+
     kache --version
+
+# ensure cargo-sweep is available for target/ hygiene (just sweep)
+_ensure-cargo-sweep:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source scripts/cargo-path.sh
+
+    if cargo sweep --version &> /dev/null; then
+        exit 0
+    fi
+
+    if command -v cargo-binstall &> /dev/null; then
+        RUSTC_WRAPPER="" cargo binstall --no-confirm cargo-sweep \
+            || RUSTC_WRAPPER="" cargo install --locked cargo-sweep
+    else
+        RUSTC_WRAPPER="" cargo install --locked cargo-sweep
+    fi
+
+# prune Cargo target/ dirs, which cargo never garbage-collects. With kache
+# wired, swept artifacts come back as link-restores, not recompiles — and a
+# lean target/ keeps kache's per-crate keying fast (~100x slower on huge
+# trees). Passes: uninstalled toolchains, untouched >14d, then a 120GB
+# backstop cap per root (docs/kache-strategy.md). Roots default to this repo;
+# override with `just sweep <path>...`.
+sweep *args="": _ensure-cargo-sweep
+    @scripts/sweep.sh {{ args }}
 
 # ensure the test runner every tier above L1 depends on is available
 #
@@ -668,7 +860,7 @@ _ensure-kache:
 _ensure-nextest:
     #!/usr/bin/env bash
     set -euo pipefail
-    [[ -f "$HOME/.cargo/env" ]] && source "$HOME/.cargo/env"
+    source scripts/cargo-path.sh
 
     if cargo nextest --version &> /dev/null; then
         exit 0
@@ -689,6 +881,12 @@ _ensure-gitnexus:
 
     if ! command -v node &> /dev/null || ! command -v npm &> /dev/null; then
         echo "GitNexus requires Node.js 22 or newer and npm." >&2
+        case "$(uname -s)" in
+            MINGW*|MSYS*|CYGWIN*)
+                echo "Install it with: winget install OpenJS.NodeJS.LTS" >&2
+                echo "Then open a NEW terminal (so PATH updates apply) and re-run just init." >&2
+                ;;
+        esac
         exit 1
     fi
 
@@ -710,7 +908,14 @@ _ensure-gitnexus:
     fi
 
     run_global_npm() {
-        if [[ -w "$npm_global_root" || (-d "$gitnexus_root" && -w "$gitnexus_root") ]]; then
+        # `-w` on the full path fails for a FRESH npm prefix (node_modules does
+        # not exist yet), which used to drop hosts with a writable prefix into
+        # the sudo branch. Test the nearest ancestor that actually exists.
+        local probe="$npm_global_root"
+        while [[ ! -e "$probe" && "$probe" != "/" && "$probe" != "." ]]; do
+            probe="$(dirname "$probe")"
+        done
+        if [[ -w "$probe" || (-d "$gitnexus_root" && -w "$gitnexus_root") ]]; then
             npm "$@"
         elif command -v sudo &> /dev/null; then
             sudo npm "$@"
@@ -722,8 +927,21 @@ _ensure-gitnexus:
     }
 
     if ! command -v gitnexus &> /dev/null || [[ ! -f "$gitnexus_root/package.json" ]]; then
+        # The native toolchain goes in FIRST: node-gyp/node-addon-api are what
+        # a source build of tree-sitter needs, and npm's script-approval flags
+        # (--allow-scripts) guarantee their install scripts actually run —
+        # without them a blocked script leaves a tree-sitter binding that
+        # installs cleanly but cannot be require()'d.
+        echo "Installing GitNexus build toolchain (node-gyp, node-addon-api, tree-sitter)..."
+        run_global_npm install --global \
+            node-addon-api node-gyp tree-sitter \
+            --allow-scripts node-addon-api \
+            --allow-scripts node-gyp \
+            --allow-scripts tree-sitter
         echo "Installing GitNexus..."
-        run_global_npm install --global gitnexus@latest
+        run_global_npm install --global gitnexus@latest \
+            --allow-scripts gitnexus \
+            --allow-scripts tree-sitter
     fi
 
     if [[ ! -d "$gitnexus_root/node_modules/tree-sitter" ]]; then
