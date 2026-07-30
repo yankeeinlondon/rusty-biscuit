@@ -50,7 +50,11 @@ biscuit-test-harness = { path = "../../biscuit-test-harness" }
 expectrl = "0.8"
 # Only to snapshot worktrees into commits when building CLI test repos —
 # gix has no worktree-staging write API. See sniff-lib's dev-dep note.
-git2 = "0.20"
+git2 = { version = "0.20", default-features = false }
+# 0.18.6+ bundles PCRE2, which collides on MSVC with hyperpolyglot's pcre2-sys.
+# This is test-only, with network transports disabled; keep it on the last
+# non-PCRE2 release until upstream isolates its bundled symbols.
+libgit2-sys = "=0.18.5"
 insta = { version = "1", features = ["json"] }
 predicates = "3"
 serial_test = "3"
