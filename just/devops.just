@@ -351,6 +351,39 @@ _run_all recipe specs *args="":
         exit 1
     fi
 
+    # Give every invocation in this run the SAME `-p` set, so Cargo resolves
+    # features once for the whole area instead of once per package.
+    #
+    # Feature unification is computed over the selected packages. Running
+    # `-p claudine` and then `-p claudine-cli` therefore configures shared
+    # dependencies differently — claudine-cli's dev-dependency enables
+    # `darkmatter/effects-instrumentation`, and `claudine-catalog-types` takes
+    # `chrono` with `default-features = false` while its siblings do not — so
+    # each invocation rebuilt crates the previous one had already built under a
+    # different configuration. Measured on run 30562649123: `claudine` and
+    # `claudine-catalog-types` compiled 3x per job. It is invisible locally
+    # because Cargo caches every variant; a cold CI cache pays for each.
+    #
+    # `_test` narrows back to one package with a `package()` filter, which is
+    # exactly what the archive path already does, so per-package JUnit staging
+    # and the pass/fail summary are unchanged.
+    #
+    # Skipped when any entry carries per-package build flags (`messenger
+    # --features desktop; messenger-cli`): a shared selection would have to
+    # union those flags across packages, which changes what each package is
+    # built with rather than merely when.
+    build_scope=""
+    scope_is_uniform=1
+    for entry in "${entries[@]}"; do
+        # shellcheck disable=SC2206
+        scope_parts=(${entry})
+        (( ${#scope_parts[@]} > 1 )) && scope_is_uniform=0
+        build_scope="${build_scope}${build_scope:+ }${scope_parts[0]}"
+    done
+    if (( scope_is_uniform == 1 )) && (( ${#entries[@]} > 1 )); then
+        export BISCUIT_BUILD_SCOPE="${build_scope}"
+    fi
+
     for entry in "${entries[@]}"; do
         # Word-splitting is the point: an entry is `<package> [extra args…]`.
         # shellcheck disable=SC2206
@@ -620,6 +653,16 @@ _test pkg *args="":
         filter="$(just _tier_filter L1 '{{ pkg }}')"
         selection=(-p '{{ pkg }}')
         run_args=(${forwarded[@]+"${forwarded[@]}"})
+        # Shared build scope (set by `_run_all`): select every package in the
+        # area so Cargo resolves features once, then narrow to this package with
+        # `package()`. Same shape as the archive branch below.
+        if (( archive_mode == 0 )) && [[ -n "${BISCUIT_BUILD_SCOPE:-}" ]]; then
+            selection=()
+            for scope_pkg in ${BISCUIT_BUILD_SCOPE}; do
+                selection+=(-p "${scope_pkg}")
+            done
+            filter="package({{ pkg }}) & (${filter})"
+        fi
         if (( archive_mode == 1 )); then
             selection=()
             filter="package({{ pkg }}) & (${filter})"
