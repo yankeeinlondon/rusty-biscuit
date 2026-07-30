@@ -2,27 +2,35 @@
 
 Short reference for the decisions. Full investigation and evidence: `kache-sessions.md`.
 
-## Repo integration (2026-07-29)
+## Repo integration (revised 2026-07-30)
 
-kache is the compiler cache for every build in this repo, on every OS:
+kache is an **optional, per-host** cache. The repository tracks no Cargo wrapper and CI does not
+use it. Rationale and measurements: `fixes/2026-07-30-ci-cd-stabilization/plan.md`.
 
-- **Wiring:** tracked `.cargo/config.toml` → `[build] rustc-wrapper = "kache"`. Chosen over
-  `kache init` (user-wide `~/.cargo/config.toml`) because it is repo-scoped, applies to CI, and
-  cannot leak into unrelated checkouts.
-- **Version authority:** `.github/kache-version` = **0.12.0**, consumed by the root justfile and
-  CI.
-- **Store cap:** `just init` seeds `local_max_size = "100GiB"` when a host has no kache config
-  (never overwrites). Config path: `~/.config/kache/config.toml` on macOS/Linux,
+- **Wiring: none tracked.** The earlier design put `[build] rustc-wrapper = "kache"` in a tracked
+  `.cargo/config.toml`. That imposed one answer on every contributor's filesystem, hard-failed
+  Cargo for anyone without kache installed, and forced five CI legs plus every other workflow to
+  *neutralize* the wrapper they had just been given. Activation is now a host decision:
+  `RUSTC_WRAPPER=kache` per shell, or `kache init` host-wide with informed consent.
+- **Install:** `just install-kache` — `cargo binstall` at the pinned version, on every OS.
+  Explicitly *not* a dependency of `just init`; installing and activating are separate decisions.
+- **Version authority:** `.github/kache-version` = **0.12.0**, consumed by the root justfile.
+- **Store cap:** `just install-kache` seeds `local_max_size = "100GiB"` when a host has no kache
+  config (never overwrites). Config path: `~/.config/kache/config.toml` on macOS/Linux,
   `%APPDATA%\kache\config.toml` on Windows.
 - **Sweep:** version-controlled at `scripts/sweep.sh` (three passes + census below), run via
   `just sweep [roots...]`. Schedule per host: launchd (Mac, done — see below), Task Scheduler on
-  Windows, cron/systemd timer on Linux.
-- **CI:** the tracked config applies to every workflow, so each leg either installs kache or
-  neutralizes the wrapper. The `enable-kache` composite action installs kache on Linux/macOS
-  (via `kache-action@v1`, GitHub-cache-backed) and clears `RUSTC_WRAPPER` on Windows
-  (kache-action@v1 rejects win32-x64); every other workflow sets `RUSTC_WRAPPER: ""` at
-  workflow level. Guarded by `ci_workflow_contracts.rs`.
+  Windows, cron/systemd timer on Linux. Unaffected by the above — target hygiene matters with or
+  without a cache.
+- **CI: kache removed.** `Swatinem/rust-cache@v2` remains on every native leg. The measured legs
+  returned 0–6% hit rates (0.4–2.3% weighted by compile cost, ~2–15s saved) because
+  `kache-action@v1` fell back to the GitHub Actions cache, whose entries are immutable and
+  branch-scoped, so a store shared by all same-platform area jobs could never accumulate.
+  Revisit only with an S3/R2 backend and a measured comparison against a no-kache control.
 - **Health:** judge with `kache stats`, **not** `kache doctor`.
+- **Probe before activating:** never infer the restore mode from the OS. `kache doctor` reports the
+  store filesystem from 0.12.0; confirm cloning with `cp -c` (macOS) or `cp --reflink=always`
+  (Linux) between the store and a target directory.
 
 ## Future ambitions — kache in Windows CI
 

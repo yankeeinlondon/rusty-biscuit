@@ -88,8 +88,9 @@ uv tool install rust-just
 Once installed run `just init` from the repo's root which will:
 
 - ensure you have all necessary build tools for your operating system
-- install and verify the repository-pinned kache compiler cache
 - install some core CLIs from this monorepo to make sure all your `justfile` configurations will work with full fidelity
+
+The optional [kache](https://github.com/kunobi-ninja/kache) compiler cache is a separate, per-host opt-in (`just install-kache`) — whether it pays off depends on your filesystem, not your OS.
 
 See [Development Environment Initialization](./docs/initialization.md) for the
 complete process, platform behavior, and troubleshooting guidance.
