@@ -220,8 +220,25 @@ leak-timeout = { period = "1s", result = "fail" }
 # masking flakes and quadrupling wasted time. Only the resource-sensitive tiers
 # below keep a scoped, justified retry.
 retries = 0
-# Stricter slow-test marker for CI, same generous termination ceiling.
-slow-timeout = { period = "10s", terminate-after = 3 }
+# Mark slow at 30s, kill at 90s (3 x 30s).
+#
+# Was `10s x 3` = a 30-second kill, which was below what correct tests need on a
+# contended runner and, with `retries = 0`, gave them no second chance. Measured
+# on run 30562649123: the claudine shards reported 11 timeouts and ZERO assertion
+# failures — every "failure" was the harness killing a slow test. One of them
+# (`agent_errors_fleet::exhausted_remediation_fails_finalize_and_preserves_findings`)
+# takes ~21s alone on an 8-core dev machine and 83s under full-suite contention;
+# a 2-core runner is slower still.
+#
+# 90s is not a licence to be slow — it is the difference between "this is hung"
+# and "this is slow", which is what a termination ceiling should express. The
+# fifteen per-test overrides already in this file all raise the period to 30s for
+# exactly this reason; that many exceptions is evidence the global default was
+# the thing that was wrong.
+#
+# `retries = 0` deliberately stays. A timeout must not be retried into looking
+# healthy — it should either fit the ceiling or be reported.
+slow-timeout = { period = "30s", terminate-after = 3 }
 # Leaked child processes are a hard failure in CI as well.
 leak-timeout = { period = "100ms", result = "fail" }
 # JUnit XML for CI dashboards.
