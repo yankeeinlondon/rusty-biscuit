@@ -30,6 +30,10 @@ pub fn assemble_shared_module() -> TokenStream {
     quote! {
         //! Shared types and utilities for generated API clients.
 
+        // `FormFile` is a field type on generated form-body structs, which derive
+        // both traits, so it must derive them too.
+        use serde::{Deserialize, Serialize};
+
         /// Re-export reqwest for downstream crates that need to make custom requests.
         ///
         /// This allows consumers to use the same HTTP client types without adding

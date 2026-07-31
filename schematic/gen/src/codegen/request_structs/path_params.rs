@@ -4,7 +4,7 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
 use crate::codegen::request_structs::shared::{
-    QueryParamInfo, param_field_name, param_serde_rename,
+    QueryParamInfo, param_field_name, param_serde_rename, type_name_to_tokens,
 };
 
 /// Generates field declarations for path parameters.
@@ -64,7 +64,7 @@ pub(super) fn generate_new_method(
         .collect();
 
     if has_body {
-        let body_ty = format_ident!("{}", body_type.unwrap());
+        let body_ty = type_name_to_tokens(body_type.unwrap_or("Body"));
         quote! {
             /// Creates a new request with the required path parameters and body.
             pub fn new(#(#params,)* body: #body_ty) -> Self {

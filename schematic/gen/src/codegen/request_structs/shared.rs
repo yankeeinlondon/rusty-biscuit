@@ -9,6 +9,26 @@ use quote::{format_ident, quote};
 use schematic_define::openapi::import::naming::sanitize_rust_field_ident;
 use schematic_define::{EndpointParams, QueryParamType};
 
+/// Renders a schema type name as Rust type tokens.
+///
+/// Names arriving from an imported spec are not always bare identifiers: a
+/// schema with no `$ref` maps to the path `serde_json::Value`, and generic
+/// spellings such as `Vec<Model>` also occur. Both are valid input to
+/// [`syn::parse_str`] but panic `format_ident!`, so every site that turns a
+/// `Schema::type_name` into tokens must go through here.
+pub fn type_name_to_tokens(type_name: &str) -> TokenStream {
+    match syn::parse_str::<syn::Type>(type_name) {
+        Ok(ty) => quote! { #ty },
+        // Unparseable names are still emitted as an identifier so the generated
+        // file fails to compile at the offending type rather than aborting the
+        // whole run with a `quote` panic.
+        Err(_) => {
+            let ident = format_ident!("{}", sanitize_rust_field_ident(type_name));
+            quote! { #ident }
+        }
+    }
+}
+
 /// Returns the Rust struct-field identifier for a parameter's wire name.
 ///
 /// Wire names taken from a spec (`{user-id}`, `$top`, `user.name`, `2fa`) are
@@ -119,7 +139,9 @@ pub fn generate_path_format(
         let format_args = path_params.iter().map(|param| {
             let field_name = format_ident!("{}", param_field_name(param));
             if path.contains(&format!("{{+{}}}", param)) {
-                quote! { &self.#field_name }
+                // No `&`: `format!` takes its arguments by reference already, and
+                // a redundant one trips `clippy::needless_borrows_for_generic_args`.
+                quote! { self.#field_name }
             } else {
                 quote! { urlencoding::encode(&self.#field_name.to_string()) }
             }

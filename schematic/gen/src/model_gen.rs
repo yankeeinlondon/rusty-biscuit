@@ -35,7 +35,25 @@ pub fn generate_models(
     output_dir: &Path,
     dry_run: bool,
 ) -> Result<String, GeneratorError> {
-    let tokens = assemble_model_tokens(catalog);
+    generate_models_with(catalog, output_dir, dry_run, false)
+}
+
+/// Generates Rust source code from a `ModelCatalog`.
+///
+/// `derive_json_schema` adds `schemars::JsonSchema` to every emitted type.
+///
+/// ## Errors
+///
+/// Returns `GeneratorError` if:
+/// - Generated code fails syn validation
+/// - File writing fails (when not dry-run)
+pub fn generate_models_with(
+    catalog: &ModelCatalog,
+    output_dir: &Path,
+    dry_run: bool,
+    derive_json_schema: bool,
+) -> Result<String, GeneratorError> {
+    let tokens = assemble_model_tokens_with(catalog, derive_json_schema);
     let file = validate_code(&tokens)?;
     let formatted = format_code(&file);
 
@@ -50,16 +68,31 @@ pub fn generate_models(
 
 /// Assembles token stream for all model definitions.
 pub fn assemble_model_tokens(catalog: &ModelCatalog) -> TokenStream {
+    assemble_model_tokens_with(catalog, false)
+}
+
+/// Assembles token stream for all model definitions.
+///
+/// `derive_json_schema` adds `schemars::JsonSchema` to every emitted type. The
+/// definitions crate needs it so `openapi_registry()` can register the types;
+/// the standalone client output does not depend on `schemars`.
+pub fn assemble_model_tokens_with(catalog: &ModelCatalog, derive_json_schema: bool) -> TokenStream {
     let type_defs: Vec<TokenStream> = catalog
         .types
         .iter()
         .map(|model| match model {
-            ModelDef::Struct(s) => generate_struct(s),
-            ModelDef::Enum(e) => generate_enum(e),
-            ModelDef::Alias(a) => generate_alias(a),
+            ModelDef::Struct(s) => generate_struct_with(s, derive_json_schema),
+            ModelDef::Enum(e) => generate_enum_with(e, derive_json_schema),
+            ModelDef::Alias(a) => generate_alias_with(a, derive_json_schema),
             _ => TokenStream::new(),
         })
         .collect();
+
+    let schema_import = if derive_json_schema {
+        quote! { use schemars::JsonSchema; }
+    } else {
+        quote! {}
+    };
 
     quote! {
         //! Generated model types.
@@ -67,6 +100,7 @@ pub fn assemble_model_tokens(catalog: &ModelCatalog) -> TokenStream {
         //! These types were generated from an OpenAPI specification.
         //! Do not edit manually.
 
+        #schema_import
         use serde::{Deserialize, Serialize};
         use std::collections::HashMap;
 
@@ -74,8 +108,17 @@ pub fn assemble_model_tokens(catalog: &ModelCatalog) -> TokenStream {
     }
 }
 
-/// Generates a Rust struct from a `StructDef`.
-fn generate_struct(def: &StructDef) -> TokenStream {
+/// Returns the extra derive applied when `schemars` support is requested.
+fn json_schema_derive(enabled: bool) -> TokenStream {
+    if enabled {
+        quote! { #[derive(JsonSchema)] }
+    } else {
+        quote! {}
+    }
+}
+
+/// Generates a Rust struct from a `StructDef`, optionally deriving `JsonSchema`.
+fn generate_struct_with(def: &StructDef, derive_json_schema: bool) -> TokenStream {
     let name = format_ident!("{}", def.name);
     let doc = doc_comment(&def.description);
 
@@ -95,10 +138,12 @@ fn generate_struct(def: &StructDef) -> TokenStream {
     // We can if all required fields have types that impl Default (primitives, Option, Vec)
     // For simplicity, derive Default for all structs - users can manually implement if needed
     let derives = quote! { #[derive(Debug, Clone, Default, Serialize, Deserialize)] };
+    let schema_derive = json_schema_derive(derive_json_schema);
 
     quote! {
         #doc
         #derives
+        #schema_derive
         pub struct #name {
             #(#fields)*
             #extra_field
@@ -136,8 +181,8 @@ fn generate_field(def: &FieldDef) -> TokenStream {
     }
 }
 
-/// Generates a Rust enum from an `EnumDef`.
-fn generate_enum(def: &EnumDef) -> TokenStream {
+/// Generates a Rust enum from an `EnumDef`, optionally deriving `JsonSchema`.
+fn generate_enum_with(def: &EnumDef, derive_json_schema: bool) -> TokenStream {
     let name = format_ident!("{}", def.name);
     let doc = doc_comment(&def.description);
 
@@ -164,10 +209,12 @@ fn generate_enum(def: &EnumDef) -> TokenStream {
     } else {
         quote! { #[derive(Debug, Clone, Serialize, Deserialize)] }
     };
+    let schema_derive = json_schema_derive(derive_json_schema);
 
     quote! {
         #doc
         #derives
+        #schema_derive
         #untagged_attr
         pub enum #name {
             #(#variants)*
@@ -201,16 +248,150 @@ fn generate_variant(def: &EnumVariant, is_default: bool) -> TokenStream {
     }
 }
 
-/// Generates a type alias from a `TypeAlias`.
-fn generate_alias(def: &TypeAlias) -> TokenStream {
+/// Generates a type alias, or a real composite type when the target is a
+/// schema combinator.
+///
+/// A bare `pub type X = serde_json::Value` would erase the whole shape, so
+/// `oneOf`/`anyOf` become untagged enums and `allOf` becomes a struct that
+/// flattens its members.
+fn generate_alias_with(def: &TypeAlias, derive_json_schema: bool) -> TokenStream {
+    match &def.target {
+        TypeRef::OneOf(variants) | TypeRef::AnyOf(variants) if !variants.is_empty() => {
+            generate_union_enum(def, variants, derive_json_schema)
+        }
+        TypeRef::AllOf(members) if !members.is_empty() => {
+            generate_composed_struct(def, members, derive_json_schema)
+        }
+        _ => {
+            let name = format_ident!("{}", def.name);
+            let doc = doc_comment(&def.description);
+            let target = type_ref_to_tokens(&def.target);
+
+            quote! {
+                #doc
+                pub type #name = #target;
+            }
+        }
+    }
+}
+
+/// Emits an untagged enum for a `oneOf` / `anyOf` schema.
+fn generate_union_enum(
+    def: &TypeAlias,
+    variants: &[TypeRef],
+    derive_json_schema: bool,
+) -> TokenStream {
     let name = format_ident!("{}", def.name);
     let doc = doc_comment(&def.description);
-    let target = type_ref_to_tokens(&def.target);
+    let schema_derive = json_schema_derive(derive_json_schema);
+
+    let mut used = HashSet::new();
+    let variant_idents: Vec<_> = variants
+        .iter()
+        .enumerate()
+        .map(|(index, variant)| {
+            let mut base = variant_name(variant, index);
+            // Two variants can share a base name (two arrays, two strings);
+            // suffixing keeps the enum well-formed.
+            while !used.insert(base.clone()) {
+                base = format!("{base}{index}");
+            }
+            format_ident!("{}", base)
+        })
+        .collect();
+
+    let variant_types: Vec<_> = variants.iter().map(type_ref_to_tokens).collect();
+    let first_ident = &variant_idents[0];
 
     quote! {
         #doc
-        pub type #name = #target;
+        // Union variants mirror the spec's shapes and routinely differ in size;
+        // boxing them would push an indirection onto every caller for no gain.
+        #[allow(clippy::large_enum_variant)]
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        #schema_derive
+        #[serde(untagged)]
+        pub enum #name {
+            #(#variant_idents(#variant_types),)*
+        }
+
+        // Hand-written because `#[derive(Default)]` accepts `#[default]` only on
+        // unit variants, and structs holding this type as a required field derive
+        // `Default`.
+        impl Default for #name {
+            fn default() -> Self {
+                Self::#first_ident(Default::default())
+            }
+        }
     }
+}
+
+/// Emits a struct that flattens each member of an `allOf` schema.
+fn generate_composed_struct(
+    def: &TypeAlias,
+    members: &[TypeRef],
+    derive_json_schema: bool,
+) -> TokenStream {
+    let name = format_ident!("{}", def.name);
+    let doc = doc_comment(&def.description);
+    let schema_derive = json_schema_derive(derive_json_schema);
+
+    let mut used = HashSet::new();
+    let fields = members.iter().enumerate().map(|(index, member)| {
+        let mut base = to_snake_case(&variant_name(member, index));
+        while !used.insert(base.clone()) {
+            base = format!("{base}_{index}");
+        }
+        let field = format_ident!("{}", base);
+        let ty = type_ref_to_tokens(member);
+
+        quote! {
+            #[serde(flatten)]
+            pub #field: #ty,
+        }
+    });
+
+    quote! {
+        #doc
+        #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+        #schema_derive
+        pub struct #name {
+            #(#fields)*
+        }
+    }
+}
+
+/// Derives a PascalCase variant/member name for one arm of a combinator.
+fn variant_name(type_ref: &TypeRef, index: usize) -> String {
+    match type_ref {
+        TypeRef::Named(name) => name.clone(),
+        TypeRef::Primitive(PrimitiveType::String) => "Text".to_string(),
+        TypeRef::Primitive(PrimitiveType::Integer) => "Integer".to_string(),
+        TypeRef::Primitive(PrimitiveType::Number) => "Number".to_string(),
+        TypeRef::Primitive(PrimitiveType::Boolean) => "Boolean".to_string(),
+        TypeRef::Primitive(PrimitiveType::Bytes) => "Bytes".to_string(),
+        TypeRef::Primitive(PrimitiveType::Json) => "Json".to_string(),
+        TypeRef::Array(inner) => format!("{}List", variant_name(inner, index)),
+        TypeRef::Map(inner) => format!("{}Map", variant_name(inner, index)),
+        TypeRef::Optional(inner) => variant_name(inner, index),
+        _ => format!("Variant{index}"),
+    }
+}
+
+/// Converts a PascalCase name to snake_case for use as a field name.
+fn to_snake_case(name: &str) -> String {
+    let mut out = String::with_capacity(name.len() + 4);
+    for (index, ch) in name.chars().enumerate() {
+        if ch.is_uppercase() {
+            if index > 0 {
+                out.push('_');
+            }
+            out.extend(ch.to_lowercase());
+        } else {
+            out.push(ch);
+        }
+    }
+    out
 }
 
 /// Converts a `TypeRef` to a Rust type token stream.
@@ -226,8 +407,9 @@ fn type_ref_to_tokens(type_ref: &TypeRef) -> TokenStream {
             quote! { HashMap<String, #inner_tokens> }
         }
         TypeRef::Named(name) => {
-            let ident = format_ident!("{}", name);
-            quote! { #ident }
+            // Imported names may be paths (`serde_json::Value`), which `format_ident!`
+            // rejects; `type_name_to_tokens` accepts both spellings.
+            crate::codegen::request_structs::shared::type_name_to_tokens(name)
         }
         TypeRef::Optional(inner) => {
             let inner_tokens = type_ref_to_tokens(inner);
@@ -264,11 +446,50 @@ fn primitive_to_tokens(prim: &PrimitiveType) -> TokenStream {
 fn doc_comment(desc: &Option<String>) -> TokenStream {
     match desc {
         Some(text) => {
-            let text = text.trim();
+            let text = tag_bare_code_fences(text.trim());
             quote! { #[doc = #text] }
         }
         None => TokenStream::new(),
     }
+}
+
+/// Tags untagged Markdown code fences in a description as `text`.
+///
+/// Spec descriptions carry illustrative snippets in bare ``` fences. Rustdoc
+/// treats an untagged fence as Rust and tries to compile it, so OpenAI's
+/// JavaScript-ish coordinate example would fail `cargo test --doc`.
+fn tag_bare_code_fences(description: &str) -> String {
+    let mut out = String::with_capacity(description.len() + 16);
+    let mut inside_fence = false;
+
+    for (index, line) in description.lines().enumerate() {
+        if index > 0 {
+            out.push('\n');
+        }
+
+        let trimmed = line.trim_end();
+        let is_fence = trimmed.trim_start().starts_with("```");
+
+        if is_fence && !inside_fence {
+            inside_fence = true;
+            // Only a fence with no info string needs one added.
+            if trimmed.trim_start() == "```" {
+                out.push_str(&trimmed.replace("```", "```text"));
+                continue;
+            }
+        } else if is_fence {
+            inside_fence = false;
+        }
+
+        out.push_str(trimmed);
+    }
+
+    // An unterminated fence would swallow the rest of the doc block.
+    if inside_fence {
+        out.push_str("\n```");
+    }
+
+    out
 }
 
 /// Validates model names for uniqueness.

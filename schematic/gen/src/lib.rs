@@ -65,6 +65,7 @@ pub mod asyncapi_import;
 pub mod cargo_gen;
 pub mod codegen;
 pub mod commands;
+pub mod definition_gen;
 pub mod errors;
 pub mod export;
 pub mod import_pipeline;

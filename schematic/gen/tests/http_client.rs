@@ -468,13 +468,23 @@ fn client_adds_body_when_present() {
     let code = format_tokens(&tokens);
 
     assert!(
-        code.contains("if let Some(body) = body"),
-        "Should conditionally add body\nGenerated code:\n{}",
+        code.contains("crate::shared::RequestBody::Json(json)"),
+        "Should attach a JSON body\nGenerated code:\n{}",
         code
     );
     assert!(
-        code.contains(".body(body)"),
-        "Should add body to request\nGenerated code:\n{}",
+        code.contains(".body(json)"),
+        "Should add the serialized JSON to the request\nGenerated code:\n{}",
+        code
+    );
+    assert!(
+        code.contains("req_builder.multipart(form)"),
+        "Should attach a multipart body\nGenerated code:\n{}",
+        code
+    );
+    assert!(
+        code.contains("req_builder.form(&pairs)"),
+        "Should attach a URL-encoded body\nGenerated code:\n{}",
         code
     );
 }

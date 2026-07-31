@@ -220,6 +220,22 @@ fn map_schema_to_model(
                 target: TypeRef::AllOf(variants),
             }))
         }
+        // JSON Schema (and so OpenAPI 3.1) lets a schema carry `properties`
+        // without a `type: object`, which openapiv3 parses as `Any`. OpenAI's
+        // `Model` and `OpenAIFile` are spelled that way; without this arm they
+        // would erase to `serde_json::Value`.
+        openapiv3::SchemaKind::Any(any) if !any.properties.is_empty() => {
+            let object = openapiv3::ObjectType {
+                properties: any.properties.clone(),
+                required: any.required.clone(),
+                additional_properties: any.additional_properties.clone(),
+                min_properties: any.min_properties,
+                max_properties: any.max_properties,
+            };
+            let struct_def =
+                map_object_to_struct(rust_name, description, &object, resolver, diagnostics);
+            Some(ModelDef::Struct(struct_def))
+        }
         openapiv3::SchemaKind::Any(_) => Some(ModelDef::Alias(TypeAlias {
             name: rust_name.to_string(),
             description,

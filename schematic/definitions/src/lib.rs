@@ -35,7 +35,8 @@
 //!
 //! let api = define_openai_api();
 //! assert_eq!(api.name, "OpenAI");
-//! assert_eq!(api.endpoints.len(), 3);
+//! // Imported from the vendored spec; the count tracks OpenAI's surface.
+//! assert!(api.endpoints.len() > 200);
 //! ```
 //!
 //! ```

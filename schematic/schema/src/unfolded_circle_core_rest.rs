@@ -82,19 +82,19 @@ impl LoginCoreRestRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/pub/login".to_string();
         Ok((
             "POST",
             path,
-            Some(
+            crate::shared::RequestBody::Json(
                 serde_json::to_string(&self.body)
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
@@ -131,16 +131,16 @@ impl LogoutCoreRestRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/pub/logout".to_string();
-        Ok(("POST", path, None, vec![]))
+        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for LogoutCoreRestRequest {
@@ -167,16 +167,16 @@ impl GetSystemInfoCoreRestRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/system".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for GetSystemInfoCoreRestRequest {
@@ -203,35 +203,62 @@ impl ExportBackupCoreRestRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/system/backup/export".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for ExportBackupCoreRestRequest {
     type Response = bytes::Bytes;
     const ENDPOINT_ID: &'static str = "ExportBackup";
 }
+/// Body for the `RestoreBackup` endpoint, sent as `multipart/form-data`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RestoreBackupForm {
+    pub file: crate::shared::FormFile,
+}
+impl RestoreBackupForm {
+    /// Converts the body into its multipart parts.
+    pub fn into_form_parts(self) -> Vec<crate::shared::FormPart> {
+        let mut parts = Vec::new();
+        {
+            let value = self.file;
+            parts.push(crate::shared::FormPart::file("file", value));
+        }
+        parts
+    }
+}
 /// Request for `RestoreBackup` endpoint.
 ///
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::unfolded_circle_core_rest::RestoreBackupCoreRestRequest;
+/// use schematic_schema::unfolded_circle_core_rest::{RestoreBackupCoreRestRequest, RestoreBackupForm};
 ///
-/// let request = RestoreBackupCoreRestRequest::default()
+/// let body = RestoreBackupForm {
+///     // ... set required fields ...
+///     ..Default::default()
+/// };
+/// let request = RestoreBackupCoreRestRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct RestoreBackupCoreRestRequest {}
+pub struct RestoreBackupCoreRestRequest {
+    /// Request body
+    pub body: RestoreBackupForm,
+}
 impl RestoreBackupCoreRestRequest {
+    /// Creates a new request with the required path parameters and body.
+    pub fn new(body: RestoreBackupForm) -> Self {
+        Self { body }
+    }
     /// Converts the request into (method, path, body, headers) parts.
     ///
     /// ## Returns
@@ -239,42 +266,75 @@ impl RestoreBackupCoreRestRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/system/backup/restore".to_string();
-        Ok(("PUT", path, None, vec![]))
+        Ok((
+            "PUT",
+            path,
+            crate::shared::RequestBody::Multipart(self.body.into_form_parts()),
+            vec![],
+        ))
+    }
+}
+impl From<RestoreBackupForm> for RestoreBackupCoreRestRequest {
+    fn from(body: RestoreBackupForm) -> Self {
+        Self { body }
     }
 }
 impl crate::shared::EndpointSpec for RestoreBackupCoreRestRequest {
     type Response = BackupRestoreReportItems;
     const ENDPOINT_ID: &'static str = "RestoreBackup";
 }
+/// Body for the `UploadResource` endpoint, sent as `multipart/form-data`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UploadResourceForm {
+    pub file: crate::shared::FormFile,
+}
+impl UploadResourceForm {
+    /// Converts the body into its multipart parts.
+    pub fn into_form_parts(self) -> Vec<crate::shared::FormPart> {
+        let mut parts = Vec::new();
+        {
+            let value = self.file;
+            parts.push(crate::shared::FormPart::file("file", value));
+        }
+        parts
+    }
+}
 /// Request for `UploadResource` endpoint.
 ///
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::unfolded_circle_core_rest::UploadResourceCoreRestRequest;
+/// use schematic_schema::unfolded_circle_core_rest::{UploadResourceCoreRestRequest, UploadResourceForm};
 ///
-/// let request = UploadResourceCoreRestRequest::new("resource_type_value")
+/// let body = UploadResourceForm {
+///     // ... set required fields ...
+///     ..Default::default()
+/// };
+/// let request = UploadResourceCoreRestRequest::new("resource_type_value", body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UploadResourceCoreRestRequest {
     /// Path parameter: resource_type
     pub resource_type: String,
+    /// Request body
+    pub body: UploadResourceForm,
 }
 impl UploadResourceCoreRestRequest {
-    /// Creates a new request with the required path parameters.
-    pub fn new(resource_type: impl Into<String>) -> Self {
+    /// Creates a new request with the required path parameters and body.
+    pub fn new(resource_type: impl Into<String>, body: UploadResourceForm) -> Self {
         Self {
             resource_type: resource_type.into(),
+            body,
         }
     }
     /// Converts the request into (method, path, body, headers) parts.
@@ -284,30 +344,23 @@ impl UploadResourceCoreRestRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/resources/{}", urlencoding::encode(& self.resource_type.to_string())
         );
-        Ok(("POST", path, None, vec![]))
-    }
-}
-impl From<&str> for UploadResourceCoreRestRequest {
-    fn from(param: &str) -> Self {
-        Self {
-            resource_type: param.to_string(),
-        }
-    }
-}
-impl From<String> for UploadResourceCoreRestRequest {
-    fn from(param: String) -> Self {
-        Self { resource_type: param }
+        Ok((
+            "POST",
+            path,
+            crate::shared::RequestBody::Multipart(self.body.into_form_parts()),
+            vec![],
+        ))
     }
 }
 impl crate::shared::EndpointSpec for UploadResourceCoreRestRequest {
@@ -349,38 +402,65 @@ impl GetResourceCoreRestRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/resources/{}/{}", urlencoding::encode(& self.resource_type.to_string()),
             urlencoding::encode(& self.resource_id.to_string())
         );
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for GetResourceCoreRestRequest {
     type Response = bytes::Bytes;
     const ENDPOINT_ID: &'static str = "GetResource";
 }
+/// Body for the `InstallCustomIntegration` endpoint, sent as `multipart/form-data`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct InstallCustomIntegrationForm {
+    pub file: crate::shared::FormFile,
+}
+impl InstallCustomIntegrationForm {
+    /// Converts the body into its multipart parts.
+    pub fn into_form_parts(self) -> Vec<crate::shared::FormPart> {
+        let mut parts = Vec::new();
+        {
+            let value = self.file;
+            parts.push(crate::shared::FormPart::file("file", value));
+        }
+        parts
+    }
+}
 /// Request for `InstallCustomIntegration` endpoint.
 ///
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::unfolded_circle_core_rest::InstallCustomIntegrationCoreRestRequest;
+/// use schematic_schema::unfolded_circle_core_rest::{InstallCustomIntegrationCoreRestRequest, InstallCustomIntegrationForm};
 ///
-/// let request = InstallCustomIntegrationCoreRestRequest::default()
+/// let body = InstallCustomIntegrationForm {
+///     // ... set required fields ...
+///     ..Default::default()
+/// };
+/// let request = InstallCustomIntegrationCoreRestRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct InstallCustomIntegrationCoreRestRequest {}
+pub struct InstallCustomIntegrationCoreRestRequest {
+    /// Request body
+    pub body: InstallCustomIntegrationForm,
+}
 impl InstallCustomIntegrationCoreRestRequest {
+    /// Creates a new request with the required path parameters and body.
+    pub fn new(body: InstallCustomIntegrationForm) -> Self {
+        Self { body }
+    }
     /// Converts the request into (method, path, body, headers) parts.
     ///
     /// ## Returns
@@ -388,42 +468,75 @@ impl InstallCustomIntegrationCoreRestRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/intg/install".to_string();
-        Ok(("POST", path, None, vec![]))
+        Ok((
+            "POST",
+            path,
+            crate::shared::RequestBody::Multipart(self.body.into_form_parts()),
+            vec![],
+        ))
+    }
+}
+impl From<InstallCustomIntegrationForm> for InstallCustomIntegrationCoreRestRequest {
+    fn from(body: InstallCustomIntegrationForm) -> Self {
+        Self { body }
     }
 }
 impl crate::shared::EndpointSpec for InstallCustomIntegrationCoreRestRequest {
     type Response = IntegrationDriverInfo;
     const ENDPOINT_ID: &'static str = "InstallCustomIntegration";
 }
+/// Body for the `UploadCustomIrCodeSet` endpoint, sent as `multipart/form-data`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UploadCustomIrCodeSetForm {
+    pub file: crate::shared::FormFile,
+}
+impl UploadCustomIrCodeSetForm {
+    /// Converts the body into its multipart parts.
+    pub fn into_form_parts(self) -> Vec<crate::shared::FormPart> {
+        let mut parts = Vec::new();
+        {
+            let value = self.file;
+            parts.push(crate::shared::FormPart::file("file", value));
+        }
+        parts
+    }
+}
 /// Request for `UploadCustomIrCodeSet` endpoint.
 ///
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::unfolded_circle_core_rest::UploadCustomIrCodeSetCoreRestRequest;
+/// use schematic_schema::unfolded_circle_core_rest::{UploadCustomIrCodeSetCoreRestRequest, UploadCustomIrCodeSetForm};
 ///
-/// let request = UploadCustomIrCodeSetCoreRestRequest::new("code_set_id_value")
+/// let body = UploadCustomIrCodeSetForm {
+///     // ... set required fields ...
+///     ..Default::default()
+/// };
+/// let request = UploadCustomIrCodeSetCoreRestRequest::new("code_set_id_value", body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UploadCustomIrCodeSetCoreRestRequest {
     /// Path parameter: code_set_id
     pub code_set_id: String,
+    /// Request body
+    pub body: UploadCustomIrCodeSetForm,
 }
 impl UploadCustomIrCodeSetCoreRestRequest {
-    /// Creates a new request with the required path parameters.
-    pub fn new(code_set_id: impl Into<String>) -> Self {
+    /// Creates a new request with the required path parameters and body.
+    pub fn new(code_set_id: impl Into<String>, body: UploadCustomIrCodeSetForm) -> Self {
         Self {
             code_set_id: code_set_id.into(),
+            body,
         }
     }
     /// Converts the request into (method, path, body, headers) parts.
@@ -433,56 +546,75 @@ impl UploadCustomIrCodeSetCoreRestRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/ir/codes/custom/{}", urlencoding::encode(& self.code_set_id.to_string())
         );
-        Ok(("POST", path, None, vec![]))
-    }
-}
-impl From<&str> for UploadCustomIrCodeSetCoreRestRequest {
-    fn from(param: &str) -> Self {
-        Self {
-            code_set_id: param.to_string(),
-        }
-    }
-}
-impl From<String> for UploadCustomIrCodeSetCoreRestRequest {
-    fn from(param: String) -> Self {
-        Self { code_set_id: param }
+        Ok((
+            "POST",
+            path,
+            crate::shared::RequestBody::Multipart(self.body.into_form_parts()),
+            vec![],
+        ))
     }
 }
 impl crate::shared::EndpointSpec for UploadCustomIrCodeSetCoreRestRequest {
     type Response = CodeSetUploadResult;
     const ENDPOINT_ID: &'static str = "UploadCustomIrCodeSet";
 }
+/// Body for the `InstallCustomComponent` endpoint, sent as `multipart/form-data`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct InstallCustomComponentForm {
+    pub file: crate::shared::FormFile,
+}
+impl InstallCustomComponentForm {
+    /// Converts the body into its multipart parts.
+    pub fn into_form_parts(self) -> Vec<crate::shared::FormPart> {
+        let mut parts = Vec::new();
+        {
+            let value = self.file;
+            parts.push(crate::shared::FormPart::file("file", value));
+        }
+        parts
+    }
+}
 /// Request for `InstallCustomComponent` endpoint.
 ///
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::unfolded_circle_core_rest::InstallCustomComponentCoreRestRequest;
+/// use schematic_schema::unfolded_circle_core_rest::{InstallCustomComponentCoreRestRequest, InstallCustomComponentForm};
 ///
-/// let request = InstallCustomComponentCoreRestRequest::new("custom_component_value")
+/// let body = InstallCustomComponentForm {
+///     // ... set required fields ...
+///     ..Default::default()
+/// };
+/// let request = InstallCustomComponentCoreRestRequest::new("custom_component_value", body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct InstallCustomComponentCoreRestRequest {
     /// Path parameter: custom_component
     pub custom_component: String,
+    /// Request body
+    pub body: InstallCustomComponentForm,
 }
 impl InstallCustomComponentCoreRestRequest {
-    /// Creates a new request with the required path parameters.
-    pub fn new(custom_component: impl Into<String>) -> Self {
+    /// Creates a new request with the required path parameters and body.
+    pub fn new(
+        custom_component: impl Into<String>,
+        body: InstallCustomComponentForm,
+    ) -> Self {
         Self {
             custom_component: custom_component.into(),
+            body,
         }
     }
     /// Converts the request into (method, path, body, headers) parts.
@@ -492,31 +624,24 @@ impl InstallCustomComponentCoreRestRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/system/install/{}", urlencoding::encode(& self.custom_component
             .to_string())
         );
-        Ok(("POST", path, None, vec![]))
-    }
-}
-impl From<&str> for InstallCustomComponentCoreRestRequest {
-    fn from(param: &str) -> Self {
-        Self {
-            custom_component: param.to_string(),
-        }
-    }
-}
-impl From<String> for InstallCustomComponentCoreRestRequest {
-    fn from(param: String) -> Self {
-        Self { custom_component: param }
+        Ok((
+            "POST",
+            path,
+            crate::shared::RequestBody::Multipart(self.body.into_form_parts()),
+            vec![],
+        ))
     }
 }
 impl crate::shared::EndpointSpec for InstallCustomComponentCoreRestRequest {
@@ -543,16 +668,16 @@ impl QueryLogsTextCoreRestRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/system/logs".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for QueryLogsTextCoreRestRequest {
@@ -1537,11 +1662,47 @@ impl UnfoldedCircleCoreRest {
         for (key, value) in merged_headers {
             req_builder = req_builder.header(key.as_str(), value.as_str());
         }
-        if let Some(body) = body {
-            req_builder = req_builder
-                .header("Content-Type", "application/json")
-                .body(body);
-        }
+        req_builder = match body {
+            crate::shared::RequestBody::Empty => req_builder,
+            crate::shared::RequestBody::Json(json) => {
+                req_builder.header("Content-Type", "application/json").body(json)
+            }
+            crate::shared::RequestBody::Multipart(parts) => {
+                let mut form = reqwest::multipart::Form::new();
+                for part in parts {
+                    form = match part {
+                        crate::shared::FormPart::Text { name, value } => {
+                            form.text(name, value)
+                        }
+                        crate::shared::FormPart::Json { name, value } => {
+                            let field = reqwest::multipart::Part::text(value)
+                                .mime_str("application/json")
+                                .map_err(|e| {
+                                    SchematicError::SerializationError(e.to_string())
+                                })?;
+                            form.part(name, field)
+                        }
+                        crate::shared::FormPart::File { name, file } => {
+                            let mut field = reqwest::multipart::Part::bytes(file.bytes)
+                                .file_name(file.file_name);
+                            if let Some(mime) = file.mime {
+                                field = field
+                                    .mime_str(&mime)
+                                    .map_err(|e| {
+                                        SchematicError::SerializationError(e.to_string())
+                                    })?;
+                            }
+                            form.part(name, field)
+                        }
+                    };
+                }
+                req_builder.multipart(form)
+            }
+            crate::shared::RequestBody::UrlEncoded(pairs) => req_builder.form(&pairs),
+            crate::shared::RequestBody::Raw { content_type, bytes } => {
+                req_builder.header("Content-Type", content_type).body(bytes)
+            }
+        };
         let response = req_builder.send().await?;
         if !response.status().is_success() {
             let status = response.status().as_u16();

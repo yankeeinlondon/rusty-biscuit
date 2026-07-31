@@ -66,11 +66,15 @@ fn reserved_path_param_is_emitted_without_encoding() {
     // The struct field is the bare name; the `+` never reaches Rust identifiers.
     assert!(code.contains("pub repo_id: String"));
     assert!(
-        code.contains(r#"format!("/models/{}", & self.repo_id)"#),
+        code.contains(r#"format!("/models/{}", self.repo_id)"#),
         "reserved param should be raw, got:\n{code}"
     );
     assert!(
         !code.contains("urlencoding::encode(& self.repo_id"),
+        "reserved param must not be percent-encoded:\n{code}"
+    );
+    assert!(
+        !code.contains("urlencoding::encode(&self.repo_id"),
         "reserved param must not be percent-encoded:\n{code}"
     );
 }
@@ -163,7 +167,7 @@ fn generate_delete_with_path_param() {
     assert!(code.contains("pub struct DeleteModelRequest"));
     assert!(code.contains("pub model: String"));
     assert!(code.contains(r#""DELETE""#));
-    assert!(code.contains("None")); // No body for DELETE
+    assert!(code.contains("crate::shared::RequestBody::Empty")); // No body for DELETE
 }
 
 #[test]

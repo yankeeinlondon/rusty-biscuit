@@ -3,7 +3,7 @@
 use super::*;
 use super::requests::*;
 use crate::shared::SchematicError;
-impl GitHub {
+impl OpenAI {
     fn auth_is_required(&self) -> bool {
         !self.auth_policy.explicit.is_empty() || self.auth_policy.env_fallback.is_some()
     }
@@ -198,7 +198,7 @@ impl GitHub {
     /// Returns both the response and the context needed for hook processing.
     async fn build_and_send_request(
         &self,
-        request: impl Into<GitHubRequest>,
+        request: impl Into<OpenAIRequest>,
     ) -> Result<(reqwest::Response, crate::shared::ResponseContext), SchematicError> {
         let request = request.into();
         let endpoint_id = request.endpoint_id();
@@ -329,7 +329,7 @@ impl GitHub {
     #[must_use = "this returns a Future that must be awaited"]
     pub async fn request<T: serde::de::DeserializeOwned + Send + Sync + 'static>(
         &self,
-        request: impl Into<GitHubRequest>,
+        request: impl Into<OpenAIRequest>,
     ) -> Result<T, SchematicError> {
         let request = request.into();
         match request.response_kind() {
@@ -382,9 +382,10 @@ impl GitHub {
             Ok(result)
         }
     }
-    /// Executes an API request expecting a plain text response.
+    /// Executes an API request expecting a binary response.
     ///
-    /// Returns the response body as a String.
+    /// Returns the raw bytes of the response body. Use this for endpoints
+    /// that return binary data like audio files, images, or ZIP archives.
     ///
     /// ## Errors
     ///
@@ -392,22 +393,148 @@ impl GitHub {
     /// - The HTTP request fails (network error, timeout, etc.)
     /// - The response indicates a non-success status code
     #[must_use = "this returns a Future that must be awaited"]
-    pub async fn request_text(
+    pub async fn request_bytes(
         &self,
-        request: impl Into<GitHubRequest>,
-    ) -> Result<String, SchematicError> {
+        request: impl Into<OpenAIRequest>,
+    ) -> Result<bytes::Bytes, SchematicError> {
         let (response, _ctx) = self.build_and_send_request(request).await?;
-        let text = response.text().await?;
-        Ok(text)
+        let bytes = response.bytes().await?;
+        Ok(bytes)
     }
-    /// Convenience method for the `GetRepositoryContentRaw` endpoint.
+    /// Executes an API request expecting no response body.
     ///
-    /// Get raw file content from repository
+    /// Use this for endpoints that return 204 No Content or where
+    /// the response body should be ignored.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error if:
+    /// - The HTTP request fails (network error, timeout, etc.)
+    /// - The response indicates a non-success status code
     #[must_use = "this returns a Future that must be awaited"]
-    pub async fn get_repository_content_raw(
+    pub async fn request_empty(
         &self,
-        request: GetRepositoryContentRawRequest,
-    ) -> Result<String, SchematicError> {
-        self.request_text(request).await
+        request: impl Into<OpenAIRequest>,
+    ) -> Result<(), SchematicError> {
+        let (_response, _ctx) = self.build_and_send_request(request).await?;
+        Ok(())
+    }
+    /// Convenience method for the `CreateSpeech` endpoint.
+    ///
+    /** Generates audio from the input text.
+
+Returns the audio file content, or a stream of audio events.
+*/
+    #[must_use = "this returns a Future that must be awaited"]
+    pub async fn create_speech(
+        &self,
+        request: CreateSpeechRequest,
+    ) -> Result<bytes::Bytes, SchematicError> {
+        self.request_bytes(request).await
+    }
+    /// Convenience method for the `DeleteContainer` endpoint.
+    ///
+    /// Delete Container
+    #[must_use = "this returns a Future that must be awaited"]
+    pub async fn delete_container(
+        &self,
+        request: DeleteContainerRequest,
+    ) -> Result<(), SchematicError> {
+        self.request_empty(request).await
+    }
+    /// Convenience method for the `DeleteContainerFile` endpoint.
+    ///
+    /// Delete Container File
+    #[must_use = "this returns a Future that must be awaited"]
+    pub async fn delete_container_file(
+        &self,
+        request: DeleteContainerFileRequest,
+    ) -> Result<(), SchematicError> {
+        self.request_empty(request).await
+    }
+    /// Convenience method for the `RetrieveContainerFileContent` endpoint.
+    ///
+    /// Retrieve Container File Content
+    #[must_use = "this returns a Future that must be awaited"]
+    pub async fn retrieve_container_file_content(
+        &self,
+        request: RetrieveContainerFileContentRequest,
+    ) -> Result<(), SchematicError> {
+        self.request_empty(request).await
+    }
+    /// Convenience method for the `CreateRealtimeCall` endpoint.
+    ///
+    /** Create a new Realtime API call over WebRTC and receive the SDP answer needed
+to complete the peer connection.*/
+    #[must_use = "this returns a Future that must be awaited"]
+    pub async fn create_realtime_call(
+        &self,
+        request: CreateRealtimeCallRequest,
+    ) -> Result<(), SchematicError> {
+        self.request_empty(request).await
+    }
+    /// Convenience method for the `AcceptRealtimeCall` endpoint.
+    ///
+    /** Accept an incoming SIP call and configure the realtime session that will
+handle it.*/
+    #[must_use = "this returns a Future that must be awaited"]
+    pub async fn accept_realtime_call(
+        &self,
+        request: AcceptRealtimeCallRequest,
+    ) -> Result<(), SchematicError> {
+        self.request_empty(request).await
+    }
+    /// Convenience method for the `HangupRealtimeCall` endpoint.
+    ///
+    /** End an active Realtime API call, whether it was initiated over SIP or
+WebRTC.*/
+    #[must_use = "this returns a Future that must be awaited"]
+    pub async fn hangup_realtime_call(
+        &self,
+        request: HangupRealtimeCallRequest,
+    ) -> Result<(), SchematicError> {
+        self.request_empty(request).await
+    }
+    /// Convenience method for the `ReferRealtimeCall` endpoint.
+    ///
+    /// Transfer an active SIP call to a new destination using the SIP REFER verb.
+    #[must_use = "this returns a Future that must be awaited"]
+    pub async fn refer_realtime_call(
+        &self,
+        request: ReferRealtimeCallRequest,
+    ) -> Result<(), SchematicError> {
+        self.request_empty(request).await
+    }
+    /// Convenience method for the `RejectRealtimeCall` endpoint.
+    ///
+    /// Decline an incoming SIP call by returning a SIP status code to the caller.
+    #[must_use = "this returns a Future that must be awaited"]
+    pub async fn reject_realtime_call(
+        &self,
+        request: RejectRealtimeCallRequest,
+    ) -> Result<(), SchematicError> {
+        self.request_empty(request).await
+    }
+    /// Convenience method for the `DeleteResponse` endpoint.
+    ///
+    /** Deletes a model response with the given ID.
+*/
+    #[must_use = "this returns a Future that must be awaited"]
+    pub async fn delete_response(
+        &self,
+        request: DeleteResponseRequest,
+    ) -> Result<(), SchematicError> {
+        self.request_empty(request).await
+    }
+    /// Convenience method for the `BetaDeleteResponse` endpoint.
+    ///
+    /** Deletes a model response with the given ID.
+*/
+    #[must_use = "this returns a Future that must be awaited"]
+    pub async fn beta_delete_response(
+        &self,
+        request: BetaDeleteResponseRequest,
+    ) -> Result<(), SchematicError> {
+        self.request_empty(request).await
     }
 }

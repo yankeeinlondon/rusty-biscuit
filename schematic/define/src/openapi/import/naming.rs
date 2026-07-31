@@ -22,6 +22,7 @@ const RUST_KEYWORDS: &[&str] = &[
 /// - camelCase: `listUsers` -> `ListUsers`
 /// - SCREAMING_SNAKE: `LIST_USERS` -> `ListUsers`
 /// - Already PascalCase: `ListUsers` -> `ListUsers`
+/// - Dotted event names: `api_key.created` -> `ApiKeyCreated`
 ///
 /// ## Examples
 ///
@@ -32,11 +33,15 @@ const RUST_KEYWORDS: &[&str] = &[
 /// assert_eq!(to_pascal_case("list-users"), "ListUsers");
 /// assert_eq!(to_pascal_case("listUsers"), "ListUsers");
 /// assert_eq!(to_pascal_case("LIST_USERS"), "ListUsers");
+/// assert_eq!(to_pascal_case("api_key.created"), "ApiKeyCreated");
 /// ```
 pub fn to_pascal_case(s: &str) -> String {
     // Split by common separators first
+    // `.` and `:` are separators too: enum values like `api_key.created` are
+    // common in event-name schemas, and leaving them would sanitize to an
+    // underscore mid-identifier (`ApiKey_created`), which is not camel case.
     let words: Vec<&str> = s
-        .split(['_', '-', ' ', '/'])
+        .split(['_', '-', ' ', '/', '.', ':'])
         .filter(|w| !w.is_empty())
         .collect();
 

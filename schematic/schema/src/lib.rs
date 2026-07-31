@@ -13,7 +13,7 @@
 //! | [`artificial_analysis`] | [`ArtificialAnalysisData`](artificial_analysis::ArtificialAnalysisData) | Artificial Analysis free data API: LLM and media-model benchmark catalogs. Attribution: as required by the Artificial Analysis API terms, all usage must include attribution to https://artificialanalysis.ai/. | API Key (`x-api-key`) |
 //! | [`artificial_analysis`] | [`ArtificialAnalysisCritPt`](artificial_analysis::ArtificialAnalysisCritPt) | Artificial Analysis CritPt benchmark: submit code-generation results for evaluation. Attribution: as required by the Artificial Analysis API terms, all usage must include attribution to https://artificialanalysis.ai/. | API Key (`x-api-key`) |
 //! | [`bitbucket`] | [`Bitbucket`](bitbucket::Bitbucket) | Bitbucket Cloud REST API v2.0 for repository, PR, issue, and tag workflows | Basic |
-//! | [`openai`] | [`OpenAI`](openai::OpenAI) | OpenAI REST API for model management | Bearer |
+//! | [`openai`] | [`OpenAI`](openai::OpenAI) | The OpenAI REST API. Please see https://platform.openai.com/docs/api-reference for more details. | Bearer |
 //! | [`elevenlabs`] | [`ElevenLabs`](elevenlabs::ElevenLabs) | ElevenLabs Creative Platform API for text-to-speech, voice management, and sound generation | API Key (`xi-api-key`) |
 //! | [`gitea`] | [`Gitea`](gitea::Gitea) | Gitea REST API v1.25+ for repository, PR, issue, and release workflows | API Key (`Authorization`) |
 //! | [`github`] | [`GitHub`](github::GitHub) | GitHub REST API v2022-11-28 for repository, PR, issue, and release workflows | Bearer |

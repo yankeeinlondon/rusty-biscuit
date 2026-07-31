@@ -1,8 +1,10 @@
 //! EndpointSpec trait implementation generation.
 
 use proc_macro2::TokenStream;
-use quote::{format_ident, quote};
+use quote::quote;
 use schematic_define::ApiResponse;
+
+use crate::codegen::request_structs::shared::type_name_to_tokens;
 
 /// Generates the EndpointSpec implementation for type-safe hook registration.
 ///
@@ -15,19 +17,7 @@ pub(super) fn generate_endpoint_spec_impl(
 ) -> TokenStream {
     // Determine the response type based on ApiResponse variant
     let response_type = match response {
-        ApiResponse::Json(schema) => {
-            // Parse the type name as a proper type (handles Vec<T>, Option<T>, etc.)
-            let type_name = &schema.type_name;
-            // Use syn to parse the type expression
-            match syn::parse_str::<syn::Type>(type_name) {
-                Ok(ty) => quote! { #ty },
-                Err(_) => {
-                    // Fallback: treat as simple identifier (shouldn't happen with valid schemas)
-                    let ident = format_ident!("{}", type_name);
-                    quote! { #ident }
-                }
-            }
-        }
+        ApiResponse::Json(schema) => type_name_to_tokens(&schema.type_name),
         ApiResponse::Text => quote! { String },
         ApiResponse::Binary => quote! { bytes::Bytes },
         ApiResponse::Empty => quote! { () },

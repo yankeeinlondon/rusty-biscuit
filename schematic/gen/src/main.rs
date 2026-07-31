@@ -101,8 +101,16 @@ enum Commands {
         #[arg(long, value_name = "PATH")]
         module_path: Option<String>,
 
-        #[arg(short, long)]
+        #[arg(short, long, default_value = "")]
         output: String,
+
+        /// Emit a `schematic-definitions` module here instead of a standalone client
+        #[arg(long, value_name = "DIR")]
+        definitions_out: Option<String>,
+
+        /// Skip endpoints whose path starts with this prefix (repeatable)
+        #[arg(long, value_name = "PREFIX")]
+        exclude_path: Vec<String>,
 
         #[arg(long)]
         dry_run: bool,
@@ -170,15 +178,22 @@ fn main() -> ExitCode {
             api_name,
             module_path,
             output,
+            definitions_out,
+            exclude_path,
             dry_run,
             strict,
         }) => schematic_gen::commands::run_import_command(
-            &input,
-            api_name.as_deref(),
-            module_path.as_deref(),
-            &output,
-            dry_run,
-            strict,
+            schematic_gen::import_pipeline::ImportOptions {
+                input,
+                api_name,
+                module_path,
+                output,
+                definitions_out,
+                exclude_paths: exclude_path,
+                dry_run,
+                strict,
+                verbose: cli.verbose > 0,
+            },
             cli.verbose,
         ),
         Some(Commands::ImportAsyncapi {

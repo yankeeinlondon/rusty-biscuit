@@ -85,6 +85,21 @@ impl<'a> RefResolver<'a> {
         }
     }
 
+    /// Resolves a boxed schema reference to its underlying schema.
+    ///
+    /// Object properties and array items are spelled `ReferenceOr<Box<Schema>>`
+    /// rather than `ReferenceOr<Schema>`; this is the same resolution with that
+    /// shape unwrapped.
+    pub fn resolve_boxed_schema(
+        &self,
+        ref_or: &'a ReferenceOr<Box<Schema>>,
+    ) -> Result<&'a Schema, ResolveError> {
+        match ref_or {
+            ReferenceOr::Item(schema) => Ok(schema),
+            ReferenceOr::Reference { reference } => self.resolve_schema_ref(reference),
+        }
+    }
+
     /// Resolves a schema reference by its reference string.
     fn resolve_schema_ref(&self, reference: &str) -> Result<&'a Schema, ResolveError> {
         // Check depth limit
