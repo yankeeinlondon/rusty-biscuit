@@ -137,7 +137,7 @@ mod tests {
         let names: Vec<String> = report
             .files
             .iter()
-            .map(|p| p.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/"))
+            .map(|p| biscuit_file::to_portable_string(p.strip_prefix(root).unwrap()))
             .collect();
         assert!(names.contains(&"a.md".to_string()));
         assert!(names.contains(&"docs/b.markdown".to_string()));
