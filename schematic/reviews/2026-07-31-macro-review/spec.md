@@ -207,6 +207,16 @@ Concrete bugs found during this review, independent of any design opinion:
 > **Status update (2026-07-31, OpenAI import work).** Items 1, 4, 20, and 21 are
 > fixed, and #16's concern is partly addressed: the generated crate is now
 > compiled and clippy-clean as part of `just lint-schema`. Everything else stands.
+>
+> Separately, §7.1's "0 query parameters across all 15 artifacts" and §9's
+> recommendation 7 are now done: operation
+> parameters now export (OpenAI 288, GitHub 31, GitLab 32, Gitea 22, Bitbucket 17).
+> HuggingFace and ElevenLabs still show 0 because their *definitions* declare none.
+> A second bug surfaced while fixing it — path parameters were emitted once per
+> method sharing a path, so `/models/{model}` declared `model` twice, which OpenAPI
+> forbids. Both are now covered by wiring-level tests in `export/mod.rs`;
+> `map_parameters` had full unit coverage while the call site still said
+> `parameters: vec![]`, which is how the defect survived.
 
 | # | Defect | Location | Status |
 |---|---|---|---|
