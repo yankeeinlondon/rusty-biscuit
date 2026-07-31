@@ -393,15 +393,6 @@ pub(crate) fn file_stem(basename: &str) -> String {
         .unwrap_or_else(|| basename.to_string())
 }
 
-/// Renders a path with `/` separators for stable Markdown output.
-///
-/// Platform path semantics are used for parsing; the result is normalized to
-/// forward slashes so composed Markdown is portable.
-#[allow(dead_code)]
-pub(crate) fn display_path_with_forward_slashes(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
-}
-
 /// Resolves skill roots for an executing agent with injectable directories.
 ///
 /// User-scoped roots are derived from `home_dir`; local-scoped roots are derived
@@ -2062,9 +2053,26 @@ pub fn join_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Express
     ))
 }
 
-/// Escapes `[` and `]` in Markdown link text with backslashes.
+/// Backslash-escapes the characters CommonMark treats as active in link text.
+///
+/// The backslash itself is escaped first, and is not optional: the two-argument
+/// `link(target, desc)` takes its description straight from the caller, who can
+/// supply a literal `\`. CommonMark honors a backslash before ASCII punctuation
+/// inside link text, so an unescaped `\\server\share\[x]` would lose separators
+/// and reopen the very bracket escaping this function performs.
+///
+/// The one-argument arm cannot reach that case: its description and its
+/// destination project the same path, so a description that fell back to a
+/// native spelling implies `portable_destination` already rejected the
+/// destination.
+///
+/// Whitespace is preserved. The sibling
+/// [`collapse_and_escape`](escape::collapse_and_escape) collapses it
+/// deliberately, which is right for provider prose and wrong for a path.
 fn escape_link_text(text: &str) -> String {
-    text.replace('[', "\\[").replace(']', "\\]")
+    text.replace('\\', "\\\\")
+        .replace('[', "\\[")
+        .replace(']', "\\]")
 }
 
 /// Returns `true` when a link destination needs angle-bracket wrapping to stay
@@ -2094,6 +2102,27 @@ fn format_markdown_link(text: &str, destination: &str) -> String {
     format!("[{escaped_text}]({safe_dest})")
 }
 
+/// Renders a resolved local path as a `link()` destination.
+///
+/// ## Errors
+///
+/// [`ExpressionError`] when the path has no faithful portable spelling (a
+/// Windows UNC, device, or unreducible verbatim path). `link()` has no
+/// compose-report warning channel, and falling back to the raw argument is not
+/// an option: it may be a magic (`@`, `!`) or source-relative reference that
+/// names a different file once the composed document moves.
+fn portable_destination(path: &Path) -> Result<String, ExpressionError> {
+    biscuit_file::try_portable_string(path).ok_or_else(|| {
+        expression_other(
+            "link",
+            format!(
+                "link() cannot render {} as a Markdown destination: no faithful portable spelling exists, and CommonMark would consume the backslash escapes in its native form.",
+                path.display()
+            ),
+        )
+    })
+}
+
 /// `link(file)` / `link(target, desc)` — emits a Markdown inline link.
 ///
 /// - One argument: resolves a local file and uses `relative(file)` as the link
@@ -2121,7 +2150,7 @@ pub fn link_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Express
                 &ctx.base_dir,
                 ctx.file_resolution_context.as_ref(),
             );
-            let dest = path.to_string_lossy().replace('\\', "/");
+            let dest = portable_destination(&path)?;
             Ok(Value::String(format_markdown_link(&desc, &dest)))
         }
         2 => {
@@ -2137,7 +2166,7 @@ pub fn link_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Express
                 target_raw.to_string()
             } else {
                 let path = resolve_path_arg("link", &args[0], ctx)?;
-                path.to_string_lossy().replace('\\', "/")
+                portable_destination(&path)?
             };
             Ok(Value::String(format_markdown_link(desc, &dest)))
         }
@@ -4464,7 +4493,7 @@ mod tests {
                 result,
                 format!(
                     "[My Doc]({})",
-                    display_path_with_forward_slashes(&dir.path().join("doc.md"))
+                    biscuit_file::to_portable_string(&dir.path().join("doc.md"))
                 )
             );
         }
@@ -4521,6 +4550,68 @@ mod tests {
                 "expected angle-bracket wrapping for destination with spaces, got {result:?}"
             );
             assert!(result.ends_with(">)"));
+        }
+
+        /// Returns the visible text of the single link in `markdown`.
+        fn link_label(markdown: &str) -> String {
+            use pulldown_cmark::{Event, Parser, Tag, TagEnd};
+
+            let mut label = String::new();
+            let mut inside = false;
+            for event in Parser::new(markdown) {
+                match event {
+                    Event::Start(Tag::Link { .. }) => inside = true,
+                    Event::End(TagEnd::Link) => inside = false,
+                    Event::Text(text) if inside => label.push_str(&text),
+                    _ => {}
+                }
+            }
+            label
+        }
+
+        /// A label carrying a native Windows spelling must survive a CommonMark
+        /// round-trip character for character.
+        ///
+        /// `make_portable_relative_in_context` falls back to the native
+        /// spelling when no faithful portable one exists, so a `link()`
+        /// description can contain literal backslashes. CommonMark honors a
+        /// backslash before ASCII punctuation inside link text, so escaping
+        /// only `[` and `]` would silently delete the separators — and the
+        /// leading `\\` would arrive as a single `\`.
+        #[test]
+        fn native_fallback_label_round_trips_through_commonmark() {
+            let label = r"\\server\share\notes\[draft].md";
+
+            let rendered = format_markdown_link(label, "C:/repo/notes.md");
+
+            assert_eq!(link_label(&rendered), label);
+        }
+
+        /// Both local-destination arms refuse a path with no faithful portable
+        /// spelling rather than emitting Markdown that parses back as a
+        /// different destination.
+        ///
+        /// Windows-only: off Windows every path portabilizes, so there is no
+        /// decline to simulate.
+        #[cfg(windows)]
+        #[test]
+        fn link_local_destination_arms_reject_declined_paths() {
+            // A literal `.` component under a verbatim prefix is a real
+            // directory name, so `dunce` refuses to reduce the prefix and the
+            // path has no portable spelling.
+            let ctx = ResolutionContext::new(std::path::PathBuf::from(r"\\?\C:\repo\.\docs"));
+
+            let one_arg = link_fn(&[json!("sibling.md")], &ctx).unwrap_err();
+            assert!(
+                one_arg.contains("no faithful portable spelling"),
+                "got: {one_arg}"
+            );
+
+            let two_arg = link_fn(&[json!("sibling.md"), json!("Sibling")], &ctx).unwrap_err();
+            assert!(
+                two_arg.contains("no faithful portable spelling"),
+                "got: {two_arg}"
+            );
         }
 
         #[test]
@@ -4934,24 +5025,6 @@ mod phase1_helpers {
         assert_eq!(file_extension("review"), "");
         assert_eq!(file_stem("foo.tar.gz"), "foo.tar");
         assert_eq!(file_extension("foo.tar.gz"), "gz");
-    }
-
-    #[test]
-    fn display_path_with_forward_slashes_normalizes_separators() {
-        assert_eq!(
-            display_path_with_forward_slashes(Path::new("foo/bar/baz.md")),
-            "foo/bar/baz.md"
-        );
-        assert_eq!(
-            display_path_with_forward_slashes(Path::new("/tmp/foo/bar.md")),
-            "/tmp/foo/bar.md"
-        );
-        // Backslashes are normalized even if the running platform does not use
-        // them as separators, so composed Markdown stays portable.
-        assert_eq!(
-            display_path_with_forward_slashes(Path::new("foo\\bar\\baz.md")),
-            "foo/bar/baz.md"
-        );
     }
 
     #[test]
