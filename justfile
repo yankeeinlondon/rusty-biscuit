@@ -3,7 +3,16 @@ set positional-arguments
 
 # set allow-duplicate-recipes
 
-set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+# The `env CYG_SYS_BASHRC=1` prefix is load-bearing. Cygwin's /etc/bash.bashrc
+# opens with `[[ -z ${CYG_SYS_BASHRC} ]]`, an unguarded expansion that the `-u`
+# below turns into a fatal "unbound variable" wherever bash sources that file
+# non-interactively (a shell exporting BASH_ENV is the usual cause). Pre-setting
+# the variable sends that guard down its already-initialized early-return path.
+#
+# It must reach bash through the environment rather than just's `export`, which
+# covers recipe shells but NOT the shells just spawns to evaluate backtick
+# assignments — `KACHE_VERSION` below is one.
+set shell := ["env", "CYG_SYS_BASHRC=1", "bash", "-eu", "-o", "pipefail", "-c"]
 
 import "./just/lifecycle.just"
 import "./just/plan.just"

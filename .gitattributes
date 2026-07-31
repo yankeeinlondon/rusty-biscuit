@@ -1,0 +1,34 @@
+# Line endings are normalized to LF in the repo AND in the working tree.
+#
+# Without this, a Windows checkout with `core.autocrlf=true` writes CRLF into
+# every text file. Bash then reads `\r` as part of each command and dies with
+# `$'\r': command not found`, which is how `just init` fails on a fresh Windows
+# clone. Insta snapshots (*.snap) break the same way — they are compared byte
+# for byte against LF output produced by the tests.
+#
+# `eol=lf` takes precedence over the user's core.autocrlf setting, so this is
+# the durable fix and no per-developer git config is required.
+* text=auto eol=lf
+
+# PowerShell is the one place CRLF is the native convention.
+*.ps1 text eol=crlf
+
+# Archived terminal captures: byte-exact records of a run, CRLF and ANSI escapes
+# included. Normalizing them would rewrite the evidence they exist to preserve.
+claudine/features/_completed/**/reproduce_output.txt -text
+
+# Binaries: never touch, never diff as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.wav binary
+*.ogg binary
+*.mp3 binary
+*.afphoto binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
