@@ -1,7 +1,8 @@
 # Implementation plan — `to_portable_string`
 
-Execution plan for [`spec.md`](./spec.md). Three independently landable commits,
-each deleting the local implementation it replaces.
+Execution plan for [`spec.md`](./spec.md). Three sequentially landable commits,
+each deleting the local implementation it replaces. Commits 2 and 3 depend on
+the public API introduced by commit 1.
 
 Every file, line number, symbol, and impact figure below was verified against
 the working tree and the GitNexus index on 2026-07-31. Line numbers are given so
@@ -27,7 +28,13 @@ GitNexus impact, `direction: upstream`, 2026-07-31 index:
 | Symbol | Risk | Impacted | Direct | Flows | Tests |
 |--------|------|----------|--------|-------|-------|
 | `path_to_markdown` | **HIGH** | 29 (16 / 13) | 16 | 0 | included |
+| `make_relative_in_context` | **HIGH** | 38 (3 / 10 / 25) | 3 | 0 | included |
 | `make_portable_relative_in_context` | MEDIUM | 38 (8 / 25 / 5) | 8 | 0 | included |
+| `link_resolve` | **HIGH** | 15 | 15 | 0 | included |
+| `normalize_links` | MEDIUM | 11 | 11 | 0 | included |
+| `link_fn` | MEDIUM | 8 | 8 | 0 | included |
+| `comparison_path` | LOW | 12 (1 / 11) | 1 | 0 | included |
+| `escape_link_text` | LOW | 10 (1 / 1 / 8) | 1 | 0 | included |
 | `complete_markdown_files_from` | LOW | 6 (3 / 2 / 1) | 3 | 0 | included |
 | `display_path_with_forward_slashes` | LOW | 0 | 0 | 0 | included |
 
@@ -178,6 +185,7 @@ resolver coverage, not renderer coverage.
 From `biscuit-file/`:
 
 ```
+just build
 just lint
 just test
 just doctest
@@ -187,16 +195,22 @@ cargo test -p biscuit-file --no-default-features --lib path_text
 The last command is the one that proves the API is genuinely unfeatured; no
 `just` recipe expresses `--no-default-features`, so an exact package selector is
 used instead. `darkmatter/dmls` depends on biscuit-file with
-`default-features = false`, so this is a real build configuration, not a
-hypothetical one.
+`default-features = false`, so this is a real build configuration, but it also
+enables `file-reference`; the explicit command above is what proves the new API
+is genuinely unfeatured.
 
-**Done when:** all four pass, and `detect_changes()` reports only the new
-`path_text` symbols.
+Run the platform-sensitive tests on Windows and a non-Windows host.
+
+**Done when:** all five commands pass on the applicable hosts, and
+`detect_changes()` reports only the expected manifest, module/export,
+`path_text`, test, and documentation changes, with no affected execution flow.
 
 ## Commit 2 — darkmatter production adoption
 
 Run `impact` on each symbol immediately before editing it and confirm the
-figures above still hold.
+figures above still hold. `link_resolve`, `path_to_markdown`, and
+`make_relative_in_context` are HIGH risk; warn before editing any of them if the
+refreshed result remains HIGH or becomes CRITICAL.
 
 ### `path_to_markdown` — delete (HIGH risk, 16 direct callers)
 
@@ -204,41 +218,55 @@ Production call sites split by whether the value can carry a Windows prefix:
 
 | Site | Replace with | Why |
 |------|--------------|-----|
-| `link_normalization.rs:23` (`comparison_path`) | `to_portable_string` | Feeds `starts_with`, not document text. Both sides of every comparison must decline together. |
+| `link_normalization.rs:23` (`comparison_path`) | private Windows comparison representation | Rendering and path identity have different contracts; safe roots and long verbatim descendants do not necessarily decline together. |
 | `link_normalization.rs:160`, `:168`, `:200` | `to_portable_string` | Each arm is guarded by `comparable_abs.starts_with(repo/home/var)`, so `rel` is a prefix-free relative path and the render always portabilizes. A decline branch here would be dead code. |
-| `link_resolve.rs:100` | `try_portable_string`, branching | Writes `abs_path_str` — a canonicalized **absolute** destination, which on Windows can be verbatim or UNC. |
+| `link_resolve.rs:100` | `try_portable_string`, erroring on `None` | Writes a canonicalized **absolute** destination before documents move; retaining a relative authored target would break transclusion identity. |
 
-At `link_resolve.rs:100`, `None` means: leave `record`'s original target text in
-place, do not call `find_target_range`, and add a compose-report warning naming
-the path. Assert the guarded-relative reasoning for the three
-`link_normalization` arms in a comment at `comparison_path`, not at each arm —
-it is one fact about the function's contract, and CLAUDE.md's criterion A
-(invariant not derivable from the types) is what earns it the line.
+At `link_resolve.rs:100`, `None` means: return
+`MarkdownError::Transform(String)` naming the resolved path and explaining that
+no faithful Markdown destination exists. Do not leave the original target in
+place: `link_resolve` exists to make child-relative links absolute before
+movement, so warning-and-continue would silently retarget a link after
+transclusion. Reuse the existing error variant; this feature does not add a new
+public error type.
+
+Replace `comparison_path` with a private comparison representation whose Windows
+contract is independent of rendering:
+
+- ordinary disk and verbatim-disk prefixes for the same drive compare equal,
+  even when `dunce` retains the descendant because it is over `MAX_PATH`;
+- legacy and verbatim UNC prefixes compare equal if UNC normalization is
+  supported by the comparison key;
+- remaining components are preserved without lexical `.`/`..` collapse;
+- device and unknown verbatim namespaces remain distinct;
+- every `starts_with` and `strip_prefix` operand in `normalize_links` uses the
+  same representation.
+
+This may be a small private enum or a comparison-only `PathBuf` projection. It
+must never be emitted as document text. Document the invariant at the helper;
+it is not derivable from the types.
 
 Then delete `compose/util.rs:17-32` and its entry in the `compose/mod.rs:146-148`
 re-export list.
 
-The remaining direct callers are test expectations in the same two files
+The remaining `path_to_markdown` callers are test expectations in the same two files
 (`link_normalization.rs:305,322,363,387,433-435,487-488,530,568-571,625-628`
-and `link_resolve.rs:212,247,287,312,334,359,361`). Point them at
-`to_portable_string` as well — they exist to build an expected string in the
-same spelling the production path emits, and that reason survives the rename.
+`to_portable_string` only where the expected value is rendered relative text.
+Tests for an absolute declined path must instead assert the stage-specific
+branch: Finalization preserves and warns; Inline-Pre errors. Do not build both
+the input and expectation through one renderer, because that can hide a broken
+comparison key.
 
-Two correctness notes:
+Add a Windows normalization regression with a short, safely reducible repository
+root and an over-`MAX_PATH` verbatim descendant. The descendant must still pass
+the repo prefix test and become relative portable text. Add the corresponding
+legacy/verbatim UNC comparison case; the key must support that equivalence.
 
-- `comparison_path` is applied to **both** sides of every `starts_with` /
-  `strip_prefix` in `normalize_links` (`:139`, `:145`, `:148`, `:185`), so a
-  declined path staying native does not break comparison — both sides decline
-  together. Preserve that symmetry; do not simplify one side away. Record it as
-  an inline comment at `comparison_path` in this commit.
-- On Windows these tests canonicalize `TempDir` paths, which come back verbatim,
-  and build both the input document and the expectation through the same helper.
-  Expectations therefore do not move with path length. What a `MAX_PATH`-length
-  temp root changes is the *input*: the document would carry a declined
-  `\\?\C:\…` destination, which `normalize_links` then refuses to rewrite, so
-  `link_normalizations_applied` drops to 0 and the test fails loudly. Correct
-  behavior, confusing failure — if a Windows runner starts failing these
-  together, check the temp root's length before suspecting the rendering.
+After the repo/home/environment branches, if no replacement was selected and
+`try_portable_string(&abs_path)` is `None`, leave the authored destination
+byte-identical and add the compose-report warning. Run this check only after the
+anchored branches so a declined absolute spelling that can become a safe
+relative replacement is still normalized.
 
 ### `make_portable_relative_in_context` — delegate (MEDIUM risk, 8 direct)
 
@@ -265,13 +293,19 @@ and would otherwise keep the defect until that feature lands.
 `compose/expression/functions/mod.rs:2124` and `:2140` —
 `path.to_string_lossy().replace('\\', "/")` → `try_portable_string(&path)`, both
 branching. `path` comes from `resolve_path_arg`, so it is absolute and can be
-verbatim or UNC on Windows. On `None`, emit the link with the raw argument text
-the author supplied rather than a native spelling CommonMark would re-parse
-incorrectly, and record the warning.
+verbatim or UNC on Windows. On `None`, return `ExpressionError` naming the path.
+Do not emit the raw argument and do not add a warning sink to `ResolutionContext`:
+the raw value may be a magic or source-relative reference, and the expression
+function currently has no compose-report warning channel.
 
-The `desc` argument at `:2119` keeps `make_portable_relative_in_context` and its
-native fallback: link *text* is not a destination, and CommonMark applies no
-escape processing that would corrupt it.
+The generated `desc` at `:2119` keeps
+`make_portable_relative_in_context`, including its native fallback. Update the
+link-label escaping path so literal backslashes survive CommonMark parsing;
+`escape_link_text` currently escapes only `[` and `]`, but backslash escapes are
+active in link text too. Prefer a whitespace-preserving inline escape helper
+over the provider helper that deliberately collapses whitespace. Parse focused
+labels through `pulldown_cmark` and assert exact visible text, including leading
+`\\` and backslashes before punctuation.
 
 ### `display_path_with_forward_slashes` — delete (LOW risk, 0 callers)
 
@@ -283,15 +317,22 @@ separator coverage added in commit 1 carry that case.
 
 ### Gates
 
-From `darkmatter/`: `just lint`, `just test`, `just doctest`. Add the two
-Windows integration cases the spec asks for at the public consumer boundary — a
-safely canonicalized disk path, and a declined verbatim/UNC path whose
-destination must come out byte-identical to the authored text with the warning
-present in the report. Asserting only "unchanged" would pass equally if the
-normalizer never ran, so assert the warning too. Run the suite
-on Windows **and** a non-Windows host; the UNC policy change is invisible on
-Unix. Check `darkmatter/docs/` for a `path_to_markdown` reference before
-deleting (none exists as of 2026-07-31).
+From `darkmatter/`: `just build`, `just lint`, `just test`, `just doctest`.
+Add the stage-specific Windows cases from the spec:
+
+- safe canonicalized disk paths continue through resolution and normalization;
+- `normalize_links` preserves a declined authored absolute destination and
+  records a warning;
+- `link_resolve` returns an error for a declined resolved destination, including
+  a transclusion-oriented regression that would fail if a child-relative link
+  were left behind;
+- both local `link()` destination arms return `ExpressionError` on decline;
+- the mixed safe-root/long-verbatim-descendant comparison normalizes correctly;
+- native-fallback link labels round-trip through `pulldown_cmark`.
+
+Run the suite on Windows **and** a non-Windows host; the prefix policy change is
+invisible on Unix. Check `darkmatter/docs/` for a `path_to_markdown` reference
+before deleting (none exists as of 2026-07-31).
 
 **Done when:** both platforms are green, no Unix snapshot moved, and
 `detect_changes()` shows only the path-rendering symbols and compose/link flows.
@@ -299,10 +340,13 @@ deleting (none exists as of 2026-07-31).
 ## Commit 3 — darkmatter CLI and test utilities
 
 - `cli/src/args/completion.rs:31` `complete_markdown_files_from` — the candidate
-  is built at `:92-99` from `path`/`path.strip_prefix(base_dir)`. Render both
-  branches with `to_portable_string` instead of `to_string_lossy().to_string()`.
-  The `./` trim at `:101` and the trailing-`/` append at `:105` then operate on
-  portable text on every platform.
+  is built at `:92-99` from `path`/`path.strip_prefix(base_dir)`. Call
+  `try_portable_string` on the selected `&Path` and retain whether it succeeded;
+  on `None`, call `to_portable_string` for the specified native fallback rather
+  than duplicating that policy locally. The `./` trim at `:101` applies only to
+  portable output. At `:105`, append `/` to portable directories and
+  `std::path::MAIN_SEPARATOR` to native-fallback directories. Do not produce a
+  mixed `\\server\share\dir/` candidate.
 - `cli/src/args/completion.rs:173-175` — delete the test-only `normalize_path`
   helper and assert candidate values directly. Post-hoc normalization in the
   test is what hides the production behavior above.
@@ -318,8 +362,10 @@ deleting (none exists as of 2026-07-31).
 
 ### Gates
 
-From `darkmatter/`: `just lint`, `just test`. CLI completion tests must pass
-without the deleted normalizer on both platforms.
+From `darkmatter/`: `just build`, `just lint`, `just test`. CLI completion tests
+must pass without the deleted normalizer on both platforms. Add a Windows case
+for a declined absolute UNC directory and assert its spelling and suffix remain
+native.
 
 ## Verification scope
 
@@ -344,12 +390,16 @@ this scope.
    starts passing for the wrong reason — because someone reintroduced a lexical
    collapse — the spec's central decision has been silently reversed.
 2. **UNC output changes.** A Markdown destination that used to be rewritten to
-   `//server/share/f.md` is now left exactly as the author wrote it, with a
-   compose-report warning; non-Markdown consumers see `\\server\share\f.md`.
-   Intended; see the spec's Prefix policy and Declined paths at the Markdown
-   boundary. Any downstream report of "links on a network share stopped being
-   normalized" is this change, and the fix is a URL-aware caller, not a
-   separator replacement here.
+   `//server/share/f.md` now follows a stage-specific policy: Finalization leaves
+   authored text unchanged and warns, while Inline-Pre resolution and `link()`
+   return errors rather than emit ambiguous Markdown. Non-Markdown consumers see
+   `\\server\share\f.md`. Intended; see the spec's Prefix policy and Declined
+   paths at the Markdown boundary.
 3. **`--no-default-features` is a real configuration**, not a formality:
-   `darkmatter/dmls` uses it. If commit 1's helper accidentally lands inside a
-   feature-gated module, dmls breaks at commit 3, not commit 1.
+   `darkmatter/dmls` uses it but also enables `file-reference`, so DMLS alone
+   cannot catch accidental placement inside that feature. Commit 1's explicit
+   `cargo test -p biscuit-file --no-default-features --lib path_text` gate is the
+   proof.
+4. **Comparison is not rendering.** A short repository root can simplify while
+   its long verbatim descendant cannot. If either operand goes through
+   `to_portable_string`, valid repo/home/env normalization can silently stop.
