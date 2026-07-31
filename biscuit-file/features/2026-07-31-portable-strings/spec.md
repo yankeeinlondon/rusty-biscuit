@@ -7,7 +7,9 @@ path as portable, forward-slash-separated text when the Windows spelling can be
 reduced faithfully. A safe Windows verbatim-disk (`\\?\C:\...`) prefix is reduced
 through `dunce::simplified` before separator conversion. If `dunce` declines,
 or the path is UNC/device namespaced, the function returns the native spelling
-instead of manufacturing a URL-shaped or semantically different string.
+instead of manufacturing a URL-shaped or semantically different string. A
+sibling `try_portable_string(&Path) -> Option<String>` exposes that decline so a
+consumer which must not emit a native spelling can act on it.
 
 Make `dunce` unconditional so the helper is available without the heavyweight
 `file-reference` feature. Then remove Darkmatter's production renderers and
@@ -88,6 +90,16 @@ Markdown is one consumer among several.
 ## Public API
 
 ```rust
+/// Render a filesystem path as portable text, or `None` when no faithful
+/// portable spelling exists.
+///
+/// Returns `None` exactly when [`to_portable_string`] would fall back to the
+/// native spelling: a Windows UNC, device-namespace, or verbatim path that
+/// [`dunce::simplified`] declined to reduce. Callers that must not emit a
+/// native spelling — a Markdown link destination, for instance — branch on
+/// this rather than inspecting the rendered string.
+pub fn try_portable_string(path: &Path) -> Option<String>;
+
 /// Render a filesystem path according to biscuit-file's portable-text policy.
 ///
 /// On Windows, a safely reducible verbatim-disk prefix is removed through
@@ -101,6 +113,12 @@ Markdown is one consumer among several.
 pub fn to_portable_string(path: &Path) -> String;
 ```
 
+`to_portable_string` is defined as `try_portable_string(path)` falling back to
+the lossy native spelling, so the two cannot disagree about what "declined"
+means. The predicate exists because the decline is a decision consumers act on;
+recovering it by searching the rendered string for a `\` would re-derive the
+policy at every call site.
+
 Additive only. No existing public signature changes.
 
 ## Rendering contract
@@ -113,8 +131,9 @@ The algorithm is intentionally small:
    remaining prefix:
    - no prefix or `Prefix::Disk(_)`: render lossily and replace `\\` with `/`;
    - `Prefix::UNC`, `Prefix::Verbatim`, `Prefix::VerbatimDisk`,
-     `Prefix::VerbatimUNC`, or `Prefix::DeviceNS`: decline and return the lossy
-     native spelling unchanged.
+     `Prefix::VerbatimUNC`, or `Prefix::DeviceNS`: decline —
+     `try_portable_string` yields `None`, and `to_portable_string` returns the
+     lossy native spelling unchanged.
 3. On non-Windows targets, render lossily and replace `\\` with `/`.
 
 After step 1, a `VerbatimDisk` prefix means `dunce` deliberately declined to
@@ -171,11 +190,37 @@ Therefore the decided policy is: **render portable text only when a faithful
 path spelling exists; otherwise preserve the native spelling.** Callers that
 need a URL must build one explicitly with URL-aware code.
 
-This changes darkmatter's UNC behavior rather than grandfathering it.
-`path_to_markdown` currently maps `\\?\UNC\server\share\f.md` to
-`//server/share/f.md`; after adoption a UNC destination keeps its native
-`\\server\share\f.md` spelling. The change is deliberate: today's output is a
-protocol-relative URL, not the path it claims to be.
+### Declined paths at the Markdown boundary
+
+A declined spelling is a valid path but not valid Markdown. CommonMark
+processes backslash escapes inside a link destination, so a native Windows path
+written there does not survive a parse:
+
+```text
+[f](\\server\share\f.md)   parses back as   \server\share\f.md
+[f](\\?\C:\repo\f.md)      parses back as   \?\C:\repo\f.md
+```
+
+The leading `\\` collapses to a single `\`. Escaping at the Markdown boundary
+would round-trip, but it puts a Markdown-specific escaping layer under a
+domain-neutral renderer — the condition this spec's own reopening triggers name
+as cause to revisit the return type.
+
+**Decided policy: consumers that write Markdown destinations decline too.**
+Where `try_portable_string` returns `None`, `normalize_links`, `link_resolve`,
+and `link()` leave the author's original destination text untouched and record a
+report warning. The decline propagates end to end rather than being papered over
+one layer up. Non-Markdown consumers — diagnostics, completions, YAML scalars —
+keep using `to_portable_string` and its native fallback, which is correct text
+for them.
+
+This changes darkmatter's UNC behavior rather than grandfathering it, and the
+change is not a regression. `path_to_markdown` currently maps
+`\\?\UNC\server\share\f.md` to `//server/share/f.md`, which a Markdown reader
+resolves as a protocol-relative URL against the page's scheme. After adoption
+the destination keeps whatever the author wrote and the compose report carries a
+warning; non-Markdown consumers see the native spelling. Leaving the author's
+text alone is the first behavior on this path that is not silently wrong.
 
 ## Non-goals
 
@@ -262,22 +307,32 @@ shared function. The commits remain independently landable.
 
 ### 1. biscuit-file foundation
 
-- Add an unfeatured path-text module and re-export
+- Add an unfeatured path-text module and re-export `try_portable_string` and
   `to_portable_string` at the crate root.
 - Make `dunce` unconditional and remove the redundant dev-dependency.
 - Add unit tests and public documentation.
 - Do **not** move, wrap, or otherwise edit `normalize_components` or
   `simplify_root`.
 
-Because the function is new and has no callers until later steps, this is an
-additive LOW-risk foundation. It must be tested with
-`--no-default-features` to prove the API is genuinely unfeatured.
+Because both functions are new and have no callers until later steps, this is an
+additive LOW-risk foundation. It must be tested with `--no-default-features` to
+prove the API is genuinely unfeatured. That configuration is not hypothetical:
+`darkmatter/dmls/Cargo.toml:59` already depends on biscuit-file with
+`default-features = false`, so a helper that lands inside a feature-gated module
+compiles here and breaks there.
 
 ### 2. darkmatter production
 
 - Delete `compose/util.rs::path_to_markdown` and its `compose/mod.rs` re-export;
   call `biscuit_file::to_portable_string` directly from `link_resolve.rs` and
   `link_normalization.rs`.
+- At every site that writes a **Markdown destination**, branch on
+  `try_portable_string`: on `None`, leave the authored text in place and add a
+  compose-report warning naming the path, per
+  [Declined paths at the Markdown boundary](#declined-paths-at-the-markdown-boundary).
+  `comparison_path` is not such a site — it feeds `starts_with` comparisons, not
+  document text, and must keep using `to_portable_string` so both sides of every
+  comparison decline together.
 - Refactor `path_projection` around a Path-valued projection result so raw and
   portable wrappers render the selected `&Path` directly. Do not convert the
   final anchored `String` back into a `Path` merely to call the shared helper.
@@ -334,6 +389,9 @@ Test `to_portable_string` directly:
 - `#[cfg(windows)]` legacy UNC, verbatim UNC, and device-namespace inputs remain
   native;
 - `#[cfg(not(windows))]` an input without backslashes is unchanged;
+- `try_portable_string` returns `Some` for every case above that portabilizes
+  and `None` for every case that stays native, with the `Some` payload equal to
+  `to_portable_string`'s result — the two must not be able to disagree;
 - the tests compile and run with `--no-default-features`.
 
 The existing Windows `normalize_components_reduces_verbatim_paths` test remains
@@ -346,7 +404,10 @@ relocated.
   rewrite, DMLS discovery, and CLI completion tests pass unchanged on Windows
   and a non-Windows host.
 - Add focused Windows integration cases at the public consumer boundary for a
-  safe canonicalized disk path and a declined verbatim/UNC path.
+  safe canonicalized disk path and a declined verbatim/UNC path. The declined
+  case must assert that the destination text is byte-identical to what the
+  author wrote and that the compose report carries the warning — a link that is
+  silently left alone is indistinguishable from a normalizer that failed to run.
 - No existing Unix snapshot should move for ordinary Unicode paths without
   literal backslashes.
 
@@ -363,8 +424,9 @@ These changes land with the code that makes them true:
 - Rewrite `biscuit-file/docs/dependencies.md:14-20`: `dunce` is unconditional
   and serves both the resolver root boundary (`simplify_root`) and the path→text
   boundary (`to_portable_string`). Remove the dev-dependency claim.
-- Document the public helper and its declined-prefix/lossy behavior in
-  `biscuit-file/README.md`.
+- Document both public helpers, the declined-prefix policy, and the lossy
+  conversion in `biscuit-file/README.md`, including which of the two a consumer
+  should reach for.
 - Update `.claude/skills/biscuit-file/SKILL.md` and any API references so agents
   find the shared renderer rather than writing another `.replace`.
 - Verify root `docs/dependencies.md`; it does not currently mention `dunce`, so
@@ -386,5 +448,10 @@ These changes land with the code that makes them true:
 4. **Normalization:** no lexical collapse and no extraction from
    `file_reference::resolve`. `dunce`'s refusal is authoritative at the public
    rendering boundary.
+5. **Declined paths in Markdown:** the consumer declines too. Markdown
+   destination writers leave the authored text and warn rather than emitting a
+   native spelling that CommonMark's escape rules would corrupt, or adding
+   Markdown-specific escaping beneath a domain-neutral renderer.
+   `try_portable_string` exists to make that branch expressible.
 
 There are no open decisions in this feature.
