@@ -86,8 +86,9 @@ jobs:
           packages="$(jq -c '.packages' <<<"$scope_json")"
 
           # Canary orchestration (D11): a global (full-scope) change runs the
-          # canary areas FIRST; the rest fan out only after they pass. A
-          # package-local change has no canary stage and fans out directly.
+          # canary areas FIRST, as an early signal. They no longer gate the rest
+          # of the fan-out — see the `area-ci` job. A package-local change has no
+          # canary stage and fans out directly.
           if [[ "$(jq -r '.full_scope' <<<"$scope_json")" == "true" ]]; then
             canary_matrix="$(jq -c '{include: [.areas[] | select(.canary == true)]}' <<<"$scope_json")"
             area_matrix="$(jq -c '{include: [.areas[] | select(.canary != true)]}' <<<"$scope_json")"
@@ -215,12 +216,21 @@ jobs:
   area-ci:
     name: ${{ matrix.area }}
     needs: [scope, preflight, canary]
-    # Runs when there are (non-canary) areas AND the canary stage passed or was
-    # skipped (package-local change). A canary failure blocks this fan-out.
+    # Ordering only. The canary runs FIRST as an early signal, but its result no
+    # longer gates this fan-out.
+    #
+    # Gating on it traded visibility for runner minutes, and visibility is the
+    # thing this pipeline exists to provide. Three consecutive runs produced ZERO
+    # area evidence because one canary test failed — a Windows compile-check, a
+    # WSL2 binary path, and a 40ms timing assertion on macOS. None of the three
+    # said anything about the other 20 areas, yet each erased them: 31 jobs
+    # instead of 168, and no way to tell a passing area from an unscheduled one.
+    #
+    # A red canary is still loud — it is a failed job and the verdict counts it.
+    # It simply no longer decides whether anything else is allowed to report.
     if: >-
       !cancelled() &&
-      needs.scope.outputs.has_areas == 'true' &&
-      (needs.canary.result == 'success' || needs.canary.result == 'skipped')
+      needs.scope.outputs.has_areas == 'true'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.scope.outputs.area_matrix) }}
@@ -250,8 +260,7 @@ jobs:
     if: >-
       !cancelled() &&
       github.event_name == 'pull_request' &&
-      needs.scope.outputs.has_packages == 'true' &&
-      (needs.canary.result == 'success' || needs.canary.result == 'skipped')
+      needs.scope.outputs.has_packages == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -302,8 +311,7 @@ jobs:
     needs: [scope, preflight, canary]
     if: >-
       !cancelled() &&
-      needs.scope.outputs.claudine == 'true' &&
-      (needs.canary.result == 'success' || needs.canary.result == 'skipped')
+      needs.scope.outputs.claudine == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -328,8 +336,7 @@ jobs:
     needs: [scope, preflight, canary]
     if: >-
       !cancelled() &&
-      needs.scope.outputs.darkmatter == 'true' &&
-      (needs.canary.result == 'success' || needs.canary.result == 'skipped')
+      needs.scope.outputs.darkmatter == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -358,8 +365,7 @@ jobs:
     if: >-
       !cancelled() &&
       (contains(fromJSON(needs.scope.outputs.area_names), 'claudine') ||
-       contains(fromJSON(needs.scope.outputs.area_names), 'sniff')) &&
-      (needs.canary.result == 'success' || needs.canary.result == 'skipped')
+       contains(fromJSON(needs.scope.outputs.area_names), 'sniff'))
     uses: ./.github/workflows/rendezvous-tests.yml
     secrets: inherit
 
@@ -368,8 +374,7 @@ jobs:
     needs: [scope, preflight, canary]
     if: >-
       !cancelled() &&
-      contains(fromJSON(needs.scope.outputs.area_names), 'biscuit-tui') &&
-      (needs.canary.result == 'success' || needs.canary.result == 'skipped')
+      contains(fromJSON(needs.scope.outputs.area_names), 'biscuit-tui')
     uses: ./.github/workflows/biscuit-tui-windows-captured-stdout.yml
     secrets: inherit
 
@@ -378,8 +383,7 @@ jobs:
     needs: [scope, preflight, canary]
     if: >-
       !cancelled() &&
-      contains(fromJSON(needs.scope.outputs.area_names), 'playa') &&
-      (needs.canary.result == 'success' || needs.canary.result == 'skipped')
+      contains(fromJSON(needs.scope.outputs.area_names), 'playa')
     uses: ./.github/workflows/playa-windows.yml
     secrets: inherit
 
@@ -391,8 +395,7 @@ jobs:
     needs: [scope, preflight, canary]
     if: >-
       !cancelled() &&
-      contains(fromJSON(needs.scope.outputs.packages), 'messenger') &&
-      (needs.canary.result == 'success' || needs.canary.result == 'skipped')
+      contains(fromJSON(needs.scope.outputs.packages), 'messenger')
     uses: ./.github/workflows/messenger-desktop-tests.yml
     secrets: inherit
 

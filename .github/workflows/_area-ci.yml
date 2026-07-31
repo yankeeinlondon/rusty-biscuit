@@ -427,9 +427,13 @@ jobs:
   # POLICY GAP in `areas.json` instead of appearing as a green 0-run cell.
   l2:
     name: test-l2 (${{ matrix.environment }})
-    # Expensive optional tier runs only after L1 passes (D4).
+    # Ordering only: this tier runs AFTER L1 for resource staging, but does not
+    # require L1 to have passed. A red L1 used to suppress this leg entirely,
+    # so the rollup recorded MISSING and one L1 failure erased the whole tier's
+    # evidence. Absence of evidence must never be a side effect of a failure
+    # elsewhere.
     needs: test
-    if: ${{ inputs.l2 }}
+    if: ${{ !cancelled() && inputs.l2 }}
     strategy:
       fail-fast: false
       matrix:
@@ -543,9 +547,13 @@ jobs:
 
   browser:
     name: test-browser (ubuntu-latest)
-    # Expensive optional tier runs only after L1 passes (D4).
+    # Ordering only: this tier runs AFTER L1 for resource staging, but does not
+    # require L1 to have passed. A red L1 used to suppress this leg entirely,
+    # so the rollup recorded MISSING and one L1 failure erased the whole tier's
+    # evidence. Absence of evidence must never be a side effect of a failure
+    # elsewhere.
     needs: test
-    if: ${{ inputs.browser }}
+    if: ${{ !cancelled() && inputs.browser }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -612,9 +620,13 @@ jobs:
   # would silently apply to a Linux guest.
   wsl:
     name: wsl2
-    # Same staging as the native legs: nothing expensive before L1 is known good.
+    # Ordering only: this tier runs AFTER L1 for resource staging, but does not
+    # require L1 to have passed. A red L1 used to suppress this leg entirely,
+    # so the rollup recorded MISSING and one L1 failure erased the whole tier's
+    # evidence. Absence of evidence must never be a side effect of a failure
+    # elsewhere.
     needs: test
-    if: ${{ inputs.wsl }}
+    if: ${{ !cancelled() && inputs.wsl }}
     uses: ./.github/workflows/_wsl-ci.yml
     with:
       area: ${{ inputs.area }}
