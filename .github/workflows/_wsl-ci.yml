@@ -186,6 +186,7 @@ jobs:
       # No `wsl-version:` pin — the action already defaults to 2, and pinning 1
       # would be an explicit downgrade to an environment without WSLg.
       - name: Provision the WSL2 guest
+        id: provision
         uses: Vampire/setup-wsl@v4
         with:
           distribution: ${{ inputs.distribution }}
@@ -247,6 +248,7 @@ jobs:
           cd /home/runner/rusty-biscuit
           just _ensure-native-libs "${{ inputs.area }}"
       - name: L1 tests from the archive
+        id: l1
         shell: wsl-bash {0}
         run: |
           set -euo pipefail
@@ -282,6 +284,7 @@ jobs:
           cd "/home/runner/rusty-biscuit/${{ inputs.area }}"
           just test "${args[@]}"
       - name: Stage the JUnit reports for upload
+        id: stage_junit
         if: ${{ !cancelled() }}
         shell: wsl-bash {0}
         run: |
@@ -317,12 +320,39 @@ jobs:
           JOB: L1
           ENVIRONMENT: wsl2-ubuntu
           RESULT: ${{ job.status }}
+          PROVISION: ${{ steps.provision.outcome }}
+          L1: ${{ steps.l1.outcome }}
+          STAGED: ${{ steps.stage_junit.outcome }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/status"
-          printf '{"area":"%s","job":"%s","environment":"%s","result":"%s"}\n' \
-            "$AREA" "$JOB" "$ENVIRONMENT" "$RESULT" \
-            >"$RUNNER_TEMP/status/status.json"
+          # Name WHY no evidence exists, when that is the case.
+          #
+          # A guest that dies takes the staging step with it, `wsl-junit` stays
+          # empty, and `if-no-files-found: ignore` uploads nothing successfully —
+          # so the rollup could only say "produced no report at all", which reads
+          # identically to a tier that ran and had no tests. In run 30595280027
+          # that hid two different faults: claudine's guest was killed by SIGBUS
+          # mid-suite, and darkmatter's shard 3/4 never provisioned at all
+          # (`wsl.exe` exit 4294967295). Both rendered as the same blank cell.
+          #
+          # A failing TEST does not reach here: the guest stays healthy, staging
+          # succeeds, and the report is uploaded normally.
+          detail=""
+          if [ "$PROVISION" != "success" ]; then
+            detail="the WSL2 guest failed to provision (step outcome: ${PROVISION}); no test could run"
+          elif [ "$STAGED" != "success" ]; then
+            detail="the WSL2 guest became unreachable after the test step (L1: ${L1}, staging: ${STAGED}); its reports could not be collected"
+          fi
+          if [ -n "$detail" ]; then
+            printf '{"area":"%s","job":"%s","environment":"%s","result":"%s","detail":"%s"}\n' \
+              "$AREA" "$JOB" "$ENVIRONMENT" "$RESULT" "$detail" \
+              >"$RUNNER_TEMP/status/status.json"
+          else
+            printf '{"area":"%s","job":"%s","environment":"%s","result":"%s"}\n' \
+              "$AREA" "$JOB" "$ENVIRONMENT" "$RESULT" \
+              >"$RUNNER_TEMP/status/status.json"
+          fi
       - name: Upload producer status
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
