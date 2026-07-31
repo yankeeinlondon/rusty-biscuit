@@ -206,10 +206,18 @@ fn primary_ci_runs_a_bootstrap_preflight_before_fan_out() {
 #[test]
 fn expensive_tiers_stage_behind_l1_but_lint_never_gates_it() {
     let shared = workflow("_area-ci.yml");
-    // The expensive L2 and browser tiers run only after L1 (D4).
+    // The expensive L2 and browser tiers are ORDERED after L1 (D4) — but only
+    // ordered. Requiring L1 to have passed meant one red L1 deleted the whole
+    // tier's evidence and the rollup recorded MISSING, which is indistinguishable
+    // from a leg that was never scheduled.
     assert!(
         shared.matches("needs: test").count() >= 2,
-        "the L2 and browser tiers must each depend on L1 (D4)"
+        "the L2 and browser tiers must each be ordered after L1 (D4)"
+    );
+    assert!(
+        shared.matches("!cancelled() && inputs.").count() >= 3,
+        "the L2, browser, and wsl tiers must run on `!cancelled()`, not on L1 success — \
+         absence of evidence must never be a side effect of a failure elsewhere"
     );
     // L1 does NOT stage behind lint. A clippy hint in one package must not
     // delete every L1 leg's evidence for the whole area.
@@ -255,8 +263,16 @@ fn area_ci_selects_the_ci_nextest_profile_explicitly() {
     );
 }
 
+/// Canaries run first as an early signal, and must NOT gate the fan-out.
+///
+/// Reversed from the original contract, which required exactly the gate this now
+/// forbids. Gating traded visibility for runner minutes, and visibility is what
+/// this pipeline exists to provide: three consecutive runs produced zero area
+/// evidence because one canary test failed — a Windows compile-check, a WSL2
+/// binary path, and a 40ms timing assertion on macOS. None of those said anything
+/// about the other twenty areas, yet each erased them.
 #[test]
-fn global_changes_run_canaries_before_full_fan_out() {
+fn global_changes_run_canaries_first_without_gating_the_fan_out() {
     let ci = workflow("ci.yml");
     assert!(
         ci.contains("canary:") && ci.contains("fromJSON(needs.scope.outputs.canary_matrix)"),
@@ -266,10 +282,15 @@ fn global_changes_run_canaries_before_full_fan_out() {
         ci.contains("has_canaries"),
         "the canary stage must gate on a full-scope canary selection"
     );
+    // `needs:` is retained for ORDERING — the canary still runs first.
     assert!(
-        ci.contains("needs: [scope, preflight, canary]")
-            && ci.contains("needs.canary.result == 'success' || needs.canary.result == 'skipped'"),
-        "the area fan-out must not start after a canary failure (D11)"
+        ci.contains("needs: [scope, preflight, canary]"),
+        "the area fan-out must still be ordered after the canary stage (D11)"
+    );
+    assert!(
+        !ci.contains("needs.canary.result == 'success'"),
+        "no job may gate on canary success — one canary failure must not erase \
+         every other area's evidence"
     );
     let areas = read(".github/ci/areas.json");
     assert!(
