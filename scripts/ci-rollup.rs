@@ -396,6 +396,12 @@ struct ProducerStatus {
     result: String,
     #[serde(default)]
     environment: Option<String>,
+    /// Why this producer has no evidence, when it knows. A dead WSL2 guest and a
+    /// tier that genuinely ran no tests both upload nothing; only the producer
+    /// can tell them apart, so it says so here rather than leaving the rollup to
+    /// render one indistinguishable blank cell for both.
+    #[serde(default)]
+    detail: Option<String>,
 }
 
 /// Tests the target environment actually compiled, generated *on* that
@@ -1261,7 +1267,20 @@ fn classify_one(
         // timeout — was computed but pushed behind a false upstream blame.
         if indices.is_empty() {
             reasons.push("scheduled but produced no report at all".to_owned());
-        } else if !missing_shards.is_empty() {
+        }
+        // The producer's own explanation, when it has one. "No report at all" is
+        // equally true of a dead guest and of a tier that ran no tests, and only
+        // the producer can tell them apart, so it says which.
+        if let Some(explained) = inputs.statuses.iter().find_map(|status| {
+            (status.area == key.area
+                && Tier::parse(&status.job) == key.tier
+                && status.environment.as_deref() == Some(key.environment.as_str()))
+            .then(|| status.detail.as_deref())
+            .flatten()
+        }) {
+            reasons.push(explained.to_owned());
+        }
+        if !missing_shards.is_empty() {
             reasons.push(format!(
                 "no report for shard(s) {}",
                 missing_shards.join(", ")
