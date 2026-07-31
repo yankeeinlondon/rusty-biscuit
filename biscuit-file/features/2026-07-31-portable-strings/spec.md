@@ -229,11 +229,36 @@ it. Add `to_portable_string` + rustdoc; make `dunce` unconditional; drop the
 redundant dev-dependency; tests.
 
 This step is **larger than a pure addition** — it edits a `pub(crate)` symbol
-that `df5cb5268` measured at MEDIUM risk (36 impacted, 6 direct), whose only
-out-of-area consumer is darkmatter's `resolve_ctx`. Deliberate: one
-implementation of the ordering rule is the goal, and a second copy would defeat
-the spec. Run impact analysis on `normalize_components` before editing, and
-verify biscuit-file's suite on both a Windows and a non-Windows host — the
+measured at **HIGH** risk. Deliberate: one implementation of the ordering rule
+is the goal, and a second copy would defeat the spec.
+
+Impact analysis, re-measured against the 2026-07-31 index (`epistemic: exact`),
+correcting the MEDIUM/36 figures quoted from `df5cb5268`'s commit message:
+
+| | Measured | `df5cb5268` claimed |
+|---|---|---|
+| Risk | **HIGH** | MEDIUM |
+| Impacted | 25 (6 / 15 / 4 by depth) | 36 |
+| Direct | 6 | 6 ✓ |
+| Processes affected | 0 | — |
+
+Direct callers, all in `biscuit-file/lib/src/file_reference/`: `validate`
+(`context.rs`), plus `recursive_subdir_filter`, `dedupe_candidates`,
+`normalize_absolute`, `diff_paths`, and `normalize_dotdot` (`resolve.rs`).
+
+This **confirms `df5cb5268`'s reasoning**: the three consumers its message named
+as depending on this symbol for lexical comparison — candidate dedupe,
+repository containment, and `diff_paths`' common-prefix walk — are all present
+as direct callers. The mechanism is real, only the severity was understated.
+
+Exactly one consumer lives outside biscuit-file, as that commit claimed:
+`resolve_document_file_ref_shape`
+(`darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs`). Zero
+execution flows are affected, which is what keeps HIGH tractable — the blast
+radius is wide but shallow and wholly inside one module plus one known
+consumer.
+
+Verify biscuit-file's suite on both a Windows and a non-Windows host; the
 existing behavior has never been executed on the former.
 
 ### 2. darkmatter — core
@@ -368,5 +393,10 @@ obligation survives.
    smaller diff.
 
    Chosen with explicit direction that a wider rollout is acceptable when it
-   buys the better decision. The cost is real and is recorded in
-   [step 1](#1-biscuit-file): MEDIUM risk, 36 impacted, 6 direct.
+   buys the better decision. The cost is real, measured, and recorded in
+   [step 1](#1-biscuit-file): **HIGH risk, 25 impacted, 6 direct, 0 execution
+   flows** — worse than the MEDIUM this spec originally quoted from
+   `df5cb5268`. The decision stands: the alternatives buy a smaller diff by
+   duplicating a load-bearing ordering rule, and a second copy of that rule is
+   the defect this spec exists to prevent. But it is now a HIGH-risk edit made
+   knowingly rather than a MEDIUM one assumed.
