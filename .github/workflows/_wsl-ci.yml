@@ -185,8 +185,40 @@ jobs:
           path: ${{ github.workspace }}/nextest-archive
       # No `wsl-version:` pin — the action already defaults to 2, and pinning 1
       # would be an explicit downgrade to an environment without WSLg.
+      #
+      # WHY A SECOND ATTEMPT, AND WHY IT MUST WAIT
+      #
+      # `Vampire/setup-wsl@v4` retries internally, so a bare re-run would buy
+      # nothing. In run 30595280027 that internal retry was measurably useless:
+      # `wsl.exe --update` returned `Forbidden (403)`
+      # (`Wsl/UpdatePackage/0x80190193`) in 0.2s, and the action burned ten
+      # attempts inside 2.4 seconds with no backoff between them. The three
+      # shards that DID provision spent 46 seconds inside that same `--update`
+      # call fetching WSL 2.7.11 — all four runners were racing one Microsoft
+      # endpoint at the same instant and one of them got throttled.
+      #
+      # So the missing ingredient is delay, not more attempts. `continue-on-error`
+      # on the first attempt is what makes the second reachable; the second is
+      # NOT `continue-on-error`, because a guest that cannot be provisioned twice
+      # must still turn the cell red.
       - name: Provision the WSL2 guest
         id: provision
+        continue-on-error: true
+        uses: Vampire/setup-wsl@v4
+        with:
+          distribution: ${{ inputs.distribution }}
+          set-as-default: true
+          additional-packages: ca-certificates curl git xz-utils
+      - name: Let the update throttle clear before a second attempt
+        if: ${{ steps.provision.outcome == 'failure' }}
+        shell: bash
+        # Longer than the 46s the successful shards spent downloading, so the
+        # sibling shards this one was competing with have finished by the time it
+        # asks again.
+        run: sleep 90
+      - name: Provision the WSL2 guest (second attempt)
+        id: provision_retry
+        if: ${{ steps.provision.outcome == 'failure' }}
         uses: Vampire/setup-wsl@v4
         with:
           distribution: ${{ inputs.distribution }}
@@ -247,6 +279,70 @@ jobs:
           # separate `wsl2-ubuntu` key in areas.json.
           cd /home/runner/rusty-biscuit
           just _ensure-native-libs "${{ inputs.area }}"
+      # DIAGNOSTIC ONLY — nothing below changes what runs or how it is reported.
+      #
+      # THE CONFIRMED FAILURE, AND WHY THE CENSUS RUNS *BEFORE* EXTRACTION
+      #
+      # Extracting a large archive into the guest exhausts the WINDOWS RUNNER's
+      # disk, not the guest's. Run 30605643702, all four claudine shards, ~3
+      # minutes after `Extracting 153 binaries`:
+      #
+      #   ##[error]There is not enough space on the disk. :
+      #     'C:\actions-runner\cached\2.336.0\_diag\blocks\...'
+      #
+      # That path is the runner's OWN diagnostic writer. Once it cannot write,
+      # the runner is finished: every remaining step is abandoned, including the
+      # `always()` producer status. That is why claudine published no
+      # `status-claudine-L1-wsl2-ubuntu-*` artifact at all while darkmatter — same
+      # run, same shard count — published all four.
+      #
+      # In run 30595280027 the same exhaustion surfaced one layer down as SIGBUS
+      # (signal 7, exit 135): a page mapped from a VHDX that could no longer grow
+      # cannot be backed, and an unbacked mapped page is a bus error rather than
+      # an `ENOSPC` return. Same cause, different symptom depending on which
+      # write hits the wall first.
+      #
+      # It is a capacity threshold, not a claudine-code question — claudine's
+      # archive is 6.4 GiB, darkmatter's 3.9 GiB and its guests survive, and no
+      # other area exceeds 870 MiB.
+      #
+      # Hence the ordering below. A post-mortem cannot run on a runner that has
+      # already died, so the measurement that matters is taken BEFORE extraction,
+      # where it is guaranteed to reach the log.
+      - name: Census the Windows host before extraction
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          # Headroom on the volume the guest's VHDX grows into. This number is
+          # the whole diagnosis: compare it against the extracted size of the
+          # area's archive.
+          Get-PSDrive -PSProvider FileSystem |
+            Select-Object Name, @{n='UsedGB';e={[math]::Round($_.Used/1GB,1)}},
+                                @{n='FreeGB';e={[math]::Round($_.Free/1GB,1)}} |
+            Format-Table | Out-String | Write-Host
+      - name: Census the guest before the archive is extracted
+        if: ${{ !cancelled() }}
+        shell: wsl-bash {0}
+        run: |
+          set -uo pipefail
+          workspace="$(pwd)"
+          mkdir -p "$workspace/wsl-diag"
+          {
+            echo "=== $(date -u +%FT%TZ) guest census ==="
+            uname -a
+            echo "--- filesystem backing each path extraction touches ---"
+            for path in /tmp / /home; do
+              # -T resolves the mount for a PATH, so this is correct whether or
+              # not the directory is itself a mount point.
+              findmnt -T "$path" -o TARGET,SOURCE,FSTYPE,SIZE,AVAIL 2>&1 || echo "$path: findmnt failed"
+            done
+            echo "--- df ---"
+            df -h / /tmp /home 2>&1
+            echo "--- memory ---"
+            free -m
+            swapon --show 2>&1 || true
+          } 2>&1 | tee "$workspace/wsl-diag/guest-census.txt"
       - name: L1 tests from the archive
         id: l1
         shell: wsl-bash {0}
@@ -273,6 +369,33 @@ jobs:
 
           archive=/home/runner/nextest-archive.tar.zst
           [ -f "$archive" ] || { echo "nextest archive missing at $archive" >&2; exit 1; }
+
+          # DIAGNOSTIC ONLY. Started HERE rather than in its own step so it is
+          # unambiguously alive across extraction — a background process from an
+          # earlier `wsl-bash` invocation would depend on surviving that
+          # invocation's exit, which is exactly the assumption a dying guest
+          # breaks. It writes across the 9p mount, ON PURPOSE: a log on ext4 is
+          # unreachable from the Windows host once the VM is gone, and a VM that
+          # is gone is the case being diagnosed. Self-limiting so nothing outlives
+          # the job's own ceiling.
+          workspace="$(pwd)"
+          mkdir -p "$workspace/wsl-diag"
+          cat >/tmp/biscuit-sampler.sh <<'SAMPLER'
+          #!/bin/bash
+          out="$1"
+          for _ in $(seq 1 400); do
+            {
+              printf '%s' "$(date -u +%FT%TZ)"
+              df -BM --output=target,avail /tmp / /home 2>/dev/null | tail -n +2 | tr -s ' \n' ' '
+              printf '| memAvailMiB=%s' "$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)"
+              printf ' | %s\n' "$(tr '\n' ' ' </proc/pressure/memory 2>/dev/null)"
+            } >>"$out"
+            sleep 10
+          done
+          SAMPLER
+          chmod +x /tmp/biscuit-sampler.sh
+          setsid nohup /tmp/biscuit-sampler.sh \
+            "$workspace/wsl-diag/guest-resources.log" >/dev/null 2>&1 &
 
           # --workspace-remap is not optional: the archive records the BUILD
           # host's source paths, and the guest checkout is somewhere else.
@@ -309,6 +432,78 @@ jobs:
           name: junit-${{ inputs.area }}-L1-wsl2-ubuntu-${{ strategy.job-index }}
           path: wsl-junit
           if-no-files-found: ignore
+      # DIAGNOSTIC ONLY, and deliberately `continue-on-error`: if the guest is
+      # dead this step cannot run, and that failure is itself the finding — it
+      # must not be allowed to overwrite the tier's real outcome.
+      - name: Guest post-mortem
+        id: guest_postmortem
+        if: ${{ steps.l1.outcome == 'failure' }}
+        continue-on-error: true
+        shell: wsl-bash {0}
+        run: |
+          set -uo pipefail
+          workspace="$(pwd)"
+          mkdir -p "$workspace/wsl-diag"
+          {
+            echo "=== $(date -u +%FT%TZ) guest post-mortem ==="
+            df -h / /tmp /home 2>&1
+            free -m
+            # An OOM kill or an ext4 I/O error — the two ways a backing store
+            # failure becomes a signal — are both recorded here and nowhere else.
+            echo "--- dmesg tail ---"
+            dmesg -T 2>&1 | tail -120
+          } 2>&1 | tee "$workspace/wsl-diag/guest-postmortem.txt"
+      - name: Host post-mortem
+        if: ${{ steps.l1.outcome == 'failure' }}
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          # The VHDX only ever grows, so a Windows volume that is full HERE was
+          # full when the guest died. This is the measurement that separates "the
+          # guest filled its own filesystem" from "the guest's disk could not grow
+          # because the host had nothing left to give it".
+          $ErrorActionPreference = 'Continue'
+          # wsl.exe emits UTF-16 by default, which is why it renders as spaced-out
+          # characters in the raw Actions logs. WSL_UTF8 makes it emit UTF-8
+          # instead. Reaching for [Console]::OutputEncoding would be the wrong
+          # lever: it also governs what pwsh WRITES, so it would garble this
+          # step's own output to fix someone else's.
+          $env:WSL_UTF8 = '1'
+          New-Item -ItemType Directory -Force -Path wsl-diag | Out-Null
+          $report = @("=== host post-mortem $(Get-Date -Format o) ===")
+          $report += Get-PSDrive -PSProvider FileSystem |
+            Select-Object Name, @{n='UsedGB';e={[math]::Round($_.Used/1GB,1)}},
+                                @{n='FreeGB';e={[math]::Round($_.Free/1GB,1)}} |
+            Out-String
+          $report += "--- wsl --status ---"
+          $report += (wsl.exe --status 2>&1 | Out-String)
+          $report += "--- wsl --list --verbose ---"
+          $report += (wsl.exe --list --verbose 2>&1 | Out-String)
+          $report += "--- backing VHDX ---"
+          # Bounded depth: a recursive sweep of the whole profile would cost
+          # minutes on a Windows runner for a file whose location is well known.
+          $roots = @("$env:LOCALAPPDATA\Packages", "$env:LOCALAPPDATA\wsl") |
+            Where-Object { Test-Path $_ }
+          if ($roots) {
+            # No backtick continuations anywhere in this step: a single trailing
+            # space after one silently turns it into a syntax error, and this
+            # script cannot be parse-checked on a macOS or Linux host.
+            $vhdx = Get-ChildItem -Path $roots -Recurse -Depth 3 -Filter 'ext4.vhdx' -ErrorAction SilentlyContinue
+            $report += $vhdx |
+              Select-Object FullName, @{n='SizeGB';e={[math]::Round($_.Length/1GB,2)}} |
+              Out-String
+          }
+          $report | Tee-Object -FilePath wsl-diag/host-postmortem.txt
+      - name: Upload WSL2 diagnostics
+        if: ${{ steps.l1.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          # A prefix `ci-rollup` does not walk: this is evidence for a human
+          # reading a failure, never an input to a cell's verdict.
+          name: wsl-diag-${{ inputs.area }}-wsl2-ubuntu-${{ strategy.job-index }}
+          path: wsl-diag
+          if-no-files-found: ignore
+          retention-days: 3
       # `L1`, not `wsl`: `ci-rollup` keys a status by TIER, and this job produces
       # the wsl2-ubuntu L1 evidence. A non-tier name would manufacture a phantom
       # cell beside the real one.
@@ -320,7 +515,11 @@ jobs:
           JOB: L1
           ENVIRONMENT: wsl2-ubuntu
           RESULT: ${{ job.status }}
-          PROVISION: ${{ steps.provision.outcome }}
+          # Provisioning is two steps, so its outcome is the SECOND attempt's
+          # unless the first already succeeded — otherwise a guest that came up
+          # on the retry would still be reported as never having provisioned.
+          PROVISION: ${{ steps.provision.outcome == 'success' && 'success' || steps.provision_retry.outcome }}
+          PROVISION_FIRST: ${{ steps.provision.outcome }}
           L1: ${{ steps.l1.outcome }}
           STAGED: ${{ steps.stage_junit.outcome }}
         run: |
@@ -340,7 +539,7 @@ jobs:
           # succeeds, and the report is uploaded normally.
           detail=""
           if [ "$PROVISION" != "success" ]; then
-            detail="the WSL2 guest failed to provision (step outcome: ${PROVISION}); no test could run"
+            detail="the WSL2 guest failed to provision (attempt 1: ${PROVISION_FIRST}, attempt 2: ${PROVISION}); no test could run"
           elif [ "$STAGED" != "success" ]; then
             detail="the WSL2 guest became unreachable after the test step (L1: ${L1}, staging: ${STAGED}); its reports could not be collected"
           fi

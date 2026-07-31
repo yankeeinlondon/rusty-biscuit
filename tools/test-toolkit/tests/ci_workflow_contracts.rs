@@ -986,6 +986,139 @@ fn wsl_is_an_environment_and_never_a_runner_label() {
 }
 
 #[test]
+fn wsl_provisioning_retries_with_a_delay_and_the_test_step_never_does() {
+    // Measured in run 30595280027: `Vampire/setup-wsl@v4` already retries
+    // internally, and that retry could not have worked — `wsl.exe --update`
+    // returned `Forbidden (403)` and the action spent ten attempts inside 2.4
+    // seconds with no backoff, while the shards that succeeded spent 46 seconds
+    // in the same call. A retry with no delay re-asks a throttle that has not
+    // moved, so the delay is the load-bearing part of this guard, not the
+    // second attempt.
+    let wsl = workflow("_wsl-ci.yml");
+    assert_eq!(
+        wsl.matches("uses: Vampire/setup-wsl@v4").count(),
+        2,
+        "provisioning must get exactly one bounded retry — unbounded retries turn a \
+         dead runner into a long timeout instead of a fast red cell"
+    );
+    // Without `continue-on-error` on the first attempt the job dies there and the
+    // second is unreachable, which is a retry that never runs.
+    assert!(
+        wsl.contains("id: provision\n        continue-on-error: true"),
+        "the first provisioning attempt must be non-fatal, or the retry is dead code"
+    );
+    assert!(
+        wsl.contains("if: ${{ steps.provision.outcome == 'failure' }}\n        shell: bash")
+            && wsl.contains("run: sleep 90"),
+        "a delay must separate the two attempts; the action's own retry has none"
+    );
+    // The second attempt is NOT continue-on-error: a guest that cannot be
+    // provisioned twice has to turn the cell red.
+    let retry = wsl
+        .split("- name: Provision the WSL2 guest (second attempt)")
+        .nth(1)
+        .expect("_wsl-ci.yml must define a second provisioning attempt");
+    let retry = &retry[..retry.find("\n      - name:").unwrap_or(retry.len())];
+    assert!(
+        !retry.contains("continue-on-error"),
+        "a guest that fails to provision twice must still fail the job"
+    );
+
+    // The whole point of bounding the retry to provisioning: a retried TEST step
+    // turns a timeout or a killed guest into something that eventually looks
+    // healthy, which is the exact failure this pipeline exists to surface.
+    let executable: String = wsl
+        .lines()
+        .filter(|line| !line.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(
+        executable.matches("just test ").count(),
+        1,
+        "the WSL test step must be invoked exactly once — a retried test hides a real failure"
+    );
+    let l1 = executable
+        .split("id: l1")
+        .nth(1)
+        .expect("_wsl-ci.yml must define the L1 test step");
+    let l1 = &l1[..l1.find("\n      - name:").unwrap_or(l1.len())];
+    assert!(
+        !l1.contains("continue-on-error"),
+        "the L1 test step must never be made non-fatal"
+    );
+}
+
+#[test]
+fn a_failed_wsl_guest_leaves_evidence_of_which_backing_store_ran_out() {
+    // Confirmed in run 30605643702: extraction exhausts the WINDOWS RUNNER's
+    // disk. All four claudine shards died with `There is not enough space on the
+    // disk` against `C:\actions-runner\...\_diag\`, the runner's own writer —
+    // after which no step runs at all, which is why claudine published no
+    // producer status while darkmatter published four. Run 30595280027 showed
+    // the same exhaustion as SIGBUS one layer down: a page mapped from a VHDX
+    // that cannot grow is a bus error, not an `ENOSPC` return.
+    //
+    // The host census is therefore the load-bearing measurement AND has to
+    // precede extraction — a post-mortem cannot run on a dead runner.
+    let wsl = workflow("_wsl-ci.yml");
+    let host_census = wsl
+        .find("- name: Census the Windows host before extraction")
+        .expect("_wsl-ci.yml must measure host headroom before extraction");
+    let extraction = wsl
+        .find("- name: L1 tests from the archive")
+        .expect("_wsl-ci.yml must define the L1 test step");
+    assert!(
+        host_census < extraction,
+        "the host disk census must run BEFORE extraction — the runner that would \
+         have reported it afterwards is exactly the thing that dies"
+    );
+    // Comment-stripped: these comments DESCRIBE the measurements, so a prose-only
+    // match would let the commentary alone satisfy the contract.
+    let executable: String = wsl
+        .lines()
+        .filter(|line| !line.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        executable.contains("findmnt -T"),
+        "the census must name the FILESYSTEM behind /tmp — a tmpfs is the one \
+         backing store whose exhaustion surfaces as SIGBUS rather than a write error"
+    );
+    assert!(
+        executable.contains("dmesg -T"),
+        "an OOM kill and an ext4 I/O error are recorded in the kernel log and nowhere else"
+    );
+    assert!(
+        executable.contains("ext4.vhdx"),
+        "the host post-mortem must size the VHDX and the volume it grows into"
+    );
+    // A sampler on ext4 dies with the guest it is measuring. The 9p mount is the
+    // only surface that outlives the VM, which is the case being diagnosed.
+    assert!(
+        executable.contains(r#""$workspace/wsl-diag/guest-resources.log""#),
+        "the resource sampler must write across the 9p mount, not onto guest ext4"
+    );
+    // Diagnostics must never be able to change a verdict.
+    for step in ["Guest post-mortem", "Host post-mortem"] {
+        let block = wsl
+            .split(&format!("- name: {step}"))
+            .nth(1)
+            .unwrap_or_else(|| panic!("_wsl-ci.yml must define `{step}`"));
+        let block = &block[..block.find("\n      - name:").unwrap_or(block.len())];
+        assert!(
+            block.contains("continue-on-error: true"),
+            "`{step}` must not be able to overwrite the tier's real outcome — a guest \
+             too dead to inspect is the finding, not a new failure"
+        );
+    }
+    assert!(
+        !wsl.contains("name: status-${{ inputs.area }}-wsl-diag")
+            && wsl.contains("name: wsl-diag-${{ inputs.area }}-wsl2-ubuntu-"),
+        "the diagnostic artifact must use a prefix ci-rollup does not walk"
+    );
+}
+
+#[test]
 fn artifact_names_carry_the_environment_not_the_runner_label() {
     // `junit-<area>-L1-windows-latest-*` and `junit-<area>-L1-wsl2-ubuntu-*` are
     // two different cells produced on the same runner label. Keying the artifact
