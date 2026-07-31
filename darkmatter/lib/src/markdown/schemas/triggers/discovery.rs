@@ -609,11 +609,11 @@ mod tests {
             std::os::unix::fs::symlink(&target, schemas.join("link.yaml")).unwrap();
         }
 
-        let files = enumerate_root(&schemas).unwrap();
         // On non-Unix the symlink test is a no-op; just verify the real file
         // was found and the symlink was excluded.
         #[cfg(unix)]
         {
+            let files = enumerate_root(&schemas).unwrap();
             assert_eq!(files.len(), 0, "symlinked file should be excluded");
         }
         #[cfg(not(unix))]

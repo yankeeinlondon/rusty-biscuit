@@ -92,7 +92,10 @@ fn schema_validate_legacy_pretty_output_is_byte_identical() {
         // (symlink-resolved) absolute path, which is host-specific. Rebuild the
         // exact URL the CLI emits and substitute it into the snapshot.
         let canonical = fs::canonicalize(work.path().join("doc.md")).unwrap();
-        let expected = template.replace("{DOC_URL}", &format!("file://{}", canonical.display()));
+        let canonical = canonical.to_string_lossy();
+        #[cfg(windows)]
+        let canonical = canonical.strip_prefix(r"\\?\").unwrap_or(&canonical);
+        let expected = template.replace("{DOC_URL}", &format!("file://{canonical}"));
 
         let output = assert_cmd::Command::cargo_bin("md").unwrap()
             .current_dir(work.path())

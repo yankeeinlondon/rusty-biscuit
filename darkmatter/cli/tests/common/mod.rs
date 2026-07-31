@@ -181,6 +181,9 @@ pub mod baseline {
                 result = result.replace(path, "<TMP>");
             }
         }
+        if result.contains("<TMP>") {
+            result = result.replace('\\', "/");
+        }
         result
     }
 

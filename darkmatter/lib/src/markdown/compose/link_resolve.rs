@@ -97,7 +97,7 @@ pub fn link_resolve(
 
         // 2.5 Resolve to absolute path
         if let Some(abs_path) = resolve_absolute(&raw_target, base_dir, options) {
-            let abs_path_str = abs_path.to_string_lossy().to_string();
+            let abs_path_str = super::path_to_markdown(&abs_path);
 
             // 2.6 Replace original link text with absolute path
             // We need to find the raw target string within the span.
@@ -208,10 +208,8 @@ mod tests {
 
         link_resolve(&mut md, &options, &mut report).unwrap();
 
-        let resolved_path = fs::canonicalize(&file_b)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
+        let resolved_path =
+            super::super::path_to_markdown(&fs::canonicalize(&file_b).unwrap());
         assert!(md.content().contains(&format!("({})", resolved_path)));
         assert!(md.content().contains(&format!("({})", resolved_path)));
         assert_eq!(report.link_resolves_applied, 2);
@@ -246,10 +244,9 @@ mod tests {
         }
 
         result.unwrap();
+        let expected = super::super::path_to_markdown(&std::fs::canonicalize(target).unwrap());
         assert!(
-            markdown
-                .content()
-                .contains(&std::fs::canonicalize(target).unwrap().to_string_lossy().to_string()),
+            markdown.content().contains(&expected),
             "{}",
             markdown.content(),
         );
@@ -286,9 +283,10 @@ mod tests {
 
         link_resolve(&mut md, &options, &mut report).unwrap();
 
+        let expected =
+            super::super::path_to_markdown(&std::fs::canonicalize(package_target).unwrap());
         assert!(
-            md.content()
-                .contains(&std::fs::canonicalize(package_target).unwrap().to_string_lossy().to_string()),
+            md.content().contains(&expected),
             "{}",
             md.content(),
         );
@@ -310,10 +308,8 @@ mod tests {
 
         link_resolve(&mut md, &options, &mut report).unwrap();
 
-        let resolved_path = fs::canonicalize(&file_b)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
+        let resolved_path =
+            super::super::path_to_markdown(&fs::canonicalize(&file_b).unwrap());
         assert!(md.content().contains(&format!("\"{}\"", resolved_path)));
         assert!(md.content().contains(&format!("\"{}\"", resolved_path)));
         assert!(md.content().contains(&format!("\"{}\"", resolved_path)));
@@ -334,10 +330,8 @@ mod tests {
 
         link_resolve(&mut md, &options, &mut report).unwrap();
 
-        let resolved_path = fs::canonicalize(&file_b)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
+        let resolved_path =
+            super::super::path_to_markdown(&fs::canonicalize(&file_b).unwrap());
         assert!(md.content().contains(&format!("\"{}\"", resolved_path)));
         assert_eq!(report.link_resolves_applied, 3);
     }
@@ -361,18 +355,12 @@ mod tests {
 
         link_resolve(&mut md, &options, &mut report).unwrap();
 
-        let resolved_css = fs::canonicalize(&target_css)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
-        let resolved_font = fs::canonicalize(&target_font)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
-        let resolved_script = fs::canonicalize(&target_script)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
+        let resolved_css =
+            super::super::path_to_markdown(&fs::canonicalize(&target_css).unwrap());
+        let resolved_font =
+            super::super::path_to_markdown(&fs::canonicalize(&target_font).unwrap());
+        let resolved_script =
+            super::super::path_to_markdown(&fs::canonicalize(&target_script).unwrap());
 
         assert!(
             md.content().contains(&format!("\"{}\"", resolved_css)),
@@ -416,22 +404,14 @@ mod tests {
 
         link_resolve(&mut md, &options, &mut report).unwrap();
 
-        let resolved_parens = fs::canonicalize(&target_parens)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
-        let resolved_quotes = fs::canonicalize(&target_quotes)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
-        let resolved_mixed = fs::canonicalize(&target_mixed)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
-        let resolved_multi = fs::canonicalize(&target_multi)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
+        let resolved_parens =
+            super::super::path_to_markdown(&fs::canonicalize(&target_parens).unwrap());
+        let resolved_quotes =
+            super::super::path_to_markdown(&fs::canonicalize(&target_quotes).unwrap());
+        let resolved_mixed =
+            super::super::path_to_markdown(&fs::canonicalize(&target_mixed).unwrap());
+        let resolved_multi =
+            super::super::path_to_markdown(&fs::canonicalize(&target_multi).unwrap());
 
         assert!(
             md.content().contains(&format!("(<{}>)", resolved_parens)),
@@ -483,7 +463,7 @@ mod tests {
         // shape is `<source_dir>/./b.md`. This flows through `FileReference`'s
         // candidate plan, not a private `dir.join(raw)` fallback.
         let joined = dir.path().join("./b.md");
-        let resolved_path = joined.to_string_lossy().to_string();
+        let resolved_path = super::super::path_to_markdown(&joined);
 
         assert!(
             md.content().contains(&format!("({})", resolved_path)),
@@ -517,8 +497,8 @@ mod tests {
 
         link_resolve(&mut md, &options, &mut report).unwrap();
 
-        let repo_first = dir.path().join("missing.md").to_string_lossy().to_string();
-        let source_first = nested.join("missing.md").to_string_lossy().to_string();
+        let repo_first = super::super::path_to_markdown(&dir.path().join("missing.md"));
+        let source_first = super::super::path_to_markdown(&nested.join("missing.md"));
         assert!(
             md.content().contains(&format!("({repo_first})")),
             "expected repository-first shape {repo_first}. Content: {}",
@@ -547,10 +527,8 @@ mod tests {
 
         link_resolve(&mut md, &options, &mut report).unwrap();
 
-        let resolved_path = fs::canonicalize(&logo)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
+        let resolved_path =
+            super::super::path_to_markdown(&fs::canonicalize(&logo).unwrap());
 
         // src should be resolved to absolute path
         assert!(
@@ -582,10 +560,8 @@ mod tests {
 
         link_resolve(&mut md, &options, &mut report).unwrap();
 
-        let resolved_path = fs::canonicalize(&target)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
+        let resolved_path =
+            super::super::path_to_markdown(&fs::canonicalize(&target).unwrap());
 
         assert!(
             md.content().contains(&format!("\"{}\"", resolved_path)),
@@ -610,10 +586,8 @@ mod tests {
 
         link_resolve(&mut md, &options, &mut report).unwrap();
 
-        let resolved_path = fs::canonicalize(&movie)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
+        let resolved_path =
+            super::super::path_to_markdown(&fs::canonicalize(&movie).unwrap());
 
         assert!(
             md.content().contains(&format!("\"{}\"", resolved_path)),
@@ -641,18 +615,12 @@ mod tests {
 
         link_resolve(&mut md, &options, &mut report).unwrap();
 
-        let resolved_b = fs::canonicalize(&file_b)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
-        let resolved_movie = fs::canonicalize(&file_movie)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
-        let resolved_css = fs::canonicalize(&file_css)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
+        let resolved_b =
+            super::super::path_to_markdown(&fs::canonicalize(&file_b).unwrap());
+        let resolved_movie =
+            super::super::path_to_markdown(&fs::canonicalize(&file_movie).unwrap());
+        let resolved_css =
+            super::super::path_to_markdown(&fs::canonicalize(&file_css).unwrap());
 
         assert!(
             md.content().contains(&format!("\"{}\"", resolved_b)),

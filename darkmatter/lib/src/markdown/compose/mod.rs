@@ -145,7 +145,7 @@ pub(crate) use context::options::TransclusionOptions;
 pub use util::find_git_root_from;
 pub(crate) use util::{
     abbreviate_path, document_resolution_context, find_package_area_from, find_target_range,
-    prepare_frontmatter_for_compose,
+    path_to_markdown, prepare_frontmatter_for_compose,
 };
 
 use super::Markdown;

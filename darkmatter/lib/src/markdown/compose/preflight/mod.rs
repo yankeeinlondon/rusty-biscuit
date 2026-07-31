@@ -450,7 +450,7 @@ flag: a
     fn preflight_blocks_frontmatter_shell_when_body_unapproved() {
         let temp = TempDir::new().unwrap();
         let sentinel = temp.path().join("sentinel");
-        let sentinel_str = sentinel.display().to_string();
+        let sentinel_str = sentinel.to_string_lossy().replace('\\', "/");
 
         let content = format!(
             "---\nsentinel: \"$(touch {sentinel_str})\"\n---\n::shell echo body-cmd\n"
@@ -491,7 +491,7 @@ flag: a
     fn preflight_allows_frontmatter_shell_when_all_approved() {
         let temp = TempDir::new().unwrap();
         let sentinel = temp.path().join("sentinel");
-        let sentinel_str = sentinel.display().to_string();
+        let sentinel_str = sentinel.to_string_lossy().replace('\\', "/");
 
         let content = format!(
             "---\nsentinel: \"$(touch {sentinel_str})\"\n---\n::shell echo body-cmd\n"

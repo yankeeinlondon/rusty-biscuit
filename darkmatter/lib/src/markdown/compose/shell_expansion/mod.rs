@@ -2250,9 +2250,13 @@ name: world
     /// Helper to find python3 for integration tests.
     fn find_test_python() -> Option<String> {
         ["python3", "python"].into_iter().find_map(|candidate| {
-            which::which(candidate)
+            let path = which::which(candidate).ok()?;
+            std::process::Command::new(&path)
+                .arg("--version")
+                .output()
                 .ok()
-                .map(|p| p.to_string_lossy().to_string())
+                .filter(|output| output.status.success())
+                .map(|_| path.to_string_lossy().to_string())
         })
     }
 

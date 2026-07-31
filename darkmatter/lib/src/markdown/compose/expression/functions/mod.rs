@@ -20,7 +20,7 @@ use biscuit_terminal::components::renderable::TerminalRenderable;
 
 use super::{
     ExpressionError, FileRefFailure, FileReferenceDiagnostic, json_number, make_portable_relative_in_context,
-    make_relative_in_context, scalar_string, to_number, to_number_coerce,
+    scalar_string, to_number, to_number_coerce,
 };
 use super::resolve_ctx::{
     ResolutionContext, is_remote_url, normalize_path_arg, resolve_document_file_ref,
@@ -1597,6 +1597,9 @@ pub fn has_command_fn(args: &[Value], _ctx: &ResolutionContext) -> Result<Value,
 }
 
 /// `relative(file) -> file | Error::InvalidFilePath`
+///
+/// The returned path uses forward slashes so it can be persisted in Markdown
+/// without platform-dependent text drift.
 pub fn relative_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
     require_args_expr("relative", args, 1)?;
     if any_null(args) {
@@ -1615,7 +1618,7 @@ pub fn relative_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Exp
             ));
         }
     };
-    Ok(Value::String(make_relative_in_context(
+    Ok(Value::String(make_portable_relative_in_context(
         &abs,
         &ctx.base_dir,
         ctx.file_resolution_context.as_ref(),
@@ -4457,7 +4460,13 @@ mod tests {
                 .as_str()
                 .unwrap()
                 .to_string();
-            assert_eq!(result, "[My Doc](".to_string() + &dir.path().join("doc.md").to_string_lossy() + ")");
+            assert_eq!(
+                result,
+                format!(
+                    "[My Doc]({})",
+                    display_path_with_forward_slashes(&dir.path().join("doc.md"))
+                )
+            );
         }
 
         #[test]

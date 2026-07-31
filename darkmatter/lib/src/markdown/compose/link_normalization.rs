@@ -17,6 +17,17 @@ use crate::markdown::reference::{
 };
 use crate::markdown::types::MarkdownResult;
 
+fn comparison_path(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        PathBuf::from(super::path_to_markdown(path))
+    }
+    #[cfg(not(windows))]
+    {
+        path.to_path_buf()
+    }
+}
+
 /// Normalizes absolute path links back into portable forms.
 ///
 /// This operation is the inverse of [`link_resolve`](super::link_resolve::link_resolve).
@@ -101,7 +112,7 @@ pub fn normalize_links(
 
     let base_file = match &source {
         ComposeSource::File(path) => match std::fs::canonicalize(path) {
-            Ok(p) => Some(p),
+            Ok(p) => Some(comparison_path(&p)),
             Err(e) => {
                 report.add_warning(crate::markdown::compose::ComposeWarning::new(
                     "link_normalization",
@@ -124,31 +135,37 @@ pub fn normalize_links(
         Some(context) => context.repository_root().map(Path::to_path_buf),
         None => base_dir.as_ref().and_then(|d| super::find_git_root_from(d)),
     }
-    .map(|r| std::fs::canonicalize(&r).unwrap_or(r));
+    .map(|r| std::fs::canonicalize(&r).unwrap_or(r))
+    .map(|r| comparison_path(&r));
     let home = match options.file_resolution_context.as_ref() {
         Some(context) => context.home_dir().map(Path::to_path_buf),
         None => dirs::home_dir(),
-    };
+    }
+    .map(|path| std::fs::canonicalize(&path).unwrap_or(path))
+    .map(|path| comparison_path(&path));
 
     for (record, abs_path) in to_normalize {
+        let comparable_abs = comparison_path(
+            &std::fs::canonicalize(&abs_path).unwrap_or_else(|_| abs_path.clone()),
+        );
         let mut replacement = None;
 
         // 3.6 Same-repo rule
         if let Some(ref repo) = git_root
-            && abs_path.starts_with(repo)
+            && comparable_abs.starts_with(repo)
             && let Some(ref doc_path) = base_file
         {
-            let rel = compute_relative_path(doc_path, &abs_path);
+            let rel = compute_relative_path(doc_path, &comparable_abs);
 
-            replacement = Some(rel.to_string_lossy().to_string());
+            replacement = Some(super::path_to_markdown(&rel));
         }
 
         if replacement.is_none()
             && let Some(ref h) = home
-            && abs_path.starts_with(h)
-            && let Ok(rel) = abs_path.strip_prefix(h)
+            && comparable_abs.starts_with(h)
+            && let Ok(rel) = comparable_abs.strip_prefix(h)
         {
-            replacement = Some(format!("~/{}", rel.display()));
+            replacement = Some(format!("~/{}", super::path_to_markdown(rel)));
         }
 
         // 3.8 ENV-var rule
@@ -164,7 +181,9 @@ pub fn normalize_links(
                 };
                 if let Some(val) = val {
                     let var_path = PathBuf::from(val);
-                    if abs_path.starts_with(&var_path) {
+                    let var_path = std::fs::canonicalize(&var_path).unwrap_or(var_path);
+                    let var_path = comparison_path(&var_path);
+                    if comparable_abs.starts_with(&var_path) {
                         let path_len = var_path.as_os_str().len();
                         if path_len > longest_len {
                             longest_len = path_len;
@@ -175,9 +194,10 @@ pub fn normalize_links(
             }
 
             if let Some((var_name, var_path)) = best_var
-                && let Ok(rel) = abs_path.strip_prefix(&var_path)
+                && let Ok(rel) = comparable_abs.strip_prefix(&var_path)
             {
-                let env_replacement = format!("${{{}}}/{}", var_name, rel.display());
+                let env_replacement =
+                    format!("${{{}}}/{}", var_name, super::path_to_markdown(rel));
 
                 // 3.9 Emit warning
                 let msg = format!(
@@ -282,7 +302,7 @@ mod tests {
         let target_file = assets.join("image.png");
         fs::write(&target_file, "png").unwrap();
         let abs_path = std::fs::canonicalize(&target_file).unwrap();
-        let content = format!("![img]({})\n", abs_path.display());
+        let content = format!("![img]({})\n", super::super::path_to_markdown(&abs_path));
         let mut md = Markdown::new(&content);
         let options = ComposeOptions::new().with_source_file(&source_file);
         let mut report = ComposeReport::new();
@@ -299,7 +319,7 @@ mod tests {
     fn test_normalize_links_home_dir() {
         let home = dirs::home_dir().expect("Has home dir");
         let target = home.join("some_file.txt");
-        let content = format!("[file]({})\n", target.display());
+        let content = format!("[file]({})\n", super::super::path_to_markdown(&target));
         let mut md = Markdown::new(&content);
         let options = ComposeOptions::new();
         let mut report = ComposeReport::new();
@@ -329,20 +349,23 @@ mod tests {
             }
             Err(_) => target.clone(),
         };
-        unsafe {
-            let p = std::fs::canonicalize(&project_root).unwrap();
-            let ps = p.to_string_lossy();
-            let val = if ps.starts_with("/private/") {
-                &ps[8..]
-            } else {
-                &ps
-            };
-            std::env::set_var("PROJECT_ROOT", val)
-        };
-        let content = format!("<a href=\"{}\">config</a>\n", abs_path.display());
+        let canonical_root = std::fs::canonicalize(&project_root).unwrap();
+        let mut env = std::collections::HashMap::new();
+        env.insert(
+            "PROJECT_ROOT".to_string(),
+            canonical_root.to_string_lossy().into_owned(),
+        );
+        let snapshot = biscuit_file::FileResolutionContext::new(&project_root)
+            .without_home_dir()
+            .with_env(env);
+        let content = format!(
+            "<a href=\"{}\">config</a>\n",
+            super::super::path_to_markdown(&abs_path)
+        );
         let mut md = Markdown::new(&content);
-        let options =
-            ComposeOptions::new().with_env_path_whitelist(vec!["PROJECT_ROOT".to_string()]);
+        let options = ComposeOptions::new()
+            .with_env_path_whitelist(vec!["PROJECT_ROOT".to_string()])
+            .with_file_resolution_context(snapshot);
         let mut report = ComposeReport::new();
         normalize_links(&mut md, &options, &mut report).unwrap();
         assert!(
@@ -359,11 +382,16 @@ mod tests {
         let root = std::fs::canonicalize(dir.path()).unwrap();
         let target = root.join("config.json");
         fs::write(&target, "{}").unwrap();
-        let content = format!("[config]({})\n", target.display());
+        let content = format!(
+            "[config]({})\n",
+            super::super::path_to_markdown(&target)
+        );
         let mut md = Markdown::new(&content);
         let mut env = std::collections::HashMap::new();
         env.insert("CAPTURED_ROOT".to_string(), root.display().to_string());
-        let snapshot = biscuit_file::FileResolutionContext::new(&root).with_env(env);
+        let snapshot = biscuit_file::FileResolutionContext::new(&root)
+            .without_home_dir()
+            .with_env(env);
         let options = ComposeOptions::new()
             .with_env_path_whitelist(vec!["CAPTURED_ROOT".to_string()])
             .with_file_resolution_context(snapshot);
@@ -402,9 +430,9 @@ mod tests {
 
         let content = format!(
             "<link rel=\"stylesheet\" href=\"{}\">\n<link rel=\"preload\" as=\"font\" href=\"{}\">\n<script src=\"{}\"></script>",
-            abs_css.display(),
-            abs_font.display(),
-            abs_script.display()
+            super::super::path_to_markdown(&abs_css),
+            super::super::path_to_markdown(&abs_font),
+            super::super::path_to_markdown(&abs_script)
         );
         let mut md = Markdown::new(&content);
         let options = ComposeOptions::new().with_source_file(&source_file);
@@ -456,8 +484,8 @@ mod tests {
 
         let content = format!(
             "[img]({})\n[sibling]({})",
-            abs_img.display(),
-            abs_sibling.display()
+            super::super::path_to_markdown(&abs_img),
+            super::super::path_to_markdown(&abs_sibling)
         );
         let mut md = Markdown::new(&content);
         let options = ComposeOptions::new().with_source_file(&source_file);
@@ -482,17 +510,29 @@ mod tests {
 
         let abs_path = std::fs::canonicalize(&target).unwrap_or(target);
         let abs_parent = std::fs::canonicalize(&parent).unwrap_or(parent);
-        let abs_child = std::fs::canonicalize(&child).unwrap_or(child);
+        let abs_child = std::fs::canonicalize(&child).unwrap_or_else(|_| child.clone());
 
-        unsafe {
-            std::env::set_var("USER", abs_parent.to_string_lossy().as_ref());
-            std::env::set_var("USER_NAME", abs_child.to_string_lossy().as_ref());
-        };
+        let mut env = std::collections::HashMap::new();
+        env.insert(
+            "USER".to_string(),
+            abs_parent.to_string_lossy().into_owned(),
+        );
+        env.insert(
+            "USER_NAME".to_string(),
+            abs_child.to_string_lossy().into_owned(),
+        );
+        let snapshot = biscuit_file::FileResolutionContext::new(&child)
+            .without_home_dir()
+            .with_env(env);
 
-        let content = format!("[config]({})", abs_path.display());
+        let content = format!(
+            "[config]({})",
+            super::super::path_to_markdown(&abs_path)
+        );
         let mut md = Markdown::new(&content);
         let options = ComposeOptions::new()
-            .with_env_path_whitelist(vec!["USER".to_string(), "USER_NAME".to_string()]);
+            .with_env_path_whitelist(vec!["USER".to_string(), "USER_NAME".to_string()])
+            .with_file_resolution_context(snapshot);
         let mut report = ComposeReport::new();
 
         normalize_links(&mut md, &options, &mut report).unwrap();
@@ -525,10 +565,10 @@ mod tests {
 
         let content = format!(
             "[link](<{}>)\n<img src='{}'>\n<a href=\"{}\" data-alt='{}'>link</a>",
-            abs_parens.display(),
-            abs_quotes.display(),
-            abs_quotes.display(),
-            abs_quotes.display()
+            super::super::path_to_markdown(&abs_parens),
+            super::super::path_to_markdown(&abs_quotes),
+            super::super::path_to_markdown(&abs_quotes),
+            super::super::path_to_markdown(&abs_quotes)
         );
 
         let mut md = Markdown::new(&content);
@@ -582,10 +622,10 @@ mod tests {
 
         let content = format!(
             "<a href = \"{}\">link</a>\n<img src = \"{}\">\n<video src = \"{}\"></video>\n<link href = \"{}\">",
-            abs_img.display(),
-            abs_img.display(),
-            abs_video.display(),
-            abs_css.display()
+            super::super::path_to_markdown(&abs_img),
+            super::super::path_to_markdown(&abs_img),
+            super::super::path_to_markdown(&abs_video),
+            super::super::path_to_markdown(&abs_css)
         );
         let mut md = Markdown::new(&content);
         let options = ComposeOptions::new().with_source_file(&source_file);

@@ -698,8 +698,11 @@ mod tests {
         std::fs::write(&package_target, "package").unwrap();
 
         assert_eq!(
-            resolve_file_reference("!shared.md", Some(&member.join("docs")), None).unwrap(),
-            package_target,
+            std::fs::canonicalize(
+                resolve_file_reference("!shared.md", Some(&member.join("docs")), None).unwrap()
+            )
+            .unwrap(),
+            std::fs::canonicalize(package_target).unwrap(),
         );
     }
 

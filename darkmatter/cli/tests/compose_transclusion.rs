@@ -152,9 +152,17 @@ fn test_compose_env_var_substitution_one_warning() {
 
     let abs_target = std::fs::canonicalize(&target_file).unwrap();
     let abs_root = std::fs::canonicalize(&project_root).unwrap();
+    let abs_target_markdown = abs_target.to_string_lossy();
+    #[cfg(windows)]
+    let abs_target_markdown = abs_target_markdown
+        .strip_prefix(r"\\?\")
+        .unwrap_or(&abs_target_markdown)
+        .replace('\\', "/");
+    #[cfg(not(windows))]
+    let abs_target_markdown = abs_target_markdown.into_owned();
 
     let md_file = dir.path().join("test.md");
-    std::fs::write(&md_file, format!("[config]({})\n", abs_target.display())).unwrap();
+    std::fs::write(&md_file, format!("[config]({abs_target_markdown})\n")).unwrap();
 
     let output = md_cmd()
         .env("PROJECT_ROOT", &abs_root)
@@ -170,9 +178,18 @@ fn test_compose_env_var_substitution_one_warning() {
     eprintln!("DEBUG stdout:\n{stdout}");
     eprintln!("DEBUG stderr:\n{stderr}");
 
+    #[cfg(not(windows))]
     assert!(
         stdout.contains("${PROJECT_ROOT}/config.json"),
         "stdout should contain env-var abstraction, got:\n{stdout}"
+    );
+    // Windows places its temp directory beneath the user profile. The
+    // normalization contract prefers the home abstraction over environment
+    // variables, so this fixture is represented with `~/` on Windows.
+    #[cfg(windows)]
+    assert!(
+        stdout.contains("~/") && stdout.contains("/project/config.json"),
+        "stdout should contain the higher-priority home abstraction, got:\n{stdout}"
     );
     // Warning text should NOT be in stdout
     assert!(
@@ -180,11 +197,19 @@ fn test_compose_env_var_substitution_one_warning() {
         "stdout should not contain warning text, got:\n{stdout}"
     );
 
-    // stderr should contain exactly one warning about the env var
+    // Unix temp directories are outside the home directory, so the env-var
+    // abstraction is selected and emits one warning. On Windows the
+    // higher-priority home abstraction emits no warning.
     let warning_count = stderr.matches("environment variable").count();
+    #[cfg(not(windows))]
     assert_eq!(
         warning_count, 1,
         "stderr should contain exactly one env-var warning, got {warning_count} occurrences:\n{stderr}"
+    );
+    #[cfg(windows)]
+    assert_eq!(
+        warning_count, 0,
+        "home abstraction should not emit an env-var warning, got:\n{stderr}"
     );
 }
 
@@ -229,4 +254,3 @@ fn test_compose_html_spaced_attributes() {
         "stdout should not contain unprocessed spaced src, got:\n{stdout}"
     );
 }
-

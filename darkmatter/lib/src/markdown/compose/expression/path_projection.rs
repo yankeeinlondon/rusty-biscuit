@@ -30,7 +30,8 @@ use std::path::Path;
 /// output is composed into document text) should prefer
 /// [`make_portable_relative`] so the stored value is portable across OSes.
 ///
-/// `relative(file)` keeps using this raw form to preserve its existing contract.
+/// This raw form remains available for diagnostics and tests that explicitly
+/// need native path text.
 #[cfg(test)]
 pub(crate) fn make_relative(abs: &Path, base_dir: &Path) -> String {
     make_relative_in_context(abs, base_dir, None)
@@ -136,7 +137,12 @@ mod tests {
         let base = TempDir::new().unwrap();
         let other = TempDir::new().unwrap();
         let abs = other.path().join("file.md");
-        let rendered = make_relative(&abs, base.path());
+        let context = biscuit_file::FileResolutionContext::from_snapshot(
+            base.path(),
+            None,
+            std::collections::HashMap::new(),
+        );
+        let rendered = make_relative_in_context(&abs, base.path(), Some(&context));
         // No repo, not under base_dir, not under $HOME → absolute verbatim.
         assert_eq!(rendered, abs.to_string_lossy());
     }
