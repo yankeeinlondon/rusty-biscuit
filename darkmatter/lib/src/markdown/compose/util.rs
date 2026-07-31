@@ -14,23 +14,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tracing::trace;
 
-/// Renders a filesystem path as a portable Markdown link destination.
-///
-/// Windows canonicalization may add a verbatim-path prefix. That prefix is
-/// meaningful to Windows filesystem APIs but is not valid portable Markdown.
-pub(crate) fn path_to_markdown(path: &Path) -> String {
-    let rendered = path.to_string_lossy();
-    #[cfg(windows)]
-    let rendered = rendered
-        .strip_prefix(r"\\?\UNC\")
-        .map(|tail| format!(r"\\{tail}"))
-        .or_else(|| rendered.strip_prefix(r"\\?\").map(str::to_string))
-        .unwrap_or_else(|| rendered.into_owned());
-    #[cfg(not(windows))]
-    let rendered = rendered.into_owned();
-    rendered.replace('\\', "/")
-}
-
 /// Shorten an absolute path for display in diagnostics.
 ///
 /// Tries to make the path relative to the git repo root discovered by

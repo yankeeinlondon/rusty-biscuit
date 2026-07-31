@@ -16,16 +16,64 @@ use crate::markdown::reference::{
     local::{extract_markdown_images, extract_markdown_links},
 };
 use crate::markdown::types::MarkdownResult;
+use biscuit_file::{to_portable_string, try_portable_string};
 
-fn comparison_path(path: &Path) -> PathBuf {
-    #[cfg(windows)]
-    {
-        PathBuf::from(super::path_to_markdown(path))
-    }
-    #[cfg(not(windows))]
-    {
-        path.to_path_buf()
-    }
+/// Projects `path` to a Windows-prefix-agnostic key for `starts_with` and
+/// `strip_prefix`.
+///
+/// Path identity and path rendering are different contracts, and this is the
+/// identity one: the result must never be emitted as document text. A
+/// repository root short enough for `dunce` to reduce can hold a descendant
+/// that is too long for it, so routing either operand through
+/// [`to_portable_string`] would spell the two differently and silently stop
+/// normalizing a path that really is inside the repository.
+///
+/// Keys compare equal across the spellings of one location: `C:\x` and
+/// `\\?\C:\x` (a drive letter is case-insensitive), `\\server\share\x` and
+/// `\\?\UNC\server\share\x`. Device (`\\.\`) and unrecognized verbatim
+/// (`\\?\Volume{…}`) namespaces keep their own prefix text, because neither has
+/// an equivalent spelling in another namespace.
+///
+/// Only the drive letter is case-folded. Windows compares whole paths
+/// case-insensitively, so a root recorded as `C:\repo` still fails to match a
+/// destination canonicalized as `C:\Repo\…`. That gap predates this key and is
+/// deliberately not widened here.
+///
+/// Everything after the prefix is copied as raw text rather than rebuilt from
+/// [`Path::components`], which silently drops a `.` component. Under a verbatim
+/// prefix that `.` is a literal directory name, so dropping it would change
+/// which file a `strip_prefix` remainder names.
+#[cfg(windows)]
+fn comparison_key(path: &Path) -> PathBuf {
+    use std::path::{Component, Prefix};
+
+    let Some(Component::Prefix(prefix)) = path.components().next() else {
+        return path.to_path_buf();
+    };
+    let mut key = match prefix.kind() {
+        Prefix::Disk(drive) | Prefix::VerbatimDisk(drive) => {
+            format!("{}:", drive.to_ascii_uppercase() as char)
+        }
+        Prefix::UNC(server, share) | Prefix::VerbatimUNC(server, share) => format!(
+            r"\\{}\{}",
+            server.to_string_lossy(),
+            share.to_string_lossy()
+        ),
+        Prefix::DeviceNS(_) | Prefix::Verbatim(_) => {
+            prefix.as_os_str().to_string_lossy().into_owned()
+        }
+    };
+    // Not an ASCII-boundary argument — a UNC prefix ends inside the share name.
+    // The whole path's lossy rendering always begins with the prefix's own, so
+    // that rendering's length is a char boundary in it by construction.
+    let text = path.to_string_lossy();
+    key.push_str(&text[prefix.as_os_str().to_string_lossy().len()..]);
+    PathBuf::from(key)
+}
+
+#[cfg(not(windows))]
+fn comparison_key(path: &Path) -> PathBuf {
+    path.to_path_buf()
 }
 
 /// Normalizes absolute path links back into portable forms.
@@ -37,6 +85,15 @@ fn comparison_path(path: &Path) -> PathBuf {
 /// 1. **Same-repo**: If path is inside the same git repo as the document, make it relative.
 /// 2. **Home-dir**: If path is under HOME, use `~/` prefix.
 /// 3. **ENV-var**: If path is under a whitelisted environment variable, use `${VAR}/` prefix.
+///
+/// A destination that matches no anchor and has no faithful portable spelling
+/// (a Windows UNC, device, or unreducible verbatim path) is left byte-identical
+/// and reported as a warning. This stage runs after transclusion, so preserving
+/// authored text cannot retarget the link — unlike
+/// [`link_resolve`](super::link_resolve::link_resolve), which errors instead.
+/// The check is deliberately last: a declined absolute spelling that is still
+/// inside the repository becomes a safe relative path above and must be
+/// normalized rather than warned about.
 pub fn normalize_links(
     markdown: &mut Markdown,
     options: &ComposeOptions,
@@ -112,7 +169,7 @@ pub fn normalize_links(
 
     let base_file = match &source {
         ComposeSource::File(path) => match std::fs::canonicalize(path) {
-            Ok(p) => Some(comparison_path(&p)),
+            Ok(p) => Some(comparison_key(&p)),
             Err(e) => {
                 report.add_warning(crate::markdown::compose::ComposeWarning::new(
                     "link_normalization",
@@ -136,16 +193,16 @@ pub fn normalize_links(
         None => base_dir.as_ref().and_then(|d| super::find_git_root_from(d)),
     }
     .map(|r| std::fs::canonicalize(&r).unwrap_or(r))
-    .map(|r| comparison_path(&r));
+    .map(|r| comparison_key(&r));
     let home = match options.file_resolution_context.as_ref() {
         Some(context) => context.home_dir().map(Path::to_path_buf),
         None => dirs::home_dir(),
     }
     .map(|path| std::fs::canonicalize(&path).unwrap_or(path))
-    .map(|path| comparison_path(&path));
+    .map(|path| comparison_key(&path));
 
     for (record, abs_path) in to_normalize {
-        let comparable_abs = comparison_path(
+        let comparable_abs = comparison_key(
             &std::fs::canonicalize(&abs_path).unwrap_or_else(|_| abs_path.clone()),
         );
         let mut replacement = None;
@@ -157,7 +214,9 @@ pub fn normalize_links(
         {
             let rel = compute_relative_path(doc_path, &comparable_abs);
 
-            replacement = Some(super::path_to_markdown(&rel));
+            // `rel` is prefix-free, so it always portabilizes; a decline branch
+            // here would be dead code.
+            replacement = Some(to_portable_string(&rel));
         }
 
         if replacement.is_none()
@@ -165,7 +224,7 @@ pub fn normalize_links(
             && comparable_abs.starts_with(h)
             && let Ok(rel) = comparable_abs.strip_prefix(h)
         {
-            replacement = Some(format!("~/{}", super::path_to_markdown(rel)));
+            replacement = Some(format!("~/{}", to_portable_string(rel)));
         }
 
         // 3.8 ENV-var rule
@@ -182,7 +241,7 @@ pub fn normalize_links(
                 if let Some(val) = val {
                     let var_path = PathBuf::from(val);
                     let var_path = std::fs::canonicalize(&var_path).unwrap_or(var_path);
-                    let var_path = comparison_path(&var_path);
+                    let var_path = comparison_key(&var_path);
                     if comparable_abs.starts_with(&var_path) {
                         let path_len = var_path.as_os_str().len();
                         if path_len > longest_len {
@@ -196,8 +255,7 @@ pub fn normalize_links(
             if let Some((var_name, var_path)) = best_var
                 && let Ok(rel) = comparable_abs.strip_prefix(&var_path)
             {
-                let env_replacement =
-                    format!("${{{}}}/{}", var_name, super::path_to_markdown(rel));
+                let env_replacement = format!("${{{}}}/{}", var_name, to_portable_string(rel));
 
                 // 3.9 Emit warning
                 let msg = format!(
@@ -212,6 +270,16 @@ pub fn normalize_links(
 
                 replacement = Some(env_replacement);
             }
+        }
+
+        if replacement.is_none() && try_portable_string(&abs_path).is_none() {
+            report.add_warning(crate::markdown::compose::ComposeWarning::new(
+                "link_normalization",
+                format!(
+                    "the destination <blue>{}</blue> has no faithful portable spelling and no repository, home, or environment anchor applies; it was left exactly as authored.",
+                    abs_path.display()
+                ),
+            ));
         }
 
         if let Some(new_target) = replacement
@@ -302,7 +370,7 @@ mod tests {
         let target_file = assets.join("image.png");
         fs::write(&target_file, "png").unwrap();
         let abs_path = std::fs::canonicalize(&target_file).unwrap();
-        let content = format!("![img]({})\n", super::super::path_to_markdown(&abs_path));
+        let content = format!("![img]({})\n", biscuit_file::to_portable_string(&abs_path));
         let mut md = Markdown::new(&content);
         let options = ComposeOptions::new().with_source_file(&source_file);
         let mut report = ComposeReport::new();
@@ -319,7 +387,7 @@ mod tests {
     fn test_normalize_links_home_dir() {
         let home = dirs::home_dir().expect("Has home dir");
         let target = home.join("some_file.txt");
-        let content = format!("[file]({})\n", super::super::path_to_markdown(&target));
+        let content = format!("[file]({})\n", biscuit_file::to_portable_string(&target));
         let mut md = Markdown::new(&content);
         let options = ComposeOptions::new();
         let mut report = ComposeReport::new();
@@ -360,7 +428,7 @@ mod tests {
             .with_env(env);
         let content = format!(
             "<a href=\"{}\">config</a>\n",
-            super::super::path_to_markdown(&abs_path)
+            biscuit_file::to_portable_string(&abs_path)
         );
         let mut md = Markdown::new(&content);
         let options = ComposeOptions::new()
@@ -384,7 +452,7 @@ mod tests {
         fs::write(&target, "{}").unwrap();
         let content = format!(
             "[config]({})\n",
-            super::super::path_to_markdown(&target)
+            biscuit_file::to_portable_string(&target)
         );
         let mut md = Markdown::new(&content);
         let mut env = std::collections::HashMap::new();
@@ -430,9 +498,9 @@ mod tests {
 
         let content = format!(
             "<link rel=\"stylesheet\" href=\"{}\">\n<link rel=\"preload\" as=\"font\" href=\"{}\">\n<script src=\"{}\"></script>",
-            super::super::path_to_markdown(&abs_css),
-            super::super::path_to_markdown(&abs_font),
-            super::super::path_to_markdown(&abs_script)
+            biscuit_file::to_portable_string(&abs_css),
+            biscuit_file::to_portable_string(&abs_font),
+            biscuit_file::to_portable_string(&abs_script)
         );
         let mut md = Markdown::new(&content);
         let options = ComposeOptions::new().with_source_file(&source_file);
@@ -484,8 +552,8 @@ mod tests {
 
         let content = format!(
             "[img]({})\n[sibling]({})",
-            super::super::path_to_markdown(&abs_img),
-            super::super::path_to_markdown(&abs_sibling)
+            biscuit_file::to_portable_string(&abs_img),
+            biscuit_file::to_portable_string(&abs_sibling)
         );
         let mut md = Markdown::new(&content);
         let options = ComposeOptions::new().with_source_file(&source_file);
@@ -527,7 +595,7 @@ mod tests {
 
         let content = format!(
             "[config]({})",
-            super::super::path_to_markdown(&abs_path)
+            biscuit_file::to_portable_string(&abs_path)
         );
         let mut md = Markdown::new(&content);
         let options = ComposeOptions::new()
@@ -565,10 +633,10 @@ mod tests {
 
         let content = format!(
             "[link](<{}>)\n<img src='{}'>\n<a href=\"{}\" data-alt='{}'>link</a>",
-            super::super::path_to_markdown(&abs_parens),
-            super::super::path_to_markdown(&abs_quotes),
-            super::super::path_to_markdown(&abs_quotes),
-            super::super::path_to_markdown(&abs_quotes)
+            biscuit_file::to_portable_string(&abs_parens),
+            biscuit_file::to_portable_string(&abs_quotes),
+            biscuit_file::to_portable_string(&abs_quotes),
+            biscuit_file::to_portable_string(&abs_quotes)
         );
 
         let mut md = Markdown::new(&content);
@@ -622,10 +690,10 @@ mod tests {
 
         let content = format!(
             "<a href = \"{}\">link</a>\n<img src = \"{}\">\n<video src = \"{}\"></video>\n<link href = \"{}\">",
-            super::super::path_to_markdown(&abs_img),
-            super::super::path_to_markdown(&abs_img),
-            super::super::path_to_markdown(&abs_video),
-            super::super::path_to_markdown(&abs_css)
+            biscuit_file::to_portable_string(&abs_img),
+            biscuit_file::to_portable_string(&abs_img),
+            biscuit_file::to_portable_string(&abs_video),
+            biscuit_file::to_portable_string(&abs_css)
         );
         let mut md = Markdown::new(&content);
         let options = ComposeOptions::new().with_source_file(&source_file);
@@ -654,6 +722,100 @@ mod tests {
             md.content()
         );
         assert_eq!(report.link_normalizations_applied, 4);
+    }
+
+    /// Both spellings of one share must land on one key, or a document under
+    /// `\\server\share` stops normalizing the moment something canonicalizes a
+    /// destination into the verbatim namespace.
+    #[cfg(windows)]
+    #[test]
+    fn comparison_key_equates_legacy_and_verbatim_unc() {
+        assert_eq!(
+            comparison_key(Path::new(r"\\server\share\x")),
+            comparison_key(Path::new(r"\\?\UNC\server\share\x"))
+        );
+        // Equal as identities, declined as text: the pair a UNC destination
+        // reaches Finalization with, and the reason equating them cannot be
+        // done by rendering both.
+        assert!(try_portable_string(Path::new(r"\\server\share\x")).is_none());
+        assert!(try_portable_string(Path::new(r"\\?\UNC\server\share\x")).is_none());
+    }
+
+    /// A repository root short enough for `dunce` to reduce, holding a
+    /// descendant too long for it to reduce.
+    ///
+    /// This is the case that separates identity from rendering: the descendant
+    /// declines portabilization outright, so had either operand been spelled
+    /// through `to_portable_string` the prefix test would compare `C:/r`
+    /// against `\\?\C:\r\…` and silently refuse to normalize a path that is
+    /// genuinely inside the repository.
+    #[cfg(windows)]
+    #[test]
+    fn safe_repo_root_contains_declined_long_verbatim_descendant() {
+        let repo = Path::new(r"C:\r");
+        let doc = Path::new(r"C:\r\docs\a.md");
+        let long_a = "a".repeat(150);
+        let long_b = "b".repeat(150);
+        let descendant =
+            PathBuf::from(format!(r"\\?\C:\r\assets\{long_a}\{long_b}\image.png"));
+        assert!(
+            descendant.as_os_str().len() > 260,
+            "fixture must exceed MAX_PATH or `dunce` would reduce it"
+        );
+
+        assert!(try_portable_string(repo).is_some());
+        assert!(
+            try_portable_string(&descendant).is_none(),
+            "the descendant must be one `dunce` declines, or this proves nothing"
+        );
+
+        let repo_key = comparison_key(repo);
+        let doc_key = comparison_key(doc);
+        let descendant_key = comparison_key(&descendant);
+        assert!(descendant_key.starts_with(&repo_key));
+
+        let rel = compute_relative_path(&doc_key, &descendant_key);
+        assert_eq!(
+            to_portable_string(&rel),
+            format!("../assets/{long_a}/{long_b}/image.png")
+        );
+    }
+
+    /// Finalization runs after transclusion, so an authored destination it
+    /// cannot portabilize is left exactly as written and reported — the
+    /// warn-and-preserve half of the stage-specific policy whose other half is
+    /// `link_resolve`'s error.
+    ///
+    /// The fixture is an HTML anchor rather than a Markdown destination because
+    /// CommonMark consumes the backslash escapes in the latter, so a native
+    /// Windows spelling cannot survive being authored there in the first place.
+    /// It is a verbatim path rather than the UNC one because `canonicalize`
+    /// against `\\server\share` blocks on SMB name resolution for tens of
+    /// seconds; UNC's decline is pinned in
+    /// [`comparison_key_equates_legacy_and_verbatim_unc`] instead.
+    #[cfg(windows)]
+    #[test]
+    fn declined_absolute_destination_is_preserved_and_warned() {
+        let dir = tempdir().unwrap();
+        let snapshot = biscuit_file::FileResolutionContext::new(dir.path())
+            .without_home_dir()
+            .with_env(std::collections::HashMap::new());
+        let content = "<a href=\"\\\\?\\C:\\repo\\.\\docs\\f.md\">f</a>\n";
+        let mut md = Markdown::new(content);
+        let options = ComposeOptions::new().with_file_resolution_context(snapshot);
+        let mut report = ComposeReport::new();
+
+        normalize_links(&mut md, &options, &mut report).unwrap();
+
+        assert_eq!(md.content(), content);
+        assert_eq!(report.link_normalizations_applied, 0);
+        assert!(
+            report.warnings.iter().any(|w| {
+                w.stage == "link_normalization" && w.message.contains(r"\\?\C:\repo\.\docs\f.md")
+            }),
+            "expected a preserved-destination warning, got: {:?}",
+            report.warnings
+        );
     }
 
     #[test]
