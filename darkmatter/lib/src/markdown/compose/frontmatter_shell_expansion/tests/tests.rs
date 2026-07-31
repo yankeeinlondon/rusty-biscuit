@@ -1007,7 +1007,11 @@
         // The spec's intermixing example: the condition is expression content
         // (`file_exists(...)`) and both branches are real shell pipelines.
         let directive =
-            parse_shell_value("$( file_exists('Cargo.toml') ? cargo build : make )", "k", None)
+            parse_shell_value(
+                "$( file_exists('Cargo.toml') ? cargo build : cargo test )",
+                "k",
+                None,
+            )
                 .unwrap()
                 .expect("directive should parse");
         let (cond, then_b, else_b) = unwrap_ternary(&directive);

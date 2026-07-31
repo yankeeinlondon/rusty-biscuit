@@ -55,10 +55,15 @@
     }
 
     fn find_python() -> Option<PathBuf> {
-        ["python3", "python"]
-            .into_iter()
-            .find_map(|candidate| which::which(candidate).ok())
-            .filter(|path| !path.as_os_str().is_empty())
+        ["python3", "python"].into_iter().find_map(|candidate| {
+            let path = which::which(candidate).ok()?;
+            std::process::Command::new(&path)
+                .arg("--version")
+                .output()
+                .ok()
+                .filter(|output| output.status.success())
+                .map(|_| path)
+        })
     }
 
     #[test]

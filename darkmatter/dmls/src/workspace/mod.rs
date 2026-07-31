@@ -104,11 +104,11 @@ mod tests {
 
     #[test]
     fn test_uri_to_file_path_decodes_percent_escapes() {
-        let uri: Uri = "file:///tmp/with%20space/doc.md".parse().unwrap();
-        assert_eq!(
-            uri_to_file_path(&uri),
-            Some(PathBuf::from("/tmp/with space/doc.md"))
-        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("with space").join("doc.md");
+        let uri = file_path_to_uri(&path).unwrap();
+        assert!(uri.as_str().contains("with%20space"));
+        assert_eq!(uri_to_file_path(&uri), Some(path));
     }
 
     #[test]
@@ -129,12 +129,16 @@ mod tests {
 
     #[test]
     fn test_workspace_roots_prefers_folders() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = file_path_to_uri(&dir.path().join("legacy")).unwrap();
+        let alpha = file_path_to_uri(&dir.path().join("alpha")).unwrap();
+        let beta = file_path_to_uri(&dir.path().join("beta")).unwrap();
         let params: InitializeParams = serde_json::from_value(json!({
             "capabilities": {},
-            "rootUri": "file:///legacy",
+            "rootUri": legacy.as_str(),
             "workspaceFolders": [
-                { "uri": "file:///alpha", "name": "alpha" },
-                { "uri": "file:///beta", "name": "beta" }
+                { "uri": alpha.as_str(), "name": "alpha" },
+                { "uri": beta.as_str(), "name": "beta" }
             ]
         }))
         .unwrap();
@@ -145,9 +149,11 @@ mod tests {
 
     #[test]
     fn test_workspace_roots_falls_back_to_root_uri() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = file_path_to_uri(&dir.path().join("legacy")).unwrap();
         let params: InitializeParams = serde_json::from_value(json!({
             "capabilities": {},
-            "rootUri": "file:///legacy"
+            "rootUri": legacy.as_str()
         }))
         .unwrap();
         let roots = workspace_roots(&params);

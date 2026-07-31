@@ -282,15 +282,19 @@ pub fn edit_text(initial: &str, suffix: &str) -> Result<Option<String>, EditorEr
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use serial_test::serial;
-    use std::env;
-    use std::ffi::OsString;
+    #[cfg(unix)]
+    use std::{env, ffi::OsString};
+    #[cfg(unix)]
     use tempfile::tempdir;
 
+    #[cfg(unix)]
     struct ScopedEnv {
         vars: Vec<(&'static str, Option<OsString>)>,
     }
 
+    #[cfg(unix)]
     impl ScopedEnv {
         fn new() -> Self {
             Self { vars: Vec::new() }
@@ -311,6 +315,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     impl Drop for ScopedEnv {
         fn drop(&mut self) {
             for (key, original) in self.vars.iter().rev() {

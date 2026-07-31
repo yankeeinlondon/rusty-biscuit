@@ -2855,9 +2855,11 @@ mod bare_name_phase3 {
             "one referenced file recorded"
         );
         assert!(
-            resolved.referenced_files[0]
-                .to_string_lossy()
-                .contains("pkg/schemas"),
+            resolved.referenced_files[0].ends_with(
+                Path::new("pkg")
+                    .join("schemas")
+                    .join("claudine.yaml")
+            ),
             "referenced file must be from the near root"
         );
     }

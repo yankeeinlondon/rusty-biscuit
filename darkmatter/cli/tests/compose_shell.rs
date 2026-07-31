@@ -40,7 +40,13 @@ fn test_compose_with_blacklisted_command_fails() {
 #[test]
 fn test_compose_stdin_unapproved_command_fails_with_guidance() {
     let temp_dir = tempfile::TempDir::new().unwrap();
+    #[cfg(not(windows))]
     let whitelist_path = temp_dir.path().join(".darkmatter-shell-whitelist");
+    #[cfg(windows)]
+    let whitelist_path = std::path::PathBuf::from(
+        std::env::var_os("USERPROFILE").expect("Windows user profile is available"),
+    )
+    .join(".darkmatter-shell-whitelist");
 
     md_cmd()
         .current_dir(temp_dir.path())
@@ -96,11 +102,14 @@ fn test_compose_with_nonexistent_command_fails() {
     let md_path = temp_dir.path().join("test.md");
     std::fs::write(&md_path, "# Test\n::shell nonexistent_command_xyz\n").unwrap();
 
-    // Write whitelist to approve the command
     let whitelist_path = temp_dir.path().join(".darkmatter-shell-whitelist");
     std::fs::write(&whitelist_path, "prefix nonexistent_command_xyz\n").unwrap();
+    // Missing executables exhaust PATH. Isolate lookup so WSL does not probe
+    // Windows-backed mounts whose latency is unrelated to this CLI contract.
+    let isolated_path = std::env::join_paths([temp_dir.path()]).unwrap();
 
     md_cmd()
+        .env("PATH", isolated_path)
         .arg("compose")
         .arg(&md_path)
         .assert()
@@ -183,4 +192,3 @@ fn test_compose_shell_reports_discovered_commands_without_executing() {
         .stdout(predicate::str::contains("root-frontmatter\n").not())
         .stdout(predicate::str::contains("child-frontmatter\n").not());
 }
-

@@ -405,6 +405,9 @@ fn errors_preserve_branch_and_caller_anchor() {
         let mut permissions = fs::metadata(&object_path)
             .expect("incoming object metadata")
             .permissions();
+        // This branch is Windows-only, where clearing the read-only file
+        // attribute does not broaden Unix mode bits.
+        #[allow(clippy::permissions_set_readonly_false)]
         permissions.set_readonly(false);
         fs::set_permissions(&object_path, permissions).expect("make incoming object writable");
     }
