@@ -223,8 +223,18 @@ Each step deletes the local implementation in the same change that adopts the
 shared one. Three commits, independently landable:
 
 ### 1. biscuit-file
-Add `to_portable_string` + rustdoc; make `dunce` unconditional; drop the
-redundant dev-dependency; tests. No consumer changes.
+Lift the collapse-then-reduce core out of `file_reference::resolve` into an
+unfeatured module (decision 4); reduce `normalize_components` to a wrapper over
+it. Add `to_portable_string` + rustdoc; make `dunce` unconditional; drop the
+redundant dev-dependency; tests.
+
+This step is **larger than a pure addition** — it edits a `pub(crate)` symbol
+that `df5cb5268` measured at MEDIUM risk (36 impacted, 6 direct), whose only
+out-of-area consumer is darkmatter's `resolve_ctx`. Deliberate: one
+implementation of the ordering rule is the goal, and a second copy would defeat
+the spec. Run impact analysis on `normalize_components` before editing, and
+verify biscuit-file's suite on both a Windows and a non-Windows host — the
+existing behavior has never been executed on the former.
 
 ### 2. darkmatter — core
 - **Delete** `compose/util.rs::path_to_markdown` and its `compose/mod.rs`
@@ -306,38 +316,57 @@ obligation survives.
 
 ## Open decisions
 
-1. **UNC policy.** `\\server\share\f.md` currently renders `//server/share/f.md`,
-   which in a Markdown destination reads as a protocol-relative URL rather than
-   a path. As a private darkmatter helper that was an internal quirk; as shared
-   biscuit-file API it becomes a contract. Decide before publishing: commit to
-   the collapse and document it, or leave UNC explicitly unspecified.
-   **Proposed:** keep the collapse (it matches today's behavior, so adoption
-   changes nothing) and document it as intentional.
+1. **UNC policy — the one item needing sign-off.** `\\server\share\f.md`
+   currently renders `//server/share/f.md`. In a Markdown destination a leading
+   `//` is a *protocol-relative URL*, not a path — so today's behavior is wrong
+   for the primary consumer. As a private darkmatter helper that was an internal
+   quirk; as biscuit-file API it becomes a contract.
+
+   The root difficulty: **there is no portable *path* text for a network
+   location.** The correct portable form of `\\server\share\f.md` is the URL
+   `file://server/share/f.md` — a UNC host is exactly a file URL's authority.
+   But this function returns path text, not a URL; emitting a scheme would be a
+   layer violation and would corrupt every non-URL consumer (YAML scalars,
+   config values).
+
+   - **(a) Keep the collapse** → `//server/share/f.md`. Rejected: silently
+     produces a URL-shaped string with different meaning.
+   - **(b) Emit `file://…`.** Rejected: a path renderer must not invent a
+     scheme.
+   - **(c) Decline — return the native spelling unchanged.** **Proposed.**
+
+   (c) is not a cop-out; it reuses the rule already in the codebase. When
+   `dunce::simplified` cannot faithfully reduce a verbatim path it leaves it
+   intact rather than approximating. Applying the same rule to UNC gives the
+   function one honest contract: *render portable text where a faithful portable
+   form exists; otherwise return the input's native spelling.* Consumers that
+   need a URL build one deliberately, with the information to do it correctly.
+
+   Note this **changes darkmatter's current behavior** for UNC paths rather than
+   grandfathering it, and the output can then contain `\` — so the doc comment
+   must state that forward-slash output is guaranteed only where a portable form
+   exists. Needs sign-off because it is a user-visible contract, not an
+   implementation detail.
 2. **Name.** `to_portable_string` proposed. Alternatives: `portable_display`,
    `to_portable_text`. Should not carry `markdown` — the function is
    domain-neutral and Markdown is one consumer.
 3. **Module placement.** Crate root (`biscuit_file::to_portable_string`) versus
    a small `path` module. **Proposed:** crate root, matching the flat surface
    of the other top-level helpers.
-4. **Where the collapse-then-reduce core lives.** This is the one decision the
-   `df5cb5268` review forced, and it has no free answer. `normalize_components`
-   already implements exactly the required order — but it is `pub(crate)` inside
-   `file_reference`, which is `#[cfg(feature = "file-reference")]`
-   (`lib.rs:121`), while `to_portable_string` must be available *without* that
-   feature or the reuse goal dies.
-   - **(a) Lift the core into an unfeatured module** and have both
-     `normalize_components` and `to_portable_string` call it.
-     `normalize_components` becomes a thin wrapper; one implementation of the
-     ordering rule survives. **Proposed** — it is the only option that does not
-     recreate the duplication this spec exists to remove, and the lifted code is
-     already written and reviewed.
-   - **(b) Duplicate the collapse** inside `to_portable_string`. Rejected: two
-     copies of a subtle, load-bearing ordering rule is precisely the failure
-     mode being fixed.
-   - **(c) Gate `to_portable_string` behind `file-reference`.** Rejected: drags
-     in gix, cargo_metadata, walkdir, dirs, and url for a path renderer.
+4. ~~**Where the collapse-then-reduce core lives.**~~ **DECIDED 2026-07-31:
+   lift the core into an unfeatured module**, with `normalize_components`
+   reduced to a wrapper over it.
 
-   Note (a) widens step 1's blast radius: `df5cb5268` measured
-   `normalize_components` at **MEDIUM, 36 impacted / 6 direct**, with darkmatter's
-   `resolve_ctx` the only consumer outside biscuit-file. Re-run impact analysis
-   before lifting it.
+   `normalize_components` already implements exactly the required order, but it
+   is `pub(crate)` inside `file_reference`, which is
+   `#[cfg(feature = "file-reference")]` (`lib.rs:121`), while
+   `to_portable_string` must work without that feature. The alternatives were
+   duplicating the collapse (two copies of a subtle, load-bearing ordering rule
+   — the exact failure mode this spec exists to remove) or gating
+   `to_portable_string` behind `file-reference` (drags in gix, cargo_metadata,
+   walkdir, dirs, and url for a path renderer). Both trade correctness for a
+   smaller diff.
+
+   Chosen with explicit direction that a wider rollout is acceptable when it
+   buys the better decision. The cost is real and is recorded in
+   [step 1](#1-biscuit-file): MEDIUM risk, 36 impacted, 6 direct.
