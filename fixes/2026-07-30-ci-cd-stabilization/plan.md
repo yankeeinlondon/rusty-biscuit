@@ -575,11 +575,103 @@ Per repo policy, run gates only for the recorded scope — never
 | 1 — land PR 19 | **done** | merge commit `53cfeec00`; admin override inside a restored-on-exit ruleset window; `enforcement=active`, `bypass_actors=0` after |
 | 2 — replay PR 21 | **done** | `git rebase --onto main 2d6a606d5`; 11 of 12 clean, one conflict; head `f2f600a9f` |
 | 3 — stacked CI + PR 22 | **done** | `ci.yml`/`pr-health.yml` base filters removed; PR 22 head `c3f8ae798`; first-ever `ci` run **30562649123** (112 jobs) |
-| 4 — Windows burn-down | not started | awaiting the first post-replay area fan-out |
+| 4 — Windows burn-down | **handed to Ken** | targets identified below; owned on a separate branch |
+| 5 — remove the blinders | **done** | run **30595280027**: 238 jobs, 151 pass, 55 fail, **0 without a verdict**, 2.4h |
 
 Recovery tags pushed to the remote: `recovery/pr19-pre-merge` (`b09b1f50e`),
 `recovery/pr21-pre-rebase` (`02a89f149`), `recovery/pr22-pre-rebase`
 (`f83c69da5`).
+
+### Phase 5 — the goal restated, and met
+
+Ken reframed the objective mid-execution, and it was the right correction: the
+aim is **a CI/CD process that reports the true state of the software**, not one
+where tests pass. Remove what blinds us; fix bugs afterwards. Work had drifted
+into fixing individual tests to get past a gate, when the gate was the problem.
+
+Two structural blinders were removed (`161402b6e`), both "fail fast to save
+runner minutes" trades that cost exactly the visibility the pipeline exists to
+provide:
+
+- **The canary gated the whole area fan-out.** Three consecutive runs produced
+  ZERO area evidence because one canary test failed — a Windows compile-check, a
+  WSL2 binary path, and a 40 ms timing assertion on macOS. None said anything
+  about the other twenty areas, yet each erased them: 31 jobs instead of 168.
+  Seven further jobs carried the same clause.
+- **L1 gated L2/browser/wsl within each area.** One red L1 deleted the whole
+  tier's evidence and the rollup logged MISSING — indistinguishable from a leg
+  that was never scheduled.
+
+Both now keep `needs:` for ordering and run on `!cancelled()`. Removing the gate
+also made the run *faster* — 2.4 h for 238 jobs versus 4.0 h for 172 — because
+areas start immediately instead of queuing behind the canary stage. Wall clock
+here is bounded by runner concurrency, not job duration.
+
+Supporting fixes in the same phase:
+
+| Commit | Blinder removed |
+|---|---|
+| `64837bd21` | `sniff repo --json` aborted on CI's shallow clone (`try_find_object`); added a test owning its own depth-1 fixture |
+| `ba2f46229` | 30 min job ceiling killed cells into MISSING → 45 min |
+| `3a274b2fa` | 30 s per-test kill failed correct tests → 90 s; claudine's shard had 11 timeouts and **zero** assertion failures |
+| `268ab36bf`, `be7e4f613` | per-package invocation resolved features per package, rebuilding crates 3× and hiding feature-gated tests; one resolution per area |
+| `7f2bbf7ce` | `progress_resets_stall_clock` had never run in CI; 40 ms budget widened |
+| `e5ee7c7f8` | a dead WSL2 guest rendered identically to a tier with no tests; producer now records *why* |
+
+### Remaining blind spots — two, both WSL2 guest instability
+
+Confirmed not to be reporting bugs. Control case: darkmatter shards 1/2/4 had
+real test failures, their guests stayed healthy, staging succeeded, and reports
+came through. Only a dead guest loses evidence.
+
+1. **claudine wsl2, all four shards** — nextest killed by SIGBUS (signal 7, exit
+   135) ~3m45s in, right after `Extracting 153 binaries`. claudine has the
+   largest archive (153, vs darkmatter 130, biscuit-terminal 55). Signal 7 is
+   what the kernel delivers when a memory-mapped file cannot be backed, so VHDX
+   disk or memory exhaustion is the lead. **Diagnose before fixing.**
+2. **darkmatter wsl2 shard 3/4** — `Provision the WSL2 guest` failed with
+   `wsl.exe` exit 4294967295. A flake; the other three provisioned. Wants a
+   bounded retry on that step only — never on the test step, where a retried
+   timeout would look healthy.
+
+`claudine/windows-latest/L1` also renders MISSING, but honestly: the crate fails
+to BUILD, so the test set is genuinely unknown. That is the rollup working.
+
+### Phase 4 targets — 917 failing tests, two causes explain ~800
+
+macOS and ubuntu are healthy: 14 failures between them. This is Windows (550)
+and WSL2 (353).
+
+| Area | macOS | ubuntu | Windows | WSL2 |
+|---|---:|---:|---:|---:|
+| `darkmatter` | · | 1 | **480** | MISSING |
+| `tree-hugger` | · | · | 6 | **150** |
+| `biscuit-terminal` | 3 | 2 | 36 | 48 |
+| `biscuit-file` | · | · | 4 | 43 |
+| `biscuit-speaks` | · | · | · | 34 |
+| `schematic` | · | · | 8 | 24 |
+| `research` | · | · | 2 | 28 |
+| `sniff` | 3 | 1 | 5 | 19 |
+| `unchained-ai` | · | · | 5 | 6 |
+| others | 1 | 3 | 4 | 1 |
+
+**Target 1 — `md.exe` stack-overflows on Windows (~451 tests, 49% of all
+failures).** `code=-1073741571` = `0xC00000FD` = `STATUS_STACK_OVERFLOW`, on
+*every* subcommand (`compose`, `clean`, `schema`, `code-block`, `get`, `set`,
+`hash`, `graph`, `rm`) — so it is at startup, not in one code path. Windows gives
+the main thread 1 MB against 8 MB on Linux/macOS. Candidates: a Windows-scoped
+`-C link-arg=/STACK:8388608`, or moving the work onto a thread with an explicit
+stack size. Note `.cargo/config.toml` does not exist on any branch — it was
+deleted with the kache wrapper — so that file would be created fresh and must be
+scoped to `[target.x86_64-pc-windows-msvc]`.
+
+**Target 2 — archived tests resolve fixture paths to the build host (~250–350
+tests, 9 areas).** `Io { path: "/home/runner/work/rusty-biscuit/…", NotFound }`
+is the *Windows host's* checkout; the guest has the repo at
+`/home/runner/rusty-biscuit`. `--workspace-remap` fixes nextest's bookkeeping but
+not paths baked into the binary at compile time via `CARGO_MANIFEST_DIR`. Same
+class as the `cargo_bin!` bug already fixed in `43056c8bc`; one helper likely
+closes all nine areas.
 
 **Both PR 21 canary failures are resolved**, in run 30562547696:
 `canary / playa / check (windows-latest)` and
@@ -615,33 +707,46 @@ bought.
 
 ## Acceptance criteria
 
-- [ ] PR 19 is merged by an authorized admin override; its failure set, source
+- [x] PR 19 is merged by an authorized admin override; its failure set, source
       run, and head SHA are recorded in the PR body, and no baseline entries were
       added merely to achieve the merge.
-- [ ] `Cargo.lock` is tracked on `main`.
-- [ ] PR 21 is replayed from the 12-commit range (`2d6a606d5..02a89f149`) onto
+- [x] `Cargo.lock` is tracked on `main`.
+- [x] PR 21 is replayed from the 12-commit range (`2d6a606d5..02a89f149`) onto
       post-PR-19 `main` and every item in the Phase 2 verification list holds.
-- [ ] `canary / playa / check (windows-latest)` passes.
-- [ ] `canary / biscuit-hash / wsl2 / test` passes.
-- [ ] The area fan-out runs on PR 21 — `matrix.area` is no longer `skipped`.
-- [ ] `sniff` has Windows L1 and compile-check cells reporting real results.
-- [ ] `ci.yml` schedules stacked pull requests and `pr-health.yml` has the same
+- [x] `canary / playa / check (windows-latest)` passes.
+- [x] `canary / biscuit-hash / wsl2 / test` passes.
+- [x] The area fan-out runs on PR 21 — `matrix.area` is no longer `skipped`.
+- [x] `sniff` has Windows L1 and compile-check cells reporting real results.
+- [x] `ci.yml` schedules stacked pull requests and `pr-health.yml` has the same
       applicability contract, enforced by a workflow-contract test.
-- [ ] PR 22 runs CI while stacked, then targets `main` with only its intended
-      six-commit delta; the duplicate `research` symlink implementation is
-      resolved to one.
-- [ ] The Windows failure table is re-derived from a post-replay run,
+- [~] PR 22 runs CI while stacked (**done**) and the duplicate `research`
+      symlink implementation is resolved to one (**done**); retargeting to
+      `main` waits on PR 21 landing.
+- [x] The Windows failure table is re-derived from a post-replay run,
       with failures, timeouts, cancellations, missing evidence, and policy gaps
       distinguished.
-- [ ] No tracked Cargo configuration imposes a rustc wrapper on every host, and
+- [x] No tracked Cargo configuration imposes a rustc wrapper on every host, and
       `just init` does not silently activate a host-wide wrapper.
-- [ ] The pinned `cargo binstall`-backed root recipe is documented as the
+- [x] The pinned `cargo binstall`-backed root recipe is documented as the
       developer install path on every OS, in the kache skill's
       `installation.md` and wherever developer setup is described.
-- [ ] kache action calls, reports, reusable-workflow inputs, and per-area policy
+- [x] kache action calls, reports, reusable-workflow inputs, and per-area policy
       are removed from CI; `Swatinem/rust-cache@v2` remains.
-- [ ] `.github/kache-version` is `0.12.0` on `main`, and the developer installer
-      verifies the installed executable against it.
+- [~] `.github/kache-version` is `0.12.0` and the developer installer verifies
+      the installed executable against it — true on the branch; reaches `main`
+      when PR 21 lands.
 - [ ] Any future kache CI experiment is separately scoped, uses a reviewed
       commit-SHA-pinned action or explicit backend, and reports weighted hit rate
       plus wall-clock comparison against a no-kache control.
+
+### Phase 5 — reporting the true state
+
+- [x] No cell in a completed run lacks a verdict — run 30595280027: 238 jobs,
+      zero cancelled, zero timed out.
+- [x] A canary failure no longer suppresses the area fan-out, and no job gates on
+      canary success. Guarded by a contract test, proven non-vacuous.
+- [x] A red L1 no longer suppresses its area's L2, browser, or WSL2 tiers.
+- [x] A dead WSL2 guest is distinguishable from a tier that ran no tests.
+- [ ] The WSL2 provisioning flake is retried (`wsl.exe` exit 4294967295).
+- [ ] The claudine WSL2 SIGBUS has a confirmed cause. Diagnose before fixing.
+- [ ] Phase 4 burn-down proceeds against a run in which every cell reported.
