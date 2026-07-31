@@ -57,6 +57,18 @@ Windows spells paths several ways.
 Finally, the name is wrong today: nothing in `path_to_markdown` is
 Markdown-specific. Markdown is one consumer among many.
 
+### Where the verbatim paths actually come from
+
+Not from biscuit-file. `df5cb5268` already reduces verbatim spellings at the
+resolver's root boundary, so paths *returned by* `FileReference` are legacy-form
+on Windows.
+
+They come from darkmatter calling `std::fs::canonicalize` itself — five sites in
+`link_normalization.rs` alone (`:76`, `:114`, `:138`, `:144`, `:149`), plus the
+`schemas` and `compose` paths. Those results are handed straight to a renderer.
+So the resolver being fixed does not make this redundant; it narrows the problem
+to exactly the boundary this spec covers.
+
 ## Non-goals
 
 - **No `Path::components()` rewrite.** Structural rendering would fix the Unix
@@ -80,12 +92,14 @@ Markdown-specific. Markdown is one consumer among many.
 ```rust
 /// Render a path as portable, forward-slash-separated text.
 ///
-/// A Windows verbatim (`\\?\`) prefix is reduced first, via
-/// [`dunce::simplified`], which declines to reduce when the legacy spelling
-/// would not be equivalent (over-long paths, reserved DOS device names,
-/// trailing dots or spaces) — so such a path survives intact rather than being
-/// silently corrupted. On every non-Windows target this is a plain separator
-/// pass with no prefix work.
+/// `.` and `..` are collapsed lexically, then a Windows verbatim (`\\?\`)
+/// prefix is reduced via [`dunce::simplified`] — in that order, which is
+/// load-bearing (see the spec's "Ordering constraint"). `dunce` declines to
+/// reduce when the legacy spelling would not be equivalent (over-long paths,
+/// reserved DOS device names, trailing dots or spaces), so such a path survives
+/// intact rather than being silently corrupted. On every non-Windows target
+/// `dunce::simplified` is a `const fn` returning false, making this provably
+/// the identity apart from the separator pass.
 ///
 /// ## Notes
 ///
@@ -97,6 +111,38 @@ pub fn to_portable_string(path: &Path) -> String;
 ```
 
 Additive only. No existing signature or behavior changes.
+
+## Ordering constraint
+
+`dunce::simplified` **refuses** to reduce a verbatim path that still carries
+components Win32 would not accept literally — because under a `\\?\` prefix
+Win32 performs no path parsing, so `.`, `..`, and `/` are all literal filename
+characters rather than syntax. `df5cb5268` discovered this twice and documented
+it in both places:
+
+- `normalize_components` (`resolve.rs:996`) reduces **after** `.`/`..` collapse,
+  "because [`dunce::simplified`] refuses to touch a verbatim path that still
+  carries relative components";
+- `simplify_root` is applied to the root **before** any join, because "a
+  component containing a slash is not a valid filename" — so simplifying an
+  already-joined candidate declines.
+
+The naive implementation is therefore wrong:
+
+```rust
+// WRONG: dunce declines on `\\?\C:\repo\.\docs`, the prefix survives,
+// and the replace yields `//?/C:/repo/./docs`.
+dunce::simplified(path).to_string_lossy().replace('\\', "/")
+```
+
+`to_portable_string` must collapse first, then reduce, then render — the same
+order `normalize_components` already uses. A silent failure here is worse than
+no function at all: it produces `//?/C:/…`, which is neither a path nor a URL,
+from an input the caller had every reason to think was fine.
+
+This is also why the accepted limitation is a *rendering* limitation only. The
+prefix handling is exact, or it declines and says so by leaving the path
+untouched.
 
 ## Manifest changes
 
@@ -215,6 +261,18 @@ In biscuit-file, against `to_portable_string`:
   name or `MAX_PATH`-exceeding) survives with its prefix intact rather than
   being corrupted — this is the defect the current hand-rolled strip has;
 - `#[cfg(not(windows))]`: no-op for any path without a backslash.
+- **Ordering**, per [Ordering constraint](#ordering-constraint): a verbatim path
+  carrying `.`/`..` (`\\?\C:\repo\.\docs`) reduces correctly rather than
+  surviving as `//?/C:/repo/./docs`. This is the test that fails against the
+  naive implementation, so it is the one that must exist.
+
+**Verify the foundation while here.** `df5cb5268` closes with *"No Windows host
+was available, so no Windows test was executed"* — it was validated by
+`cargo check` and `clippy --target x86_64-pc-windows-msvc` only. Its
+`simplify_root` / `normalize_components` behavior, which this spec builds
+directly on, has never actually run on Windows. Step 1 is developed on a Windows
+host, so it should execute biscuit-file's existing suite there and report the
+result, rather than inheriting an unverified foundation.
 
 In darkmatter, existing compose and link tests must pass unchanged on both
 platforms; no snapshot should move, since on Unix the new function is
@@ -261,3 +319,25 @@ obligation survives.
 3. **Module placement.** Crate root (`biscuit_file::to_portable_string`) versus
    a small `path` module. **Proposed:** crate root, matching the flat surface
    of the other top-level helpers.
+4. **Where the collapse-then-reduce core lives.** This is the one decision the
+   `df5cb5268` review forced, and it has no free answer. `normalize_components`
+   already implements exactly the required order — but it is `pub(crate)` inside
+   `file_reference`, which is `#[cfg(feature = "file-reference")]`
+   (`lib.rs:121`), while `to_portable_string` must be available *without* that
+   feature or the reuse goal dies.
+   - **(a) Lift the core into an unfeatured module** and have both
+     `normalize_components` and `to_portable_string` call it.
+     `normalize_components` becomes a thin wrapper; one implementation of the
+     ordering rule survives. **Proposed** — it is the only option that does not
+     recreate the duplication this spec exists to remove, and the lifted code is
+     already written and reviewed.
+   - **(b) Duplicate the collapse** inside `to_portable_string`. Rejected: two
+     copies of a subtle, load-bearing ordering rule is precisely the failure
+     mode being fixed.
+   - **(c) Gate `to_portable_string` behind `file-reference`.** Rejected: drags
+     in gix, cargo_metadata, walkdir, dirs, and url for a path renderer.
+
+   Note (a) widens step 1's blast radius: `df5cb5268` measured
+   `normalize_components` at **MEDIUM, 36 impacted / 6 direct**, with darkmatter's
+   `resolve_ctx` the only consumer outside biscuit-file. Re-run impact analysis
+   before lifting it.
