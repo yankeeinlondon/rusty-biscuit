@@ -96,11 +96,14 @@ fn test_compose_with_nonexistent_command_fails() {
     let md_path = temp_dir.path().join("test.md");
     std::fs::write(&md_path, "# Test\n::shell nonexistent_command_xyz\n").unwrap();
 
-    // Write whitelist to approve the command
     let whitelist_path = temp_dir.path().join(".darkmatter-shell-whitelist");
     std::fs::write(&whitelist_path, "prefix nonexistent_command_xyz\n").unwrap();
+    // Missing executables exhaust PATH. Isolate lookup so WSL does not probe
+    // Windows-backed mounts whose latency is unrelated to this CLI contract.
+    let isolated_path = std::env::join_paths([temp_dir.path()]).unwrap();
 
     md_cmd()
+        .env("PATH", isolated_path)
         .arg("compose")
         .arg(&md_path)
         .assert()
@@ -183,4 +186,3 @@ fn test_compose_shell_reports_discovered_commands_without_executing() {
         .stdout(predicate::str::contains("root-frontmatter\n").not())
         .stdout(predicate::str::contains("child-frontmatter\n").not());
 }
-
