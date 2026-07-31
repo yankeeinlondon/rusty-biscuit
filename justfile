@@ -833,6 +833,99 @@ install-kache:
     echo "  this shell  : export RUSTC_WRAPPER=kache"
     echo "  host-wide   : kache init     (writes \$CARGO_HOME/config.toml — affects every repo)"
     echo "  undo        : unset RUSTC_WRAPPER, or remove the wrapper from Cargo home"
+    echo
+    echo "  Windows/NTFS: repository policy says leave it OFF (just kache-status)."
+
+# Exists because activation is HOST policy and the repository therefore cannot
+# see it: `kache init` writes `$CARGO_HOME/config.toml` and affects every Rust
+# repo on the machine. Nothing here can prevent that — this recipe makes it
+# visible, and answers the question the tool's own advisory does not: whether
+# this repo wants the cache on THIS filesystem at all.
+
+# report whether kache is active here, and whether this filesystem earns it
+kache-status:
+    #!/usr/bin/env bash
+    set -uo pipefail
+
+    say() { printf '  %-12s %s\n' "$1" "$2"; }
+    echo "=== kache status — policy: docs/kache-strategy.md ==="
+
+    if command -v kache &> /dev/null; then
+        say "installed" "$(kache --version 2>/dev/null | cut -d' ' -f2) (pinned {{ KACHE_VERSION }})"
+    else
+        say "installed" "no — 'just install-kache' installs it (does not activate it)"
+    fi
+
+    # Cargo's own precedence order, highest first. Reporting only the winner
+    # would hide a second activation that survives undoing the first.
+    active=""
+    if [[ -n "${RUSTC_WRAPPER:-}" ]]; then
+        active="RUSTC_WRAPPER=${RUSTC_WRAPPER}"
+        say "active" "YES — environment: $active"
+    fi
+    if [[ -f .cargo/config.toml ]] && grep -q 'rustc-wrapper' .cargo/config.toml; then
+        active="${active:+$active; }repo .cargo/config.toml"
+        say "active" "YES — repo .cargo/config.toml (tracked wrapper is forbidden here)"
+    fi
+    cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+    for candidate in "$cargo_home/config.toml" "$cargo_home/config"; do
+        if [[ -f "$candidate" ]] && grep -q 'rustc-wrapper' "$candidate"; then
+            active="${active:+$active; }$candidate"
+            say "active" "YES — $candidate (host-wide: every repo on this machine)"
+        fi
+    done
+    [[ -z "$active" ]] && say "active" "no — nothing sets a rustc wrapper"
+
+    # Never inferred from the OS: the restore mode is a property of the
+    # FILESYSTEM, and one host can have several. Probe where target/ actually is.
+    probe_dir="target"; [[ -d "$probe_dir" ]] || probe_dir="."
+    cow="unknown"
+    case "$(uname -s)" in
+        Darwin)
+            src="$(mktemp "$probe_dir/.kache-probe.XXXXXX")"
+            cp -c "$src" "$src.clone" &> /dev/null && cow="yes" || cow="no"
+            rm -f "$src" "$src.clone"
+            say "target/ fs" "clone-on-write: $cow (cp -c probe)"
+            ;;
+        Linux)
+            src="$(mktemp "$probe_dir/.kache-probe.XXXXXX")"
+            cp --reflink=always "$src" "$src.clone" &> /dev/null && cow="yes" || cow="no"
+            rm -f "$src" "$src.clone"
+            say "target/ fs" "$(df -PT "$probe_dir" | awk 'NR==2{print $2}') — reflink: $cow"
+            ;;
+        MINGW*|MSYS*|CYGWIN*)
+            # No userspace reflink probe exists on Windows, so the filesystem
+            # type IS the answer: ReFS clones blocks, NTFS restores by copy.
+            drive="$(pwd -W 2>/dev/null | cut -c1)"
+            fstype="$(powershell.exe -NoProfile -NonInteractive -Command \
+                "(Get-Volume -DriveLetter $drive).FileSystemType" 2>/dev/null | tr -d '\r\n')"
+            [[ "$fstype" == "ReFS" ]] && cow="yes" || cow="no"
+            say "target/ fs" "${drive}: ${fstype:-unknown} — block cloning: $cow"
+            ;;
+    esac
+
+    if command -v kache &> /dev/null; then
+        say "store" "$(kache doctor 2>&1 | head -3 | tr '\n' ' ' | tr -s ' ')"
+    fi
+
+    echo
+    if [[ -z "$active" ]]; then
+        echo "  VERDICT: not in use. Cargo builds normally; nothing to undo."
+    elif [[ "$cow" == "yes" ]]; then
+        echo "  VERDICT: active on a filesystem that clones blocks — this is the case kache is for."
+    else
+        echo "  VERDICT: active WITHOUT copy-on-write. The store is a real second copy of every"
+        echo "           cached artifact, so disk roughly doubles for cached content."
+        echo "           Repository policy (docs/kache-strategy.md): on NTFS/ext4 leave it OFF"
+        echo "           unless a ReFS Dev Drive or reflink volume holds the store AND target/."
+        echo
+        echo "           Do NOT take kache's own first two suggestions here:"
+        echo "             windows_hardlink = true        unsafe — Cargo DOES rewrite object outputs"
+        echo "             storage_layout_advice = false  silences the signal rather than the cause"
+        echo
+        echo "           Undo — this shell : export RUSTC_WRAPPER=\"\""
+        echo "                  host-wide  : remove the rustc-wrapper line from $cargo_home/config.toml"
+    fi
 
 # ensure cargo-sweep is available for target/ hygiene (just sweep)
 _ensure-cargo-sweep:

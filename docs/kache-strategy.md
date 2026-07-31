@@ -32,6 +32,37 @@ use it. Rationale and measurements: `fixes/2026-07-30-ci-cd-stabilization/plan.m
   store filesystem from 0.12.0; confirm cloning with `cp -c` (macOS) or `cp --reflink=always`
   (Linux) between the store and a target directory.
 
+## Per-host activation decision
+
+Activation is a **host** decision and the repository cannot see it — `kache init`
+writes `$CARGO_HOME/config.toml` and affects every Rust repo on that machine. Run
+`just kache-status` to see what is actually active here and whether this
+filesystem earns it.
+
+The restore mode is a property of the **filesystem**, not the OS, so these are
+defaults to start from and not conclusions to skip the probe with:
+
+| Target | Decision | Rationale |
+|---|---|---|
+| **macOS dev** | Opt in after probe | Measured 99.6% warm on the current APFS layout. Other store/target layouts must still prove clone support. |
+| **Linux dev** | Opt in after probe | ext4 is hardlink mode: store ingestion is a second copy and live `target/` links limit reclamation. btrfs / XFS-reflink are stronger candidates. |
+| **Windows dev** | **Off by default** | NTFS restores by copy. Opt in only after a ReFS Dev Drive — holding the store *and* `target/` — is measured. |
+| **WSL2 dev** | Qualified like Linux | A normal distro root is commonly ext4 in a VHDX; measure storage and restore behavior. |
+| **WSL2 CI guest** | No | It executes a prebuilt nextest archive and compiles nothing inside the guest. |
+| **CI** | Off for now | Keep `Swatinem/rust-cache@v2`. Revisit only with an S3/R2 backend. |
+
+### Two remedies kache suggests that this repo rejects
+
+On a non-clone volume kache prints storage-layout advice offering three fixes.
+Only the third is ours:
+
+- `[cache] windows_hardlink = true` — kache itself conditions this on the build
+  never deleting or rewriting an object output. Cargo does both, routinely.
+- `[cache] storage_layout_advice = false` — silences the signal rather than the
+  cause, and the signal is what tells you the volume is one we decided against.
+- A ReFS Dev Drive holding store and `target/` together — the supported way to
+  make Windows worth activating.
+
 ## Future ambitions — kache in Windows CI
 
 Windows legs currently build wrapper-free (Option A). The candidate upgrades, in order of

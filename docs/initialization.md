@@ -91,12 +91,30 @@ Never infer the restore mode from the OS. Confirm the store and `target/` can
 actually clone blocks:
 
 ```sh
+just kache-status                              # what is active here, and does this volume earn it
 kache doctor                                   # reports the store filesystem (0.12.0+)
 cp -c  <store-file> <target-dir>/probe                 # macOS: fails if clonefile can't
 cp --reflink=always <store-file> <target-dir>/probe    # Linux: fails if reflink can't
 ```
 
+Windows has no userspace reflink probe, so the filesystem type *is* the answer:
+**ReFS** clones blocks, **NTFS** restores by copy. `just kache-status` reads it
+for you.
+
 ### Activating
+
+Start from the per-host decision table in
+[`kache-strategy.md`](kache-strategy.md#per-host-activation-decision). The one
+that most often surprises people:
+
+> **Windows dev hosts: leave kache off.** NTFS restores cache hits by copy, so
+> the store becomes a genuine second copy of every cached artifact. Opt in only
+> after a ReFS Dev Drive — holding the store *and* `target/` — has been measured.
+
+If kache prints storage-layout advice on a non-clone volume, do **not** take its
+first two suggestions: `windows_hardlink = true` is unsafe because Cargo rewrites
+object outputs, and `storage_layout_advice = false` silences the signal instead
+of the cause. Turn the wrapper off, or move to a clone-capable volume.
 
 Two supported scopes:
 
@@ -106,9 +124,11 @@ kache init                   # host-wide: writes $CARGO_HOME/config.toml
 ```
 
 `kache init` affects **every** Rust repository on the host, so choose it only
-with that in mind. To undo: `unset RUSTC_WRAPPER`, or remove the wrapper line
-from Cargo home. Do not hand-create an ignored `.cargo/config.toml` in this
-repository — hidden local policy is difficult to diagnose later.
+with that in mind. It is also invisible to this repository — nothing in a clone
+can detect or override it, which is why `just kache-status` exists. To undo:
+`export RUSTC_WRAPPER=""`, or remove the wrapper line from Cargo home. Do not
+hand-create an ignored `.cargo/config.toml` in this repository — hidden local
+policy is difficult to diagnose later.
 
 Activating disables Cargo's incremental compilation, which is the largest
 behavioral change on adoption.

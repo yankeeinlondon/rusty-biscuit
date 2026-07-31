@@ -92,6 +92,21 @@ Prefer the env var when you want kache active for one build or one agent only; p
 `~/.cargo/config.toml` for a machine-wide default. Note that `~/.cargo/config.toml` is often on a
 shared or synced home directory — check before assuming the setting is host-local.
 
+### In this repository
+
+Activation is host policy; the repo tracks no wrapper and CI does not use kache. Two rules that
+are easy to trip over, because a machine-wide `kache init` is invisible from inside a clone:
+
+- **Windows dev hosts: leave it off.** NTFS restores by copy, so the store becomes a real second
+  copy of every cached artifact. Opt in only after a ReFS Dev Drive holding the store *and*
+  `target/` is measured.
+- **Never** answer kache's storage-layout advisory with `windows_hardlink = true` (Cargo rewrites
+  object outputs, which that setting forbids) or `storage_layout_advice = false` (silences the
+  signal, not the cause).
+
+`just kache-status` reports what is active on the current host, whether the volume clones blocks,
+and the exact undo. Decision table and evidence: `docs/kache-strategy.md`.
+
 ## Verifying it's actually working
 
 ```bash
