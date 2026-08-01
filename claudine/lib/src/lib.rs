@@ -9,6 +9,7 @@ pub mod events;
 pub mod harness;
 pub mod hook_adapters;
 pub mod interrupt;
+pub mod invocation_context;
 pub mod linking;
 pub mod mcp;
 pub mod messaging;

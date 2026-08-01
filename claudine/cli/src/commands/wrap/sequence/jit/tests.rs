@@ -83,6 +83,7 @@ fn template_preflight_resolves_against_document_dir() {
         &overrides,
         Some(launch_dir.path()),
         None,
+        None,
     );
     let result =
         resolve_shell_approvals(Some(&md), Some(&opts), &approval_options, None, None).unwrap();
@@ -134,6 +135,7 @@ fn template_preflight_does_not_resolve_launch_only_file() {
         &source_path,
         &md,
         &overrides,
+        None,
         None,
         None,
     );

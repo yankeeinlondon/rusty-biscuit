@@ -9,7 +9,7 @@ use std::fs;
 use tempfile::tempdir;
 mod common;
 use common::wrap::*;
-use common::{augmented_path, strip_ansi, write_executable};
+use common::{augmented_path, init_git_repo, strip_ansi, write_executable};
 
 #[cfg(unix)]
 #[test]
@@ -53,6 +53,38 @@ exit 0
 
 #[cfg(unix)]
 #[test]
+fn wrapper_perf_reports_source_context_probe_and_reuse_counts() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    assert!(init_git_repo(workspace.path()));
+    seed_minimal_config(workspace.path());
+    fs::write(
+        workspace.path().join("system-prompt.md"),
+        "Request-owned system prompt.\n",
+    )
+    .unwrap();
+    write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 0\n");
+
+    let assert = assert_cmd::Command::cargo_bin("claudine")
+        .unwrap()
+        .current_dir(workspace.path())
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .args(["codex", "--perf", "inspect the repository"])
+        .assert()
+        .success();
+
+    let plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert!(plain.contains("source context work"), "{plain}");
+    assert!(plain.contains("Git discoveries 1"), "{plain}");
+    assert!(plain.contains("topology probes 1"), "{plain}");
+    assert!(plain.contains("topology reuses 1"), "{plain}");
+}
+
+#[cfg(unix)]
+#[test]
 fn wrapper_dry_run_perf_emits_report_with_skipped_note() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
@@ -89,6 +121,45 @@ exit 1
     assert!(
         plain.contains("dry run") || plain.contains("skipped"),
         "stderr should mention dry run; got: {plain}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn wrapper_failure_perf_emits_report_before_the_error_returns() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+exit 0
+"#,
+    );
+
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .args(["codex", "--perf", "--timeout", "1s"])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("Performance"),
+        "failure stderr should contain the performance tree; got: {plain}"
+    );
+    assert!(
+        plain.contains("environment setup"),
+        "the failure tree should reconcile its preparation window; got: {plain}"
+    );
+    assert!(
+        plain.contains("--timeout can only be used in non-interactive mode"),
+        "the original typed failure should still be rendered; got: {plain}"
     );
 }
 

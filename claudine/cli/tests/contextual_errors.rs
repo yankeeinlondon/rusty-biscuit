@@ -9,7 +9,7 @@ use std::fs;
 use tempfile::tempdir;
 
 mod common;
-use common::{augmented_path, strip_ansi, write_executable};
+use common::{CliProcessFixture, augmented_path, strip_ansi, write_executable};
 
 #[cfg(windows)]
 fn shim_name(name: &str) -> String {
@@ -155,27 +155,21 @@ fn compose_shell_execution_failure_renders_rich_block() {
 #[cfg(unix)]
 #[test]
 fn compose_system_prompt_shell_failure_renders_rich_block() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("compose-system-prompt-shell-failure");
 
-    let md_file = workspace.path().join("prompt.md");
+    let md_file = fixture.cwd().join("prompt.md");
     fs::write(&md_file, "---\ntitle: demo\n---\nHello compose\n").unwrap();
 
     // Broken system prompt: ::shell with a blacklisted command.
-    let sp_file = workspace.path().join("append-system-prompt.md");
+    let sp_file = fixture.cwd().join("append-system-prompt.md");
     fs::write(&sp_file, "Base system prompt.\n\n::shell rm -rf /\n").unwrap();
 
     // Fake codex binary so the wrapper pipeline picks a provider and
     // reaches system-prompt resolution.
-    write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 0\n");
+    write_executable(&fixture.bin_dir().join("codex"), "#!/bin/sh\nexit 0\n");
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args([
             "compose",
             "--codex",

@@ -19,7 +19,7 @@ use std::path::Path;
 use claudine::composition::{
     ActiveDocumentState, DocumentEntryReason, EvaluatedProxyRequest, LifecycleConfig,
     LifecycleRunGuard, ProxyCommitError, ProxyHandoff, ProxyProvenance, RunLedger,
-    SharedApprovalCache, commit_proxy,
+    SharedApprovalCache, commit_proxy, commit_proxy_in_context,
 };
 
 use super::super::HarnessPromptState;
@@ -145,18 +145,23 @@ impl ActiveDocumentCoordinator {
         lifecycle_guard: &mut LifecycleRunGuard<'_>,
         active: &mut ActiveDocumentState,
     ) -> Result<(), ProxyCommitError> {
-        let handoff = commit_proxy(&mut self.ledger, request, repo_root)?;
+        let handoff = match prompt_state.file_resolution_context() {
+            Some(context) => commit_proxy_in_context(&mut self.ledger, request, context)?,
+            None => {
+                if let Some(invocation) = prompt_state.invocation_context.as_ref() {
+                    invocation.record_ambient_fallback();
+                }
+                commit_proxy(&mut self.ledger, request, repo_root)?
+            }
+        };
 
         // Assignment, not merge: the overlay is document-scoped, so the source's
         // is discarded with the rest of its state and the target gets only what
         // its own `with:` evaluated to. Forwarding is explicit — an omitted
         // `with:` commits an empty map and installs it, which is what makes a
         // three-hop chain's middle document unable to leak into the third.
-        prompt_state.overlay = handoff.overlay().clone();
         self.active_provenance = Some(handoff.provenance().clone());
-        prompt_state.source_path = handoff.resolved_target().to_path_buf();
-        prompt_state.original_ref = handoff.authored_target().to_string();
-        prompt_state.entry = DocumentEntryReason::ProxyTarget;
+        Self::repoint_prompt_state(prompt_state, &handoff);
         // The document's prompt tail belonged to the source and is discarded
         // with the rest of its state.
         prompt_state.prompt_tail.clear();
@@ -199,15 +204,30 @@ impl ActiveDocumentCoordinator {
         lifecycle_guard: &mut LifecycleRunGuard<'_>,
         active: &mut ActiveDocumentState,
     ) {
-        prompt_state.overlay = handoff.overlay().clone();
         self.active_provenance = Some(handoff.provenance().clone());
-        prompt_state.source_path = handoff.resolved_target().to_path_buf();
-        prompt_state.original_ref = handoff.authored_target().to_string();
-        prompt_state.entry = DocumentEntryReason::ProxyTarget;
+        Self::repoint_prompt_state(prompt_state, &handoff);
         prompt_state.prompt_tail.clear();
         *active = ActiveDocumentState::initial();
         lifecycle_guard.reset_for_proxy();
         lifecycle_guard.set_config(LifecycleConfig::default());
         self.bootstrap_pending = Some(BootstrapStage::Full);
+    }
+
+    fn repoint_prompt_state(prompt_state: &mut HarnessPromptState, handoff: &ProxyHandoff) {
+        let source_context = prompt_state.invocation_context.as_ref().map(|invocation| {
+            invocation
+                .derive_source(handoff.resolved_target())
+                .expect("resolved proxy target always has an authoring directory")
+        });
+
+        prompt_state.overlay = handoff.overlay().clone();
+        prompt_state.source_path = handoff.resolved_target().to_path_buf();
+        prompt_state.original_ref = handoff.authored_target().to_string();
+        prompt_state.entry = DocumentEntryReason::ProxyTarget;
+        if let Some(source_context) = source_context.as_ref() {
+            prompt_state.input_layers.file_resolution_context =
+                Some(source_context.file_resolution_context().clone());
+        }
+        prompt_state.source_context = source_context;
     }
 }

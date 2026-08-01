@@ -73,6 +73,34 @@ fn direct_composition_uses_effective_frontmatter() {
 }
 
 #[test]
+fn canonical_preparation_records_each_compose_on_the_request_owner() {
+    let dir = TempDir::new().unwrap();
+    let direct = make_source(&dir, &[], "direct body");
+    let invocation = crate::invocation_context::InvocationContext::capture_at(dir.path());
+
+    prepare_direct(
+        &direct,
+        PrepareOptions {
+            invocation_context: Some(invocation.clone()),
+            ..PrepareOptions::default()
+        },
+    )
+    .unwrap();
+
+    let inline = make_source(&dir, &[("prompt", json!("inline body"))], "old body");
+    prepare_inline(
+        &inline,
+        PrepareOptions {
+            invocation_context: Some(invocation.clone()),
+            ..PrepareOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(invocation.work_snapshot().compose_operations, 2);
+}
+
+#[test]
 fn inline_composition_uses_effective_frontmatter() {
     let dir = TempDir::new().unwrap();
     let source = make_source(

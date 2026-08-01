@@ -1,11 +1,13 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 /// Host and repository environment snapshot.
 ///
-/// Detected once at session start via `sniff::detect_with_plan`
-/// and cached for the session lifetime. Attached to every `EventMeta`.
+/// Canonical wrapper and composition paths project this from invocation-owned
+/// observations; compatibility and hook paths may still detect it directly.
+/// Attached to every `EventMeta`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct EnvironmentContext {
     /// Operating system information.
@@ -334,6 +336,21 @@ impl From<sniff::SniffResult> for EnvironmentContext {
 pub fn environment_context_from_sniff_result(result: sniff::SniffResult) -> EnvironmentContext {
     let mut context = EnvironmentContext::from(result);
     apply_wrapper_package_context(&mut context, &lookup_env_var);
+    context
+}
+
+/// Build an environment context from observed host facts and a captured
+/// process-environment snapshot.
+///
+/// Unlike [`environment_context_from_sniff_result`], this projection performs
+/// no late environment reads. Invocation-scoped callers use it after child CWD
+/// or HOME changes so event metadata remains tied to launch inputs.
+pub fn environment_context_from_sniff_result_and_env(
+    result: sniff::SniffResult,
+    environment: &HashMap<String, String>,
+) -> EnvironmentContext {
+    let mut context = EnvironmentContext::from(result);
+    apply_wrapper_package_context(&mut context, &|name| environment.get(name).cloned());
     context
 }
 

@@ -49,7 +49,7 @@ pub use coordinator::{
     EvaluatedProxyRequest, HopApproval, HopRejection, InvocationInputs, InvocationInputsDraft,
     LaunchDiscovery, LedgerMut, PreparedDocument, ProviderAttempt, ProxyCommitError, ProxyHandoff,
     ProxyProvenance, ResolvedProxyTarget, RunLedger, SessionCompatibilityKey, SharedRunLedger,
-    SurfacedHandoff, TransitionAbort, TransitionRecord, commit_proxy,
+    SurfacedHandoff, TransitionAbort, TransitionRecord, commit_proxy, commit_proxy_in_context,
 };
 pub use darkmatter::markdown::compose::shell_expansion::{ShellCommandOrigin, ShellExpansionError};
 pub use error::{
@@ -148,7 +148,7 @@ pub use sequence::preflight::{
     DiscoveredCommand, GroupExecution, PreflightAction, PreflightGraph, PreflightGroup,
     PreflightStep, PreflightTask, PromptDocument, build_preflight_graph,
     build_preflight_graph_with_context, build_preflight_graph_with_context_and_resolution,
-    reject_non_sequence_kind,
+    build_preflight_graph_with_invocation, reject_non_sequence_kind,
 };
 pub use sequence::task::{
     DEFAULT_COMMAND_TIMEOUT, PromptRunOutcome, PromptTaskRequest, PromptTaskRunner, RunawayTrip,

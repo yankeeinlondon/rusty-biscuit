@@ -70,7 +70,7 @@ fn enforce_repo_launch_detection_passes_when_no_error() {
 /// `CompositionPrepContext` projects it.
 fn captured_launch_detection_failure() -> claudine::diagnostics::DiagnosticSnapshot {
     claudine::diagnostics::DiagnosticSnapshot::from_diagnostic(
-        &claudine::error::ClaudineError::LaunchContextDetection(Box::new(
+        &claudine::error::ClaudineError::LaunchContextDetection(std::sync::Arc::new(
             sniff::SniffError::NotARepository(std::path::PathBuf::from("/no/such/repo")),
         )),
     )
@@ -1166,6 +1166,93 @@ fn emit_preflight_blocked_and_finalize_runs_top_level_and_stack_for_both_events(
         4,
         "Drop safety-net must NOT double-emit after explicit blocked+finalize"
     );
+}
+
+#[test]
+fn preflight_blocked_and_finalize_stacks_reuse_prepared_file_resolution() {
+    use claudine::composition::{
+        LifecycleErrorInfo, LifecycleRunGuard, LifecycleRuntimeContext, parse_lifecycle_config,
+    };
+    use serde_json::json;
+
+    let request = tempfile::tempdir().unwrap();
+    let owned_repo = request.path().join("owned-repo");
+    let source_dir = owned_repo.join("source");
+    let launch_dir = request.path().join("launch");
+    std::fs::create_dir_all(&source_dir).unwrap();
+    std::fs::create_dir_all(&launch_dir).unwrap();
+    std::fs::write(owned_repo.join("owned.flag"), "ready").unwrap();
+    let source_path = source_dir.join("prompt.md");
+    let resolution = biscuit_file::FileResolutionContext::new(&source_dir)
+        .with_source_path(&source_path)
+        .with_repository_root(&owned_repo);
+    let prepared_context = darkmatter::markdown::compose::ComposeContext::capture_for_content(
+        &source_dir,
+        "",
+    );
+    let fm = json!({
+        "blocked": {
+            "stack": [{
+                "when": "file_exists('owned.flag')",
+                "action": {"stderr": "blocked-owned"}
+            }]
+        },
+        "finalize": {
+            "stack": [{
+                "when": "file_exists('owned.flag')",
+                "action": {"stderr": "finalize-owned"}
+            }]
+        }
+    });
+    let config = parse_lifecycle_config(&fm, &source_path).unwrap();
+    let settings = claudine::events::GlobalSettings::default();
+    let messaging = claudine::messaging::RuntimeMessagingSettings {
+        user: None,
+        repo: None,
+    };
+    let term = Terminal::default();
+    let lifecycle_context = LifecycleRuntimeContext {
+        settings: &settings,
+        messaging: &messaging,
+        term: &term,
+        source_path: &source_path,
+        repo_root: None,
+        launch_area: Some(&launch_dir),
+        context: Some(&prepared_context),
+    };
+    let emitter = PreflightRecordingEmitter::new();
+    let effect_engine = darkmatter::effects::EffectEngine::builder()
+        .mutation_root(&source_dir)
+        .auto_rehash(false)
+        .build();
+    let frontmatter = serde_json::Map::new();
+    let mut guard = LifecycleRunGuard::new(&config, &lifecycle_context, &emitter);
+
+    let outcome = preflight::emit_preflight_blocked_and_finalize_in_context(
+        &mut guard,
+        &effect_engine,
+        &emitter,
+        &settings,
+        &messaging,
+        &term,
+        &source_path,
+        None,
+        Some(&source_dir),
+        Some(&launch_dir),
+        Some(&prepared_context),
+        Some(&resolution),
+        &frontmatter,
+        std::time::Instant::now(),
+        LifecycleErrorInfo::from_action_failure("preflight", "blocked".to_string()),
+    );
+
+    assert!(matches!(outcome, PreflightBlockedOutcome::Control(None)));
+    let texts: Vec<String> = emitter
+        .stderr_calls()
+        .into_iter()
+        .map(|(_, text)| text)
+        .collect();
+    assert_eq!(texts, vec!["blocked-owned", "finalize-owned"]);
 }
 
 /// The `err` global carried into the blocked stack must surface the

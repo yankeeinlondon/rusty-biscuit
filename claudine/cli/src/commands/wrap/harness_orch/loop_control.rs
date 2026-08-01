@@ -16,7 +16,7 @@ use claudine::composition::{
     LifecycleCatchExecution, LifecycleCatchProtocol, LifecycleCatchState, ProxyProvenance,
     LifecycleTransitionAbort, LifecycleTransitionDecision, LifecycleTransitionError,
     LifecycleTransitionInput, RunLedger, SharedRunLedger, SurfacedHandoff,
-    commit_proxy, decide_lifecycle_transition,
+    commit_proxy, commit_proxy_in_context, decide_lifecycle_transition,
 };
 use claudine::events::EnvironmentContext;
 use claudine::provider::Provider;
@@ -248,14 +248,21 @@ impl<'a, 'guard> HarnessLoopState<'a, 'guard> {
     /// names a target that cannot be resolved or that the ledger refuses. The
     /// same commit runs for a proxy raised mid-run, so both fail identically.
     fn new(mut run: HarnessLoopCtx<'a, 'guard>) -> Result<Self> {
-        let mutation_root = run.repo_root.unwrap_or(run.child_cwd).to_path_buf();
+        let source_repo_root = run
+            .prompt_state
+            .repository_root_or(run.repo_root)
+            .map(Path::to_path_buf);
+        let mutation_root = source_repo_root
+            .as_deref()
+            .unwrap_or(run.child_cwd)
+            .to_path_buf();
         let effect_engine = EffectEngine::builder()
             .mutation_root(&mutation_root)
             .auto_rehash(false)
             .build();
         let harness_context = CachedHarnessLoopContext::with_shell_options(
             &run.prompt_state.source_path,
-            run.repo_root,
+            source_repo_root.as_deref(),
             run.shell_options.clone(),
         );
         // The chain originates at the document whose lifecycle the guard was
@@ -424,12 +431,17 @@ fn run_harness_loop_inner(ctx: HarnessLoopCtx<'_, '_>) -> Result<LoopStep> {
 fn prepare_attempt_phase(
     state: &mut HarnessLoopState<'_, '_>,
 ) -> Result<PhaseResult<PreparedHarnessAttempt>> {
+    let active_repo_root = state
+        .run
+        .prompt_state
+        .repository_root_or(state.run.repo_root)
+        .map(Path::to_path_buf);
     let mut prompt = AttemptPromptPreparation {
         prompt_state: state.run.prompt_state,
         harness_context: &mut state.harness_context,
         initial_materialized: &mut state.initial_materialized,
         child_cwd: state.run.child_cwd,
-        repo_root: state.run.repo_root,
+        repo_root: active_repo_root.as_deref(),
         effective_non_interactive: state.run.effective_non_interactive,
         show_checks: state.run.show_checks,
         detail_requested: state.run.detail_requested,
@@ -459,9 +471,16 @@ fn prepare_attempt_phase(
         source_path = %prompt.prompt_state.source_path.display(),
     )
     .entered();
-    prompt
-        .harness_context
-        .refresh(&prompt.prompt_state.source_path, prompt.repo_root);
+    if let Some(source_context) = prompt.prompt_state.source_context.as_ref() {
+        prompt.harness_context.refresh_for_source(
+            &prompt.prompt_state.source_path,
+            source_context.repository_root(),
+        );
+    } else {
+        prompt
+            .harness_context
+            .refresh(&prompt.prompt_state.source_path, prompt.repo_root);
+    }
     preflight_pending_proxy_phase(&mut prompt, &mut lifecycle, &control)?;
     // A document still owing its staged boot is being read *before* its own
     // `initialize`, which may add or repair the very property a schema verdict
@@ -989,14 +1008,21 @@ fn surface_or_adopt_terminal_proxy(
     iteration_signals: Option<IterationSummarySignals>,
 ) -> Result<LoopStep> {
     match handoff_ledger {
-        Some(shared) => match commit_proxy(&mut shared.lock().unwrap(), request, repo_root) {
-            Ok(handoff) => Ok(LoopStep::Return((
-                0,
-                perf,
-                iteration_signals,
-                Some(SurfacedHandoff::Committed(Box::new(handoff))),
-            ))),
-            Err(error) => Err(route_handoff_failure(
+        Some(shared) => match prompt_state.file_resolution_context() {
+            Some(context) => commit_proxy_in_context(
+                &mut shared.lock().unwrap(),
+                request,
+                context,
+            ),
+            None => {
+                if let Some(invocation) = prompt_state.invocation_context.as_ref() {
+                    invocation.record_ambient_fallback();
+                }
+                commit_proxy(&mut shared.lock().unwrap(), request, repo_root)
+            }
+        }
+        .map_or_else(
+            |error| Err(route_handoff_failure(
                 lifecycle_guard,
                 materialized,
                 &prompt_state.source_path,
@@ -1006,7 +1032,13 @@ fn surface_or_adopt_terminal_proxy(
                 error,
                 loop_start,
             )),
-        },
+            |handoff| Ok(LoopStep::Return((
+                0,
+                perf,
+                iteration_signals,
+                Some(SurfacedHandoff::Committed(Box::new(handoff))),
+            ))),
+        ),
         None => Err(route_unowned_handoff(
             lifecycle_guard,
             materialized,
@@ -1148,6 +1180,7 @@ fn empty_materialized_prompt() -> MaterializedHarnessPrompt {
         selection_hints: claudine::composition::EffectiveSelectionHints::default(),
         inline_closure_plan: None,
         file_resolution_context: None,
+        compose_context: None,
         live_frontmatter: MaterializedHarnessPrompt::live_cell_from(&serde_json::Value::Null),
         runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
         lifecycle: None,
@@ -1534,7 +1567,12 @@ fn execute_attempt_phase(
     let stream_verbosity = state.run.stream_verbosity;
     let detail_requested = state.run.detail_requested;
     let env_context = state.run.env_context;
-    let repo_root = state.run.repo_root;
+    let active_repo_root = state
+        .run
+        .prompt_state
+        .repository_root_or(state.run.repo_root)
+        .map(Path::to_path_buf);
+    let repo_root = active_repo_root.as_deref();
     let term = state.run.term;
     let emit_prompt_timing = state.run.emit_prompt_timing;
     let attempt = state.active.iteration().attempt().number();
@@ -1801,7 +1839,12 @@ fn classify_attempt_phase(
     executed: ExecutedHarnessAttempt,
 ) -> Result<LoopStep> {
     let child_cwd = state.run.child_cwd;
-    let repo_root = state.run.repo_root;
+    let active_repo_root = state
+        .run
+        .prompt_state
+        .repository_root_or(state.run.repo_root)
+        .map(Path::to_path_buf);
+    let repo_root = active_repo_root.as_deref();
     let show_checks = state.run.show_checks;
     let term = state.run.term;
     let handoff_ledger = state.run.handoff_ledger.clone();

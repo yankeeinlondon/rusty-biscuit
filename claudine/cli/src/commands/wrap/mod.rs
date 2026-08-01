@@ -41,6 +41,7 @@ pub(crate) use harness_orch::{
     AttemptLaunch, CachedHarnessLoopContext, HarnessPromptMode, HarnessPromptState,
     MaterializedHarnessPrompt, apply_composition_shell_overrides, build_harness_launch,
     build_harness_shell_options, build_harness_shell_options_with_cache, execute_harness_attempt,
+    build_harness_shell_options_for_source, build_harness_shell_options_for_source_with_cache,
     find_wrapper_harness_source, harness_policy_root, harness_prompt_mode_label,
     materialize_harness_prompt, materialize_passthrough_harness_seed,
     materialized_harness_prompt_from_prepared, run_harness_loop,
@@ -210,8 +211,18 @@ pub fn run_provider_wrapper(
     let mut perf_collector =
         startup_timings.map(|timings| crate::perf::CommandPerfCollector::new("Wrapper", timings));
 
-    let (code, stderr_capture, model_source) =
-        run_provider_wrapper_inner(provider, args, verbose, perf_collector.as_mut())?;
+    let wrapper_result =
+        run_provider_wrapper_inner(provider, args, verbose, perf_collector.as_mut());
+    let (code, stderr_capture, model_source) = match wrapper_result {
+        Ok(result) => result,
+        Err(error) => {
+            if let Some(mut collector) = perf_collector {
+                collector.mark_env_setup_complete();
+                crate::perf::emit_report(&collector.into_report());
+            }
+            return Err(error);
+        }
+    };
 
     if code != 0 {
         let term = wrap_terminal();
@@ -239,6 +250,7 @@ fn run_provider_wrapper_inner(
     verbose: u8,
     mut perf_collector: Option<&mut crate::perf::CommandPerfCollector>,
 ) -> Result<(i32, Option<String>, Option<profile::OpenCodeModelSource>)> {
+    let perf_enabled = perf_collector.is_some();
     // ------------------------------------------------------------------
     // Stage 1: Resolve profile and binary
     // ------------------------------------------------------------------
@@ -314,15 +326,24 @@ fn run_provider_wrapper_inner(
     // ------------------------------------------------------------------
     // Stage 4: Detect startup context (env, launch, workspace)
     // ------------------------------------------------------------------
-    let startup = env::detect_wrap_startup_or_fallback(
+    let launch_discovery_started = std::time::Instant::now();
+    let startup_result = env::detect_wrap_startup_or_fallback(
         &cwd,
         has_prompt,
         repo_requested,
         &mut deferred_warnings,
-    )?;
+    );
+    if let Some(collector) = perf_collector.as_mut() {
+        collector.mark_substage("launch discovery", launch_discovery_started.elapsed());
+    }
+    let startup = startup_result?;
+    let invocation = startup.invocation;
     let env_context = startup.env_context;
     let launch_context = startup.launch_context;
     let launch_workspace = startup.launch_workspace;
+    if let Some(collector) = perf_collector.as_mut() {
+        collector.set_invocation_work(&invocation.work_snapshot());
+    }
 
     let wrapper_span = info_span!(
         "wrapper_session",
@@ -466,17 +487,57 @@ fn run_provider_wrapper_inner(
     // ------------------------------------------------------------------
     // Stage 8: Resolve and apply system prompt
     // ------------------------------------------------------------------
-    let (effective_sp, _sp_artifacts) = resolve_and_apply_system_prompt(
+    let system_prompt_started = std::time::Instant::now();
+    let system_prompt_work_before = invocation.work_snapshot();
+    let system_prompt_result = resolve_and_apply_system_prompt(
         profile,
         &args,
         &launch_context,
+        &invocation,
         &launch_workspace,
         &cwd,
         non_interactive_requested,
         &mut child_args,
         &mut env_overrides,
         &mut deferred_warnings,
-    )?;
+    );
+    if let Some(collector) = perf_collector.as_mut() {
+        let total = system_prompt_started.elapsed();
+        let system_prompt_work_after = invocation.work_snapshot();
+        let mut children = [
+            "lookup",
+            "runtime capture",
+            "primary compose",
+            "appendix compose",
+        ]
+        .into_iter()
+        .filter_map(|stage| {
+            let after = system_prompt_work_after
+                .system_prompt_timings
+                .get(stage)
+                .copied()
+                .unwrap_or_default();
+            let before = system_prompt_work_before
+                .system_prompt_timings
+                .get(stage)
+                .copied()
+                .unwrap_or_default();
+            after
+                .checked_sub(before)
+                .map(|elapsed| crate::perf::SubstageTiming::new(stage, elapsed))
+        })
+        .collect::<Vec<_>>();
+        let measured = children
+            .iter()
+            .fold(std::time::Duration::ZERO, |sum, child| sum + child.elapsed);
+        children.push(crate::perf::SubstageTiming::new(
+            "delivery",
+            total.checked_sub(measured).unwrap_or_default(),
+        ));
+        collector.mark_substage_with_children("system prompt", total, children);
+        collector.set_invocation_work(&invocation.work_snapshot());
+    }
+    let (effective_sp, _sp_artifacts) = system_prompt_result?;
 
     // ------------------------------------------------------------------
     // Stage 9: Apply sandbox and build child environment
@@ -490,7 +551,8 @@ fn run_provider_wrapper_inner(
     let needs_mcp_shadow_home = (args.mcp || !args.mcp_use.is_empty())
         && matches!(provider, Provider::Codex | Provider::Gemini);
 
-    let mut env_plan = env::build_child_env_with_launch(
+    let child_env_started = std::time::Instant::now();
+    let mut env_plan_result = env::build_child_env_with_launch(
         profile,
         provider,
         &args.include,
@@ -501,8 +563,20 @@ fn run_provider_wrapper_inner(
         repo_requested,
         needs_mcp_shadow_home,
         launch_workspace,
-        false,
-    )?;
+        perf_enabled,
+    );
+    if let Some(collector) = perf_collector.as_mut() {
+        let children = env_plan_result
+            .as_mut()
+            .map(|plan| std::mem::take(&mut plan.perf_substages))
+            .unwrap_or_default();
+        collector.mark_substage_with_children(
+            "child env build",
+            child_env_started.elapsed(),
+            children,
+        );
+    }
+    let mut env_plan = env_plan_result?;
 
     if !silent_requested && !quiet_requested {
         use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
@@ -531,7 +605,8 @@ fn run_provider_wrapper_inner(
     // ------------------------------------------------------------------
     // Stage 10: Compose MCP session
     // ------------------------------------------------------------------
-    let (mcp_runtime, mcp_cleanup) = wrapper_mcp::compose_mcp_session(
+    let mcp_started = std::time::Instant::now();
+    let mcp_result = wrapper_mcp::compose_mcp_session(
         &args,
         provider,
         non_interactive_requested,
@@ -540,7 +615,11 @@ fn run_provider_wrapper_inner(
         &mut prompt_source,
         &mut deferred_warnings,
         &mut deferred_messages,
-    )?;
+    );
+    if let Some(collector) = perf_collector.as_mut() {
+        collector.mark_substage("mcp composition", mcp_started.elapsed());
+    }
+    let (mcp_runtime, mcp_cleanup) = mcp_result?;
 
     // ------------------------------------------------------------------
     // Stage 10.5: OpenCode YOLO config overlay
@@ -561,7 +640,9 @@ fn run_provider_wrapper_inner(
         log::info(&crate::output::format_launch_directory(child_cwd));
     }
 
-    if let Some(collector) = perf_collector.as_mut() {
+    if args.dry_run
+        && let Some(collector) = perf_collector.as_mut()
+    {
         collector.mark_env_setup_complete();
     }
 
@@ -643,7 +724,8 @@ fn run_provider_wrapper_inner(
     // ------------------------------------------------------------------
     // Stage 14: Detect wrapper harness
     // ------------------------------------------------------------------
-    let wrapper_harness = detect_wrapper_harness(
+    let harness_started = std::time::Instant::now();
+    let harness_result = detect_wrapper_harness(
         provider,
         profile,
         &prompt_source,
@@ -651,7 +733,25 @@ fn run_provider_wrapper_inner(
         &env_plan,
         child_cwd,
         &cwd,
-    )?;
+        &invocation,
+    );
+    if let Some(collector) = perf_collector.as_mut() {
+        let total = harness_started.elapsed();
+        let materialization_elapsed = harness_result
+            .as_ref()
+            .ok()
+            .and_then(|(_, materialization)| *materialization);
+        let eligibility = materialization_elapsed
+            .and_then(|materialization| total.checked_sub(materialization))
+            .unwrap_or(total);
+        collector.mark_substage("harness eligibility", eligibility);
+        if let Some(materialization) = materialization_elapsed {
+            collector.mark_substage("harness materialization", materialization);
+        }
+        collector.set_invocation_work(&invocation.work_snapshot());
+        collector.mark_env_setup_complete();
+    }
+    let (wrapper_harness, _harness_materialization_elapsed) = harness_result?;
 
     if !silent_requested && !quiet_requested {
         use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
@@ -666,7 +766,7 @@ fn run_provider_wrapper_inner(
     // ------------------------------------------------------------------
     // Stage 15: Execute the provider
     // ------------------------------------------------------------------
-    let (exit_code, stderr_capture) = run_execution_stage(
+    let execution_result = run_execution_stage(
         wrapper_harness,
         use_structured,
         provider,
@@ -690,8 +790,13 @@ fn run_provider_wrapper_inner(
         &dispatch_context,
         &term,
         &wrapper_span,
-        perf_collector,
-    )?;
+        perf_collector.as_deref_mut(),
+        &invocation,
+    );
+    if let Some(collector) = perf_collector.as_mut() {
+        collector.set_invocation_work(&invocation.work_snapshot());
+    }
+    let (exit_code, stderr_capture) = execution_result?;
 
     // ------------------------------------------------------------------
     // Stage 16: Cleanup and return

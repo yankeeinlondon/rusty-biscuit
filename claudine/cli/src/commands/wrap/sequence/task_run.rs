@@ -39,11 +39,12 @@ use claudine::composition::{
     PreparedComposition, ResolvedExecutionTarget, RuntimeState, SequenceTaskResult,
 };
 use claudine::composition::sequence::preflight::PreflightTask;
-use claudine::diagnostics::DiagnosticSnapshot;
 use claudine::composition::sequence::task::{
     PromptRunOutcome, PromptTaskRequest, PromptTaskRunner, SystemTaskShell, TaskExecution,
     TaskOutcome, TaskStatus,
 };
+use claudine::diagnostics::DiagnosticSnapshot;
+use claudine::invocation_context::{InvocationContext, SourceContext};
 use claudine::render::{TaskBar, TaskLiveOutput, TaskStream, TaskStreamSink};
 use claudine::system_prompt::SystemPromptArgs;
 use darkmatter::effects::EffectEngine;
@@ -86,13 +87,12 @@ pub(super) fn run_step_task(
         }
     };
 
-    // The engine's mutation root is the document's directory: a `set_frontmatter`
-    // in a task stack targets files next to the document that authored it.
-    let mutation_root = prepared
-        .resolved_path
-        .parent()
-        .unwrap_or(&prepared.resolved_path)
-        .to_path_buf();
+    let (task_source_context, task_context) =
+        prepare_task_context(&run.prep_context.invocation, task, env_overrides);
+
+    // A task stack mutates relative to the document that authored the task,
+    // including when that document lives outside the sequence repository.
+    let mutation_root = task.origin_dir.clone();
     let engine = EffectEngine::builder().mutation_root(&mutation_root).build();
     let emitter = DefaultLifecycleEmitter;
     let settings = claudine::events::GlobalSettings::default();
@@ -112,16 +112,16 @@ pub(super) fn run_step_task(
         timing: None,
         current: None,
         group: None,
-        base_dir: prepared.resolved_path.parent(),
+        base_dir: Some(task_source_context.base_dir()),
         ctx_base_dir: Some(run.prep_context.launch_workspace.launch_cwd.as_path()),
-        prepared_context: None,
-        file_resolution_context: Some(run.compose.file_resolution_context),
+        prepared_context: Some(&task_context),
+        file_resolution_context: Some(task_source_context.file_resolution_context()),
         effect_engine: &engine,
         shell_runner: &SystemShellRunner,
         emitter: &emitter,
         term: &term,
-        source_path: &prepared.resolved_path,
-        repo_root: run.prep_context.source_repo_root.as_deref(),
+        source_path: &task.origin_path,
+        repo_root: task_source_context.repository_root(),
         messaging: &messaging,
         settings: &settings,
     };
@@ -194,6 +194,40 @@ pub(super) fn run_step_task(
             tasks,
         },
     }
+}
+
+fn prepare_task_context(
+    invocation: &InvocationContext,
+    task: &PreflightTask,
+    env_overrides: &BTreeMap<String, String>,
+) -> (SourceContext, darkmatter::markdown::compose::ComposeContext) {
+    let task_source_context = invocation
+        .derive_source(&task.origin_path)
+        .expect("resolved task document always has a parent directory");
+    let task_context_scan = format!(
+        "{action:?}\n{values}",
+        action = task.action,
+        values = serde_json::to_string(&(
+            &task.params,
+            &task.timeout,
+            &task.setup,
+            &task.teardown,
+        ))
+        .unwrap_or_default(),
+    );
+    let requirements =
+        darkmatter::markdown::compose::ContextRequirements::for_content(&task_context_scan);
+    let evidence = invocation.runtime_evidence(&task_source_context, &requirements);
+    let mut task_context = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
+        task_source_context.base_dir(),
+        &requirements,
+        &evidence,
+    );
+    for (key, value) in env_overrides {
+        task_context.env_mut().insert(key.clone(), value.clone());
+    }
+
+    (task_source_context, task_context)
 }
 
 /// Project a group's member outcomes into the step summary shape.
@@ -278,13 +312,23 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
 
         // Just-in-time, like the step itself: the referenced document is read
         // now, so a document an earlier step rewrote is composed as it stands.
-        let source = composition::resolve_composition_source(&request.path.display().to_string())?;
+        let source = composition::resolve_composition_source_in_context(
+            &request.path.display().to_string(),
+            self.run.compose.file_resolution_context,
+        )?;
+        let prompt_source_context = self
+            .run
+            .prep_context
+            .invocation
+            .derive_source(&source.resolved_path)
+            .expect("resolved prompt document always has a parent directory");
+        let prompt_compose_context = self
+            .run
+            .compose
+            .for_referenced_document(request.inline_compose, &prompt_source_context);
         let composed = super::jit::compose_step(
             &source,
-            &self
-                .run
-                .compose
-                .for_referenced_document(request.inline_compose),
+            &prompt_compose_context,
             &request.set_overrides,
             self.env_overrides,
             self.run.approved.clone(),
@@ -338,6 +382,8 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
             env_overrides,
             shared_approval_cache: Some(Arc::clone(&self.run.compose.approval_cache)),
             installed_snapshot: Some(self.run.prep_context.installed_snapshot.clone()),
+            invocation_context: Some(self.run.prep_context.invocation.clone()),
+            source_context: Some(prompt_source_context),
             prep_launch_workspace: Some(self.run.prep_context.launch_workspace.clone()),
             prep_launch_context: Some(self.run.prep_context.launch_context.clone()),
             prep_env_context: Some(self.run.prep_context.env_context.clone()),
@@ -387,5 +433,74 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
             exit_code: outcome.exit_code,
             interrupted: super::run_was_interrupted(outcome.exit_code, self.run.interrupted),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::process::Command;
+
+    use claudine::composition::sequence::preflight::PreflightAction;
+    use serde_json::{Map, json};
+
+    use super::*;
+
+    fn init_git_repo(path: &Path) {
+        let status = Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(path)
+            .status()
+            .expect("git must be available for repository-context tests");
+        assert!(status.success());
+    }
+
+    #[test]
+    fn task_stack_context_belongs_to_the_authoring_repository() {
+        let root = tempfile::tempdir().unwrap();
+        let launch_repo = root.path().join("launch");
+        let task_repo = root.path().join("tasks");
+        let task_dir = task_repo.join("nested");
+        std::fs::create_dir_all(&launch_repo).unwrap();
+        std::fs::create_dir_all(&task_dir).unwrap();
+        init_git_repo(&launch_repo);
+        init_git_repo(&task_repo);
+
+        let origin_path = task_dir.join("task.yaml");
+        let task = PreflightTask {
+            name: Some("external".to_string()),
+            label: "external".to_string(),
+            action: PreflightAction::SideEffect {
+                action: json!({"stderr": "{{ ctx.repo_root }}"}),
+            },
+            params: Map::new(),
+            timeout: None,
+            operation: None,
+            flow: None,
+            setup: None,
+            teardown: None,
+            origin_dir: task_dir.clone(),
+            origin_path: origin_path.clone(),
+        };
+        let invocation = InvocationContext::capture_at(&launch_repo);
+        let env = BTreeMap::from([("TASK_MARKER".to_string(), "owned".to_string())]);
+
+        let (source, context) = prepare_task_context(&invocation, &task, &env);
+
+        assert_eq!(source.base_dir(), task_dir);
+        assert_eq!(source.repository_root(), Some(task_repo.as_path()));
+        assert_eq!(
+            source.file_resolution_context().source_path(),
+            Some(origin_path.as_path())
+        );
+        assert_eq!(
+            source.file_resolution_context().repository_root(),
+            Some(task_repo.as_path())
+        );
+        assert_eq!(
+            context.get("repo_root").and_then(Value::as_str),
+            Some(task_repo.to_string_lossy().as_ref())
+        );
+        assert_eq!(context.env().get("TASK_MARKER").map(String::as_str), Some("owned"));
     }
 }

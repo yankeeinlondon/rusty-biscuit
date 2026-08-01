@@ -31,7 +31,7 @@ mod transition;
 #[cfg(test)]
 mod tests;
 
-pub use commit::{ProxyCommitError, commit_proxy};
+pub use commit::{ProxyCommitError, commit_proxy, commit_proxy_in_context};
 
 pub use active::{
     ActiveDocumentState, AttemptOutcome, ControlBudget, ControlBudgetKind, DocumentIteration,

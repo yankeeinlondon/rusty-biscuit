@@ -24,9 +24,11 @@ use claudine::composition::{
     LoopExecutionOptions, LoopExecutionResult,
     PrepareOptions, PreparedComposition, ProxyHandoff, ResolvedCompositionSource,
     ResolvedExecutionTarget, RunLedger, SharedApprovalCache, SharedRunLedger, SurfacedHandoff,
-    SystemShellRunner, build_loop_seed_with_lifecycle, commit_proxy, resolve_loop_config,
+    SystemShellRunner, build_loop_seed_with_lifecycle, commit_proxy_in_context,
+    resolve_loop_config,
 };
 use claudine::diagnostics::DiagnosticSnapshot;
+use claudine::invocation_context::{InvocationContext, SourceContext};
 use claudine::system_prompt::SystemPromptArgs;
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use tracing::info_span;
@@ -144,23 +146,21 @@ pub(crate) fn run_composition_inner(
     let system_prompt_args = shared.system_prompt_args();
 
     let frontmatter_load_t = std::time::Instant::now();
-    let provisional_context = claudine::composition::capture_file_resolution_context()?;
+    let invocation = InvocationContext::capture()?;
+    let provisional_context = invocation.launch_file_resolution_context().clone();
     let source = resolve_composition_source(
         &file,
         kind,
         &shared,
         &provisional_context,
     )?;
-    // Re-anchor the request snapshot at the resolved source's location so a
+    // Derive the definitive source bundle from the same owner so a
     // top-level document selected from a different repository keeps that
-    // repository's nested references (D2/D10, AC12). The provisional context
-    // captured above is the right anchor only for resolving the top-level CLI
-    // argument; downstream surfaces (body composition, transclusion,
-    // schema, lifecycle) derive from this source-anchored snapshot.
-    let file_resolution_context = claudine::composition::derive_request_context_for_source(
-        &provisional_context,
-        &source.resolved_path,
-    )?;
+    // repository's nested references (D2/D10, AC12). The launch projection is
+    // used only for resolving the top-level argument; downstream surfaces
+    // receive this source bundle.
+    let mut source_context = invocation.derive_source(&source.resolved_path)?;
+    let mut file_resolution_context = source_context.file_resolution_context().clone();
     record_prep_substage(
         &mut prep_substages,
         perf_enabled,
@@ -202,12 +202,11 @@ pub(crate) fn run_composition_inner(
     // and missing required values (non-interactive) surface as typed
     // errors here, never as Darkmatter raw errors.
     let schema_t = std::time::Instant::now();
-    // Pre-validation runs BEFORE the wrapper's `switch_process_cwd`, so the
-    // ambient CWD is still the launch area. Capture it explicitly as the
-    // `file`-typed property fallback anchor so caller-supplied area-relative
+    // Use the owner's frozen launch CWD as the `file`-typed property fallback
+    // anchor so caller-supplied area-relative
     // paths resolve here exactly as they will at prepare time and event time,
     // rather than depending on the soon-to-be-mutated process CWD.
-    let launch_area_fallback = std::env::current_dir().ok();
+    let launch_area_fallback = Some(invocation.launch_cwd().to_path_buf());
     // A document whose own `initialize` may supply or repair a schema property
     // is not judged here: R4 puts `initialize` first, and the post-`initialize`
     // stabilized reread reaches the verdict instead. Interactive collection goes
@@ -294,7 +293,8 @@ pub(crate) fn run_composition_inner(
     let mut adopted_handoff: Option<Box<ProxyHandoff>> = None;
 
     loop {
-        let (outcome, commit_repo_root) = prepare_and_run_active_document(
+        let active_file_resolution_context = source_context.file_resolution_context().clone();
+        let (outcome, _commit_repo_root) = prepare_and_run_active_document(
             &shared,
             kind,
             source,
@@ -312,7 +312,8 @@ pub(crate) fn run_composition_inner(
             startup_timings.take(),
             std::mem::take(&mut prep_substages),
             compose_entry,
-            file_resolution_context.clone(),
+            invocation.clone(),
+            source_context,
         )?;
 
         match outcome {
@@ -327,7 +328,11 @@ pub(crate) fn run_composition_inner(
                 // resolved or hop-checked twice.
                 let handoff: ProxyHandoff = match surfaced {
                     SurfacedHandoff::Request(request) => {
-                        commit_proxy(&mut ledger.lock().unwrap(), request, commit_repo_root.as_deref())
+                        commit_proxy_in_context(
+                            &mut ledger.lock().unwrap(),
+                            request,
+                            &active_file_resolution_context,
+                        )
                             .map_err(color_eyre::eyre::Report::from)?
                     }
                     SurfacedHandoff::Committed(handoff) => *handoff,
@@ -350,6 +355,8 @@ pub(crate) fn run_composition_inner(
                     handoff.overlay(),
                 );
                 source = target_source;
+                source_context = invocation.derive_source(&source.resolved_path)?;
+                file_resolution_context = source_context.file_resolution_context().clone();
                 current_file = handoff.authored_target().to_string();
                 // Carry the committed overlay onto the target's request so it is
                 // re-applied on every re-materialization of the target
@@ -401,7 +408,8 @@ pub(crate) fn prepare_and_run_active_document(
     startup_timings: Option<crate::perf::StartupTimings>,
     mut prep_substages: Vec<crate::perf::SubstageTiming>,
     compose_entry: std::time::Instant,
-    file_resolution_context: biscuit_file::FileResolutionContext,
+    invocation: InvocationContext,
+    source_context: SourceContext,
 ) -> Result<(ActiveDocumentOutcome, Option<std::path::PathBuf>)> {
     let perf_enabled = shared.perf;
     // Captured for frontmatter-excerpt enrichment of any error rendered below;
@@ -409,10 +417,7 @@ pub(crate) fn prepare_and_run_active_document(
     let stderr_is_tty =
         std::io::stderr().is_terminal() || std::env::var_os("FORCE_COLOR").is_some();
 
-    let file_resolution_context = claudine::composition::derive_request_context_for_source(
-        &file_resolution_context,
-        &source.resolved_path,
-    )?;
+    let file_resolution_context = source_context.file_resolution_context().clone();
 
     // Running a document switches the process CWD to that document's child
     // CWD (the repo root). Restore the launch area before preparing the next
@@ -447,13 +452,15 @@ pub(crate) fn prepare_and_run_active_document(
         claudine::composition::SchemaStage::DeferToStabilizedReread
     };
 
-    // Phase 2 (2026-05-09-slow-prep): build the per-invocation prep context
-    // immediately after source resolution. The context owns the single
-    // source-repo-root discovery, the loaded selection config, and the
-    // installed-provider snapshot used by every later prep phase.
+    // Build per-document provider-selection state from the invocation owner
+    // and definitive source bundle without another repository observation.
     let prep_ctx_t = std::time::Instant::now();
-    let prep_context =
-        CompositionPrepContext::new(current_file, &source.resolved_path, &shared.excluded())?;
+    let prep_context = CompositionPrepContext::from_invocation(
+        current_file,
+        invocation,
+        source_context,
+        &shared.excluded(),
+    )?;
     record_prep_substage(&mut prep_substages, perf_enabled, "prep context", prep_ctx_t);
     // This document's own repository root resolves its `@repo/…` proxy
     // targets; captured before `execute_loop_or_single` consumes the context.
@@ -540,9 +547,16 @@ pub(crate) fn prepare_and_run_active_document(
     // the launch-area-anchored snapshot the body compose uses, so the audit
     // could discover different commands than the compose expands.
     let compose_options = {
-        let mut ctx = darkmatter::markdown::compose::ComposeContext::capture_for_document(
-            prep_context.launch_workspace.launch_cwd.as_path(),
+        let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(
             &source.markdown,
+        );
+        let evidence = prep_context
+            .invocation
+            .runtime_evidence(&prep_context.source_context, &requirements);
+        let mut ctx = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
+            prep_context.source_context.base_dir(),
+            &requirements,
+            &evidence,
         );
         for (key, value) in &env_overrides {
             ctx.env_mut().insert(key.clone(), value.clone());
@@ -571,9 +585,9 @@ pub(crate) fn prepare_and_run_active_document(
     };
 
     let approval_options = crate::commands::wrap::apply_composition_shell_overrides(
-        crate::commands::wrap::build_harness_shell_options_with_cache(
+        crate::commands::wrap::build_harness_shell_options_for_source_with_cache(
             &source.resolved_path,
-            prep_context.source_repo_root.as_deref(),
+            prep_context.source_context.repository_root(),
             Some(Arc::clone(shared_approval_cache)),
         ),
         shared.dry_run,
@@ -1023,6 +1037,8 @@ fn build_execution_request(
         shared_approval_cache,
         sequence: false,
         installed_snapshot: Some(prep_context.installed_snapshot.clone()),
+        invocation_context: Some(prep_context.invocation.clone()),
+        source_context: Some(prep_context.source_context.clone()),
         prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
         prep_launch_context: Some(prep_context.launch_context.clone()),
         prep_env_context: Some(prep_context.env_context.clone()),
@@ -1118,9 +1134,16 @@ fn execute_loop_or_single(
     // is, so the commands the audit discovered are the commands this compose
     // expands.
     let prepared_context = {
-        let mut ctx = darkmatter::markdown::compose::ComposeContext::capture_for_document(
-            prep_context.launch_workspace.launch_cwd.as_path(),
+        let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(
             &source.markdown,
+        );
+        let evidence = prep_context
+            .invocation
+            .runtime_evidence(&prep_context.source_context, &requirements);
+        let mut ctx = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
+            prep_context.source_context.base_dir(),
+            &requirements,
+            &evidence,
         );
         for (key, value) in &env_overrides {
             ctx.env_mut().insert(key.clone(), value.clone());
@@ -1129,6 +1152,7 @@ fn execute_loop_or_single(
     };
 
     let loop_prepare_options = PrepareOptions {
+        invocation_context: Some(prep_context.invocation.clone()),
         set_overrides: set_overrides.clone(),
         pre_approved_commands: Some(preflight.approved_commands.clone()),
         env_overrides: env_overrides.clone(),
@@ -1230,6 +1254,7 @@ fn execute_loop_or_single(
         kind.prepare_staged(
             &source,
             PrepareOptions {
+                invocation_context: Some(prep_context.invocation.clone()),
                 set_overrides,
                 pre_approved_commands: Some(preflight.approved_commands),
                 env_overrides: env_overrides.clone(),

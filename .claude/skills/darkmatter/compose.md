@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-5e5b031489ae302f
-last_updated: 2026-07-22
+hash: ef46db3751d8e999-1f17b774a5a1ed90
+last_updated: 2026-08-01
 ---
 # Compose Pipeline
 
@@ -8,6 +8,7 @@ last_updated: 2026-07-22
 
 - Pipeline Overview
 - API
+- Demand-Driven Runtime Context Evidence
 - Text Replacement
 - Interpolation
 - ComposeReport
@@ -109,6 +110,64 @@ let options = ComposeOptions::new()
 let (composed, report) = md.compose_with(options)?;
 println!("{}", report.summary());
 ```
+
+## Demand-Driven Runtime Context Evidence
+
+Darkmatter exposes the capture requirements separately from population:
+
+```rust
+use darkmatter::markdown::compose::{
+    ComposeContext, ContextCaptureEvidence, ContextGroup, ContextRequirements,
+};
+
+let requirements = ContextRequirements::for_document(&markdown);
+if requirements.contains(ContextGroup::Git) {
+    // Ask the invocation owner for its retained Git evidence.
+}
+let evidence = ContextCaptureEvidence::new(invocation_environment)
+    .with_git(git_info)
+    .with_repository(repository_root, repo_info)
+    .with_file_changes(file_changes);
+let context = ComposeContext::capture_with_evidence(
+    source_base_dir,
+    &requirements,
+    &evidence,
+);
+```
+
+`ContextRequirements::for_content` scans active `ctx.*` references in one
+content fragment. `for_document` scans both authored frontmatter values and the
+body, preserving interpolation-literal masking and date/time aliases. `all`,
+`contains`, and `iter` support explicit orchestration without exposing the
+population modules. Date/time is always present in a requirements set.
+
+`ContextCaptureEvidence` carries the invocation environment plus optional
+Sniff-owned `GitInfo`, file changes, `RepoInfo`, `LanguageBreakdown`, Markdown
+metadata, `OsInfo`, `HardwareInfo`, and GPU observations. Its builders
+distinguish **not supplied** from an explicitly observed absence (`None` or an
+empty vector). `with_documents_for_source` derives the canonical best matching
+skill from a supplied repository root/topology and source directory without
+performing Git or topology discovery.
+
+Supplied capture is fail-closed. If a requested fact was not supplied,
+Darkmatter emits the existing `PartialRuntimeCapture` diagnostic and populates
+the group's empty/null projection. It never fills the gap by reading ambient
+CWD, HOME, environment, Git, repository topology, OS, hardware, or GPU state.
+The injected environment is used for both `env.*` and the `ctx.agent` /
+`ctx.model` projection, so later process-environment mutation cannot change the
+capture.
+
+The supplied entry points are:
+
+- `ComposeContext::capture_with_evidence`
+- `ComposeContext::capture_for_content_with_evidence`
+- `ComposeContext::capture_for_document_with_evidence`
+
+Existing `ComposeContext::capture_for_content`,
+`ComposeContext::capture_for_document`, and `ComposeOptions::new()` remain
+ambient compatibility APIs and use the same `populate_*` code. Ambient capture
+snapshots the environment once and reuses its original `GitRepo` handle for
+file changes rather than discovering the repository a second time.
 
 ## Text Replacement
 
@@ -489,7 +548,7 @@ darkmatter/lib/src/
     │   ├── runtime.rs   # ComposeContext (the ctx namespace)
     │   ├── report.rs    # ComposeReport, ComposeWarning, SourceRange
     │   ├── effective_state.rs # EffectiveState, builder, merge logic
-    │   ├── capture.rs   # Raw fact capture from sniff, chrono, std::env
+    │   ├── capture/     # Requirements, ambient/supplied snapshots, and group populators
     │   ├── format.rs    # CSV, markdown list, byte, ordinal formatters
     │   ├── merge.rs     # User ctx + runtime ctx merge policy
     │   └── diagnostics.rs # ContextMergeDiagnostic types

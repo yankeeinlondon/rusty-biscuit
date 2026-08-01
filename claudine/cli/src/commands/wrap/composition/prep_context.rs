@@ -1,14 +1,14 @@
 //! CLI-private invocation context for compose / inline-compose / sequence.
 //!
-//! `CompositionPrepContext` is built once per command invocation immediately
-//! after `composition::resolve_composition_source` returns. It owns the
-//! repo/source/CWD facts that earlier code paths rediscovered independently
-//! (see `2026-05-09-slow-prep` Phase 2).
+//! `CompositionPrepContext` is rebuilt for each active document from the one
+//! invocation owner and that document's definitive source context. It owns
+//! provider-selection state; repository, source, and launch facts remain
+//! projections of `InvocationContext`.
 //!
 //! By threading this context into eager target resolution, shell preflight
 //! setup, and composition preparation we ensure:
 //!
-//! - The source repo root is detected exactly once.
+//! - Repository topology is reused per worktree by the invocation owner.
 //! - The selection config (`favorite`, `model_overrides`) is loaded exactly
 //!   once for the effective source repo root or CWD.
 //! - The installed-provider snapshot is built exactly once.
@@ -19,6 +19,7 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use claudine::composition::{
     InstalledProviderSnapshot, LaunchWorkspaceContext, build_installed_snapshot,
@@ -26,30 +27,35 @@ use claudine::composition::{
 };
 use claudine::diagnostics::DiagnosticSnapshot;
 use claudine::error::ClaudineError;
-use claudine::events::{EnvironmentContext, environment_context_from_sniff_result};
+use claudine::events::EnvironmentContext;
+use claudine::invocation_context::{InvocationContext, SourceContext};
 use claudine::provider::Provider;
 use claudine::system_prompt::LaunchContext;
 use color_eyre::eyre::Result;
 use sniff::programs::InstalledAiClients;
-use sniff::request::*;
 
-use super::{SelectionConfig, env, load_selection_config_for_repo};
+use super::{SelectionConfig, load_selection_config_for_repo};
 
 /// CLI-private invocation context used to deduplicate source-root and
 /// selection-config discovery across compose prep phases.
 pub(crate) struct CompositionPrepContext {
+    /// Shared owner of immutable launch and repository observations.
+    pub invocation: InvocationContext,
+    /// Definitive context for the first resolved composition source.
+    pub source_context: SourceContext,
     /// Original CLI file argument (relative or absolute, as the user typed).
     #[allow(dead_code)]
     pub original_ref: String,
     /// Resolved absolute source path (output of `biscuit-file` resolution).
     #[allow(dead_code)]
     pub resolved_path: PathBuf,
-    /// Parent directory of the resolved source path, when one exists.
+    /// Parent directory of the resolved source path; canonical constructors
+    /// always populate it.
     #[allow(dead_code)]
     pub source_parent: Option<PathBuf>,
     /// Source repo root, when the source lives inside a git workspace.
     pub source_repo_root: Option<PathBuf>,
-    /// Ambient working directory at command invocation time.
+    /// Working directory frozen by the invocation owner at launch.
     pub cwd: PathBuf,
     /// Selection config (favorite, model overrides) loaded for the
     /// effective source repo root or CWD.
@@ -57,29 +63,13 @@ pub(crate) struct CompositionPrepContext {
     /// Snapshot of installed agentic CLIs at prep time, filtered by the
     /// caller's `--exclude` set.
     pub installed_snapshot: InstalledProviderSnapshot,
-    /// Launch-CWD `LaunchContext`, derived from the single shared sniff
-    /// scan in [`Self::new`]. Threaded into `composition_prepare` so the
-    /// per-invocation `LaunchContext::from_cwd` re-scan is skipped.
+    /// Launch-CWD `LaunchContext` projected from the invocation owner.
     pub launch_context: LaunchContext,
-    /// Launch-CWD `EnvironmentContext`, derived from the same shared
-    /// sniff scan. Threaded into `composition_preflight` so the
-    /// per-invocation `detect_environment_fast` re-scan is skipped when
-    /// it would have run against the same root.
+    /// Launch-CWD `EnvironmentContext` projected from the captured environment.
     pub env_context: EnvironmentContext,
-    /// Launch-CWD `LaunchWorkspaceContext`, derived from the same shared
-    /// sniff scan. Threaded into `execute_composition_request_inner` so
-    /// both the header env plan and the child env build reuse it instead
-    /// of calling `resolve_launch_workspace_context` again.
+    /// Launch-CWD workspace projection reused by headers and child setup.
     pub launch_workspace: LaunchWorkspaceContext,
-    /// Diagnostic snapshot of the shared sniff scan failure, if it failed.
-    ///
-    /// The shared scan uses `unwrap_or_default()` to keep prep best-
-    /// effort, but the legacy non-prep path treated launch-context
-    /// detection failure as a hard error when `--repo` was set. The
-    /// executor reads this field to preserve that contract: when
-    /// `--repo` is set and the sniff scan failed, the run is aborted
-    /// with the captured error rather than silently launching with an
-    /// empty launch context. `None` means the scan succeeded.
+    /// Diagnostic snapshot of the retained launch observation failure.
     ///
     /// The typed `sniff::SniffError` is retained through
     /// `ClaudineError::LaunchContextDetection` and projected once into a
@@ -98,130 +88,40 @@ impl CompositionPrepContext {
     /// `excluded` is the caller's `--exclude` set, applied to the installed
     /// provider list.
     ///
-    /// Performs one shared `sniff::detect_with_plan` scan rooted at the
-    /// launch CWD covering git summary only (no os/hw/net/repo), and reuses
-    /// its result for both [`LaunchContext`] and [`EnvironmentContext`] so
-    /// downstream phases never re-scan. Workspace (repo) structure is
-    /// detected in a separate, bounded `detect_repo_structure` call gated on
-    /// the scan's discovered git root — never as part of the launch-CWD scan
-    /// — so a non-repo launch directory (e.g. `$HOME`) can never trigger an
-    /// unbounded home-tree walk. The source's parent directory is probed
-    /// separately with the much cheaper `detect_git` to discover
-    /// `source_repo_root` because the markdown file may live in a different
-    /// repo than the launch CWD.
+    /// The compatibility constructor establishes one invocation owner and one
+    /// definitive source bundle. Canonical command paths pass those objects to
+    /// [`Self::from_invocation`] directly.
+    #[allow(dead_code)]
     pub fn new(
         original_ref: &str,
         resolved_path: &Path,
         excluded: &BTreeSet<Provider>,
     ) -> Result<Self> {
-        // Phase 3 (2026-05-09-slow-prep): instrument the discoveries owned
-        // by this context so trace inspection can confirm each runs exactly
-        // once per compose invocation.
+        let invocation = InvocationContext::capture()?;
+        let source_context = invocation.derive_source(resolved_path)?;
+        Self::from_invocation(original_ref, invocation, source_context, excluded)
+    }
+
+    /// Build provider-selection state from the invocation's existing source
+    /// observation without performing filesystem discovery.
+    pub fn from_invocation(
+        original_ref: &str,
+        invocation: InvocationContext,
+        source_context: SourceContext,
+        excluded: &BTreeSet<Provider>,
+    ) -> Result<Self> {
         let _ctx_span = tracing::info_span!("compose_prep.prep_context").entered();
-        let cwd = std::env::current_dir()?;
-        let source_parent = resolved_path.parent().map(Path::to_path_buf);
-
-        // Single shared sniff scan rooted at the launch CWD. Replaces the
-        // historical `LaunchContext::from_cwd` (in composition_prepare) and
-        // `detect_environment_fast` (in composition_preflight) duplicate
-        // calls. Both consumers now read from the cached results below.
-        // Run this FIRST so `source_repo_root` resolution can reuse the
-        // launch repo root in the common case.
-        //
-        // The scan requests git summary only — never repo structure. Repo
-        // structure is detected separately below, bounded to the discovered
-        // git root, because sniff bounds its package-enumeration walk to the
-        // git root *when one exists* but otherwise walks `base_dir` unbounded.
-        // Launched from a non-repo directory (e.g. `$HOME`) that unbounded
-        // walk would recurse the entire home tree (`~/Library`, `~/Documents`,
-        // …) and appear to hang. The git root the scan already discovers is
-        // the sole gate for whether a package concept exists at all — the same
-        // gate `FileReference::with_package_area_magic_path` applies before
-        // consulting `cargo_metadata`.
-        let (launch_context, env_context, git_root, repo, launch_detection_error) = {
-            let _span = tracing::info_span!("compose_prep.shared_sniff").entered();
-            let plan = DetectionPlan::new()
-                .base_dir(cwd.clone())
-                .without_os()
-                .without_hardware()
-                .without_network()
-                .filesystem(
-                    FilesystemRequest::new()
-                        .git(GitRequest::summary())
-                        .without_repo()
-                        .without_file_inventory()
-                        .without_docs()
-                        .without_formatting(),
-                );
-            // Preserve the sniff error so callers with strict launch-
-            // context requirements (currently `--repo`) can fail hard
-            // instead of inheriting a silent empty default. Best-effort
-            // consumers continue to read the defaulted contexts below.
-            let (sniff_result, launch_detection_error) = match sniff::detect_with_plan(plan) {
-                Ok(result) => (result, None),
-                Err(error) => (
-                    sniff::SniffResult::default(),
-                    Some(DiagnosticSnapshot::from_diagnostic(
-                        &ClaudineError::LaunchContextDetection(Box::new(error)),
-                    )),
-                ),
-            };
-            let launch_context = LaunchContext::from_sniff_result(&sniff_result, &cwd);
-
-            // The launch git root, discovered once by the scan above. This is
-            // the single guard for repo-scoped work: no git root means no
-            // repo, hence no workspace packages to enumerate.
-            let git_root = sniff_result
-                .filesystem
-                .as_ref()
-                .and_then(|f| f.git.as_ref().map(|g| g.repo_root.clone()));
-
-            // Detect workspace structure only when inside a repo, bounded to
-            // the git root so the package-enumeration walk can never escape
-            // into an unbounded directory tree. Best-effort: a structure-probe
-            // failure leaves `repo` as `None` rather than aborting prep.
-            let repo = git_root.as_deref().and_then(|root| {
-                sniff::filesystem::repo::detect_repo_structure(root)
-                    .ok()
-                    .flatten()
-            });
-
-            let env_context = environment_context_from_sniff_result(sniff_result);
-            (
-                launch_context,
-                env_context,
-                git_root,
-                repo,
-                launch_detection_error,
-            )
-        };
-
-        // Resolve source_repo_root: in the 99% case the markdown file
-        // lives inside the launch repo, so we can short-circuit the
-        // expensive `detect_git(source_parent)` (which probes branch /
-        // upstream / commit summary on top of finding `.git`). Falls back
-        // to a full probe only when the source lives outside the launch
-        // repo (e.g., user is composing a file from a sibling clone).
-        //
-        // Resolved BEFORE `launch_workspace` so the workspace context can
-        // honour the legacy split contract: `repo_root` follows the
-        // source repo (metadata for guardrails, MCP defaults, harness path
-        // resolution), while `child_cwd` keeps following the launch repo
-        // (where the spawned provider process actually runs).
-        let source_repo_root = {
-            let _span = tracing::info_span!("compose_prep.source_repo_root").entered();
-            resolve_source_repo_root(
-                source_parent.as_deref(),
-                launch_context.repo_root.as_deref(),
-            )
-        };
-
-        let launch_workspace = env::launch_workspace_context_from_repo_info(
-            &cwd,
-            git_root.as_deref(),
-            repo.as_ref(),
-            source_repo_root.as_deref(),
-        );
+        let cwd = invocation.launch_cwd().to_path_buf();
+        let resolved_path = source_context.source_path().to_path_buf();
+        let source_parent = Some(source_context.base_dir().to_path_buf());
+        let source_repo_root = source_context.repository_root().map(Path::to_path_buf);
+        let launch_context = invocation.launch_context();
+        let env_context = invocation.environment_context();
+        let launch_workspace = invocation.launch_workspace_context(source_repo_root.as_deref());
+        let launch_detection_error = invocation
+            .launch_repository()
+            .diagnostic()
+            .cloned();
 
         let selection_config = {
             let _span = tracing::info_span!("compose_prep.selection_config").entered();
@@ -236,8 +136,10 @@ impl CompositionPrepContext {
         };
 
         Ok(Self {
+            invocation,
+            source_context,
             original_ref: original_ref.to_string(),
-            resolved_path: resolved_path.to_path_buf(),
+            resolved_path,
             source_parent,
             source_repo_root,
             cwd,
@@ -254,39 +156,11 @@ impl CompositionPrepContext {
     ///
     /// Mirrors the legacy `source_repo_root.unwrap_or(&cwd)` precedence so
     /// catalog overrides keyed off the source repo continue to apply when
-    /// the source lives in one, falling back to the ambient CWD otherwise.
+    /// the source lives in one, falling back to the captured launch CWD otherwise.
     #[allow(dead_code)]
     pub fn effective_root(&self) -> &Path {
         self.source_repo_root.as_deref().unwrap_or(&self.cwd)
     }
-}
-
-/// Resolve the markdown source's enclosing git repo root.
-///
-/// Fast path: when the source's parent directory is inside the launch
-/// repo root (which the shared sniff scan already discovered), reuse the
-/// launch root and skip the expensive `sniff::filesystem::git::detect_git`
-/// probe entirely. That probe reads HEAD, branch, upstream, and a commit
-/// summary — work we don't need just to identify the repo root, and which
-/// observed at ~609 ms in the wild on the rusty-biscuit worktree.
-///
-/// Slow path: when the source lives outside the launch repo (sibling
-/// clone, source pulled from elsewhere, no launch repo), fall back to a
-/// full `detect_git` probe — that case is rare enough to absorb the cost.
-fn resolve_source_repo_root(
-    source_parent: Option<&Path>,
-    launch_repo_root: Option<&Path>,
-) -> Option<PathBuf> {
-    let parent = source_parent?;
-    if let Some(launch_root) = launch_repo_root
-        && parent.starts_with(launch_root)
-    {
-        return Some(launch_root.to_path_buf());
-    }
-    sniff::filesystem::git::detect_git(parent, false, 1)
-        .ok()
-        .flatten()
-        .map(|info| info.repo_root)
 }
 
 #[cfg(test)]
@@ -322,7 +196,7 @@ mod tests {
     fn launch_detection_failure_projects_a_clonable_serializable_snapshot() {
         let sniff_error = sniff::SniffError::NotARepository(PathBuf::from("/no/such/repo"));
         let snapshot = DiagnosticSnapshot::from_diagnostic(&ClaudineError::LaunchContextDetection(
-            Box::new(sniff_error),
+            Arc::new(sniff_error),
         ));
 
         // The typed facets survive: `LaunchContextDetection` classifies as
@@ -344,24 +218,6 @@ mod tests {
         let restored: DiagnosticSnapshot =
             serde_json::from_str(&json).expect("snapshot round-trips");
         assert_eq!(restored, snapshot);
-    }
-
-    #[test]
-    fn resolve_source_repo_root_reuses_launch_root_when_source_inside() {
-        // Fast path: source lives inside the launch repo, so we should
-        // skip the expensive detect_git probe and reuse the launch root.
-        let launch_root = PathBuf::from("/repo");
-        let source_parent = PathBuf::from("/repo/prompts");
-
-        let result = super::resolve_source_repo_root(Some(&source_parent), Some(&launch_root));
-        assert_eq!(result, Some(launch_root));
-    }
-
-    #[test]
-    fn resolve_source_repo_root_returns_none_when_no_source_parent() {
-        let launch_root = PathBuf::from("/repo");
-        let result = super::resolve_source_repo_root(None, Some(&launch_root));
-        assert!(result.is_none());
     }
 
     /// W0 regression: building `CompositionPrepContext` must populate
@@ -416,7 +272,7 @@ mod tests {
         let launch_git = PathBuf::from("/repo-a");
         let source_repo = PathBuf::from("/repo-b");
 
-        let ws = super::env::launch_workspace_context_from_repo_info(
+        let ws = claudine::composition::LaunchWorkspaceContext::from_repo_info(
             &launch_cwd,
             Some(&launch_git),
             None,

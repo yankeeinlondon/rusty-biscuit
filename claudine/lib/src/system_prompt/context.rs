@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use sniff::filesystem::repo::Package;
 use sniff::request::*;
@@ -48,7 +49,7 @@ impl LaunchContext {
             );
 
         let result = sniff::detect_with_plan(plan)
-            .map_err(|e| crate::error::ClaudineError::LaunchContextDetection(Box::new(e)))?;
+            .map_err(|e| crate::error::ClaudineError::LaunchContextDetection(Arc::new(e)))?;
 
         Ok(Self::from_sniff_result(&result, cwd))
     }
