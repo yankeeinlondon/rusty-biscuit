@@ -219,7 +219,7 @@ fn prompt_log_target(default: Option<&LogTarget>) -> Result<LogTarget> {
                 Some(LogTarget::File {
                     path: Some(path),
                     rotate_daily: false,
-                }) => biscuit_file::to_portable_string(&path),
+                }) => biscuit_file::to_portable_string(path),
                 _ => "~/.claudine/events.jsonl".to_string(),
             };
             let path = Text::new("Enter file path:")

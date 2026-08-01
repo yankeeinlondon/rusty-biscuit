@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Integration tests: compose shell preflight gating.
 //!
 //! Split out of the `wrap_commands.rs` god file; shared fixtures live in

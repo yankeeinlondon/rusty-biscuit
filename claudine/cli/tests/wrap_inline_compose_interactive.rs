@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Integration tests: inline-compose interactive collection, capability gating, and handler/readonly recovery.
 //!
 //! Split out of the `wrap_commands.rs` god file; shared fixtures live in

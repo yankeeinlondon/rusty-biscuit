@@ -366,11 +366,7 @@ impl Diagnostic for HarnessError {
                 base["reference"] = json!(raw);
                 base["failure"] = json!(failure.as_str());
                 base["source_path"] =
-                    json!(
-                        source_path
-                            .as_deref()
-                            .map(|path| biscuit_file::to_portable_string(path))
-                    );
+                    json!(source_path.as_deref().map(biscuit_file::to_portable_string));
                 if let Some(detail) = resolution {
                     base["kind"] = json!(file_reference_kind_slug(detail.kind));
                     base["effective_kind"] =
@@ -399,11 +395,7 @@ impl Diagnostic for HarnessError {
                 base["reference"] = json!(reference);
                 base["failure"] = json!(file_reference_failure_slug(source));
                 base["source_path"] =
-                    json!(
-                        source_path
-                            .as_deref()
-                            .map(|path| biscuit_file::to_portable_string(path))
-                    );
+                    json!(source_path.as_deref().map(biscuit_file::to_portable_string));
                 if let Some(detail) = resolution {
                     base["kind"] = json!(file_reference_kind_slug(detail.kind));
                     base["effective_kind"] =

@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Integration tests: --perf report emission across wrap, compose, and inline-compose.
 //!
 //! Split out of the `wrap_commands.rs` god file; shared fixtures live in

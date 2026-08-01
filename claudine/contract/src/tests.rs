@@ -16,6 +16,7 @@ use biscuit_contract::inference::{
 use claudine::provider::provider_info;
 use claudine::provider_id::Provider;
 use serde_json::json;
+#[cfg(unix)]
 use tracing_subscriber::layer::SubscriberExt;
 
 use crate::adapter::ClaudineInferenceAdapter;
@@ -931,5 +932,5 @@ fn window_contains(args: &[String], needle: &[&str]) -> bool {
 
 // -- tracing capture helper --------------------------------------------------
 
-#[cfg(test)]
+#[cfg(unix)]
 mod tracing_capture;

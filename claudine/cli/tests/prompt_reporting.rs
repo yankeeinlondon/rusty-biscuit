@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! End-to-end tests for the prompt reporting feature (Phase 5).
 //!
 //! Verifies visual layout, token counting, markdown formatting, and

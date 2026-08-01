@@ -3986,7 +3986,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/repo_home/tests.rs",
-      "line": 134,
+      "line": 136,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -3996,7 +3996,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/repo_home/tests.rs",
-      "line": 161,
+      "line": 163,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -4006,7 +4006,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/repo_home/tests.rs",
-      "line": 210,
+      "line": 212,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -4016,7 +4016,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/repo_home/tests.rs",
-      "line": 250,
+      "line": 252,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -4026,7 +4026,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/repo_home/tests.rs",
-      "line": 285,
+      "line": 287,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -4036,7 +4036,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/repo_home/tests.rs",
-      "line": 298,
+      "line": 300,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -4046,7 +4046,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/repo_home/tests.rs",
-      "line": 324,
+      "line": 326,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -4056,7 +4056,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/repo_home/tests.rs",
-      "line": 343,
+      "line": 345,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -4066,7 +4066,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/repo_home/tests.rs",
-      "line": 359,
+      "line": 361,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -4076,7 +4076,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/repo_home/tests.rs",
-      "line": 366,
+      "line": 368,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -4086,27 +4086,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/repo_home/tests.rs",
-      "line": 372,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "Claude"
-      ],
-      "exempt_candidate": true
-    },
-    {
-      "path": "claudine/cli/src/commands/wrap/repo_home/tests.rs",
-      "line": 384,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "Codex"
-      ],
-      "exempt_candidate": true
-    },
-    {
-      "path": "claudine/cli/src/commands/wrap/repo_home/tests.rs",
-      "line": 385,
+      "line": 374,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -4120,13 +4100,33 @@
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
+        "Codex"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/repo_home/tests.rs",
+      "line": 387,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Claude"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/repo_home/tests.rs",
+      "line": 388,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
         "OpenCode"
       ],
       "exempt_candidate": true
     },
     {
       "path": "claudine/cli/src/commands/wrap/repo_home/tests.rs",
-      "line": 413,
+      "line": 415,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -4136,7 +4136,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/repo_home/tests.rs",
-      "line": 474,
+      "line": 476,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [

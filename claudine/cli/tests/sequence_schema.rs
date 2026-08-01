@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Integration tests for `claudine sequence` schema validation.
 //!
 //! Split out of `sequence_cli.rs`: covers cross-step required-property

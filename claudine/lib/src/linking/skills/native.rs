@@ -112,17 +112,22 @@ fn fix_scope_skills(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use std::collections::HashMap;
 
     use tempfile::TempDir;
 
+    #[cfg(unix)]
     use super::super::ExceptionType;
     use super::fix_missing_skills;
+    #[cfg(unix)]
     use crate::linking::capabilities::ALL_PROVIDERS;
+    #[cfg(unix)]
     use crate::linking::paths::ProviderPaths;
-    use crate::linking::skills::test_helpers::{
-        empty_provider, setup_skill, test_paths_with_gemini,
-    };
+    use crate::linking::skills::test_helpers::test_paths_with_gemini;
+    #[cfg(unix)]
+    use crate::linking::skills::test_helpers::{empty_provider, setup_skill};
+    #[cfg(unix)]
     use crate::provider::Provider;
 
     #[cfg(unix)]

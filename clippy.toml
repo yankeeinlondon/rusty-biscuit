@@ -1,0 +1,5 @@
+# `claudine::CompositionError` is an intentionally rich public diagnostic enum.
+# Its largest internal-signal variant is 136 bytes on 64-bit targets. Keep the
+# threshold tight enough to catch materially larger errors without requiring
+# hundreds of call-site suppressions or a public error-shape change.
+large-error-threshold = 136

@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Integration tests: dry-run opencode-models invocation guard across providers.
 //!
 //! Split out of the `wrap_commands.rs` god file; shared fixtures live in

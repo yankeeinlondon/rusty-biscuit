@@ -1,3 +1,4 @@
+#[cfg(unix)]
 use std::process::Command;
 
 use super::*;
@@ -5,6 +6,7 @@ use serial_test::serial;
 use tempfile::TempDir;
 use test_toolkit::EnvGuard;
 
+#[cfg(unix)]
 fn init_git_repo(path: &Path) -> bool {
     Command::new("git")
         .arg("init")

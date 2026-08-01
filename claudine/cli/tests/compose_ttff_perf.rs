@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Time-to-first-feedback (TTFF) gate for the compose pipeline.
 //!
 //! Spec reference: `claudine/features/2026-05-09-perf/spec.md` Goal 1 —

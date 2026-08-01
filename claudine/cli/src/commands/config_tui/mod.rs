@@ -301,7 +301,7 @@ async fn run_tui() -> color_eyre::Result<()> {
         claudine::dispatch::loader::save_repo_override_config(repo_cfg, path)?;
         eprintln!(
             "Repo configuration saved to {}",
-            biscuit_file::to_portable_string(&path)
+            biscuit_file::to_portable_string(path)
         );
     }
 

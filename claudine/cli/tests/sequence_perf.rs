@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Integration tests for `claudine sequence --perf`.
 //!
 //! Validates that sequence performance reporting aggregates step-level

@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Integration tests: provider-specific wrapper flag handling (Gemini/Goose/Kimi/Qwen yolo and non-interactive translation).
 //!
 //! Split out of the `wrap_commands.rs` god file; shared fixtures live in

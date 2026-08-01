@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Integration tests: watchdog / timeout termination behavior across stream-idle, wall-clock, and non-harness CLI timeouts.
 //!
 //! Split out of the `wrap_commands.rs` god file; shared fixtures live in

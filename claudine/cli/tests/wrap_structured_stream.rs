@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Integration tests: structured-stream reconstruction, verbosity control, and JSONL summary behavior.
 //!
 //! Split out of the `wrap_commands.rs` god file; shared fixtures live in

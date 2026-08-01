@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Level 1 integration tests for the `compose` / `inline-compose`
 //! execution header as the first user-facing signal.
 //!

@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Integration tests: OpenCode wrapper behavior: model resolution, repo-root launch, structured stdout, and stderr diagnostic classification.
 //!
 //! Split out of the `wrap_commands.rs` god file; shared fixtures live in

@@ -13,7 +13,9 @@ use tempfile::PersistError;
 use tracing::warn;
 
 #[cfg(windows)]
-use windows::Win32::Foundation::{ERROR_ACCESS_DENIED, ERROR_SHARING_VIOLATION};
+use windows::Win32::Foundation::{
+    ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND, ERROR_SHARING_VIOLATION,
+};
 
 #[cfg(windows)]
 const PERSIST_ATTEMPTS: usize = 8;
@@ -31,8 +33,9 @@ const INITIAL_PERSIST_RETRY_DELAY: Duration = Duration::from_millis(1);
 ///
 /// Each call uses a unique temp file, so concurrent writers never corrupt each
 /// other's in-flight bytes. A successful call leaves the target equal to one
-/// complete writer payload. On Windows, transient access and sharing failures
-/// during atomic replacement are retried with a bounded backoff.
+/// complete writer payload. On Windows, the measured transient missing-file,
+/// access, and sharing failures during atomic replacement are retried with a
+/// bounded backoff.
 ///
 /// ## Errors
 ///
@@ -121,6 +124,7 @@ fn is_transient_windows_persist_error(error: &std::io::Error) -> bool {
         error.raw_os_error(),
         Some(code)
             if code == ERROR_ACCESS_DENIED.0 as i32
+                || code == ERROR_FILE_NOT_FOUND.0 as i32
                 || code == ERROR_SHARING_VIOLATION.0 as i32
     )
 }
@@ -255,14 +259,12 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn transient_windows_persist_errors_are_narrowly_classified() {
-        use windows::Win32::Foundation::{
-            ERROR_FILE_NOT_FOUND, ERROR_LOCK_VIOLATION, ERROR_PATH_NOT_FOUND,
-        };
+        use windows::Win32::Foundation::{ERROR_LOCK_VIOLATION, ERROR_PATH_NOT_FOUND};
 
         for (code, expected) in [
             (ERROR_ACCESS_DENIED, true),
             (ERROR_SHARING_VIOLATION, true),
-            (ERROR_FILE_NOT_FOUND, false),
+            (ERROR_FILE_NOT_FOUND, true),
             (ERROR_PATH_NOT_FOUND, false),
             (ERROR_LOCK_VIOLATION, false),
         ] {
@@ -282,7 +284,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn non_transient_windows_persist_error_is_not_retried() {
-        use windows::Win32::Foundation::ERROR_FILE_NOT_FOUND;
+        use windows::Win32::Foundation::ERROR_PATH_NOT_FOUND;
 
         let dir = TempDir::new().unwrap();
         let tmp = NamedTempFile::new_in(dir.path()).unwrap();
@@ -296,7 +298,7 @@ mod tests {
             |file, _| {
                 attempts += 1;
                 Err(PersistError {
-                    error: windows_error(ERROR_FILE_NOT_FOUND),
+                    error: windows_error(ERROR_PATH_NOT_FOUND),
                     file,
                 })
             },
@@ -306,7 +308,7 @@ mod tests {
 
         assert_eq!(attempts, 1);
         assert!(delays.is_empty());
-        assert_eq!(error.raw_os_error(), Some(ERROR_FILE_NOT_FOUND.0 as i32));
+        assert_eq!(error.raw_os_error(), Some(ERROR_PATH_NOT_FOUND.0 as i32));
     }
 
     #[cfg(windows)]

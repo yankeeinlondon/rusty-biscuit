@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Integration tests: compose agent resolution reporting and validation/handler engagement banners.
 //!
 //! Split out of the `wrap_commands.rs` god file; shared fixtures live in

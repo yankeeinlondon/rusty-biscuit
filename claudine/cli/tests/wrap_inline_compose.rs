@@ -3,12 +3,16 @@
 //! Split out of the `wrap_commands.rs` god file; shared fixtures live in
 //! `common::wrap`.
 
+#[cfg(unix)]
 use chrono::Local;
 use std::fs;
 use tempfile::tempdir;
 mod common;
+#[cfg(unix)]
 use common::wrap::*;
-use common::{augmented_path, strip_ansi, write_executable};
+use common::strip_ansi;
+#[cfg(unix)]
+use common::{augmented_path, write_executable};
 
 #[test]
 fn inline_compose_requires_positional_arg() {

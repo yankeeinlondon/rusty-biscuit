@@ -311,7 +311,7 @@ fn report_category_level_symlinks(
                 name: format!("{resource_label}:{provider}"),
                 reason: format!(
                     "{provider}: category-level symlink at {} -> {}. Keep as-is; switch to granular links manually.",
-                    biscuit_file::to_portable_string(&root_dir),
+                    biscuit_file::to_portable_string(root_dir),
                     biscuit_file::to_portable_string(&target)
                 ),
             });

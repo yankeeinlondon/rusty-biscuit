@@ -7,8 +7,11 @@ use predicates::str::contains;
 use std::fs;
 use tempfile::tempdir;
 mod common;
+#[cfg(unix)]
 use common::wrap::*;
-use common::{augmented_path, strip_ansi, write_executable};
+use common::strip_ansi;
+#[cfg(unix)]
+use common::{augmented_path, write_executable};
 
 #[test]
 fn compose_requires_positional_arg() {

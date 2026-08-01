@@ -154,6 +154,7 @@ fn ctrl_c_terminates_wrapped_child_on_windows() {
     while !ready_marker.exists() {
         if Instant::now() >= marker_deadline {
             let _ = child.kill();
+            let _ = child.wait();
             panic!("wrapped child never reached its run loop within 30s");
         }
         std::thread::sleep(Duration::from_millis(50));
@@ -164,6 +165,10 @@ fn ctrl_c_terminates_wrapped_child_on_windows() {
     // press and escalates to terminate the Job Object tree.
     let child_pid = child.id();
     let sent = unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, child_pid) };
+    if sent.is_err() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
     assert!(
         sent.is_ok(),
         "GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, {child_pid}) failed: {sent:?}",
@@ -181,13 +186,18 @@ fn ctrl_c_terminates_wrapped_child_on_windows() {
                 break;
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(100)),
-            Err(e) => panic!("try_wait failed: {e}"),
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("try_wait failed: {e}");
+            }
         }
     }
 
     if !exited {
         let _ = child.kill();
     }
+    let _ = child.wait();
     assert!(
         exited,
         "console Ctrl+Break to the wrapped child's process group must terminate \

@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Integration tests: compose provider selection, env-agent resolution, interactive prompt seeding, and MCP runtime.
 //!
 //! Split out of the `wrap_commands.rs` god file; shared fixtures live in

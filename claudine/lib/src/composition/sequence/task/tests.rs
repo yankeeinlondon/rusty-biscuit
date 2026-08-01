@@ -1528,25 +1528,30 @@ mod shell_tasks {
 /// [`FakeTaskShell`], because every claim here is about when bytes leave a pipe
 /// — which a fake decides by construction and therefore cannot falsify.
 mod shell_streaming {
+    #[cfg(unix)]
     use std::time::Instant;
 
     use super::*;
-    use crate::render::{TaskBar, TaskStream, TaskStreamOutcome};
+    #[cfg(unix)]
+    use crate::render::TaskStreamOutcome;
+    use crate::render::{TaskBar, TaskStream};
 
-    /// One frame group, stamped with when the sink received it.
+    /// One frame group, with its Unix reception timestamp when available.
     #[derive(Debug, Clone)]
     struct Recorded {
         channel: Channel,
         lines: Vec<String>,
+        #[cfg(unix)]
         at: Duration,
     }
 
-    /// A [`TaskStreamSink`] that timestamps every write against a fixed origin.
+    /// A [`TaskStreamSink`] that records writes and timestamps them on Unix.
     ///
     /// The timestamp is the whole point: "streamed" and "buffered until the
     /// command returned" produce identical *content*, and differ only in when
     /// the sink saw it.
     struct TimedSink {
+        #[cfg(unix)]
         origin: Instant,
         writes: Mutex<Vec<Recorded>>,
     }
@@ -1554,6 +1559,7 @@ mod shell_streaming {
     impl TimedSink {
         fn new() -> Arc<Self> {
             Arc::new(Self {
+                #[cfg(unix)]
                 origin: Instant::now(),
                 writes: Mutex::new(Vec::new()),
             })
@@ -1563,6 +1569,7 @@ mod shell_streaming {
             self.writes.lock().unwrap().push(Recorded {
                 channel,
                 lines: frames.iter().map(|line| strip_ansi(line)).collect(),
+                #[cfg(unix)]
                 at: self.origin.elapsed(),
             });
         }
@@ -1592,6 +1599,7 @@ mod shell_streaming {
         }
 
         /// When the sink first saw `needle` on `channel`.
+        #[cfg(unix)]
         fn first_seen(&self, channel: Channel, needle: &str) -> Option<Duration> {
             self.writes()
                 .into_iter()
@@ -1624,8 +1632,7 @@ mod shell_streaming {
     #[cfg(unix)]
     const TWO_CHANNEL_COMMAND: &str = "printf 'out-payload\\n'; printf 'err-payload\\n' >&2";
 
-    /// The `cmd` twin. Compile-checked under `just check-windows`; not executed
-    /// on a Windows host.
+    /// The `cmd` twin used by the native Windows channel-contract tests.
     #[cfg(windows)]
     const TWO_CHANNEL_COMMAND: &str = "echo out-payload& echo err-payload 1>&2";
 

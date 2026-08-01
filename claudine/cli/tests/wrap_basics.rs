@@ -8,7 +8,9 @@ use std::fs;
 use tempfile::tempdir;
 mod common;
 use common::wrap::*;
-use common::{strip_ansi, write_dry_run_provider_stub, write_executable};
+use common::{strip_ansi, write_dry_run_provider_stub};
+#[cfg(unix)]
+use common::write_executable;
 
 #[test]
 fn help_lists_wrapper_subcommands() {

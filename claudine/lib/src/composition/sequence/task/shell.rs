@@ -300,6 +300,7 @@ impl SystemTaskShell {
     }
 
     /// A runner whose first wait attempt after captured output always fails.
+    #[cfg(unix)]
     pub(crate) fn failing_wait() -> Self {
         Self {
             fail_wait: true,

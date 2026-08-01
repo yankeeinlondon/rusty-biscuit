@@ -8,6 +8,7 @@
 //!   * SIGINT during prep (Unix-only)
 
 use super::*;
+#[cfg(unix)]
 use super::interrupt::{format_user_interrupt_message, install_user_interrupt_guard};
 use super::setters::{parse_compose_setter, parse_shorthand_value};
 use serde_json::{Value, json};
