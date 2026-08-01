@@ -1207,13 +1207,18 @@ mod integration_tests {
     #[test]
     fn pipeline_timeout_fallback_emits_warning() {
         let temp_dir = TempDir::new().unwrap();
-        let content = "::shell sleep 1 && echo after\n";
+        // `execute_pipeline_detailed` spends one timeout budget on every `&&`
+        // segment, so `echo after` must spawn and exit inside it too. The sleep
+        // therefore has to overshoot the budget by a wide margin while the
+        // budget stays wide enough for a slow spawn under parallel-suite load.
+        // The sleeping child is killed at the timeout, so its length is free.
+        let content = "::shell sleep 10 && echo after\n";
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
             .with_shell(ShellExpansionOptions {
-                timeout: std::time::Duration::from_millis(100),
+                timeout: std::time::Duration::from_secs(2),
                 timeout_behavior: ShellTimeoutBehavior::EmptyString,
                 policy_root: Some(temp_dir.path().to_path_buf()),
                 approval_handler: Some(Arc::new(MockApprovalHandler {

@@ -474,10 +474,16 @@ mod tests {
 
     #[test]
     fn pipeline_timeout_fallback_emits_warning() {
-        let content = "::shell-block\nsleep 1 && echo after\n::end-block\n";
+        // One timeout budget covers every `&&` segment, so `echo after` has to
+        // spawn and exit inside it as well. A tight budget makes the second
+        // segment time out too under parallel-suite load — the sleep must
+        // overshoot the timeout by a wide margin, and the timeout must leave
+        // room for a slow process spawn. The sleeping child is killed at the
+        // timeout, so its length costs no wall clock.
+        let content = "::shell-block\nsleep 10 && echo after\n::end-block\n";
         let temp_dir = TempDir::new().unwrap();
         let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-            timeout: std::time::Duration::from_millis(100),
+            timeout: std::time::Duration::from_secs(2),
             timeout_behavior: ShellTimeoutBehavior::EmptyString,
             policy_root: Some(temp_dir.path().to_path_buf()),
             approval_handler: Some(Arc::new(AllowAllHandler)),
