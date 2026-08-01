@@ -385,6 +385,25 @@ fn property_value_match_pattern_filters_by_path_substring() {
 }
 
 #[test]
+fn property_value_emits_windows_shaped_path_portably() {
+    let effective = effective_from_doc(concat!(
+        "---\n",
+        "$schema:\n",
+        "  spec: \"file(match('**/*spec*.md'))\"\n",
+        "---\nbody\n",
+    ));
+    let tmp = TempDir::new().unwrap();
+    seed_repo(tmp.path());
+    write(&tmp.path().join(r"features\live\spec.md"), "# live\n");
+    let ctx = ScopeContext::discover_from(tmp.path());
+
+    assert_eq!(
+        property_value(&effective, "spec", "features/live", &ctx),
+        vec!["spec='features/live/spec.md'".to_string()]
+    );
+}
+
+#[test]
 fn property_value_match_pattern_anchors_on_cwd_not_repo_root() {
     // Regression: a `file(match(...))` property walked the effective repo
     // root, so a user completing inside a package area saw matches from

@@ -149,17 +149,21 @@ pub(super) fn pointer_to_dotted(pointer: &str) -> String {
 /// The Prose layer downgrades `<a href>` to plain text when the terminal
 /// does not support OSC8.
 pub(super) fn render_file_link(path: &std::path::Path) -> String {
-    let abs = path
-        .canonicalize()
-        .unwrap_or_else(|_| path.to_path_buf());
     let label = biscuit_file::to_portable_string(path);
     let escaped_label = escape_prose_path(&label);
-    match url::Url::from_file_path(abs) {
-        Ok(href) => format!(
+    let absolute = path.canonicalize().ok().or_else(|| {
+        if path.is_absolute() {
+            Some(path.to_path_buf())
+        } else {
+            std::env::current_dir().ok().map(|cwd| cwd.join(path))
+        }
+    });
+    match absolute.and_then(|path| url::Url::from_file_path(path).ok()) {
+        Some(href) => format!(
             "<a href=\"{}\">{escaped_label}</a>",
             escape_prose_path(href.as_str())
         ),
-        Err(()) => escaped_label,
+        None => escaped_label,
     }
 }
 

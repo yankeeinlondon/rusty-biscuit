@@ -61,7 +61,12 @@ pub(crate) fn detect_wrap_startup(
 
     let promptless_at_repo_root = !capture_git_status
         && sniff::filesystem::git::GitRepo::discover(cwd)
-            .wrap_err_with(|| format!("startup repo discovery failed for '{}'", cwd.display()))?
+            .wrap_err_with(|| {
+                format!(
+                    "startup repo discovery failed for '{}'",
+                    biscuit_file::to_portable_string(cwd)
+                )
+            })?
             .is_some_and(|repo| canonical_or_self(repo.repo_root()) == canonical_or_self(cwd));
 
     let filesystem_request = FilesystemRequest::new()
@@ -85,7 +90,12 @@ pub(crate) fn detect_wrap_startup(
         .filesystem(filesystem_request);
 
     let result = sniff::detect_with_plan(plan)
-        .wrap_err_with(|| format!("startup detection failed for '{}'", cwd.display()))?;
+        .wrap_err_with(|| {
+            format!(
+                "startup detection failed for '{}'",
+                biscuit_file::to_portable_string(cwd)
+            )
+        })?;
 
     let mut launch_context =
         claudine::system_prompt::LaunchContext::from_sniff_result(&result, cwd);

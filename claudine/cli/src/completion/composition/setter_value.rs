@@ -8,6 +8,8 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use biscuit_file::to_portable_string;
+
 use super::{Candidate, file_name_matches};
 use crate::completion::frontmatter;
 use crate::completion::fuzzy::{self, PartialLen};
@@ -76,11 +78,10 @@ pub(super) fn gather_committed(
             Ok(r) => r,
             Err(_) => continue,
         };
-        let Some(rel_str) = rel.to_str() else {
-            continue;
-        };
+        let rel_str = to_portable_string(rel);
+        let dir = to_portable_string(Path::new(dir));
         let insert = if dir.is_empty() {
-            rel_str.to_string()
+            rel_str
         } else {
             format!("{}/{}", dir.trim_end_matches('/'), rel_str)
         };

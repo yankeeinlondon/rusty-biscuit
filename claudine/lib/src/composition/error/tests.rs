@@ -39,6 +39,14 @@ fn file_link_uses_encoded_url_and_portable_label() {
 }
 
 #[test]
+fn file_link_absolutizes_a_missing_relative_path() {
+    let link = super::render::render_file_link(Path::new("missing-relative-prompt.md"));
+
+    assert!(link.contains("<a href=\"file://"), "expected file URL: {link}");
+    assert!(link.contains("missing-relative-prompt.md"), "expected label: {link}");
+}
+
+#[test]
 fn enrich_wraps_lifecycle_leak_with_excerpt() {
     let source = source_from(
         "---\nreview_file: x\nsuccess:\n    message: \"at {{review-file}}\"\n---\nbody\n",

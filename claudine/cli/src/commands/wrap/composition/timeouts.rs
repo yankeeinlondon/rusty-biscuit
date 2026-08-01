@@ -182,19 +182,19 @@ pub(crate) fn resolve_prompt_display_path(
     if let Some(root) = repo_root
         && let Ok(rel) = path.strip_prefix(root)
     {
-        return rel.display().to_string();
+        return biscuit_file::to_portable_string(rel);
     }
     if let Ok(cwd) = std::env::current_dir()
         && let Ok(rel) = path.strip_prefix(&cwd)
     {
-        return rel.display().to_string();
+        return biscuit_file::to_portable_string(rel);
     }
     if let Some(home) = dirs::home_dir()
         && let Ok(rel) = path.strip_prefix(&home)
     {
-        return format!("~/{}", rel.display());
+        return format!("~/{}", biscuit_file::to_portable_string(rel));
     }
-    path.display().to_string()
+    biscuit_file::to_portable_string(path)
 }
 
 /// Format the timeout-conflict error message, attributing the resolved

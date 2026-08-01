@@ -6,6 +6,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use biscuit_file::to_portable_string;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 
 use darkmatter::markdown::schemas::{completion as dm_completion, CompletionKind, EffectiveSchema};
@@ -110,16 +111,14 @@ fn file_candidates(
             let Ok(rel) = path.strip_prefix(&base) else {
                 continue;
             };
-            let Some(rel_str) = rel.to_str() else {
-                continue;
-            };
-            if !excluded.is_empty() && excluded.contains(rel_str) {
+            let rel_text = to_portable_string(rel);
+            if !excluded.is_empty() && excluded.contains(&rel_text) {
                 continue;
             }
             let rendered = if is_array {
-                format_array_candidate(property, &prefix_segments, rel_str)
+                format_array_candidate(property, &prefix_segments, &rel_text)
             } else {
-                format!("{property}='{rel_str}'")
+                format!("{property}='{rel_text}'")
             };
             if seen.insert(rendered.clone()) {
                 out.push(rendered);
@@ -147,30 +146,28 @@ fn file_candidates(
         let Ok(rel) = path.strip_prefix(&base) else {
             continue;
         };
-        let Some(rel_str) = rel.to_str() else {
-            continue;
-        };
+        let rel_text = to_portable_string(rel);
         let file_name = path
             .file_name()
             .and_then(|n| n.to_str())
-            .unwrap_or(rel_str);
-        if !matcher.is_match(rel_str, file_name) {
+            .unwrap_or(&rel_text);
+        if !matcher.is_match(&rel_text, file_name) {
             continue;
         }
         // Filter the typed partial against the repo-relative path, not the
         // basename: `match(...)` candidates routinely share a basename
         // (e.g. every `**/*spec*.md` hit is `spec.md`), so only path-fragment
         // matching lets the user narrow by directory.
-        if !active.is_empty() && !contains_ci(rel_str, &active) {
+        if !active.is_empty() && !contains_ci(&rel_text, &active) {
             continue;
         }
-        if !excluded.is_empty() && excluded.contains(rel_str) {
+        if !excluded.is_empty() && excluded.contains(&rel_text) {
             continue;
         }
         let rendered = if is_array {
-            format_array_candidate(property, &prefix_segments, rel_str)
+            format_array_candidate(property, &prefix_segments, &rel_text)
         } else {
-            format!("{property}='{rel_str}'")
+            format!("{property}='{rel_text}'")
         };
         if seen.insert(rendered.clone()) {
             out.push(rendered);
@@ -217,14 +214,12 @@ pub(crate) fn file_candidate_paths(patterns: &[String], ctx: &ScopeContext) -> V
         let Ok(rel) = path.strip_prefix(&base) else {
             continue;
         };
-        let Some(rel_str) = rel.to_str() else {
-            continue;
-        };
+        let rel_text = to_portable_string(rel);
         let file_name = path
             .file_name()
             .and_then(|n| n.to_str())
-            .unwrap_or(rel_str);
-        if !matcher.is_match(rel_str, file_name) {
+            .unwrap_or(&rel_text);
+        if !matcher.is_match(&rel_text, file_name) {
             continue;
         }
         out.push(path.to_path_buf());
@@ -255,9 +250,12 @@ fn rel_or_name_matches(path: &Path, base: &Path, active: &str) -> bool {
     let target = path
         .strip_prefix(base)
         .ok()
-        .and_then(|rel| rel.to_str())
-        .or_else(|| path.file_name().and_then(|n| n.to_str()));
-    target.is_some_and(|t| contains_ci(t, active))
+        .map(to_portable_string)
+        .or_else(|| {
+            path.file_name()
+                .map(|name| to_portable_string(Path::new(name)))
+        });
+    target.is_some_and(|t| contains_ci(&t, active))
 }
 
 /// Normalize a value partial by stripping surrounding quotes and the `@`

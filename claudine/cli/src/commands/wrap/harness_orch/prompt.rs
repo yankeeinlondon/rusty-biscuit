@@ -202,7 +202,7 @@ pub(crate) fn materialize_harness_prompt(
             state.base_prompt.clone().ok_or_else(|| {
                 eyre!(
                     "missing passthrough prompt seed for '{}'",
-                    state.source_path.display()
+                    biscuit_file::to_portable_string(&state.source_path)
                 )
             })?,
         ),

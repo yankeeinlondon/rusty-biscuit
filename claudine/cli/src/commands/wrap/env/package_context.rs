@@ -60,7 +60,7 @@ pub(crate) fn resolve_launch_workspace_context(
             package_context: None,
             warnings: vec![format!(
                 "failed to resolve monorepo package metadata for '{}': {}",
-                launch_cwd.display(),
+                biscuit_file::to_portable_string(launch_cwd),
                 error
             )],
         },
@@ -107,7 +107,7 @@ pub(crate) fn launch_workspace_context_from_repo_info(
                 None,
                 vec![format!(
                     "monorepo detected at '{}' but no packages were reported",
-                    repo.root.display()
+                    biscuit_file::to_portable_string(&repo.root)
                 )],
             ),
         },
@@ -148,8 +148,8 @@ fn resolve_package_context_from_packages(
         None,
         vec![format!(
             "monorepo detected at '{}' but no package area matched cwd '{}'",
-            repo.root.display(),
-            cwd.display()
+            biscuit_file::to_portable_string(&repo.root),
+            biscuit_file::to_portable_string(cwd)
         )],
     )
 }
@@ -176,7 +176,7 @@ fn resolve_monorepo_package_context(cwd: &Path) -> Result<RepoContext> {
             package_context: None,
             warnings: vec![format!(
                 "monorepo detected at '{}' but no packages were reported",
-                repo.root.display()
+                biscuit_file::to_portable_string(&repo.root)
             )],
         });
     };
@@ -204,8 +204,8 @@ fn resolve_monorepo_package_context(cwd: &Path) -> Result<RepoContext> {
         package_context: None,
         warnings: vec![format!(
             "monorepo detected at '{}' but no package area matched cwd '{}'",
-            repo.root.display(),
-            cwd.display()
+            biscuit_file::to_portable_string(&repo.root),
+            biscuit_file::to_portable_string(cwd)
         )],
     })
 }

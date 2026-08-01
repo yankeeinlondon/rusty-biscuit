@@ -56,12 +56,12 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 rendezvous-client = { path = "../rendezvous/client" }
 rendezvous-core = { path = "../rendezvous/core" }
 tonic = { version = "0.14", default-features = false, features = ["codegen"] }
+url = "2"
 
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.4"
 libc = "0.2"
 shellexpand = "3"
-url = "2"
 
 [target.'cfg(windows)'.dependencies]
 # Q15 Ctrl+C / timeout parity: the unified wait loop targets the child tree

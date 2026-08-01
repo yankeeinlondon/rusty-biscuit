@@ -17,6 +17,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
+use biscuit_file::to_portable_string;
 use biscuit_tui::components::choose::ChoiceOption;
 use claudine::composition::{
     CompositionError, FileDetail, extract_markdown_detail, extract_yaml_sequence_detail,
@@ -166,7 +167,7 @@ fn present_and_select(
     let insert = insert_map
         .get(&detail.path)
         .cloned()
-        .unwrap_or_else(|| detail.path.display().to_string());
+        .unwrap_or_else(|| format_relative_insert(&detail.path, ctx));
     Ok(insert)
 }
 
@@ -198,11 +199,7 @@ fn build_options(
         };
         let insert = format_relative_insert(path, ctx);
         insert_map.insert(detail.path.clone(), insert.clone());
-        options.push(ChoiceOption::new(
-            insert.clone(),
-            detail.name.clone(),
-            detail,
-        ));
+        options.push(ChoiceOption::new(insert.clone(), insert, detail));
     }
 
     (options, insert_map)
@@ -222,22 +219,20 @@ fn is_yaml_sequence(path: &Path) -> bool {
 fn format_relative_insert(path: &Path, ctx: &ScopeContext) -> String {
     if let Some(root) = scopes::effective_repo_root(ctx)
         && let Ok(rel) = path.strip_prefix(root)
-        && let Some(rel_str) = rel.to_str()
-        && !rel_str.is_empty()
+        && !rel.as_os_str().is_empty()
     {
-        return rel_str.to_string();
+        return to_portable_string(rel);
     }
 
     if let Some(home) = &ctx.home
         && path.starts_with(home)
         && let Ok(rel) = path.strip_prefix(home)
-        && let Some(rel_str) = rel.to_str()
-        && !rel_str.is_empty()
+        && !rel.as_os_str().is_empty()
     {
-        return format!("~/{rel_str}");
+        return format!("~/{}", to_portable_string(rel));
     }
 
-    path.display().to_string()
+    to_portable_string(path)
 }
 
 #[cfg(test)]
@@ -476,5 +471,34 @@ mod tests {
             format_relative_insert(&path, &ctx),
             "prompts/plan.md"
         );
+    }
+
+    #[test]
+    fn format_relative_insert_portably_renders_windows_shaped_segments() {
+        let root = PathBuf::from("repo");
+        let path = root.join(r"prompts\nested\plan.md");
+        let ctx = ScopeContext {
+            cwd: root.clone(),
+            home: None,
+            repo_info: None,
+            git_root: Some(root),
+        };
+
+        assert_eq!(
+            format_relative_insert(&path, &ctx),
+            "prompts/nested/plan.md"
+        );
+    }
+
+    #[test]
+    fn build_options_uses_portable_relative_path_as_visible_label() {
+        let tmp = TempDir::new().unwrap();
+        seed_cargo_workspace(tmp.path(), &["a/lib"]);
+        let path = tmp.path().join("prompts").join(r"nested\plan.md");
+        write(&path, "# x\n");
+        let ctx = ScopeContext::discover_from(tmp.path());
+
+        let (options, _) = build_options(&[path], "COMPOSE", &ctx);
+        assert_eq!(options[0].label, "prompts/nested/plan.md");
     }
 }

@@ -226,7 +226,10 @@ fn load_committed_catalog(area: &Path) -> Result<Option<Value>, GenError> {
     serde_json::from_str(&text)
         .map(Some)
         .map_err(|err| GenError::Json {
-            message: format!("committed catalog `{}`: {err}", path.display()),
+            message: format!(
+                "committed catalog `{}`: {err}",
+                biscuit_file::to_portable_string(&path)
+            ),
         })
 }
 

@@ -279,9 +279,9 @@ fn force_exit() -> ! {
 ///
 /// At install time we have only the user's CLI argument (e.g. the
 /// relative path they typed). We use that verbatim as the OSC8 visible
-/// text, and best-effort canonicalise it against the current working
-/// directory to produce an absolute `file://` link target. If
-/// canonicalisation fails (path doesn't exist yet, permission denied,
+/// text, and best-effort canonicalize it against the current working
+/// directory to produce an absolute file-URL link target. If
+/// canonicalization fails (path doesn't exist yet, permission denied,
 /// etc.) we fall back to a plain (non-hyperlinked) prose line.
 pub(crate) fn format_user_interrupt_message(prompt_argv: &str) -> String {
     use biscuit_terminal::components::renderable::TerminalRenderable;
@@ -291,10 +291,10 @@ pub(crate) fn format_user_interrupt_message(prompt_argv: &str) -> String {
         .ok()
         .map(|cwd| cwd.join(prompt_argv))
         .and_then(|p| p.canonicalize().ok())
-        .map(|p| p.display().to_string());
+        .and_then(|p| crate::cli_utils::file_url(&p));
 
     let prose = if let Some(absolute) = absolute {
-        format!("User interrupted compose operation in [{prompt_argv}](file://{absolute})")
+        format!("User interrupted compose operation in [{prompt_argv}]({absolute})")
     } else {
         format!("User interrupted compose operation in <yellow>{prompt_argv}</yellow>")
     };

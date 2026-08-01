@@ -209,3 +209,35 @@ fn windows_directory_allow_rule_grants_child_path() {
     assert!(result.is_allowed());
     assert_eq!(result.matched_rules[0].effect, PolicyEffect::Allow);
 }
+
+#[test]
+fn windows_shaped_query_paths_render_portably_without_changing_identity() {
+    let original_path = PathBuf::from(r"src\main.rs");
+    let normalized_path = PathBuf::from(r"C:\workspace\project\src\main.rs");
+    let resolved = ResolvedPathQuery {
+        original_path: original_path.clone(),
+        normalized_path: normalized_path.clone(),
+        classification: PathClassification::Workspace,
+    };
+
+    assert_eq!(
+        resolved.subject(),
+        "`src/main.rs` -> `C:/workspace/project/src/main.rs` (workspace)"
+    );
+    assert_eq!(
+        resolved.scope_reason("Query path resolved within").message,
+        "Query path resolved within workspace scope at `C:/workspace/project/src/main.rs`."
+    );
+    assert_eq!(resolved.original_path, original_path);
+    assert_eq!(resolved.normalized_path, normalized_path);
+
+    let already_normalized = ResolvedPathQuery {
+        original_path: normalized_path.clone(),
+        normalized_path,
+        classification: PathClassification::Workspace,
+    };
+    assert_eq!(
+        already_normalized.subject(),
+        "`C:/workspace/project/src/main.rs` (workspace)"
+    );
+}

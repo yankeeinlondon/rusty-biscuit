@@ -857,10 +857,12 @@ fn agent_prompt_message_single_invalid_is_imperative_with_link() {
     assert!(msg.contains("totally-bogus"), "got: {msg}");
     assert!(msg.contains("/tmp/doc.md"), "got: {msg}");
     // The TTY pre-prompt and the no-TTY abort body share this exact text.
+    let href = crate::cli_utils::file_url(Path::new("/tmp/doc.md"))
+        .expect("test path should convert to a file URL");
     assert!(
         msg.starts_with(&invalid_agent_message(
             "totally-bogus",
-            "<a href=\"file:///tmp/doc.md\">/tmp/doc.md</a>"
+            &format!("<a href=\"{href}\">/tmp/doc.md</a>")
         )),
         "got: {msg}"
     );

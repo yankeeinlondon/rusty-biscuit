@@ -116,7 +116,9 @@ fn resolve_sequence_source(
         .ok_or_else(|| CompositionError::FileNotFound(file_ref.to_string()))?;
 
     if !composition::is_yaml_source(&resolved_path) {
-        return Err(CompositionError::NotMarkdown(resolved_path.display().to_string()));
+        return Err(CompositionError::NotMarkdown(
+            biscuit_file::to_portable_string(&resolved_path),
+        ));
     }
 
     // The same conversion the just-in-time re-read performs, so a step composes
@@ -150,7 +152,7 @@ fn emit_empty_sequence_notice(path: &std::path::Path) {
         &biscuit_terminal::components::prose::Prose::new(format!(
             "<dim>sequence</dim> <bold>{}</bold> resolved to <bold>0 steps</bold>; \
              nothing to run.",
-            path.display()
+            biscuit_file::to_portable_string(path)
         ))
         .render(&crate::log::terminal()),
     );

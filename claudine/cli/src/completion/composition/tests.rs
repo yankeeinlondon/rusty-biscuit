@@ -650,3 +650,21 @@ fn finalize_dedups_and_sorts_by_rank() {
     let got = finalize(cs);
     assert_eq!(got, vec!["prompts/a.md", "prompts/b.md"]);
 }
+
+#[test]
+fn committed_directory_output_is_portable_without_test_normalization() {
+    let tmp = TempDir::new().unwrap();
+    seed_cargo_workspace(tmp.path(), &["a/lib"]);
+    write(
+        &tmp.path().join("prompts").join(r"nested\plan.md"),
+        "---\ntitle: P\n---\n",
+    );
+
+    let ctx = ScopeContext::discover_from(tmp.path());
+    let got = run(ComposeMode::Compose, &ctx, "prompts/");
+    assert!(
+        got.iter()
+            .any(|candidate| candidate == "prompts/nested/plan.md"),
+        "completion must emit slash-separated paths directly: {got:?}"
+    );
+}
