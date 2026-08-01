@@ -175,9 +175,19 @@ pub fn document_expression_resolution_context(
     file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
     file_ref_fallback_dir: Option<&Path>,
 ) -> darkmatter::markdown::compose::expression::ResolutionContext {
-    let context = prepared_context.cloned().unwrap_or_else(
-        darkmatter::markdown::compose::ComposeContext::capture,
-    );
+    // The no-snapshot fallback is demand-driven, matching the executor's
+    // `early_binding_context`. `ComposeContext::capture` runs the repo-wide
+    // sniff scan — git, repo, file changes, languages, docs, OS, hardware, GPU
+    // — and this is called once per evaluated expression argument, so an
+    // eager capture here costs ~1.5s *per argument* on a large working tree.
+    // Groups an expression actually reads are still captured on demand during
+    // evaluation.
+    let context = prepared_context.cloned().unwrap_or_else(|| {
+        let base = file_ref_fallback_dir
+            .or_else(|| source_path.parent())
+            .unwrap_or_else(|| Path::new("."));
+        darkmatter::markdown::compose::ComposeContext::capture_for_content(base, "")
+    });
     let mut options = darkmatter::markdown::compose::ComposeOptions::new_with_context(context)
         .with_source_file(source_path);
     if let Some(snapshot) = file_resolution_context {
