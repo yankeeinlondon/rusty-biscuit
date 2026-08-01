@@ -253,7 +253,8 @@ path renderer.
 - **No anchoring policy.** Repo-relative, `~`, and `${VAR}` selection belongs to
   [`2026-06-13-resolve-tuple`](../2026-06-13-resolve-tuple/spec.md).
 - **No sniff or claudine adoption in this feature.** Their display sites belong
-  to resolve-tuple's abbreviation rollout.
+  to resolve-tuple's abbreviation rollout. Biscuit-file's own `bf reference`
+  is not in that group and *is* adopted here — see step 4.
 - **No new feature flag.** `dunce` becomes unconditional rather than gaining a
   `portable-path` feature.
 - **No changes to file-reference lexical normalization.** In particular,
@@ -430,6 +431,29 @@ a non-Windows host.
   original `Path` rather than a pre-rendered `String`.
 - Leave `schemas/resolve.rs::is_bare_name` unchanged for the domain reason
   documented above.
+
+### 4. `bf reference`
+
+`biscuit-file/cli/src/main.rs:453` prints a resolved path with `Path::display`,
+the one path→text site in the CLI. It was originally left out of scope, which
+was wrong twice over: it is the same defect in the crate that owns the fix, and
+its own tests already assumed the corrected behavior — they assert
+`biscuit-file/cli/Cargo.toml` with forward slashes and had been failing on
+Windows since before this feature began.
+
+- Print through `to_portable_string`, so a script capturing stdout gets one
+  spelling on every host. GitNexus measures `run_reference` as LOW risk: 1
+  impacted, 1 direct (`main`), 1 execution flow.
+- Its four Windows-failing tests carry a second, independent defect:
+  `starts_with("/")` as a stand-in for "absolute". No Windows path satisfies
+  that, portable or not, because a portable disk path begins `C:/`. Replace it
+  with `Path::is_absolute` on the captured stdout rather than a string
+  predicate. Keeping the `/`-separated `ends_with` assertions is what pins the
+  renderer; a substring predicate that tolerated both spellings would let the
+  CLI regress to `display` unnoticed.
+- Update `biscuit-file/cli/README.md` and the biscuit-file skill's CLI
+  reference: the output spelling is user-visible behavior, and the skill should
+  stop an agent from reintroducing the `starts_with("/")` assertion.
 
 ## Testing
 

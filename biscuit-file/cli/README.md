@@ -146,6 +146,17 @@ bf reference %foo.md                 # recursive: walks directories for a match
 bf ref ./Cargo.toml                  # alias for 'reference'
 ```
 
+### Output spelling
+
+Resolved paths print as portable text through
+[`biscuit_file::to_portable_string`](../README.md), so `bf ref ./Cargo.toml`
+prints `C:/repo/Cargo.toml` on Windows rather than `C:\repo\Cargo.toml`. A
+script that captures this output behaves the same on every host.
+
+A Windows UNC, device, or unreducible verbatim path has no faithful
+`/`-separated spelling and prints natively instead, because a path the caller
+cannot open would be worse than an inconsistent separator.
+
 ### Flags
 
 | Flag | Description |
