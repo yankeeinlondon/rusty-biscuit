@@ -81,6 +81,12 @@ fn trigger_discovery_boundary(options: &ComposeOptions, document_path: &Path) ->
 /// the slot, and the second reuses it instead of re-scanning the `schemas/`
 /// ancestry from disk (F8). Matching is re-evaluated against the current
 /// frontmatter in each pass regardless.
+///
+/// `presentation_overrides` receives caller-originated eager-file values in a
+/// portable spelling for later Markdown body interpolation. Effective
+/// frontmatter retains the absolute native values used by path operations,
+/// comparisons, and lifecycle state. Static member and index interpolation can
+/// select within the presentation values without changing that native state.
 pub(crate) fn run_with_registry(
     markdown: &mut Markdown,
     options: &ComposeOptions,

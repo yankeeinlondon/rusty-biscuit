@@ -465,6 +465,13 @@ so a committed eager-`file` reference is portable across macOS, Linux, and Windo
 See [Schema Validation — Eager-`file` value normalization](../inline/schema-validation.md#eager-file-value-normalization)
 for the full contract.
 
+Caller-originated eager-file overrides retain a resolved absolute native path in
+effective frontmatter because their identity belongs to the caller's captured
+launch area, not the document. Markdown body interpolation uses a separate
+portable presentation value for direct variables and static member/index
+selections. Path operations, comparisons, and lifecycle state continue to read
+the native effective value.
+
 ```yaml
 $schema:
     review:      "file(eager; required; match('**/*review*.md'))"   # must exist
