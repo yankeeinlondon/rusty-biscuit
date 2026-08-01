@@ -84,7 +84,12 @@ fn level2_align_code_block_center_indents_more_than_left() {
         .plain
         .lines()
         .find(|l| l.contains("rust"))
-        .expect("left: expected a header line containing 'rust'");
+        .unwrap_or_else(|| {
+            panic!(
+                "left: expected a header line containing 'rust'; captured frame:\n{}",
+                left_frame.plain
+            )
+        });
     let left_indent = left_header.chars().take_while(|c| *c == ' ').count();
 
     // Center-aligned: same fill, same page width, so the only difference is
@@ -99,7 +104,12 @@ fn level2_align_code_block_center_indents_more_than_left() {
         .plain
         .lines()
         .find(|l| l.contains("rust"))
-        .expect("center: expected a header line containing 'rust'");
+        .unwrap_or_else(|| {
+            panic!(
+                "center: expected a header line containing 'rust'; captured frame:\n{}",
+                center_frame.plain
+            )
+        });
     let center_indent = center_header.chars().take_while(|c| *c == ' ').count();
 
     assert!(
