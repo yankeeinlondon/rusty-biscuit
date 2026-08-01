@@ -64,6 +64,23 @@ sanity:
 # run tests for biscuit-file packages
 test *args="":
     @just _test_all "biscuit-file biscuit-file-cli" {{args}}
+    @just test-minimal
+
+# Proves the path→text boundary is genuinely unfeatured.
+#
+# `to_portable_string` / `try_portable_string` are documented as available
+# without `file-reference` and its gix/cargo_metadata/walkdir/dirs/url stack, so
+# a consumer can render a path without paying for a resolver. Nothing about the
+# default-feature suite would notice that guarantee lapsing — the module would
+# still compile and its tests would still pass — which is why this runs its own
+# feature resolution rather than a filter over the run above. Plain `cargo test`
+# on purpose: this invocation is fixed and must not inherit `test`'s nextest
+# partitioning arguments.
+test-minimal:
+    @echo ""
+    @echo "Testing {{ BOLD }}biscuit-file{{ RESET }} with {{ ITALIC }}--no-default-features{{ RESET }}"
+    @echo "--------------------------"
+    @cargo test -p biscuit-file --no-default-features --lib path_text
 
 # not applicable: biscuit-file has no real-terminal (Level-2) tests
 test-l2:

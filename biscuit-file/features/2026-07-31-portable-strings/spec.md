@@ -356,6 +356,20 @@ unfeatured; the explicit biscuit-file `--no-default-features` test does.
   remaining components without lexical `.`/`..` collapse and keep device or
   unknown verbatim namespaces distinct. Use this representation consistently
   on both sides of `starts_with` and `strip_prefix`.
+- The representation must not be a `PathBuf`, and must not be built through
+  `to_string_lossy`. Re-entering `std::path` hands the suffix back to Windows
+  path parsing, which drops a literal `.` and reads a literal `..` as a parent
+  hop; `to_string_lossy` maps two paths differing only in unpaired surrogates
+  onto one key, which is enough for the wrong anchor to match. Split components
+  out of the raw platform units and compare them directly.
+- Every anchored replacement drops the namespace prefix, so before emitting one
+  for a path `try_portable_string` declined, prove the removal component by
+  component: reject a literal `.`, `..`, reserved DOS name, trailing dot or
+  space, invalid Win32 character, over-255-character name, or non-Unicode name,
+  and preserve-and-warn instead. Length alone must not disqualify — an
+  over-`MAX_PATH` descendant of a short root is exactly the case that has to
+  keep normalizing. Audit only the names taken from the destination; the `..`
+  hops the relative-path computation generates are its own.
 - In `normalize_links`, relative replacements produced after a successful
   prefix comparison use `to_portable_string`; those paths are prefix-free. If
   no repo, home, or environment anchor applies and `try_portable_string` on the
@@ -438,7 +452,12 @@ Test `to_portable_string` directly:
 - `try_portable_string` returns `Some` for every case above that portabilizes
   and `None` for every case that stays native, with the `Some` payload equal to
   `to_portable_string`'s result — the two must not be able to disagree;
-- the tests compile and run with `--no-default-features`.
+- the tests compile and run with `--no-default-features`. This needs a durable
+  gate, not a one-time local pass: nothing in the default-feature suite would
+  notice the unfeatured guarantee lapsing, because the module would still
+  compile and its tests would still pass. `biscuit-file`'s `test-minimal`
+  recipe owns the second feature resolution and runs from `just test`, which is
+  what CI invokes per area.
 
 The existing Windows `normalize_components_reduces_verbatim_paths` test remains
 in place as resolver coverage; it is not renderer coverage and must not be
@@ -451,21 +470,44 @@ relocated.
   non-Windows host.
 - Add a Finalization test in which a declined absolute destination remains
   byte-identical and `normalize_links` records the warning.
-- Add an Inline-Pre/transclusion regression proving that a declined resolved
-  destination returns an error instead of leaving a child-relative link to be
-  reinterpreted relative to the root document.
+- Add an Inline-Pre/transclusion regression composing a child into a root, not
+  a direct `link_resolve` call, so the stage's position in the order is what is
+  under test. The transclusion engine applies its general child-failure policy
+  to the `MarkdownError::Transform`: it records a `transclusion` warning and
+  replaces the directive with a failure notice, so the root compose returns
+  `Ok`. Assert that outcome — no child link, absolutized or authored, reaches
+  the root, and the gap is visible in the artifact. Pair it with an
+  ordinary-path control, or a broken transclusion would satisfy the assertion,
+  and with a `fail_fast` case that does return the `MarkdownError::Transform`,
+  which is what separates a deliberate downgrade from a discarded error.
+  Making that downgrade opt-in rather than the default is
+  [`darkmatter/fixes/2026-07-31-error-handling-transclusions`](../../../darkmatter/fixes/2026-07-31-error-handling-transclusions/spec.md).
 - Add `link()` tests proving both local destination arms return
   `ExpressionError` on decline.
 - Add Windows comparison tests where a safely reducible short repository root
   contains an over-`MAX_PATH` verbatim descendant. The descendant must still be
   recognized as inside the repository and normalize to a relative portable
-  path. Cover legacy/verbatim UNC equivalence too.
+  path. Cover legacy/verbatim UNC equivalence through `starts_with`,
+  `strip_prefix`, and the relative computation, not key equality alone.
+- Add anchored regressions for each unsafe category, driven through
+  `normalize_links` rather than the comparison helper, on both the repository
+  and environment arms: the destination stays byte-identical and warns. Pair
+  each with the over-`MAX_PATH` success case, or the gate cannot be
+  distinguished from a blanket refusal to anchor declined paths.
+- Add a Windows test proving two keys differing only in an unpaired surrogate
+  stay distinct, and that neither is a prefix of the other.
 - Parse generated one-argument links with `pulldown_cmark` and assert that a
   native-fallback label, including leading `\\` and backslashes before
   punctuation, round-trips as the exact visible text.
 - Add a Windows completion test for a declined absolute UNC directory and
   assert that its directory suffix remains native rather than producing mixed
-  separators.
+  separators. Test the enumerating entry point as well as the renderer:
+  selection sits between them and decides whether a candidate keeps its
+  enumerated absolute spelling at all. Reaching it needs a *local* decline,
+  since `read_dir` against a real share is slow and unreliable — a
+  trailing-dot directory created through a `\\?\` path is the cheapest one, and
+  it must be created and removed verbatim, because Win32 strips the dot from
+  every component and would silently build an ordinary directory instead.
 - No existing Unix snapshot should move for ordinary Unicode paths without
   literal backslashes.
 
@@ -513,5 +555,14 @@ These changes land with the code that makes them true:
 6. **Path comparison:** rendered text is never a path identity key. Darkmatter
    uses a private comparison representation to equate safe and retained Windows
    prefix spellings without weakening the public renderer's decline policy.
+   That representation is neither a `Path` nor a `String`: both would undo the
+   guarantee, one by re-parsing the suffix and one by collapsing distinct
+   non-Unicode names onto a shared key.
+7. **Anchoring a declined path:** the decline is a fact about the whole
+   spelling, and an anchored replacement asks a narrower question, so the two
+   are decided separately. An anchor arm may emit text only after proving that
+   every name it copies out of the destination still means itself without the
+   namespace prefix; otherwise Finalization preserves and warns exactly as it
+   does for an unanchored decline.
 
 There are no open decisions in this feature.

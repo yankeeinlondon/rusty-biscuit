@@ -321,8 +321,16 @@ fn test_toc_linking_fail_fast_false_becomes_warning() {
         .with_fail_fast(false);
     let (composed, report) = md.compose_with(options).unwrap();
 
-    assert_eq!(composed.content().trim_end(), "::toc-linking ./missing.md");
+    // The directive is replaced by a notice rather than left in place: a
+    // tolerated failure still owes the reader a visible gap, and leaking
+    // `::toc-linking` into the output puts directive syntax in front of them
+    // instead. `fail_fast` (the test below) is what preserves the error.
+    assert_eq!(
+        composed.content().trim_end(),
+        "_Could not link headings from `./missing.md`_"
+    );
     assert_eq!(report.toc_links_generated, 0);
+    assert_eq!(report.transclusions_skipped, 1);
     assert!(
         report
             .warnings

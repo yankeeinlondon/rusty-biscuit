@@ -279,6 +279,54 @@ mod tests {
         );
     }
 
+    /// The same rule, reached through the enumerating entry point rather than
+    /// the renderer, because selection sits between the two: `is_absolute`
+    /// decides whether a candidate keeps the enumerated path or is stripped
+    /// back to a base-relative one, and only the first branch can produce a
+    /// declined spelling at all.
+    ///
+    /// A trailing dot is the cheapest local decline available. It is creatable
+    /// only through the verbatim namespace and is precisely what makes the
+    /// legacy spelling unfaithful, so no SMB share has to be reachable for the
+    /// native-fallback path to be exercised.
+    #[test]
+    #[cfg(windows)]
+    fn declined_directory_completes_without_mixing_separators() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let verbatim_root = std::fs::canonicalize(temp_dir.path()).unwrap();
+        let declined_dir = verbatim_root.join("trailing.");
+        std::fs::create_dir(&declined_dir).unwrap();
+        std::fs::create_dir(declined_dir.join("nested")).unwrap();
+        std::fs::write(declined_dir.join("guide.md"), "# Guide").unwrap();
+        assert!(
+            biscuit_file::try_portable_string(&declined_dir).is_none(),
+            "fixture must be a path with no faithful portable spelling"
+        );
+
+        let current = format!("{}\\", declined_dir.display());
+        let values = completion_values(complete_markdown_files_from(
+            temp_dir.path(),
+            OsStr::new(&current),
+        ));
+
+        assert!(
+            values.contains(&format!("{current}guide.md")),
+            "expected the native file candidate, got: {values:?}"
+        );
+        assert!(
+            values.contains(&format!("{current}nested\\")),
+            "expected a natively terminated directory candidate, got: {values:?}"
+        );
+        assert!(
+            values.iter().all(|value| !value.contains('/')),
+            "a candidate mixed separator conventions: {values:?}"
+        );
+
+        // The legacy removal `TempDir` performs on drop cannot delete a
+        // trailing-dot name, so the verbatim spelling has to do it here.
+        std::fs::remove_dir_all(&declined_dir).unwrap();
+    }
+
     #[test]
     fn compose_arg_completion_suggests_files_for_non_setter_tokens() {
         let temp_dir = tempfile::tempdir().unwrap();
