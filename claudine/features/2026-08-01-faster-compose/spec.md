@@ -10,7 +10,7 @@ packages:
 related:
     - ../../fixes/2026-08-01-propagated-context/spec.md
     - ../2026-07-13-file-resolution/spec.md
-review_iterations: 0
+review_iterations: 1
 ---
 
 # Faster compose: reduce the work one composition performs
@@ -18,11 +18,14 @@ review_iterations: 0
 ## Outcome
 
 Composing a Markdown document performs work proportional to what the document
-actually contains. A document with no links pays no link-resolution parses; a
-document with no shell directives pays no shell error-context construction; a
-stage with nothing to do allocates nothing. Repeated inputs — the same schema
-file, the same trigger roots, the same canonicalized path, the same host
-evidence — are read and computed once per invocation and reused.
+actually contains. A document with no links pays a bounded set of shared
+reference-parser passes rather than one parse per extractor; a document with
+no shell directives pays no shell error-context construction; a stage with
+nothing to do avoids body-sized copies and stage-specific setup.
+Repeated stable inputs — the same schema file, trigger discovery key,
+normalized path request, and host evidence — are read or computed once per
+invocation and reused. Long-running invocations revalidate mutable supporting
+inputs at the freshness boundaries defined below.
 
 The companion propagated-context fix eliminates *redundant context discovery*
 across Claudine's startup layers. This feature eliminates *redundant work
@@ -63,13 +66,15 @@ Darkmatter pipeline, per compose of one document:
   and rebuilds it even when nothing changed.
 - Transclusion recomputes per-directive what is loop-invariant per phase:
   the expression resolution context for `when:` guards, `options_hash`
-  (which re-canonicalizes external state and re-serializes the entire
+  base (which re-canonicalizes external state and re-serializes the entire
   context value map and environment per directive), a `canonicalize` of the
   same child path up to three times, and a double pass over the directive
-  slice for file versus code kinds. The shared `PipelineRuntime` sits behind
-  one mutex that every parallel child locks twice.
-- Code transclusion reads the target file before consulting the compose
-  cache, so a cache hit still pays the read.
+  slice for file versus code kinds. Parallel children do not compose while
+  holding the shared `PipelineRuntime` mutex, but every child serializes its
+  runtime snapshot and merge through that one lock.
+- Code transclusion reads and hashes the target before the run-local cache
+  lookup. Strict persistent-cache validation also rereads operation sources,
+  so neither kind of validated hit is content-read-free today.
 - The interpolation depth loop re-scans the entire document once per nesting
   level rather than only the rewritten regions.
 - `ComposeOptions::new()` and the `EffectiveStateBuilder` fallback trigger
@@ -83,8 +88,9 @@ Cross-document (sequence, fleet, and repeated-invocation) costs:
 
 - A `$schema` file is read from disk and parsed per document; only the
   compiled validator is cached, and only after the merged JSON is rebuilt.
-  A 500-step sequence pointing at one schema file re-reads and re-parses it
-  500 times. Named-type imports have the same shape.
+  A 500-step sequence pointing at one unchanged schema file can therefore
+  re-read and re-parse it 500 times. Named-type imports are deduplicated only
+  within one schema-resolution call and have the same cross-document shape.
 - Schema-trigger discovery re-walks its roots and re-reads every trigger
   file per document; the registry is reused only across the two passes of a
   single compose.
@@ -99,10 +105,10 @@ Claudine drive path, per document:
   by sequence JIT steps and post-initialize stabilization repeats the same
   double read.
 - The runtime context for the same document is captured twice with identical
-  arguments during preparation, and a third near-identical capture runs for
-  the lifecycle context.
+  arguments during preparation; the broader lifecycle path can perform a
+  third near-identical capture for lifecycle context.
 - `FORCE_COLOR`/terminal detection is probed four separate times in one
-  command path.
+  command path, even where the same output sink and policy are being queried.
 
 Sniff structure probe (`RepoRequest::structure()`), per call:
 
@@ -141,68 +147,116 @@ structure probe.
 Where the fix says "probe at most once," this feature says "make the probe
 and everything after it cheap."
 
+## Cost and freshness terminology
+
+- A **compose session** is the invocation-scoped Darkmatter authority defined
+  in F6. Claudine creates one for a CLI invocation; a standalone Darkmatter
+  convenience call may create a private single-use session.
+- A **document decision** is one preparation attempt over one immutable set of
+  source bytes. A lifecycle-mandated reread — post-`initialize`
+  stabilization, JIT step entry, retry, or resume — starts a new decision.
+  Those rereads remain observable behavior and are not redundant work.
+- A **content read** reads file bytes. A metadata probe (`metadata`, size,
+  modification time, or equivalent platform evidence) is counted separately.
+  "Zero reads on a cache hit" below means zero target-content reads; strict
+  validation may still perform bounded metadata probes. A cold strict lookup
+  that must read content to establish identity is validation work, not a
+  validated hit; later reuse of that established identity is the hit governed
+  by the zero-content-read bound.
+- A **stable-input count** applies while the observed metadata and discovery
+  roots do not change. An invalidated entry may be reread or rewalked and is
+  counted as required work, not a regression.
+
 ## Required design
 
 ### F1 — One parse serves all reference extraction
 
 Reference extraction must stop re-parsing the document per extractor. Link
-resolution and link normalization each build one shared parse product (MDAST
-and/or pulldown event stream plus one `LineIndex`) and run every extractor
-against it. If the body is unchanged between the link-resolve and
-link-normalization stages, the parse product may be reused across them;
-staleness is decided by the existing content-hash discipline, not by trust.
+resolution and link normalization each build at most one MDAST product and one
+pulldown event stream, plus one shared `LineIndex`, and run every classifier
+against those products. A future implementation may collapse to one parser
+family only if it preserves the current syntax and span behavior. If the body
+is byte-identical between the link-resolve and link-normalization stages, the
+parse products may be reused across them; reuse is keyed by a content identity
+computed once for that body version, not by assuming an intervening stage did
+not mutate it.
 
 Bound: composing a document performs a number of full-document parses that is
-independent of the number of extractor kinds. A linkless document performs no
-extraction-driven parse beyond the shared one that discovers it has no
-references.
+independent of the number of extractor kinds: at most one parse per required
+parser family for a body version and stage, with cross-stage reuse when the
+body identity matches. A linkless document therefore performs at most the two
+shared parses that prove it has no references, rather than the current ten per
+stage.
 
 Changing the signature or ownership model of the internal reference-extractor
 APIs is acceptable. The extracted reference records, their spans, and their
-provenance must remain byte-identical to current output.
+provenance must remain identical to current output. Record ordering is also
+part of the contract wherever a public reference API exposes it; a shared AST
+walk must not silently replace the current extractor-group order with document
+order.
 
 ### F2 — No-op stages are near-free
 
-- A stage that changes nothing must not allocate a body copy. The
+- A stage that changes nothing must not allocate a body-sized copy. The
   replacement and interpolation fast paths return a borrowed/unchanged
   signal (for example `Cow` or an explicit no-change variant) instead of
-  `to_string()` copies the caller discards.
-- Inline cleanup must not hash the body twice and rebuild it when no cleanup
-  target exists.
+  `to_string()` copies the caller discards. Small rule, warning, and report
+  allocations are not prohibited by this bound and are counted separately
+  only when evidence shows they matter.
+- Inline cleanup must not hash the body twice. It may skip reconstruction only
+  when a cheap predicate or existing parse product proves that cleanup and
+  optional fixed-width reflow are byte no-ops; otherwise it follows the
+  existing cleanup path. The optimization must not guess from a substring and
+  bypass normalization that would have changed the document.
 - `source_context_for_errors` and `full_source_context_for_errors` become
   lazy: the body `Arc`, the frontmatter reconstruction, and the path
-  `canonicalize` are deferred until an error actually needs them, or the
-  context is built once per compose and shared. The shell-expansion and
-  shell-block stages must hit their empty-directive early-outs before any
-  error-context construction.
+  `canonicalize` are deferred until an error actually needs them, then
+  memoized by source/body identity. The shell-expansion and shell-block stages
+  must hit their empty-directive early-outs before any error-context
+  construction.
 - Error rendering quality must not regress: when an error does occur, the
   rendered block carries the same source excerpt, path, and span data it
-  carries today.
+  carries today. Lazy construction is an internal ownership change, not a
+  lossy error representation; repeated errors for the same source/body version
+  reuse the same constructed source context.
 
 ### F3 — Loop-invariant work is hoisted; canonicalization is deduplicated
 
-- The per-directive `when:` expression resolution context, `options_hash`
-  (including `classify_options` and the context/environment fingerprint),
-  and the transclusion options clone are computed once per transclusion
-  phase, not once per directive.
+- The per-directive `when:` expression resolution context, the base options
+  hash (including `classify_options` and the context/environment fingerprint),
+  and the transclusion options clone are computed once per transclusion phase,
+  not once per directive. Directive-specific overlays still receive their own
+  overlay hash and are combined with the phase-wide base; the complete cache
+  identity must not collapse two distinct `set=` or replacement options.
 - The link-normalization env-path whitelist (env-var read plus
   `canonicalize`) is resolved once per stage, not once per record.
-- One request-scoped canonicalization memo serves the whole pipeline: a
-  path canonicalized anywhere in a compose (resolver, cache keying, error
-  contexts, normalization) is canonicalized once. The memo lives on the run
-  cache, not in a process-global.
+- One session-owned canonicalization memo serves the whole pipeline. Within a
+  document-decision epoch, each distinct canonicalization input used by the
+  resolver, cache keying, error contexts, or normalization is canonicalized
+  once. A relative input is keyed with its resolution-base identity (or is
+  made absolute first), so identical spelling in two directories cannot
+  alias. The memo does not case-fold, stringify, or merge symlink aliases that
+  the platform APIs distinguish. Failed canonicalizations are not retained
+  across a stage that may create the target, and JIT/retry/resume freshness
+  boundaries advance the epoch or revalidate the entry. The memo lives on the
+  session/run cache, never in a process-global.
 - The transclusion prepare step walks the directive slice once, partitioning
   by kind, instead of filtering the full slice per kind.
 
 ### F4 — Transclusion runtime contention and cache-hit purity
 
-- The shared `PipelineRuntime` must not serialize parallel children on one
-  coarse mutex for the clone-in/merge-out pair. Narrow the critical
-  sections, shard the state, or switch to lock-free accumulation — the
-  observable merge semantics (deterministic ordering of merged child state)
-  must be preserved.
-- A compose-cache hit for a code or file transclusion must not read the
-  target from disk. All reads move inside the cached computation.
+- The shared `PipelineRuntime` must not funnel every parallel child through a
+  whole-runtime clone/merge mutex. Prefer immutable shared handles plus a
+  child-local delta returned with each result and folded in prepared-item
+  order; narrower locks are acceptable where a genuinely shared facility
+  (single-flight cache, shell allow-once state, or remote runtime) requires
+  them. Lock-free accumulation is not a requirement. Existing cycle,
+  dependency, cache-stat, and shell semantics must be preserved.
+- A validated run-local or persistent cache hit for a code or file
+  transclusion performs zero target-content reads. Cache lookup and cheap
+  freshness metadata checks happen before reading bytes; a miss or invalidated
+  entry reads and hashes content inside the cached computation/revalidation
+  path. `Strict` must not silently become `Optimistic` to satisfy the counter.
 
 ### F5 — Runtime context capture is demand-driven everywhere and captured once
 
@@ -211,16 +265,24 @@ provenance must remain byte-identical to current output.
   Callers either supply a context, get demand-driven capture at first use,
   or explicitly request a full host capture. This is a deliberate behavioral
   break for any caller that silently depended on eager whole-host capture;
-  the `EffectiveStateBuilder` fallback follows the same rule.
+  the `EffectiveStateBuilder` fallback follows the same rule. Explicit APIs
+  whose name requests a full capture remain valid; the prohibition is on
+  default and convenience construction doing it implicitly.
 - One process-environment snapshot is taken per compose session and shared
   by every context construction in that session (composition contexts,
   file-resolution contexts, expression evaluation), consistent with the
-  fix's immutable launch capture.
+  fix's immutable launch capture. Provider/model and document-specific values
+  are explicit immutable overlays on that base snapshot; callers do not mutate
+  a shared environment map in place.
 - The docs group capture is spawned like the other expensive groups instead
   of running serially on the coordinating thread.
-- The interpolation depth loop re-scans only regions produced by the
-  previous pass, not the entire document per nesting level. Nesting
-  semantics and the existing depth limit are unchanged.
+- The interpolation depth loop tracks dirty regions produced by the previous
+  pass and re-scans only regions whose scanner context is locally stable.
+  Dirty windows include enough boundary context to detect delimiters formed
+  across a replacement edge. A replacement that can change Markdown block/code
+  classification, or any case the regional scanner cannot prove local, falls
+  back to a full-document scan. Nesting semantics, warnings, code-block
+  exclusion, literal conversion, and the existing depth limit are unchanged.
 
 ### F6 — A compose session owns cross-document reuse
 
@@ -232,19 +294,32 @@ invocation-scoped cache. It carries at minimum:
   outputs);
 - the shared environment snapshot (F5);
 - the canonicalization memo (F3);
-- a schema-source cache: raw bytes and parsed/converted schema per resolved
-  schema path, including named-type imports, so a sequence whose documents
-  share a schema parses it once;
-- a trigger-discovery cache keyed by the discovered root set, so trigger
-  roots are walked and trigger files read once per invocation;
+- a layered schema-source cache: raw bytes and passive syntax trees keyed by
+  canonical source identity plus freshness evidence; resolved/converted
+  schemas additionally key every semantic resolution input (ordered schema
+  roots, file-resolution context/fallback identity, meta-schema controls, and
+  imported-file content identities). Named-type imports use the same source
+  cache, so a sequence whose documents share an unchanged schema parses it
+  once without reusing a conversion under the wrong resolution context;
+- a trigger-discovery cache keyed by the boundary, ordered nearest-first root
+  vector, file-resolution context identity, and freshness evidence. Root order
+  is semantic because it controls shadowing. Stable trigger roots are walked
+  and stable trigger files read once per invocation; changed directory/file
+  metadata invalidates only the affected registry entry;
 - the existing remote runtime, run-local compose cache, and persistent
   store handles, which already have the right scope.
 
 Freshness contract: session caches are invocation-scoped, never
-process-global, and revalidate by cheap metadata (size + mtime) or content
-hash before reuse within long-running invocations. The lifecycle rules that
-force document rereads at retry/resume/JIT boundaries are unchanged —
-documents are not cached by the session; their *supporting inputs* are.
+process-global. Stable file entries are revalidated with the strongest cheap
+metadata token already accepted by the corresponding cache contract; changed
+or inconclusive metadata falls back to a content read/hash. Trigger discovery
+revalidates the membership evidence for every visited directory, not only the
+root, so nested additions, removals, and shadowing changes cause a rescan. If
+the platform cannot establish that evidence cheaply, the decision boundary
+falls back to a walk. The lifecycle rules that force document rereads at
+post-`initialize`, retry, resume, and JIT boundaries are unchanged: documents
+are not cached by the session, and supporting-input reuse never allows a
+stale schema or trigger registry to cross a required freshness boundary.
 
 `ComposeOptions` construction becomes explicit about its session: a
 convenience path may create a private single-use session, but Claudine's
@@ -254,51 +329,72 @@ composition, and harness materialization. Renaming or restructuring
 `ComposeOptions` construction to make the session explicit is an acceptable
 break.
 
+The session is a cheap cloneable handle (typically `Arc`-backed), is `Send +
+Sync`, and provides single-flight population for caches reachable from parallel
+transclusion or sequence work. Concurrent requests for the same cold entry
+perform the underlying read/parse once; counters are shared by the session but
+never by unrelated tests or invocations.
+
 ### F7 — Claudine composes and reads each document once per decision
 
 - The prepare flow must stop running two full compose pipelines per
-  document. The shell-approval discovery pass and the canonical staged pass
-  are consolidated: either one pipeline run produces both the approval
-  inventory and the canonical output, or the discovery pass is reduced to
-  the minimal stages required to enumerate shell directives byte-for-byte.
+  document decision. Darkmatter exposes a reusable prepared plan (or an
+  equivalent staged artifact) that contains the exact shell-approval
+  inventory and all work that can safely precede approval. Canonical
+  execution consumes that same plan after approval instead of recomposing
+  the source. A smaller discovery scanner is acceptable only if it neither
+  executes shell nor causes the canonical path to repeat the full pipeline.
   The security contract is untouched: every shell command is still approved
   against its exact bytes before any execution, sequences still snapshot
-  dynamic sources once during static preflight, and `--dry-run` semantics
-  are unchanged.
-- Source resolution and reload read the document file once, constructing
-  original text and parsed Markdown from the same bytes. The
-  retry/resume/JIT freshness boundaries keep their reread — but one reread,
-  not two.
-- The duplicate runtime-context captures in preparation collapse to one
-  capture shared by shell-preflight options, the prepared context, and the
-  lifecycle context, with overrides applied to the shared capture. (The
-  topology cost of these captures is bounded by the fix; this feature
-  removes the duplicate capture work itself.)
-- Terminal/`FORCE_COLOR` detection is probed once and carried on the
-  preparation context.
+  dynamic sources once during static preflight, and `--dry-run` semantics are
+  unchanged.
+- Source resolution and reload each read the document file once, constructing
+  original text and parsed Markdown (including YAML-origin documents) from
+  the same byte buffer. Post-`initialize`, retry, resume, and JIT boundaries
+  begin new document decisions and keep their required reread — but one
+  content read within each decision, not two.
+- The duplicate runtime-context captures in one decision collapse to one
+  captured base shared by shell-preflight options, the prepared context, and
+  lifecycle evaluation. Provider/model, step, and lifecycle values are
+  immutable overlays; they are not reasons to repeat host discovery or the
+  environment snapshot. A new decision may intentionally refresh the
+  document-derived overlay without recapturing invocation-stable evidence.
+- Terminal/`FORCE_COLOR` capability is probed once per output sink and policy
+  and carried on the preparation context. Stdout and stderr remain distinct
+  when their terminal capabilities differ.
 
 ### F8 — The structure probe costs what structure costs
 
 Sniff's structure tier is the probe the fix memoizes; this feature makes the
 single probe cheap. All changes preserve detection results byte-for-byte
-unless a tier explicitly declines the data.
+for fields requested by the caller. A tier may explicitly decline a field,
+but absence must be represented in the API rather than fabricated as an empty
+string or directory-derived value.
 
-- The nested-marker walk uses the same parallel walker as the shared system
-  view.
+- One marker-only parallel observation, built on the same walker machinery as
+  the shared system view, collects nested-marker candidates and manifest
+  directories. Membership-glob expansion consumes that evidence instead of
+  launching its own whole-tree walks. This observation does not pay for
+  repository inventory, file classification, dependency detection, or typed
+  manifest parsing.
 - Nested candidate detectors pre-filter on raw manifest text (for example a
   `[workspace]` / `"workspaces"` substring check through the existing
-  manifest store) before committing to a full TOML/JSON parse, so leaf
-  manifests are rejected without structured parsing. Detectors whose
-  pre-filter matches parse exactly as today.
+  manifest store) before committing to typed TOML/JSON deserialization. The
+  pre-filter is conservative: it has no false negatives for syntax accepted
+  today. A negative candidate still receives whatever syntax validation is
+  necessary to preserve current malformed-manifest errors, but does not build
+  the typed value used by workspace detection. An inconclusive pre-filter
+  falls back to the current parser.
 - Per-seed package name and version resolution is gated by the request
   tier. The structure tier resolves names only if its consumers need them
   and versions only on request; Claudine's launch/topology consumers
   declare what they actually read. If nothing needs versions, the root
-  manifest is not re-parsed for workspace version inheritance.
-- The structure tier gets a marker-collecting shared walk: one walk
-  produces both nested-marker candidates and manifest-directory evidence so
-  membership-glob expansion consumes evidence instead of launching its own
-  whole-tree walks.
+  manifest is not re-parsed for workspace version inheritance. Because
+  `Package.name` is currently required, this change must either introduce a
+  lightweight topology result or make declined metadata explicitly optional;
+  it must not populate a required field with a placeholder. Claudine requests
+  package names where its context contract exposes them, but does not request
+  versions or executable provenance unless a consumer reads them.
 - The PATH executable scan runs only for requests that consume executable
   provenance, not unconditionally in every tier.
 - `RepoInfo` path lookups (`package_for_dir`, `area_for_dir`,
@@ -306,7 +402,9 @@ unless a tier explicitly declines the data.
   index on the `RepoInfo` instead of rebuilding it — with per-package
   canonicalize syscalls — per lookup. Exposing the `_with_index` variants
   or memoizing internally are both acceptable; changing the lookup method
-  signatures is an acceptable break.
+  signatures is an acceptable break. The lookup path itself may still need
+  one platform-aware canonicalization per call; eliminating the repeated
+  per-package index construction is the required bound.
 - `detect_area` and any other single-answer helpers run the structure tier,
   not full detection.
 
@@ -315,17 +413,24 @@ unless a tier explicitly declines the data.
 Extend the existing seams rather than inventing new ones:
 
 - Sniff's performance counters already count walks, manifest parses, and
-  probes; tests assert the new bounds (one parallel marker walk, parse
-  count proportional to workspace-relevant manifests, zero glob walks when
-  evidence exists, zero PATH scans in structure tier).
+  probes, but the current manifest counter also covers raw-text acquisition.
+  Split or extend it so raw content reads, syntax validations, and typed
+  manifest parses are independently observable. Tests assert the new bounds
+  (one parallel marker walk, typed parse count proportional to
+  workspace-relevant manifests, zero glob walks when evidence exists, zero
+  PATH scans when executable provenance was not requested). Parallel workers
+  report into a request-scoped collector rather than global mutable counters.
 - Darkmatter gains request-scoped counters (on the session or run cache,
   never process-global statics) for full-document parses, context
-  captures, environment snapshots, schema file reads, trigger-root walks,
-  and canonicalize calls. Deterministic tests assert bounded counts for
+  captures, environment snapshots, schema content reads/parses,
+  trigger-root walks/file reads, canonicalization cache hits/misses,
+  target-content reads versus metadata probes, parse-product builds, and
+  body-sized copies. Deterministic tests assert bounded counts for
   representative documents: linkless, link-heavy, transclusion-heavy,
-  schema-bearing, and a multi-step sequence sharing one schema.
-- Claudine asserts one compose pipeline execution and one file read per
-  document per decision through the same kind of scoped seam.
+  schema-bearing, and a multi-step sequence sharing one schema. Stable-input
+  counts and invalidation work are reported separately.
+- Claudine asserts one compose pipeline execution and at most one source-byte
+  read per file-backed document decision through the same kind of scoped seam.
 - Wall-clock benchmarks (the existing ignored diagnostics plus a
   transclusion-fanout case) record before/after evidence on one host but
   are not CI gates.
@@ -360,16 +465,18 @@ Extend the existing seams rather than inventing new ones:
 
 ## Implementation constraints
 
-- Land in independently verifiable increments; each F-section must be
-  mergeable alone with its counters and tests. F6 is the ordering pivot:
-  F1–F5 may land before it, but F7 consumes it.
-- Session and caches are `Send`-compatible where the parallel transclusion
-  phase touches them; no new global mutable state.
+- Land in independently verifiable increments with the relevant counters and
+  tests. The numbered sections are requirements, not necessarily independent
+  commits: F6 is the ordering pivot, F1–F5 may land before it, and F7 consumes
+  its session and prepared-plan seams.
+- Session and caches are `Send + Sync` wherever parallel transclusion or
+  sequence work can share them; no new global mutable state.
 - Preserve typed error provenance and spans through every consolidation;
   lazy error contexts must produce diagnostics indistinguishable from
   today's.
-- Byte-for-byte output equivalence for composed documents across F1–F5 and
-  F8, verified against the existing corpus tests before/after.
+- Byte-for-byte output equivalence for composed documents across F1–F5.
+  Sniff preserves every requested field and detection decision across F8;
+  fields a request explicitly declines are represented as absent.
 - The fix's no-late-ambient-reads rule applies to all new code: the session
   is fed, it does not discover. Compatibility constructors that still
   discover must be clearly separated from the canonical session path.
@@ -381,30 +488,45 @@ Extend the existing seams rather than inventing new ones:
 - Preserve macOS, Linux, and Windows behavior; canonicalization memos and
   ownership indexes must respect platform path identity rules (drive
   letters, UNC, case behavior) exactly as the underlying APIs do today.
+- Every cache key includes all inputs that affect the cached result. An
+  optimization may broaden sharing only after demonstrating that omitted
+  inputs are semantically irrelevant.
 
 ## Test requirements
 
 ### Darkmatter — L1
 
 - Parse-count tests: linkless, link-heavy, and HTML-reference documents
-  compose with the bounded number of full parses; output equivalence against
-  the current extractor results.
+  compose with at most one MDAST parse and one pulldown parse per body
+  version/stage; extractor count does not affect the bound, and output plus
+  record ordering match the current extractor results.
 - No-op stage tests: a plain document's compose performs zero
-  replacement/interpolation body allocations, zero error-context
+  replacement/interpolation body-sized copies, zero error-context
   constructions, and zero shell-stage work (observed through the session
-  counters).
+  counters). Cleanup takes its no-op path only for fixtures whose current
+  output is byte-identical.
 - Lazy error-context tests: forced failures in shell, transclusion, link,
   and schema stages render blocks identical to current fixtures.
-- Transclusion: cache-hit composes perform zero target-file reads; parallel
-  fanout with many small children completes with merge ordering identical
-  to today; per-directive hash/context work is counted once per phase.
+- Transclusion: validated cache-hit composes perform zero target-content
+  reads while permitted metadata probes remain visible; strict validation is
+  unchanged. Parallel fanout with many small children completes with merge
+  ordering identical to today; phase-wide hash/context work is counted once,
+  while directive-specific option overlays retain distinct identities.
 - Session caching: a multi-document run sharing one `$schema` and one
-  trigger root performs one schema read/parse and one trigger walk;
-  modifying the schema file between documents (mtime/hash change) triggers
-  revalidation.
+  trigger root performs one schema content read/parse and one trigger walk
+  while inputs stay stable. Modifying a schema, adding/removing a trigger, or
+  changing root order between documents invalidates the affected entry and
+  produces current output.
 - Capture: `ComposeOptions` without an explicit context performs no eager
   ten-group capture; a document referencing only `ctx.datetime` performs no
-  host probes; environment is snapshotted once per session.
+  host probes; environment is snapshotted once per session. An explicitly
+  named full-capture API still captures every group.
+- Regional interpolation: replacements that create delimiters across a dirty
+  window boundary or alter Markdown fence/code classification match the
+  current full-scan output and exercise the conservative fallback.
+- Canonicalization: repeated requests in one decision hit the memo, while a
+  failed lookup followed by a mutation-capable stage and JIT/retry/resume
+  boundaries revalidate rather than retaining a stale result.
 
 ### Claudine — L1
 
@@ -414,9 +536,13 @@ Extend the existing seams rather than inventing new ones:
   exactly as today, including the sequence static-preflight snapshot
   semantics and `--dry-run` behavior.
 - One-read: source resolution and each JIT/retry/resume reread perform one
-  file read per boundary, with content freshness behavior preserved.
+  file read per document decision, including Markdown and YAML sources, with
+  post-`initialize` and all other freshness behavior preserved.
 - One-capture: shell-preflight options, prepared context, and lifecycle
   context observe the same captured runtime values.
+- Terminal capability: repeated queries for one sink/policy reuse its
+  snapshot, while redirected stdout and terminal stderr can retain different
+  answers.
 - Real-CLI regression: the composition, sequence, lifecycle, and system
   prompt integration suites pass unchanged; previously slow tests do not
   regress under concurrent nextest load.
@@ -424,15 +550,21 @@ Extend the existing seams rather than inventing new ones:
 ### Sniff — L1
 
 - Counter-bound tests for the structure tier on the existing large fixture:
-  one marker walk (parallel), manifest parses bounded by
-  workspace-relevant manifests rather than total manifests, zero
-  membership-glob walks when walk evidence exists, zero PATH scans, and
-  name/version parses only when requested.
-- Result equivalence: structure detection output on the fixture corpus is
-  identical before and after, for every tier.
+  one marker-only walk (parallel); raw reads, syntax validations, and typed
+  parses counted separately; typed parses bounded by workspace-relevant
+  manifests rather than total manifests; zero membership-glob walks when
+  walk evidence exists; zero PATH scans when executable provenance is not
+  requested; and name/version parses only when requested.
+- Pre-filter correctness: valid workspace descriptors cannot be rejected by
+  the raw filter, inconclusive text falls back to typed parsing, and malformed
+  leaf/workspace manifests produce the same errors as today.
+- Result equivalence: detection decisions and all requested fields on the
+  fixture corpus are identical before and after for every tier; declined
+  name/version/provenance fields are explicitly absent rather than fabricated.
 - `RepoInfo` lookup memoization: repeated `package_for_dir` calls build the
-  ownership index once; canonicalize counts are flat across repeated
-  lookups.
+  ownership index and canonicalize its packages once. Each later query incurs
+  at most one query-path canonicalization unless that path is separately
+  memoized; it never repeats per-package canonicalization.
 - `detect_area` produces its current answers through the structure tier.
 
 ### Cross-cutting
@@ -484,32 +616,43 @@ After implementation:
 ## Acceptance criteria
 
 - [ ] Reference extraction performs a bounded, extractor-count-independent
-      number of full-document parses per compose, with byte-identical
+      number of full-document parses — at most one per required parser family
+      for a body version/stage — with byte-identical, identically ordered
       reference output.
-- [ ] No-op stages perform no body allocations or error-context
+- [ ] No-op stages perform no body-sized copies or error-context
       construction; forced errors render identically to current fixtures.
-- [ ] Per-directive/per-record loop-invariant work (expression contexts,
-      options hashing, env whitelists, canonicalization) is computed once
-      per phase, with a request-scoped canonicalization memo in place.
-- [ ] Transclusion cache hits read no target files; parallel children are
-      not serialized on a coarse runtime lock; merge semantics unchanged.
-- [ ] No public Darkmatter entry point performs an eager ten-group host
-      capture; capture is demand-driven with one environment snapshot per
-      session; docs capture is spawned with its peers.
+- [ ] Per-directive/per-record loop-invariant work (expression contexts, base
+      options hashes, env whitelists, canonicalization) is computed once per
+      phase; directive overlays remain distinct, and the session-scoped
+      canonicalization memo respects mutation and decision epochs.
+- [ ] Validated transclusion cache hits perform no target-content reads;
+      metadata probes and strict validation remain observable, parallel
+      children are not serialized on a coarse runtime lock, and merge
+      semantics are unchanged.
+- [ ] No default or convenience Darkmatter entry point performs an eager
+      ten-group host capture; explicitly named full capture remains available,
+      demand-driven capture uses one environment snapshot per session, and
+      docs capture is spawned with its peers.
 - [ ] A Darkmatter compose session carries propagated evidence and
       invocation-scoped schema, trigger, and canonicalization caches; a
-      sequence sharing one schema parses it once with metadata
-      revalidation.
-- [ ] Claudine prepares each document with one compose pipeline run, one
-      file read per freshness boundary, and one runtime capture, while
-      preserving byte-for-byte shell approval, static-preflight, dry-run,
-      and lifecycle semantics.
+      sequence sharing stable schema and trigger inputs parses/walks each once,
+      while metadata, directory membership, resolution-context, and root-order
+      changes invalidate the affected entries.
+- [ ] Claudine prepares each file-backed document decision from at most one
+      source-byte read and one reusable compose plan/pipeline execution, using
+      one captured runtime base and per-sink terminal-capability snapshots,
+      while preserving byte-for-byte shell approval, static-preflight,
+      dry-run, and lifecycle semantics.
 - [ ] The Sniff structure tier uses a parallel marker walk, pre-filtered
-      manifest parsing, tier-gated name/version resolution, evidence-fed
-      glob expansion, and no unconditional PATH scan, with detection output
-      unchanged; `RepoInfo` lookups memoize their ownership index.
+      manifest parsing without suppressing malformed-input errors, tier-gated
+      name/version resolution with explicit absence, evidence-fed glob
+      expansion, and no unconditional PATH scan. Requested detection output is
+      unchanged, and `RepoInfo` lookups memoize their ownership index without
+      repeating per-package canonicalization.
 - [ ] Work-count regression tests cover Darkmatter, Claudine, and Sniff
-      bounds without process-global counters or elapsed-time assertions.
+      bounds — including raw versus typed manifest work and content reads
+      versus metadata probes — without process-global counters or elapsed-time
+      assertions.
 - [ ] Downstream consumers of every broken API are migrated in the same
       change set; `just test`/`just lint` pass in all touched package
       areas and the no-fail-fast `claudine-cli` gate passes.
