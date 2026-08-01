@@ -17,7 +17,7 @@ success:
     message: "staged files committed in {{ctx.area}}"
     stack:
         - action:
-              - shell: "just gitnexux"
+              - shell: "just gitnexus"
 ---
 
 # Commit Staged Files
