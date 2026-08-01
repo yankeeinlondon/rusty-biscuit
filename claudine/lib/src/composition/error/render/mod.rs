@@ -144,8 +144,7 @@ pub(super) fn pointer_to_dotted(pointer: &str) -> String {
     }
 }
 
-/// Render an absolute OSC8 hyperlink to `path` showing its relative form
-/// where possible (falling back to the full display).
+/// Render an absolute OSC8 file hyperlink to `path` showing its portable form.
 ///
 /// The Prose layer downgrades `<a href>` to plain text when the terminal
 /// does not support OSC8.
@@ -153,13 +152,15 @@ pub(super) fn render_file_link(path: &std::path::Path) -> String {
     let abs = path
         .canonicalize()
         .unwrap_or_else(|_| path.to_path_buf());
-    let abs_display = abs.display().to_string();
-    let label = path.display().to_string();
-    format!(
-        "<a href=\"{}\">{}</a>",
-        escape_prose_path(&abs_display),
-        escape_prose_path(&label)
-    )
+    let label = biscuit_file::to_portable_string(path);
+    let escaped_label = escape_prose_path(&label);
+    match url::Url::from_file_path(abs) {
+        Ok(href) => format!(
+            "<a href=\"{}\">{escaped_label}</a>",
+            escape_prose_path(href.as_str())
+        ),
+        Err(()) => escaped_label,
+    }
 }
 
 /// Project a 1-based line number, or `null` for the `0` sentinel the
@@ -236,13 +237,13 @@ fn file_reference_detail(diagnostic: &FileReferenceDiagnostic) -> Value {
     let mut base = null_detail_for("composition.invalid_file_reference");
     base["reference"] = json!(diagnostic.reference);
     base["kind"] = json!(diagnostic.kind.as_str());
-    base["base_dir"] = json!(diagnostic.base_dir.to_string_lossy());
+    base["base_dir"] = json!(biscuit_file::to_portable_string(&diagnostic.base_dir));
     base["suggestions"] = json!(suggestions);
     base["fallback_dir"] = json!(
         diagnostic
             .fallback_dir
             .as_ref()
-            .map(|p| p.to_string_lossy().into_owned())
+            .map(|path| biscuit_file::to_portable_string(path))
     );
     base
 }
@@ -395,7 +396,8 @@ impl Diagnostic for CompositionError {
                     }
                 }
                 base["reference"] = json!(context.reference);
-                base["source_path"] = json!(context.source_path.to_string_lossy());
+                base["source_path"] =
+                    json!(biscuit_file::to_portable_string(&context.source_path));
                 base["property"] = json!(context.property);
                 base["event"] = json!(context.event);
             }
@@ -414,7 +416,7 @@ impl Diagnostic for CompositionError {
                 message,
                 ..
             } => {
-                base["source_path"] = json!(source_path.to_string_lossy());
+                base["source_path"] = json!(biscuit_file::to_portable_string(source_path));
                 base["property"] = json!(property);
                 base["message"] = json!(message);
             }
@@ -422,7 +424,7 @@ impl Diagnostic for CompositionError {
                 source_path,
                 message,
             } => {
-                base["source_path"] = json!(source_path.to_string_lossy());
+                base["source_path"] = json!(biscuit_file::to_portable_string(source_path));
                 base["message"] = json!(message);
             }
             // `composition.schema_validation` declares `source_path`,
@@ -432,7 +434,7 @@ impl Diagnostic for CompositionError {
                 problems,
                 ..
             } => {
-                base["source_path"] = json!(source_path.to_string_lossy());
+                base["source_path"] = json!(biscuit_file::to_portable_string(source_path));
                 base["problems"] = json!(problems);
                 base["pointer_paths"] = json!([]);
             }
@@ -443,7 +445,7 @@ impl Diagnostic for CompositionError {
                 property,
                 ..
             } => {
-                base["source_path"] = json!(source_path.to_string_lossy());
+                base["source_path"] = json!(biscuit_file::to_portable_string(source_path));
                 base["problems"] = json!([format!("/{property}")]);
                 base["pointer_paths"] = json!([]);
             }
@@ -470,7 +472,7 @@ impl Diagnostic for CompositionError {
             }
             // `io.write_failed` declares `path`.
             CompositionError::AtomicWriteFailed { path, .. } => {
-                base["path"] = json!(path.to_string_lossy());
+                base["path"] = json!(biscuit_file::to_portable_string(path));
             }
             // `composition.shell_approval` declares `command`, `source_path`,
             // `line`, `reason`. A `line` of 0 means the source carried none, so
@@ -481,7 +483,7 @@ impl Diagnostic for CompositionError {
                 line,
             } => {
                 base["command"] = json!(command);
-                base["source_path"] = json!(source_file.to_string_lossy());
+                base["source_path"] = json!(biscuit_file::to_portable_string(source_file));
                 base["line"] = optional_line(*line);
                 base["reason"] = json!("denied");
             }
@@ -492,7 +494,7 @@ impl Diagnostic for CompositionError {
                 failure,
             } => {
                 base["command"] = json!(command);
-                base["source_path"] = json!(source_file.to_string_lossy());
+                base["source_path"] = json!(biscuit_file::to_portable_string(source_file));
                 base["line"] = optional_line(*line);
                 base["reason"] = json!(failure.as_str());
             }

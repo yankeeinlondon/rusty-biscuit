@@ -199,7 +199,7 @@ fn validate_state_schema(
     let schemas = darkmatter::markdown::schemas::DarkmatterSchemas::new();
 
     let load_failure = |source: SequenceLoadCause| CompositionError::SequenceExternalLoad {
-        context: document_path.display().to_string(),
+        context: biscuit_file::to_portable_string(document_path),
         source,
     };
 

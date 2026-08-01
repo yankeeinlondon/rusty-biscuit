@@ -136,10 +136,10 @@ pub fn derive_request_context_for_source(
     // `InvalidReference` propagation keeps the API honest if a future caller
     // violates that invariant.
     let base_dir = source_path.parent().ok_or_else(|| CompositionError::InvalidReference {
-        reference: source_path.display().to_string(),
+        reference: biscuit_file::to_portable_string(source_path),
         source: biscuit_file::FileReferenceError::InvalidSyntax(format!(
             "resolved source path has no parent directory: {}",
-            source_path.display()
+            biscuit_file::to_portable_string(source_path)
         )),
     })?;
 
@@ -219,7 +219,7 @@ pub fn resolve_composition_source_in_context(
         .unwrap_or("");
     if !matches!(ext.to_ascii_lowercase().as_str(), "md" | "markdown") {
         return Err(CompositionError::NotMarkdown(
-            resolved_path.display().to_string(),
+            biscuit_file::to_portable_string(&resolved_path),
         ));
     }
 

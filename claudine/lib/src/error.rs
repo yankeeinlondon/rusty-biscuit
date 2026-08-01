@@ -466,7 +466,7 @@ impl Diagnostic for ClaudineError {
             }
             // `io.write_failed` declares `path`.
             ClaudineError::LockError { path } => {
-                base["path"] = json!(path.to_string_lossy());
+                base["path"] = json!(biscuit_file::to_portable_string(path));
             }
             // `io.network` declares `url`, `message`. The typed source carries
             // no parsed URL to surface, so only `message` is populated.
@@ -483,7 +483,7 @@ impl Diagnostic for ClaudineError {
                 base["message"] = json!(message);
             }
             ClaudineError::PolicyApplyFailed { path, message, .. } => {
-                base["field"] = json!(path.to_string_lossy());
+                base["field"] = json!(biscuit_file::to_portable_string(path));
                 base["message"] = json!(message);
             }
             ClaudineError::PolicyNativeParse {

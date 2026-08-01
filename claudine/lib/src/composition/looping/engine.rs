@@ -1149,7 +1149,7 @@ fn compute_is_last(
         .map_err(|error| match error {
             CompositionError::LoopInvalid(message) => CompositionError::LoopInvalid(format!(
                 "failed to compute loop is_last for {} at iteration {iteration}: {message}",
-                prompt_path.display()
+                biscuit_file::to_portable_string(prompt_path)
             )),
             other => other,
         })

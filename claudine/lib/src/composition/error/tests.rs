@@ -12,6 +12,33 @@ fn source_from(text: &str) -> ResolvedCompositionSource {
 }
 
 #[test]
+fn visible_error_paths_use_portable_spelling() {
+    let err = CompositionError::SchemaLoad {
+        source_path: PathBuf::from(r"C:\repo\prompts\review.md"),
+        message: "did not resolve".to_string(),
+    };
+
+    assert!(err.to_string().contains("C:/repo/prompts/review.md"));
+    assert_eq!(
+        err.detail()["source_path"],
+        serde_json::json!("C:/repo/prompts/review.md")
+    );
+}
+
+#[test]
+fn file_link_uses_encoded_url_and_portable_label() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("a b#%.md");
+    let link = super::render::render_file_link(&path);
+
+    assert!(link.contains("a%20b%23%25.md"), "expected encoded URL: {link}");
+    assert!(
+        link.contains(&biscuit_file::to_portable_string(&path)),
+        "expected portable label: {link}"
+    );
+}
+
+#[test]
 fn enrich_wraps_lifecycle_leak_with_excerpt() {
     let source = source_from(
         "---\nreview_file: x\nsuccess:\n    message: \"at {{review-file}}\"\n---\nbody\n",
@@ -237,8 +264,9 @@ fn enrich_schema_parse_shape_falls_back_to_schema_parent_line() {
 fn schema_parse_block_links_prompt_file_and_strips_when_no_color() {
     // The rendered body OSC8-links the prompt file when color is available,
     // and strips all escapes (no raw OSC8) at `ColorDepth::None`.
+    let source_path = std::env::temp_dir().join("review.md");
     let err = CompositionError::SchemaParse {
-        source_path: PathBuf::from("review.md"),
+        source_path,
         property: Some("spec".to_string()),
         message: "expected `;` between constraints".to_string(),
         span: Some(14..15),

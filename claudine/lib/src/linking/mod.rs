@@ -144,8 +144,8 @@ fn apply_statuses(
                             reason: format!(
                                 "{}: skipped due to scope isolation mismatch (source: {}, destination: {})",
                                 target_provider,
-                                source.path.display(),
-                                dest_dir.display()
+                                biscuit_file::to_portable_string(&source.path),
+                                biscuit_file::to_portable_string(&dest_dir)
                             ),
                         });
                         continue;
@@ -157,8 +157,8 @@ fn apply_statuses(
                             reason: format!(
                                 "{}: category-level symlink at {} -> {}. Keep as-is; switch to granular links manually.",
                                 target_provider,
-                                dest_dir.display(),
-                                category_target.display()
+                                biscuit_file::to_portable_string(&dest_dir),
+                                biscuit_file::to_portable_string(&category_target)
                             ),
                         });
                         continue;
@@ -311,8 +311,8 @@ fn report_category_level_symlinks(
                 name: format!("{resource_label}:{provider}"),
                 reason: format!(
                     "{provider}: category-level symlink at {} -> {}. Keep as-is; switch to granular links manually.",
-                    root_dir.display(),
-                    target.display()
+                    biscuit_file::to_portable_string(&root_dir),
+                    biscuit_file::to_portable_string(&target)
                 ),
             });
         }

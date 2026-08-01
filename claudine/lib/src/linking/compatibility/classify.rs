@@ -29,7 +29,7 @@ pub fn classify_canonical_candidate(
         ClaudineError::LinkingError(format!(
             "no canonical markdown entrypoint for resource {:?} at {}",
             resource,
-            candidate.path.display()
+            biscuit_file::to_portable_string(&candidate.path)
         ))
     })?;
 

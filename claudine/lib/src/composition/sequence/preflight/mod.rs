@@ -397,7 +397,10 @@ impl<'a> Loader<'a> {
         expect_kind(&root, "task", &path)?;
         let (field, value, options) = parse_task_object(&root, &path)?;
 
-        let nested_label = format!("{label} → task `{}`", path.display());
+        let nested_label = format!(
+            "{label} → task `{}`",
+            biscuit_file::to_portable_string(&path)
+        );
         self.enter(&path)?;
         let result = self.load_task(
             field,
@@ -436,7 +439,10 @@ impl<'a> Loader<'a> {
                     }
                 };
 
-                let nested_label = format!("{label} → group `{}`", path.display());
+                let nested_label = format!(
+                    "{label} → group `{}`",
+                    biscuit_file::to_portable_string(&path)
+                );
                 self.enter(&path)?;
                 let result = self.build_group(&group_map, &path, &nested_label, state);
                 self.leave();

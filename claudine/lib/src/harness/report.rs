@@ -66,19 +66,22 @@ pub fn report_source_file(original_ref: &str, resolved_path: &Path, term: &Termi
 }
 
 fn source_file_success_markup(resolved_path: &Path) -> String {
-    let path_display = resolved_path.display().to_string();
-    let filepath = resolved_path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or(path_display);
-    let filepath_escaped = prose_escape(&filepath);
-    let abs_escaped = prose_escape(&resolved_path.display().to_string());
+    let linked_path = linked_path_markup(resolved_path);
 
     format!(
         "the file reference was resolved to \
-         <blue-500><a href=\"{abs_escaped}\">{filepath_escaped}</a></blue-500> \
+         <blue-500>{linked_path}</blue-500> \
          file on this host"
     )
+}
+
+fn linked_path_markup(path: &Path) -> String {
+    let label_path = path.file_name().map(Path::new).unwrap_or(path);
+    let label = prose_escape(&biscuit_file::to_portable_string(label_path));
+    match url::Url::from_file_path(path) {
+        Ok(href) => format!("<a href=\"{}\">{label}</a>", prose_escape(href.as_str())),
+        Err(()) => label,
+    }
 }
 
 /// Emit the shell audit header.
@@ -127,17 +130,11 @@ pub fn report_lifecycle_recovery(message: &str, term: &Terminal) {
 /// adopts the target document, so the operator sees *why* the running prompt
 /// changed before the target's own lifecycle and prompt render.
 pub fn report_proxy_handoff(target: &Path, term: &Terminal) {
-    let path_display = target.display().to_string();
-    let filename = target
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| path_display.clone());
-    let filename_escaped = prose_escape(&filename);
-    let abs_escaped = prose_escape(&path_display);
+    let linked_path = linked_path_markup(target);
     emit_status(
         &format!(
             "flow control redirected to \
-             <blue-500><a href=\"{abs_escaped}\">{filename_escaped}</a></blue-500>"
+             <blue-500>{linked_path}</blue-500>"
         ),
         StatusState::Info,
         term,
@@ -214,14 +211,39 @@ mod tests {
 
     #[test]
     fn source_file_success_markup_uses_resolved_filename_link_text() {
-        let path = Path::new("/tmp/_details.md");
+        let path = std::env::temp_dir().join("_details.md");
+        let href = url::Url::from_file_path(&path).unwrap();
 
         assert_eq!(
-            source_file_success_markup(path),
-            "the file reference was resolved to \
-             <blue-500><a href=\"/tmp/_details.md\">_details.md</a></blue-500> \
-             file on this host"
+            source_file_success_markup(&path),
+            format!(
+                "the file reference was resolved to \
+                 <blue-500><a href=\"{href}\">_details.md</a></blue-500> \
+                 file on this host"
+            )
         );
+    }
+
+    #[test]
+    fn linked_path_markup_uses_encoded_file_url() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("a b#%.md");
+        let markup = linked_path_markup(&path);
+
+        assert!(markup.contains("file://"), "expected file URL: {markup}");
+        assert!(
+            markup.contains("a%20b%23%25.md"),
+            "expected encoded URL: {markup}"
+        );
+        assert!(
+            markup.ends_with(">a b#%.md</a>"),
+            "expected readable label: {markup}"
+        );
+    }
+
+    #[test]
+    fn linked_path_markup_leaves_unrepresentable_target_unlinked() {
+        assert_eq!(linked_path_markup(Path::new("relative.md")), "relative.md");
     }
 
     #[test]
