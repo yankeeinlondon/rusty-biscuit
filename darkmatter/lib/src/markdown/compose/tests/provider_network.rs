@@ -24,7 +24,7 @@ use sniff::filesystem::git::ApiFlavor;
 use crate::markdown::Markdown;
 use crate::markdown::compose::expression::functions::provider::test_transport;
 use crate::markdown::compose::remote::RemoteReadConfig;
-use crate::markdown::compose::{ComposeOperation, ComposeOptions};
+use crate::markdown::compose::{ComposeContext, ComposeOperation, ComposeOptions};
 
 /// Credential variables Sniff consults for the Gitea/Forgejo flavor.
 ///
@@ -164,8 +164,20 @@ impl Fixture {
         let root = self.directory.path().join("root.md");
         std::fs::write(&root, content).expect("write document");
         let markdown: Markdown = content.into();
-        let options = ComposeOptions::new()
-            .with_source_file(&root)
+        // Demand-driven capture, not `ComposeOptions::new()`: the full capture
+        // scans git, repo, file changes, languages, docs, OS, hardware and GPU
+        // rooted at the *real* working tree, once per compose. No fixture here
+        // reads `ctx.*`, so it buys nothing, and a test that composes on every
+        // surface pays it six times over. `capture_for_content` reads the
+        // document instead — date/time only when nothing asks for a group, and
+        // `ctx.*` still captures on demand during evaluation. The fixture's own
+        // repository is the base directory because that is where the document
+        // being composed actually lives.
+        let options = ComposeOptions::new_with_context(ComposeContext::capture_for_content(
+            self.directory.path(),
+            content,
+        ))
+        .with_source_file(&root)
             .with_allow_remote_transclusion(true)
             .with_remote_read_config(RemoteReadConfig {
                 allowed_hosts,

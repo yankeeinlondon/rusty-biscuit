@@ -8,7 +8,9 @@ use darkmatter::markdown::compose::shell_expansion::{
     ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest,
 };
 use darkmatter::markdown::compose::preflight::PreflightGraphNode;
-use darkmatter::markdown::compose::{ComposeOptions, ComposeSource, ShellExpansionError};
+use darkmatter::markdown::compose::{
+    ComposeContext, ComposeOptions, ComposeSource, ShellExpansionError,
+};
 use darkmatter::markdown::normalize::HeadingLevel;
 use darkmatter::markdown::reference::types::{
     ReferenceGraphOptions, ReferenceKind, ReferenceSyntax, ReferenceTarget,
@@ -67,7 +69,13 @@ fn reference_options(repo_root: &std::path::Path) -> ComposeOptions {
         std::collections::HashMap::new(),
     )
     .with_repository_root(repo_root);
-    ComposeOptions::new().with_file_resolution_context(context)
+    // Demand-driven capture: `ComposeOptions::new()` scans git, repo, file
+    // changes, languages, docs, OS, hardware and GPU rooted at the real working
+    // tree on every call. These fixtures compose throwaway documents in a temp
+    // repository and read no `ctx.*`, so the scan is pure cost — and `ctx.*`
+    // still captures its group on demand during evaluation if one appears.
+    ComposeOptions::new_with_context(ComposeContext::capture_for_content(repo_root, ""))
+        .with_file_resolution_context(context)
 }
 
 struct CurrentDirGuard(std::path::PathBuf);
