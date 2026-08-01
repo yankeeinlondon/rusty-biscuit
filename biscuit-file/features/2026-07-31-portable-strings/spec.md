@@ -366,8 +366,11 @@ unfeatured; the explicit biscuit-file `--no-default-features` test does.
 - Every anchored replacement drops the namespace prefix, so before emitting one
   for a path `try_portable_string` declined, prove the removal component by
   component: reject a literal `.`, `..`, reserved DOS name, trailing dot or
-  space, invalid Win32 character, over-255-character name, or non-Unicode name,
-  and preserve-and-warn instead. Length alone must not disqualify — an
+  space, invalid Win32 character, name longer than 255 UTF-16 units, or
+  non-Unicode name, and preserve-and-warn instead. The length measure is UTF-16
+  units because that is what Windows and `dunce` count; Unicode scalar values
+  under-count an astral name — 128 emoji is 128 `char`s but 256 units — and
+  would let one through. Length alone must not disqualify — an
   over-`MAX_PATH` descendant of a short root is exactly the case that has to
   keep normalizing. Audit only the names taken from the destination; the `..`
   hops the relative-path computation generates are its own.
@@ -481,7 +484,12 @@ Test `to_portable_string` directly:
   notice the unfeatured guarantee lapsing, because the module would still
   compile and its tests would still pass. `biscuit-file`'s `test-minimal`
   recipe owns the second feature resolution and runs from `just test`, which is
-  what CI invokes per area.
+  what CI invokes per area. It must skip itself when `just test` is passed
+  `--archive-file`: that leg executes prebuilt binaries in a WSL2 guest which
+  deliberately installs neither Cargo nor rustc, and a second feature
+  resolution has to compile. The signal is the archive flag, not a missing
+  Cargo — the latter would also swallow a native runner whose toolchain failed
+  to provision. The three native runners own this gate.
 
 The existing Windows `normalize_components_reduces_verbatim_paths` test remains
 in place as resolver coverage; it is not renderer coverage and must not be
@@ -514,10 +522,21 @@ relocated.
   path. Cover legacy/verbatim UNC equivalence through `starts_with`,
   `strip_prefix`, and the relative computation, not key equality alone.
 - Add anchored regressions for each unsafe category, driven through
-  `normalize_links` rather than the comparison helper, on both the repository
-  and environment arms: the destination stays byte-identical and warns. Pair
-  each with the over-`MAX_PATH` success case, or the gate cannot be
-  distinguished from a blanket refusal to anchor declined paths.
+  `normalize_links` rather than the comparison helper, on all three anchor arms
+  — repository, home, and environment: the destination stays byte-identical and
+  warns. Each arm needs its own, because the audit is only one step of the
+  decision and a helper-level example cannot show that an arm reaches it with
+  the right slice. Include the over-255-UTF-16-unit category here rather than
+  only at the helper level; it is the one whose two plausible measures disagree.
+  Pair each arm with the over-`MAX_PATH` success case, or the gate cannot be
+  distinguished from a blanket refusal to anchor declined paths. A non-Unicode
+  component stays helper-level: a destination reaches this stage as document
+  text, and a Rust `str` cannot carry an unpaired surrogate, so no authored
+  link can produce one.
+- Add component-length boundary tests at 255 and 256 UTF-16 units in ASCII,
+  multi-byte BMP, and astral spellings. The three measures — bytes, scalar
+  values, UTF-16 units — agree on ASCII and diverge in opposite directions on
+  the other two.
 - Add a Windows test proving two keys differing only in an unpaired surrogate
   stay distinct, and that neither is a prefix of the other.
 - Parse generated one-argument links with `pulldown_cmark` and assert that a
