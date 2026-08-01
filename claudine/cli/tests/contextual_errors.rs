@@ -172,7 +172,10 @@ fn compose_system_prompt_shell_failure_renders_rich_block() {
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
+        .current_dir(workspace.path())
         .args([
             "compose",
             "--codex",

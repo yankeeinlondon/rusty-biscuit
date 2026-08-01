@@ -160,7 +160,9 @@ fn compose_opencode_dry_run_calls_opencode_models_and_fails_with_test_double() {
     // models`, so the failing test double causes a failure (or the catalog
     // refresh is skipped because the model comes from an env var).
     assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .current_dir(workspace.path())
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
         .env("OPENCODE_MODEL", "test-model")

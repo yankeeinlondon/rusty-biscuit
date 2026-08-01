@@ -39,9 +39,11 @@ exit 99
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
+        .current_dir(workspace.path())
         .args([
             "compose",
             "--codex",
@@ -81,8 +83,10 @@ exit 0
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
+        .current_dir(workspace.path())
         .args(["compose", "--codex", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -124,9 +128,11 @@ exit 0
 
     assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("CLAUDINE_STDIN_FILE", &stdin_path)
+        .current_dir(workspace.path())
         .args(["compose", "--codex", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -227,6 +233,7 @@ fn compose_preflight_error_includes_source_provenance() {
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
+        .current_dir(workspace.path())
         .args(["compose", "--codex", md_file.to_str().unwrap()])
         .assert()
         .failure();
@@ -273,9 +280,11 @@ exit 0
 
     assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
+        .current_dir(workspace.path())
         .args([
             "compose",
             "--interactive",
@@ -322,8 +331,10 @@ exit 0
 
     assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
+        .current_dir(workspace.path())
         .args([
             "compose",
             "--interactive",
@@ -380,9 +391,11 @@ exit 0
     assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("HOME", &home)
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("PATH", &path_dir)
         .env("CLAUDINE_STDIN_FILE", &stdin_path)
         .env("CLAUDINE_ENV_FILE", &env_path)
+        .current_dir(workspace.path())
         .args(["compose", "--codex", "--mcp", md_file.to_str().unwrap()])
         .assert()
         .success();

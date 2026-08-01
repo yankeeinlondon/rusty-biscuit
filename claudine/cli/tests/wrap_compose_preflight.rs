@@ -223,8 +223,10 @@ fn compose_interactive_preflight_with_whitelisted_command() {
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", &full_path)
+        .current_dir(workspace.path())
         .args([
             "compose",
             "--interactive",

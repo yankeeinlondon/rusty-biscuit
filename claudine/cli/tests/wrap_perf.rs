@@ -110,8 +110,10 @@ fn compose_perf_emits_report_to_stderr() {
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
         .args(["compose", "--goose", "--perf", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -273,8 +275,10 @@ fn inline_compose_perf_emits_report_to_stderr() {
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
         .args([
             "inline-compose",
             "--goose",
@@ -422,8 +426,10 @@ fn perf_arg_parsing_includes_clap_time() {
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
         .args(["compose", "--goose", "--perf", md_file.to_str().unwrap()])
         .assert()
         .success();

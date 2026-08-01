@@ -32,7 +32,9 @@ exit 0
 
     assert_cmd::Command::cargo_bin("claudine")
         .unwrap()
+        .current_dir(workspace.path())
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("PATH", &path_dir)
         .env("OPENCODE_MODEL", "test-model")
         .env("CLAUDINE_ARGS_FILE", &args_path)
