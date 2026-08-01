@@ -21,8 +21,17 @@ pub(super) fn populate_languages(cap: &ContextCapture, values: &mut Map<String, 
     let is_mono = repo.is_some_and(|r| r.is_monorepo);
 
     // All languages across packages
-    let all_langs: Vec<String> = packages
-        .map(|pkgs| {
+    let all_langs: Vec<String> = cap
+        .languages
+        .as_ref()
+        .map(|languages| {
+            languages
+                .languages
+                .iter()
+                .map(|language| format!("{:?}", language.language))
+                .collect()
+        })
+        .or_else(|| packages.map(|pkgs| {
             let mut langs: Vec<String> = pkgs
                 .iter()
                 .filter_map(|p| p.primary_language.as_ref())
@@ -31,7 +40,7 @@ pub(super) fn populate_languages(cap: &ContextCapture, values: &mut Map<String, 
             langs.sort();
             langs.dedup();
             langs
-        })
+        }))
         .unwrap_or_default();
 
     values.insert(
@@ -71,11 +80,11 @@ pub(super) fn populate_languages(cap: &ContextCapture, values: &mut Map<String, 
         }
     } else {
         // Not monorepo: repo's primary language
-        if all_langs.len() == 1 {
-            Some(all_langs[0].clone())
-        } else {
-            all_langs.first().cloned()
-        }
+        cap.languages
+            .as_ref()
+            .and_then(|languages| languages.primary.as_ref())
+            .map(|language| format!("{language:?}"))
+            .or_else(|| all_langs.first().cloned())
     };
     values.insert(
         "programming_language".into(),

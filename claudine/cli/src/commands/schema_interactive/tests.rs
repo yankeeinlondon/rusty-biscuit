@@ -1,6 +1,7 @@
 use super::status::{description_suffix, render_optional_line, render_required_line};
 use super::*;
 use claudine::composition::{PropertyState, PropertyStatus};
+use std::path::PathBuf;
 
 fn missing_with_shape(name: &str, shape: InteractiveShape) -> MissingProperty {
     MissingProperty {
@@ -325,4 +326,31 @@ fn description_suffix_handles_empty() {
     assert!(description_suffix(Some("")).is_empty());
     assert!(description_suffix(Some("   ")).is_empty());
     assert!(description_suffix(Some("hello")).contains("hello"));
+}
+
+#[test]
+fn path_label_portably_renders_windows_shaped_segments() {
+    let root = PathBuf::from("repo");
+    let path = root.join(r"assets\nested\cover.png");
+    let ctx = ScopeContext {
+        cwd: root.clone(),
+        home: None,
+        repo_info: None,
+        git_root: Some(root),
+    };
+
+    assert_eq!(path_label(&path, &ctx), "assets/nested/cover.png");
+}
+
+#[test]
+fn resolve_file_value_portably_renders_missing_windows_shaped_path() {
+    let path = PathBuf::from(r"missing\schema\definitely-not-present.json");
+
+    let error = resolve_file_value(&path).unwrap_err();
+
+    assert_eq!(error.kind(), io::ErrorKind::NotFound);
+    assert_eq!(
+        error.to_string(),
+        "file not found: missing/schema/definitely-not-present.json"
+    );
 }

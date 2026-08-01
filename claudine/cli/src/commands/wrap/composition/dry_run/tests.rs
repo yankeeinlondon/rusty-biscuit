@@ -322,6 +322,14 @@ fn document_uses_path_when_name_absent() {
 }
 
 #[test]
+fn relative_or_abs_renders_windows_shaped_paths_portably() {
+    assert_eq!(
+        relative_or_abs(Path::new(r"C:\repo\prompts\doc.md")),
+        "C:/repo/prompts/doc.md"
+    );
+}
+
+#[test]
 fn frontmatter_renders_yaml_for_keys() {
     let fm = json!({ "name": "demo", "agent": "claude" });
     let term = Terminal::default();

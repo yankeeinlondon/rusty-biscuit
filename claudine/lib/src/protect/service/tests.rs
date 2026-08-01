@@ -1,4 +1,5 @@
 use super::*;
+use std::path::PathBuf;
 use crate::protect::catalog::RuleGroup;
 use crate::protect::config::{CustomPattern, RuleGroupConfig, RuleGroupDetailedConfig};
 
@@ -60,6 +61,34 @@ fn write_to_ssh_config_is_blocked() {
     });
     assert!(decision.is_blocked());
     assert_eq!(decision.blocked.unwrap().group, RuleGroup::SensitivePaths);
+}
+
+#[test]
+fn windows_sensitive_path_is_blocked_through_protect_service() {
+    let mut service = default_service();
+    service.path_checker = SensitivePathChecker::with_home_dir(PathBuf::from(r"C:\Users\user"));
+    let decision = service.evaluate(&ProtectRequest::WritePath {
+        paths: vec![r"C:\Users\user\.ssh\config"],
+        cwd: None,
+    });
+    assert!(decision.is_blocked());
+    assert_eq!(decision.blocked.unwrap().group, RuleGroup::SensitivePaths);
+}
+
+#[test]
+fn windows_sensitive_path_allow_rule_reaches_protect_service() {
+    let mut config = ProtectConfig::default();
+    config.rules.sensitive_paths = Some(RuleGroupConfig::Detailed(RuleGroupDetailedConfig {
+        enabled: true,
+        allow_paths: vec![r"C:\Users\user\.ssh".to_string()],
+    }));
+    let mut service = ProtectService::new(config, ProtectPlatform::current()).unwrap();
+    service.path_checker = SensitivePathChecker::with_home_dir(PathBuf::from(r"C:\Users\user"));
+    let decision = service.evaluate(&ProtectRequest::WritePath {
+        paths: vec![r"C:\Users\user\.ssh\config"],
+        cwd: None,
+    });
+    assert!(!decision.is_blocked());
 }
 
 #[test]

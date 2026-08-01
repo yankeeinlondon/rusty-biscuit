@@ -3,12 +3,16 @@
 //! Split out of the `wrap_commands.rs` god file; shared fixtures live in
 //! `common::wrap`.
 
+#[cfg(unix)]
 use chrono::Local;
 use std::fs;
 use tempfile::tempdir;
 mod common;
+#[cfg(unix)]
 use common::wrap::*;
-use common::{augmented_path, strip_ansi, write_executable};
+use common::strip_ansi;
+#[cfg(unix)]
+use common::{augmented_path, write_executable};
 
 #[test]
 fn inline_compose_requires_positional_arg() {
@@ -66,7 +70,9 @@ exit 0
     );
 
     assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .current_dir(workspace.path())
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("CLAUDINE_CAPTURED_ARGS", &captured_args)
@@ -107,7 +113,9 @@ exit 0
 
     {
         let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
+            .current_dir(workspace.path())
             .env("NO_COLOR", "1")
+            .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
             .env("HOME", workspace.path())
             .env("PATH", &path_dir)
             .args(["inline-compose", "--codex", md_file.to_str().unwrap()])
@@ -146,7 +154,9 @@ fn inline_compose_preserves_frontmatter() {
     );
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .current_dir(workspace.path())
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
@@ -281,7 +291,9 @@ printf '%s\n' '{"type":"result","subtype":"success","stop_reason":"end_turn","nu
     );
 
     assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .current_dir(workspace.path())
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
         .args(["inline-compose", "--claude", md_file.to_str().unwrap()])
@@ -333,7 +345,9 @@ exit 1
     );
 
     let _assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .current_dir(workspace.path())
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .args(["inline-compose", "--codex", md_file.to_str().unwrap()])

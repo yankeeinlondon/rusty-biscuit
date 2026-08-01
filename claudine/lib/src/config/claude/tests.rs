@@ -127,6 +127,35 @@ fn register_skips_when_already_registered() {
 }
 
 #[test]
+fn recognizes_native_windows_executable_hook_command() {
+    let command = super::super::format_claudine_handle_command(
+        r"C:\Program Files\Claudine\claudine.exe",
+        "before_tool",
+        "claude",
+    );
+    let entry = json!({
+        "hooks": [{
+            "type": "command",
+            "command": command,
+        }],
+    });
+
+    assert!(is_claudine_hook_group(&entry));
+    assert_eq!(extract_claudine_event(&entry).as_deref(), Some("before_tool"));
+
+    for command in [
+        "my-claudine.exe handle before_tool --provider claude",
+        "echo C:\\tools\\claudine.exe handle before_tool",
+    ] {
+        let unrelated = json!({
+            "hooks": [{ "type": "command", "command": command }],
+        });
+        assert!(!is_claudine_hook_group(&unrelated), "{command}");
+        assert_eq!(extract_claudine_event(&unrelated), None, "{command}");
+    }
+}
+
+#[test]
 fn deregister_removes_only_claudine_hooks() {
     let tmp = TempDir::new().unwrap();
     let settings = tmp.path().join("settings.json");

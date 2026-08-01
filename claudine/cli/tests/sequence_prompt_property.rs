@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Integration tests for `claudine sequence` inline `prompt`-property
 //! behavior.
 //!

@@ -46,6 +46,11 @@ scalar types and normalize a successful eager `file(eager)` value to its
 repo-relative path. Missing optional properties and explicit `null` are
 equivalent.
 
+Caller-originated eager-file overrides instead retain an absolute native value
+in effective frontmatter. Markdown body interpolation reads a separate portable
+presentation value, including through static member and index selection; path
+operations, comparisons, and lifecycle state keep the native identity.
+
 `ValidationProblem` retains the public message plus typed code, JSON-pointer
 instance path, optional schema path, offending property, source position, and
 file-reference diagnostics. `ValidationOptions` controls pending values and

@@ -286,8 +286,12 @@ impl ShellRunner for SystemShellRunner {
 /// Build the platform `Command` that runs `command` through the system shell.
 #[cfg(windows)]
 fn system_shell_command(command: &str) -> std::process::Command {
+    use std::os::windows::process::CommandExt;
+
     let mut cmd = std::process::Command::new("cmd");
-    cmd.arg("/C").arg(command);
+    // `cmd.exe` owns the command-tail grammar. Passing it through the Windows
+    // argv encoder changes nested quotes before the shell can parse them.
+    cmd.arg("/D").arg("/C").raw_arg(command);
     cmd
 }
 

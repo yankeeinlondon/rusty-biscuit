@@ -210,7 +210,10 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
     };
 
     save_claudine_config(&config, &config_path)?;
-    log::message(&format!("Wrote config to {}", config_path.display()));
+    log::message(&format!(
+        "Wrote config to {}",
+        biscuit_file::to_portable_string(&config_path)
+    ));
 
     // Handle .gitignore in repo mode
     if repo_scope {
@@ -388,7 +391,10 @@ async fn run_quick(repo_scope: bool) -> Result<()> {
     };
 
     save_claudine_config(&config, &config_path)?;
-    log::message(&format!("  Wrote config to {}", config_path.display()));
+    log::message(&format!(
+        "  Wrote config to {}",
+        biscuit_file::to_portable_string(&config_path)
+    ));
 
     // Register with providers
     log::message("");

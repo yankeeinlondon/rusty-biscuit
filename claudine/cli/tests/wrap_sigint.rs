@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Integration tests: SIGINT-during-prep exit-code behavior.
 //!
 //! Split out of the `wrap_commands.rs` god file; shared fixtures live in

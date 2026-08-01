@@ -40,6 +40,7 @@ use super::super::json_util::json_type_name;
 use super::super::types::ResolvedCompositionSource;
 use super::model::{ExecutableField, SequencePlan, StepExecutable};
 use super::{reserved, source as source_resolution};
+use crate::invocation_context::{InvocationContext, SourceContext};
 
 mod shape;
 
@@ -178,6 +179,28 @@ pub fn build_preflight_graph_with_context_and_resolution(
     Ok(loader.graph)
 }
 
+/// Build preflight from one invocation's retained repository observations.
+///
+/// Every referenced document derives its own [`SourceContext`], so nested
+/// references and early-bound `ctx.*` values follow the repository that owns
+/// the authoring document rather than inheriting the top-level sequence roots.
+pub fn build_preflight_graph_with_invocation(
+    plan: &SequencePlan,
+    source: &ResolvedCompositionSource,
+    context: ComposeContext,
+    invocation: &InvocationContext,
+    source_context: &SourceContext,
+) -> Result<PreflightGraph, CompositionError> {
+    let mut loader = Loader::new_with_invocation(
+        source,
+        context,
+        invocation,
+        source_context.clone(),
+    );
+    loader.walk_plan(plan)?;
+    Ok(loader.graph)
+}
+
 /// Walk state: the graph under construction plus the ancestry stack and the
 /// parsed-document cache shared by independent branches.
 struct Loader<'a> {
@@ -195,6 +218,8 @@ struct Loader<'a> {
     /// environment for every string in the graph.
     context: ComposeContext,
     file_resolution_context: Option<biscuit_file::FileResolutionContext>,
+    invocation: Option<&'a InvocationContext>,
+    source_contexts: HashMap<PathBuf, SourceContext>,
 }
 
 impl<'a> Loader<'a> {
@@ -211,6 +236,28 @@ impl<'a> Loader<'a> {
             source_path: canonical(&source.resolved_path),
             context,
             file_resolution_context,
+            invocation: None,
+            source_contexts: HashMap::new(),
+        }
+    }
+
+    fn new_with_invocation(
+        source: &'a ResolvedCompositionSource,
+        context: ComposeContext,
+        invocation: &'a InvocationContext,
+        source_context: SourceContext,
+    ) -> Self {
+        let source_path = canonical(&source.resolved_path);
+        Self {
+            graph: PreflightGraph::default(),
+            ancestry: Vec::new(),
+            documents: HashMap::new(),
+            source,
+            source_path: source_path.clone(),
+            context,
+            file_resolution_context: Some(source_context.file_resolution_context().clone()),
+            invocation: Some(invocation),
+            source_contexts: HashMap::from([(source_path, source_context)]),
         }
     }
 
@@ -397,7 +444,10 @@ impl<'a> Loader<'a> {
         expect_kind(&root, "task", &path)?;
         let (field, value, options) = parse_task_object(&root, &path)?;
 
-        let nested_label = format!("{label} → task `{}`", path.display());
+        let nested_label = format!(
+            "{label} → task `{}`",
+            biscuit_file::to_portable_string(&path)
+        );
         self.enter(&path)?;
         let result = self.load_task(
             field,
@@ -436,7 +486,10 @@ impl<'a> Loader<'a> {
                     }
                 };
 
-                let nested_label = format!("{label} → group `{}`", path.display());
+                let nested_label = format!(
+                    "{label} → group `{}`",
+                    biscuit_file::to_portable_string(&path)
+                );
                 self.enter(&path)?;
                 let result = self.build_group(&group_map, &path, &nested_label, state);
                 self.leave();
@@ -736,7 +789,7 @@ impl<'a> Loader<'a> {
     /// command: it is what preflight approves and what execution runs, so the
     /// two can never drift.
     fn resolve_shell_bytes(
-        &self,
+        &mut self,
         raw: &str,
         origin: &Path,
         label: &str,
@@ -753,10 +806,34 @@ impl<'a> Loader<'a> {
             });
         }
 
+        let source_context = self.source_context_for(origin);
+        let (runtime_context, file_resolution_context) = match source_context.as_ref() {
+            Some(source_context) => {
+                let invocation = self
+                    .invocation
+                    .expect("source context requires an invocation owner");
+                let requirements =
+                    darkmatter::markdown::compose::ContextRequirements::for_content(raw);
+                let evidence = invocation.runtime_evidence(source_context, &requirements);
+                let mut context = ComposeContext::capture_with_evidence(
+                    source_context.base_dir(),
+                    &requirements,
+                    &evidence,
+                );
+                for (key, value) in self.context.env() {
+                    context.env_mut().insert(key.clone(), value.clone());
+                }
+                (
+                    context,
+                    Some(source_context.file_resolution_context().clone()),
+                )
+            }
+            None => (self.context.clone(), self.file_resolution_context.clone()),
+        };
         let resolution_ctx = super::super::document_expression_resolution_context(
             origin,
-            Some(&self.context),
-            self.file_resolution_context.as_ref(),
+            Some(&runtime_context),
+            file_resolution_context.as_ref(),
             None,
         );
 
@@ -779,11 +856,16 @@ impl<'a> Loader<'a> {
 
     /// Resolve a reference authored inside `origin` to an absolute path.
     fn resolve_reference(
-        &self,
+        &mut self,
         reference: &str,
         origin: &Path,
     ) -> Result<PathBuf, CompositionError> {
-        match self.file_resolution_context.as_ref() {
+        let source_context = self.source_context_for(origin);
+        let file_resolution_context = source_context
+            .as_ref()
+            .map(SourceContext::file_resolution_context)
+            .or(self.file_resolution_context.as_ref());
+        match file_resolution_context {
             Some(context) => source_resolution::resolve_sequence_reference_in_context(
                 reference,
                 origin,
@@ -792,6 +874,19 @@ impl<'a> Loader<'a> {
             None => source_resolution::resolve_sequence_reference(reference, origin),
         }
         .map(|p| canonical(&p))
+    }
+
+    fn source_context_for(&mut self, origin: &Path) -> Option<SourceContext> {
+        let invocation = self.invocation?;
+        let key = canonical(origin);
+        if let Some(context) = self.source_contexts.get(&key) {
+            return Some(context.clone());
+        }
+        let context = invocation
+            .derive_source(&key)
+            .expect("resolved sequence document always has a parent directory");
+        self.source_contexts.insert(key, context.clone());
+        Some(context)
     }
 
     /// Load and cache a data document (`kind: task`/`group`/`group-catalog`).

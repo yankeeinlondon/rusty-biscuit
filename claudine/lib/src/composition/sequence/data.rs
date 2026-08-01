@@ -68,7 +68,7 @@ impl SourceFormat {
 /// lower-layer parse cause.
 pub fn load_document(path: &Path) -> Result<Value, CompositionError> {
     let format = SourceFormat::for_path(path);
-    let context = || path.display().to_string();
+    let context = || biscuit_file::to_portable_string(path);
 
     match format {
         SourceFormat::Yaml => {
@@ -101,7 +101,7 @@ pub fn load_document(path: &Path) -> Result<Value, CompositionError> {
 fn load_line_delimited(path: &Path) -> Result<Value, CompositionError> {
     let text =
         std::fs::read_to_string(path).map_err(|e| CompositionError::SequenceExternalLoad {
-            context: path.display().to_string(),
+            context: biscuit_file::to_portable_string(path),
             source: SequenceLoadCause::Read(e),
         })?;
 
@@ -113,7 +113,7 @@ fn load_line_delimited(path: &Path) -> Result<Value, CompositionError> {
         }
         let value: Value = serde_json::from_str(line).map_err(|e| {
             CompositionError::SequenceExternalLoad {
-                context: path.display().to_string(),
+                context: biscuit_file::to_portable_string(path),
                 source: SequenceLoadCause::JsonLine {
                     line: offset + 1,
                     source: e,

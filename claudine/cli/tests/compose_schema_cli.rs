@@ -16,13 +16,16 @@
 //!   optional ones for `claudine compose <prompt> key=<TAB>`.
 //! - `enum` values complete from the schema member list.
 
+#[cfg(unix)]
 use std::fs;
+#[cfg(unix)]
 use tempfile::tempdir;
 
 mod common;
 use common::completion::{
     run_complete, seed_cargo_workspace_members as seed_cargo_workspace, write_file,
 };
+#[cfg(unix)]
 use common::{augmented_path, strip_ansi, write_executable};
 
 // ============================================================================

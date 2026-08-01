@@ -6,8 +6,9 @@ packages:
   - claudine
   - claudine-cli
   - claudine-gen
+depends_on:
+  - claudine/fixes/_completed/2026-07-29-windows-paths/spec.md
 related:
-  - claudine/fixes/2026-07-29-windows-paths/spec.md
   - biscuit-file/features/2026-07-31-portable-strings/
 ---
 
@@ -36,6 +37,20 @@ and after were diffed by name and are identical.
 
 `fix/dark-windows` is scoped to Darkmatter, so only the perf fix landed there.
 Everything else below is carried forward for the next branch.
+
+## Ownership and dependencies
+
+This umbrella fix depends on `2026-07-29-windows-paths`, which owns permission
+matching, sensitive-path classification, absolute allow entries, the shared
+comparison boundary, and removal of the interim Windows warning. That
+security-sensitive tranche lands first so output normalization cannot mask a
+matching defect.
+
+This July 31 fix owns every path-to-text boundary and every file-URI correction,
+including system-prompt rendering, completion values, reports, links, and
+mixed-separator output. It adopts biscuit-file's implemented portable-string
+API for visible text and uses URL-aware conversion for file hyperlinks; neither
+representation is used as path identity or for permission comparisons.
 
 ## Interim state — already landed
 
@@ -218,8 +233,10 @@ binary's output. Redirect the whole run to a file, then query it.
 
 ## Success criteria
 
-1. `just test` for the claudine area is green on Windows, or every remaining
-   failure is explicitly `#[cfg(unix)]`-gated with the reason recorded.
+1. `just test` for the claudine area is green on Windows. A remaining test may
+   be `#[cfg(unix)]`-gated only when it exercises a genuinely Unix-only
+   facility, with that facility named in the reason; Windows product-path
+   failures must not be gated, ignored, or moved out of L1.
 2. No test exceeds nextest's 30s termination ceiling on this host; the three
    `drift` tests either run under it or carry a documented override.
 3. `protect::path` and `permissions::engine` matching defects are fixed per
@@ -228,8 +245,17 @@ binary's output. Redirect the whole run to a file, then query it.
 4. `config::atomic` survives concurrent writers on Windows.
 5. Claudine's path→text boundaries render through
    `biscuit_file::to_portable_string`, matching Darkmatter's adoption.
-6. Linux and macOS results are unchanged — every fix here is cross-platform, not
-   a Windows special case.
+6. Host-independent matcher and renderer contracts remain ungated, and the
+   constrained build plus full L1 gates pass on native
+   `x86_64-pc-windows-msvc` Windows. Linux, macOS, xwin, and GNU-target checks
+   are deferred portability follow-ups rather than completion authorities.
+
+`rendezvous-daemon` and its DuckDB session-log pipeline remain required on
+every platform. Windows target exclusions are not an acceptable portability
+shortcut. Native Windows live-daemon tests pass 5/5, and the
+`x86_64-pc-windows-gnu` Cargo graph contains
+`rendezvous-daemon -> duckdb -> libduckdb-sys`; this graph evidence does not
+claim that the unavailable GNU compiler completed a build.
 
 ## Out of scope
 

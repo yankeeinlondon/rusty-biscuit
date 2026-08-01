@@ -1,15 +1,21 @@
+#[cfg(unix)]
 use std::collections::HashMap;
 use std::fs;
+#[cfg(unix)]
 use std::path::Path;
 
+#[cfg(unix)]
 use claudine::mcp::types::{
     McpCatalog, McpDefaults, McpOrigin, McpProviderState, McpServer, McpServerMetadata,
     McpTransport, ProviderScopeEntries, ProviderStateEntry, RepoProviderState,
 };
 use predicates::str::contains;
 mod common;
-use common::{TestWorkspace, init_git_repo, write, write_executable, write_json};
+use common::{TestWorkspace, init_git_repo};
+#[cfg(unix)]
+use common::{write, write_executable, write_json};
 
+#[cfg(unix)]
 fn make_server(id: &str) -> McpServer {
     McpServer {
         id: id.into(),
@@ -35,6 +41,7 @@ fn make_server(id: &str) -> McpServer {
     }
 }
 
+#[cfg(unix)]
 fn seed_catalog(home: &Path, servers: &[McpServer]) {
     let catalog = McpCatalog {
         version: 1,
@@ -47,6 +54,7 @@ fn seed_catalog(home: &Path, servers: &[McpServer]) {
     write_json(&home.join(".claudine/mcp/catalog.json"), &catalog);
 }
 
+#[cfg(unix)]
 fn seed_defaults(home: &Path, ids: &[&str]) {
     write_json(
         &home.join(".claudine/mcp/defaults.json"),
@@ -57,6 +65,7 @@ fn seed_defaults(home: &Path, ids: &[&str]) {
     );
 }
 
+#[cfg(unix)]
 fn seed_provider_state(
     home: &Path,
     repo_root: Option<&Path>,
@@ -106,6 +115,8 @@ fn seed_provider_state(
     write_json(&home.join(".claudine/mcp/provider-state.json"), &state);
 }
 
+// This subprocess fixture requires Unix HOME isolation for user-global MCP state.
+#[cfg(unix)]
 #[test]
 fn mcp_show_json_includes_provenance() {
     let workspace = TestWorkspace::named("claudine-mcp-it");
@@ -137,6 +148,8 @@ fn mcp_show_json_includes_provenance() {
     assert_eq!(value["provenance"][0]["native_name"], "calendar-native");
 }
 
+// This subprocess fixture requires Unix HOME isolation for user-global MCP state.
+#[cfg(unix)]
 #[test]
 fn mcp_config_json_uses_new_command_name() {
     let workspace = TestWorkspace::named("claudine-mcp-it");
@@ -159,6 +172,8 @@ fn mcp_config_json_uses_new_command_name() {
     assert_eq!(value["server"]["aliases"][0], "gcal");
 }
 
+// This subprocess fixture requires Unix HOME isolation for user-global MCP state.
+#[cfg(unix)]
 #[test]
 fn mcp_check_json_reports_invalid_servers() {
     let workspace = TestWorkspace::named("claudine-mcp-it");
@@ -212,6 +227,8 @@ fn mcp_default_repo_uses_repo_root_from_nested_directory() {
     assert!(!nested.join(".claudine/mcp.json").exists());
 }
 
+// This subprocess fixture requires Unix HOME isolation for user-global MCP state.
+#[cfg(unix)]
 #[test]
 fn mcp_export_reports_unresolved_defaults_and_uses_native_name() {
     let workspace = TestWorkspace::named("claudine-mcp-it");
@@ -324,6 +341,7 @@ fn gemini_and_opencode_wrapper_mcp_dry_run_show_provider_specific_injection() {
     seed_defaults(&home, &[]);
 
     let gemini = assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .current_dir(workspace.path())
         .env("HOME", &home)
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
@@ -344,6 +362,7 @@ fn gemini_and_opencode_wrapper_mcp_dry_run_show_provider_specific_injection() {
     assert!(gemini_stderr.contains(".gemini/settings.json"));
 
     let opencode = assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .current_dir(workspace.path())
         .env("HOME", &home)
         .env("NO_COLOR", "1")
         .env("OPENCODE_MODEL", "test-model")
@@ -391,6 +410,8 @@ fn claude_wrapper_mcp_reports_sync_guidance() {
 // Recommendation #1: repo-root detection returns None outside a repo
 // ---------------------------------------------------------------------------
 
+// This subprocess fixture requires Unix HOME isolation for user-global MCP state.
+#[cfg(unix)]
 #[test]
 fn mcp_list_outside_repo_returns_no_repo_defaults() {
     let workspace = TestWorkspace::named("claudine-mcp-it");
@@ -439,6 +460,8 @@ fn mcp_default_repo_fails_outside_repo() {
 // Recommendation #2: mcp remove cascades to defaults
 // ---------------------------------------------------------------------------
 
+// This subprocess fixture requires Unix HOME isolation for user-global MCP state.
+#[cfg(unix)]
 #[test]
 fn mcp_remove_cascades_to_user_defaults() {
     let workspace = TestWorkspace::named("claudine-mcp-it");
@@ -478,6 +501,8 @@ fn mcp_remove_cascades_to_user_defaults() {
     assert!(defaults.defaults.contains(&"slack".to_string()));
 }
 
+// This subprocess fixture requires Unix HOME isolation for user-global MCP state.
+#[cfg(unix)]
 #[test]
 fn mcp_remove_cascades_to_repo_defaults() {
     let workspace = TestWorkspace::named("claudine-mcp-it");
@@ -546,6 +571,8 @@ fn mcp_sync_rejects_positional_provider() {
 // Recommendation #7: repo defaults replace user defaults
 // ---------------------------------------------------------------------------
 
+// This subprocess fixture requires Unix HOME isolation for user-global MCP state.
+#[cfg(unix)]
 #[test]
 fn effective_defaults_repo_replaces_user() {
     let workspace = TestWorkspace::named("claudine-mcp-it");
@@ -662,6 +689,8 @@ fn strict_mode_errors_on_ambiguous_tag() {
 // Recommendation #8: mcp remove alias reports owner and remaining aliases
 // ---------------------------------------------------------------------------
 
+// This subprocess fixture requires Unix HOME isolation for user-global MCP state.
+#[cfg(unix)]
 #[test]
 fn mcp_remove_alias_reports_owner_and_remaining() {
     let workspace = TestWorkspace::named("claudine-mcp-it");

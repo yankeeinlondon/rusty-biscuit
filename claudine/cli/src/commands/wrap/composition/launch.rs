@@ -64,10 +64,9 @@ pub(crate) fn reset_launch_workspace_fallbacks_for_tests() {
 /// Enforce the `--repo` legacy hard-fail contract when prep-time
 /// launch-context detection failed.
 ///
-/// `CompositionPrepContext` runs a single shared `sniff::detect_with_plan`
-/// scan and falls back to a default `LaunchContext` on failure so best-
-/// effort consumers can keep going. `--repo` is not a best-effort
-/// consumer: it requires real repo detection. When the prep scan failed
+/// `CompositionPrepContext` carries the invocation owner's retained launch
+/// diagnostic while best-effort projections remain available. `--repo` is not
+/// a best-effort consumer: it requires real repo detection. When observation failed
 /// **and** `--repo` is set, surface the captured sniff error as a hard
 /// run abort, matching the behavior of the legacy non-prep path that
 /// called `LaunchContext::from_cwd` directly.

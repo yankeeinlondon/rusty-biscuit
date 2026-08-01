@@ -1,32 +1,48 @@
 use std::fs;
 use std::io::Write;
 use std::path::Path;
+#[cfg(windows)]
+use std::thread;
+#[cfg(windows)]
+use std::time::Duration;
 
 use tempfile::NamedTempFile;
+#[cfg(windows)]
+use tempfile::PersistError;
+#[cfg(unix)]
 use tracing::warn;
 
-/// Write content to a file atomically using temp file + rename.
+#[cfg(windows)]
+use windows::Win32::Foundation::{
+    ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND, ERROR_SHARING_VIOLATION,
+};
+
+#[cfg(windows)]
+const PERSIST_ATTEMPTS: usize = 8;
+#[cfg(windows)]
+const INITIAL_PERSIST_RETRY_DELAY: Duration = Duration::from_millis(1);
+
+/// Write content to a file atomically using a sibling temporary file.
 ///
-/// Creates a uniquely-named temp file inside the target's parent directory
-/// via [`tempfile::NamedTempFile::new_in`], writes the content with
-/// `fsync`, then persists it via an atomic `rename(2)` on the same
-/// filesystem. On Unix the parent directory is also `fsync`'d so the
-/// rename's metadata change survives a power loss.
+/// Creates a uniquely named temp file inside the target's parent directory
+/// via [`tempfile::NamedTempFile::new_in`], writes and syncs the content, then
+/// atomically persists it on the same filesystem. On Unix the parent directory
+/// is also synced so the replacement's metadata change survives a power loss.
 ///
 /// ## Concurrency
 ///
-/// Each call uses a unique temp file, so concurrent writers never corrupt
-/// each other's in-flight bytes. `rename` serializes on the parent
-/// directory inode; the final content is always an intact copy of exactly
-/// one writer's payload (last-rename-wins).
+/// Each call uses a unique temp file, so concurrent writers never corrupt each
+/// other's in-flight bytes. A successful call leaves the target equal to one
+/// complete writer payload. On Windows, the measured transient missing-file,
+/// access, and sharing failures during atomic replacement are retried with a
+/// bounded backoff.
 ///
 /// ## Errors
 ///
 /// Returns the [`std::io::Error`] raised if the parent directory cannot be
-/// created, the temp file cannot be written or fsync'd, or the atomic rename
-/// fails. No non-atomic fallback is attempted — a failed rename indicates a
-/// cross-device move or filesystem error that a byte-by-byte copy could
-/// leave in an inconsistent state.
+/// created, the temp file cannot be written or synced, or atomic persistence
+/// fails. Permanent errors and exhausted Windows retries remain errors. No
+/// non-atomic byte-copy fallback is attempted.
 ///
 /// The error type is `io::Error` rather than [`crate::error::ClaudineError`]
 /// because every fallible step here *is* an `io::Error`; a wider type would
@@ -34,6 +50,13 @@ use tracing::warn;
 /// returning [`crate::error::Result`] convert for free via `?` and
 /// `ClaudineError`'s `#[from] std::io::Error`.
 pub fn atomic_write(path: &Path, content: &[u8]) -> std::io::Result<()> {
+    atomic_write_with(path, content, persist_temp_file)
+}
+
+fn atomic_write_with<P>(path: &Path, content: &[u8], persist: P) -> std::io::Result<()>
+where
+    P: FnOnce(NamedTempFile, &Path) -> std::io::Result<()>,
+{
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)?;
 
@@ -41,16 +64,69 @@ pub fn atomic_write(path: &Path, content: &[u8]) -> std::io::Result<()> {
     tmp.as_file_mut().write_all(content)?;
     tmp.as_file_mut().sync_all()?;
 
-    // `persist` performs an atomic `rename(2)` on the same filesystem.
-    // If it fails (cross-device, filesystem error), surface the error
-    // rather than fall back to a non-atomic copy that could leave the
-    // target truncated on a crash mid-write.
-    tmp.persist(path).map_err(|e| e.error)?;
+    persist(tmp, path)?;
 
     #[cfg(unix)]
     fsync_dir(parent);
 
     Ok(())
+}
+
+#[cfg(not(windows))]
+fn persist_temp_file(tmp: NamedTempFile, path: &Path) -> std::io::Result<()> {
+    tmp.persist(path).map(|_| ()).map_err(|error| error.error)
+}
+
+#[cfg(windows)]
+fn persist_temp_file(tmp: NamedTempFile, path: &Path) -> std::io::Result<()> {
+    persist_with_retry(
+        tmp,
+        path,
+        |file, destination| file.persist(destination).map(|_| ()),
+        thread::sleep,
+    )
+}
+
+#[cfg(windows)]
+fn persist_with_retry<P, S>(
+    mut tmp: NamedTempFile,
+    path: &Path,
+    mut persist: P,
+    mut sleep: S,
+) -> std::io::Result<()>
+where
+    P: FnMut(NamedTempFile, &Path) -> Result<(), PersistError>,
+    S: FnMut(Duration),
+{
+    let mut delay = INITIAL_PERSIST_RETRY_DELAY;
+
+    for attempt in 1..=PERSIST_ATTEMPTS {
+        match persist(tmp, path) {
+            Ok(()) => return Ok(()),
+            Err(error)
+                if attempt < PERSIST_ATTEMPTS
+                    && is_transient_windows_persist_error(&error.error) =>
+            {
+                tmp = error.file;
+                sleep(delay);
+                delay *= 2;
+            }
+            Err(error) => return Err(error.error),
+        }
+    }
+
+    unreachable!("the bounded persist loop always returns")
+}
+
+#[cfg(windows)]
+fn is_transient_windows_persist_error(error: &std::io::Error) -> bool {
+    matches!(
+        error.raw_os_error(),
+        Some(code)
+            if code == ERROR_ACCESS_DENIED.0 as i32
+                || code == ERROR_FILE_NOT_FOUND.0 as i32
+                || code == ERROR_SHARING_VIOLATION.0 as i32
+    )
 }
 
 #[cfg(unix)]
@@ -69,7 +145,8 @@ fn fsync_dir(dir: &Path) {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::ffi::OsString;
+    use std::sync::{Arc, Barrier};
     use std::thread;
 
     use tempfile::TempDir;
@@ -100,16 +177,16 @@ mod tests {
 
     #[test]
     fn no_stray_tmp_sibling_after_write() {
-        // The old implementation left `<name>.tmp` siblings behind on some
-        // failure paths. `NamedTempFile::persist` consumes the temp file,
-        // so no sibling must survive a successful write.
         let tmp = TempDir::new().unwrap();
         let target = tmp.path().join("config.json");
 
         atomic_write(&target, b"{}").unwrap();
 
-        let tmp_sibling = target.with_extension("tmp");
-        assert!(!tmp_sibling.exists());
+        let entries: Vec<_> = fs::read_dir(tmp.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(entries, [OsString::from("config.json")]);
     }
 
     #[test]
@@ -123,35 +200,186 @@ mod tests {
         assert_eq!(fs::read_to_string(&target).unwrap(), "updated");
     }
 
-    /// Concurrent writers must produce one of the input payloads — never a
-    /// blend. With the previous fixed `.tmp` sibling this could produce a
-    /// torn file; with `NamedTempFile::new_in(parent)` each writer owns a
-    /// unique temp file so the final content is always an intact copy of
-    /// exactly one writer's bytes.
     #[test]
     fn concurrent_writers_produce_intact_payload() {
         let tmp = TempDir::new().unwrap();
         let target = Arc::new(tmp.path().join("shared.json"));
 
-        let payloads: Vec<Vec<u8>> = (0..8)
-            .map(|i| format!("payload-{i:08}-{}", "x".repeat(4096)).into_bytes())
+        for round in 0..12 {
+            let payloads: Vec<Vec<u8>> = (0..8)
+                .map(|writer| {
+                    format!("payload-{round:02}-{writer:02}-{}", "x".repeat(4096)).into_bytes()
+                })
+                .collect();
+            let barrier = Arc::new(Barrier::new(payloads.len()));
+
+            let handles: Vec<_> = payloads
+                .clone()
+                .into_iter()
+                .map(|payload| {
+                    let barrier = Arc::clone(&barrier);
+                    let target = Arc::clone(&target);
+                    thread::spawn(move || {
+                        atomic_write_with(&target, &payload, |tmp, path| {
+                            barrier.wait();
+                            persist_temp_file(tmp, path)
+                        })
+                    })
+                })
+                .collect();
+
+            let joined: Vec<_> = handles.into_iter().map(thread::JoinHandle::join).collect();
+            for worker in joined {
+                assert!(worker.is_ok(), "atomic-write worker panicked");
+                assert!(
+                    worker.unwrap().is_ok(),
+                    "atomic-write worker returned an error"
+                );
+            }
+
+            let final_bytes = fs::read(&*target).expect("final file readable");
+            assert!(
+                payloads.iter().any(|payload| payload == &final_bytes),
+                "final content must be exactly one input payload"
+            );
+        }
+
+        let entries: Vec<_> = fs::read_dir(tmp.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
             .collect();
+        assert_eq!(entries, [OsString::from("shared.json")]);
+    }
 
-        let mut handles = Vec::new();
-        for payload in payloads.clone() {
-            let target = Arc::clone(&target);
-            handles.push(thread::spawn(move || {
-                atomic_write(&target, &payload).expect("atomic_write must succeed");
-            }));
-        }
-        for h in handles {
-            h.join().unwrap();
+    #[cfg(windows)]
+    fn windows_error(code: windows::Win32::Foundation::WIN32_ERROR) -> std::io::Error {
+        std::io::Error::from_raw_os_error(code.0 as i32)
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn transient_windows_persist_errors_are_narrowly_classified() {
+        use windows::Win32::Foundation::{ERROR_LOCK_VIOLATION, ERROR_PATH_NOT_FOUND};
+
+        for (code, expected) in [
+            (ERROR_ACCESS_DENIED, true),
+            (ERROR_SHARING_VIOLATION, true),
+            (ERROR_FILE_NOT_FOUND, true),
+            (ERROR_PATH_NOT_FOUND, false),
+            (ERROR_LOCK_VIOLATION, false),
+        ] {
+            assert_eq!(
+                is_transient_windows_persist_error(&windows_error(code)),
+                expected,
+                "unexpected classification for Windows error {}",
+                code.0
+            );
         }
 
-        let final_bytes = fs::read(&*target).expect("final file readable");
-        assert!(
-            payloads.iter().any(|p| p == &final_bytes),
-            "final content must be exactly one of the input payloads (never a blend)"
+        assert!(!is_transient_windows_persist_error(
+            &std::io::Error::other("not an OS error")
+        ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn non_transient_windows_persist_error_is_not_retried() {
+        use windows::Win32::Foundation::ERROR_PATH_NOT_FOUND;
+
+        let dir = TempDir::new().unwrap();
+        let tmp = NamedTempFile::new_in(dir.path()).unwrap();
+        let target = dir.path().join("target.json");
+        let mut attempts = 0;
+        let mut delays = Vec::new();
+
+        let error = persist_with_retry(
+            tmp,
+            &target,
+            |file, _| {
+                attempts += 1;
+                Err(PersistError {
+                    error: windows_error(ERROR_PATH_NOT_FOUND),
+                    file,
+                })
+            },
+            |delay| delays.push(delay),
+        )
+        .unwrap_err();
+
+        assert_eq!(attempts, 1);
+        assert!(delays.is_empty());
+        assert_eq!(error.raw_os_error(), Some(ERROR_PATH_NOT_FOUND.0 as i32));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn transient_windows_persist_retries_are_bounded() {
+        let dir = TempDir::new().unwrap();
+        let tmp = NamedTempFile::new_in(dir.path()).unwrap();
+        let target = dir.path().join("target.json");
+        let mut attempts = 0;
+        let mut delays = Vec::new();
+
+        let error = persist_with_retry(
+            tmp,
+            &target,
+            |file, _| {
+                attempts += 1;
+                Err(PersistError {
+                    error: windows_error(ERROR_ACCESS_DENIED),
+                    file,
+                })
+            },
+            |delay| delays.push(delay),
+        )
+        .unwrap_err();
+
+        assert_eq!(attempts, PERSIST_ATTEMPTS);
+        assert_eq!(
+            delays,
+            [1, 2, 4, 8, 16, 32, 64].map(Duration::from_millis)
         );
+        assert_eq!(delays.iter().sum::<Duration>(), Duration::from_millis(127));
+        assert_eq!(error.raw_os_error(), Some(ERROR_ACCESS_DENIED.0 as i32));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn transient_windows_retries_reuse_the_written_temp_file() {
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("target.json");
+        let payload = b"complete-synced-payload";
+        let mut attempts = 0;
+        let mut temp_paths = Vec::new();
+        let mut delays = Vec::new();
+
+        atomic_write_with(&target, payload, |tmp, destination| {
+            persist_with_retry(
+                tmp,
+                destination,
+                |file, path| {
+                    attempts += 1;
+                    temp_paths.push(file.path().to_owned());
+                    match attempts {
+                        1 => Err(PersistError {
+                            error: windows_error(ERROR_ACCESS_DENIED),
+                            file,
+                        }),
+                        2 => Err(PersistError {
+                            error: windows_error(ERROR_SHARING_VIOLATION),
+                            file,
+                        }),
+                        _ => file.persist(path).map(|_| ()),
+                    }
+                },
+                |delay| delays.push(delay),
+            )
+        })
+        .unwrap();
+
+        assert_eq!(attempts, 3);
+        assert_eq!(delays, [1, 2].map(Duration::from_millis));
+        assert!(temp_paths.windows(2).all(|pair| pair[0] == pair[1]));
+        assert_eq!(fs::read(target).unwrap(), payload);
     }
 }

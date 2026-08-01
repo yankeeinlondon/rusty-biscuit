@@ -14,6 +14,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use biscuit_file::to_portable_string as portable;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::table::{Table, TableColumn};
 use biscuit_terminal::utils::layout::{Alignment, Edges, Length};
@@ -189,7 +190,7 @@ fn run_check(args: CheckArgs) -> Result<()> {
 
     log::message(&format!(
         "signals check — replaying evidence fixtures from {}",
-        signals_dir.display()
+        portable(&signals_dir)
     ));
 
     let mut used_exclusions: BTreeSet<usize> = BTreeSet::new();
@@ -604,7 +605,7 @@ fn resolve_area() -> Result<PathBuf> {
     bail!(
         "signals check requires a rusty-biscuit checkout — no `docs/providers.yaml` found \
          walking up from {}",
-        cwd.display()
+        portable(&cwd)
     )
 }
 
@@ -616,17 +617,22 @@ fn load_doc_evidence(signals_dir: &Path, slug: &str) -> Result<BTreeMap<String, 
     let records = frontmatter
         .get("records")
         .and_then(Value::as_array)
-        .ok_or_else(|| eyre!("{}: frontmatter has no `records:` list", path.display()))?;
+        .ok_or_else(|| eyre!("{}: frontmatter has no `records:` list", portable(&path)))?;
     let mut evidence_by_id = BTreeMap::new();
     for record in records {
         let id = record
             .get("id")
             .and_then(Value::as_str)
-            .ok_or_else(|| eyre!("{}: record without a string `id`", path.display()))?;
+            .ok_or_else(|| eyre!("{}: record without a string `id`", portable(&path)))?;
         let evidence = record
             .get("evidence")
             .and_then(Value::as_str)
-            .ok_or_else(|| eyre!("{}: record `{id}` without a string `evidence`", path.display()))?;
+            .ok_or_else(|| {
+                eyre!(
+                    "{}: record `{id}` without a string `evidence`",
+                    portable(&path)
+                )
+            })?;
         evidence_by_id.insert(id.to_string(), fixture_key(&path, id, evidence)?);
     }
     Ok(evidence_by_id)
@@ -641,7 +647,7 @@ fn fixture_key(doc: &Path, record: &str, evidence: &str) -> Result<String> {
         .ok_or_else(|| {
             eyre!(
                 "{}: record `{record}` evidence `{evidence}` is not under ./fixtures/",
-                doc.display()
+                portable(doc)
             )
         })
 }
@@ -651,14 +657,19 @@ fn fixture_key(doc: &Path, record: &str, evidence: &str) -> Result<String> {
 /// `load_validated_frontmatter` (this CLI never links the generator).
 fn load_validated_frontmatter(path: &Path) -> Result<Value> {
     let md = Markdown::try_from(path)
-        .map_err(|err| eyre!("failed to read {}: {err}", path.display()))?;
+        .map_err(|err| eyre!("failed to read {}: {err}", portable(path)))?;
     let schemas = DarkmatterSchemas::new();
     let effective = schemas
         .effective_for(&md)
-        .map_err(|err| eyre!("{}: schema resolution failed: {err}", path.display()))?
-        .ok_or_else(|| eyre!("{}: research document declares no `$schema`", path.display()))?;
+        .map_err(|err| eyre!("{}: schema resolution failed: {err}", portable(path)))?
+        .ok_or_else(|| {
+            eyre!(
+                "{}: research document declares no `$schema`",
+                portable(path)
+            )
+        })?;
     let frontmatter = serde_json::to_value(md.frontmatter().as_map())
-        .wrap_err_with(|| format!("{}: frontmatter is not JSON-shaped", path.display()))?;
+        .wrap_err_with(|| format!("{}: frontmatter is not JSON-shaped", portable(path)))?;
     let report = effective.validate(&frontmatter);
     if !report.valid {
         let problems = report
@@ -669,7 +680,7 @@ fn load_validated_frontmatter(path: &Path) -> Result<Value> {
             .join("\n");
         bail!(
             "{}: frontmatter does not satisfy the sidecar schema:\n{problems}",
-            path.display()
+            portable(path)
         );
     }
     Ok(frontmatter)
@@ -684,7 +695,7 @@ fn load_validated_frontmatter(path: &Path) -> Result<Value> {
 fn load_fixture_payloads(fixtures_dir: &Path, key: &str, slug: &str) -> Result<Vec<Value>> {
     let path = fixtures_dir.join(key);
     let text = std::fs::read_to_string(&path)
-        .wrap_err_with(|| format!("failed to read {}", path.display()))?;
+        .wrap_err_with(|| format!("failed to read {}", portable(&path)))?;
     let extension = path
         .extension()
         .and_then(|extension| extension.to_str())
@@ -695,15 +706,15 @@ fn load_fixture_payloads(fixtures_dir: &Path, key: &str, slug: &str) -> Result<V
             .enumerate()
             .filter(|(_, line)| !line.trim().is_empty())
             .map(|(index, line)| {
-                serde_json::from_str(line).wrap_err_with(|| {
-                    format!("{}:{}: invalid JSON", path.display(), index + 1)
-                })
+                serde_json::from_str(line)
+                    .wrap_err_with(|| format!("{}:{}: invalid JSON", portable(&path), index + 1))
             })
             .collect(),
-        "json" => Ok(vec![
-            serde_json::from_str(&text)
-                .wrap_err_with(|| format!("{}: invalid JSON", path.display()))?,
-        ]),
+        "json" => {
+            Ok(vec![serde_json::from_str(&text).wrap_err_with(|| {
+                format!("{}: invalid JSON", portable(&path))
+            })?])
+        }
         "txt" if slug == "opencode" => Ok(text
             .lines()
             .filter(|line| !line.trim().is_empty())
@@ -717,7 +728,7 @@ fn load_fixture_payloads(fixtures_dir: &Path, key: &str, slug: &str) -> Result<V
             .collect()),
         other => bail!(
             "{}: unsupported fixture extension `{other}` for provider `{slug}`",
-            path.display()
+            portable(&path)
         ),
     }
 }
@@ -729,13 +740,18 @@ fn load_exclusions(path: &Path) -> Result<Vec<OverlapExclusion>> {
         return Ok(Vec::new());
     }
     let value = biscuit_file::Yaml::try_from(path)
-        .map_err(|err| eyre!("failed to read {}: {err}", path.display()))?
+        .map_err(|err| eyre!("failed to read {}: {err}", portable(path)))?
         .as_json()
-        .map_err(|err| eyre!("{}: invalid YAML: {err}", path.display()))?;
+        .map_err(|err| eyre!("{}: invalid YAML: {err}", portable(path)))?;
     let entries = value
         .get("exclusions")
         .and_then(Value::as_array)
-        .ok_or_else(|| eyre!("{}: expected a top-level `exclusions:` list", path.display()))?;
+        .ok_or_else(|| {
+            eyre!(
+                "{}: expected a top-level `exclusions:` list",
+                portable(path)
+            )
+        })?;
     let mut exclusions = Vec::with_capacity(entries.len());
     for entry in entries {
         let field = |key: &str| -> Result<String> {
@@ -748,7 +764,7 @@ fn load_exclusions(path: &Path) -> Result<Vec<OverlapExclusion>> {
                 .ok_or_else(|| {
                     eyre!(
                         "{}: exclusion entry missing a non-empty `{key}`",
-                        path.display()
+                        portable(path)
                     )
                 })
         };

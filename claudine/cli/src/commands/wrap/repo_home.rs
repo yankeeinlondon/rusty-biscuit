@@ -46,13 +46,13 @@ impl RepoHomeManager {
         if !original_home.is_absolute() {
             bail!(
                 "original provider home '{}' must be an absolute path",
-                original_home.display()
+                biscuit_file::to_portable_string(&original_home)
             );
         }
         if !original_home.exists() {
             bail!(
                 "original HOME directory '{}' does not exist",
-                original_home.display()
+                biscuit_file::to_portable_string(&original_home)
             );
         }
 
@@ -60,7 +60,7 @@ impl RepoHomeManager {
             fs::create_dir_all(&self.shadow_home).with_context(|| {
                 format!(
                     "failed to create shadow HOME directory at '{}'",
-                    self.shadow_home.display()
+                    biscuit_file::to_portable_string(&self.shadow_home)
                 )
             })?;
         }
@@ -231,7 +231,7 @@ pub(crate) fn codex_sqlite_home() -> Result<PathBuf> {
     if !path.is_absolute() {
         bail!(
             "Codex SQLite home '{}' must be an absolute path",
-            path.display()
+            biscuit_file::to_portable_string(&path)
         );
     }
     Ok(path)

@@ -15,6 +15,7 @@ pub use config::{
 pub use environment::{
     EnvironmentContext, GitContext, HardwareContext, OsContext, RepoContext, detect_environment,
     detect_environment_fast, environment_context_from_sniff_result,
+    environment_context_from_sniff_result_and_env,
 };
 pub use event_meta::{EventMeta, ToolName};
 pub use init_defaults::{

@@ -33,6 +33,7 @@ pub(crate) fn materialized_harness_prompt_from_prepared(
         selection_hints: prepared.selection_hints.clone(),
         inline_closure_plan,
         file_resolution_context: prepared.input_layers.file_resolution_context.clone(),
+        compose_context: Some(prepared.compose_context.clone()),
         lifecycle: Some(prepared.lifecycle.clone()),
         live_frontmatter,
         runtime_state,
@@ -44,12 +45,16 @@ pub(crate) fn materialize_passthrough_harness_seed(
     prompt: String,
     shell_cwd: Option<&Path>,
     runtime_state: std::sync::Arc<claudine::composition::RuntimeState>,
+    invocation: &claudine::invocation_context::InvocationContext,
+    source_context: &claudine::invocation_context::SourceContext,
 ) -> Result<MaterializedHarnessPrompt> {
     super::super::overlay::materialize_passthrough_harness_seed(
         source_path,
         prompt,
         shell_cwd,
         runtime_state,
+        invocation,
+        source_context,
     )
 }
 
@@ -124,6 +129,7 @@ fn load_overlaid_source(
 /// `compose/prep.rs`.
 fn harness_prepare_options(
     state: &HarnessPromptState,
+    source: &claudine::composition::ResolvedCompositionSource,
     child_cwd: &Path,
 ) -> claudine::composition::PrepareOptions {
     let mut input_layers = state.input_layers.clone();
@@ -142,10 +148,47 @@ fn harness_prepare_options(
         Some(&state.runtime_state.snapshot()),
         None,
     ));
-    input_layers.apply_to(claudine::composition::PrepareOptions {
-            shell_working_directory: Some(child_cwd.to_path_buf()),
-            ..claudine::composition::PrepareOptions::default()
+    let compatibility_source_context = if state.source_context.is_none() {
+        state.invocation_context.as_ref().map(|invocation| {
+            invocation
+                .derive_source(&source.resolved_path)
+                .expect("resolved harness document always has a parent directory")
         })
+    } else {
+        None
+    };
+    let source_context = state
+        .source_context
+        .as_ref()
+        .or(compatibility_source_context.as_ref());
+    let propagated = state
+        .invocation_context
+        .as_ref()
+        .zip(source_context)
+        .map(|(invocation, source_context)| {
+            let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(
+                &source.markdown,
+            );
+            let evidence = invocation.runtime_evidence(source_context, &requirements);
+            let context = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
+                source_context.base_dir(),
+                &requirements,
+                &evidence,
+            );
+            (context, source_context.file_resolution_context().clone())
+        });
+    let mut options = input_layers.apply_to(claudine::composition::PrepareOptions {
+        invocation_context: state.invocation_context.clone(),
+        shell_working_directory: Some(child_cwd.to_path_buf()),
+        ..claudine::composition::PrepareOptions::default()
+    });
+    if let Some((context, file_resolution)) = propagated {
+        options.prepared_context = Some(context);
+        options.file_resolution_context = Some(file_resolution);
+    } else if let Some(source_context) = source_context {
+        options.file_resolution_context = Some(source_context.file_resolution_context().clone());
+    }
+    options
 }
 
 /// Run the proxied target document's own pre-flight shell audit and fold any
@@ -170,7 +213,7 @@ pub(crate) fn preflight_proxy_target(
         return Ok(());
     }
     let source = load_overlaid_source(state).map_err(Box::new)?;
-    let options = harness_prepare_options(state, child_cwd);
+    let options = harness_prepare_options(state, &source, child_cwd);
     let approved =
         claudine::composition::preflight_document_shell(&source, &options, approval_options)
             .map_err(Box::new)?;
@@ -193,7 +236,7 @@ pub(crate) fn materialize_harness_prompt(
     schema: claudine::composition::SchemaStage,
 ) -> Result<MaterializedHarnessPrompt> {
     let source = load_overlaid_source(state)?;
-    let options = harness_prepare_options(state, child_cwd);
+    let options = harness_prepare_options(state, &source, child_cwd);
 
     let prompt_source = match state.mode {
         // The prompt came from argv or stdin; the document is a provider memory
@@ -202,7 +245,7 @@ pub(crate) fn materialize_harness_prompt(
             state.base_prompt.clone().ok_or_else(|| {
                 eyre!(
                     "missing passthrough prompt seed for '{}'",
-                    state.source_path.display()
+                    biscuit_file::to_portable_string(&state.source_path)
                 )
             })?,
         ),
@@ -233,6 +276,8 @@ pub(crate) fn materialize_harness_prompt(
         claudine::composition::CompositionClosurePlan::Inline(plan) => Some(plan),
         claudine::composition::CompositionClosurePlan::Direct => None,
     };
+    let file_resolution_context = prepared.input_layers.file_resolution_context.clone();
+    let compose_context = prepared.compose_context;
     let mut prompt = prepared.prompt;
     let frontmatter = prepared.effective_frontmatter;
     let lifecycle = prepared.lifecycle;
@@ -271,7 +316,8 @@ pub(crate) fn materialize_harness_prompt(
         env_overrides,
         selection_hints,
         inline_closure_plan,
-        file_resolution_context: state.input_layers.file_resolution_context.clone(),
+        file_resolution_context,
+        compose_context: Some(compose_context),
         lifecycle: Some(lifecycle),
         live_frontmatter,
         runtime_state: std::sync::Arc::clone(&state.runtime_state),
@@ -298,6 +344,8 @@ mod tests {
             suppress_output_commit: false,
             last_final_output: None,
             entry: DocumentEntryReason::ProxyTarget,
+            invocation_context: None,
+            source_context: None,
         }
     }
 

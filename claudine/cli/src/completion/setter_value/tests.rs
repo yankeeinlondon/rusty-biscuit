@@ -503,3 +503,13 @@ fn resolve_setter_scopes_all_follow_links() {
         );
     }
 }
+
+#[test]
+fn format_relative_portably_renders_windows_shaped_segments() {
+    let base = PathBuf::from("repo");
+    let entry = base.join(r"docs\nested\plan.md");
+    assert_eq!(
+        format_relative(&base, &entry),
+        Some("docs/nested/plan.md".to_string())
+    );
+}

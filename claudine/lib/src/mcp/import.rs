@@ -128,7 +128,7 @@ impl<'a> McpImporter<'a> {
                 Err(e) => {
                     report.errors.push(ImportError {
                         provider,
-                        native_name: config_path.to_string_lossy().into(),
+                        native_name: biscuit_file::to_portable_string(&config_path),
                         reason: e.to_string(),
                         diagnostic: DiagnosticSnapshot::from_diagnostic(&e),
                     });
@@ -191,7 +191,7 @@ impl<'a> McpImporter<'a> {
                 ProviderStateEntry {
                     catalog_id: existing_id.clone(),
                     native_name: native_name.into(),
-                    source: config_path.to_string_lossy().into(),
+                    source: biscuit_file::to_portable_string(config_path),
                     origin: McpOrigin::Imported,
                     last_seen: Utc::now(),
                 },
@@ -241,7 +241,7 @@ impl<'a> McpImporter<'a> {
             ProviderStateEntry {
                 catalog_id: slug.clone(),
                 native_name: native_name.into(),
-                source: config_path.to_string_lossy().into(),
+                source: biscuit_file::to_portable_string(config_path),
                 origin: McpOrigin::Imported,
                 last_seen: Utc::now(),
             },

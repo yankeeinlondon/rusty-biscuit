@@ -36,6 +36,8 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use biscuit_file::to_portable_string;
+
 use super::fuzzy::{self, PartialLen};
 use super::scopes::{self, Scope, ScopeContext, ScopeKind};
 use super::walker;
@@ -213,10 +215,7 @@ fn resolve_setter_scopes(ctx: &ScopeContext) -> Vec<Scope> {
 /// because every scope we walk is rooted under `base`, but keeping the
 /// guard avoids rendering absolute paths on unusual filesystem layouts.
 fn format_relative(base: &Path, entry: &Path) -> Option<String> {
-    entry
-        .strip_prefix(base)
-        .ok()
-        .and_then(|r| r.to_str().map(str::to_string))
+    entry.strip_prefix(base).ok().map(to_portable_string)
 }
 
 /// Strip the last extension from a filename (for match-target purposes

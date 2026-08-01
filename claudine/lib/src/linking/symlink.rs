@@ -56,16 +56,16 @@ pub fn create_resource_link(
     let relative = source.strip_prefix(source_root).map_err(|_| {
         ClaudineError::LinkingError(format!(
             "source path {} is not contained within source root {}",
-            source.display(),
-            source_root.display()
+            biscuit_file::to_portable_string(source),
+            biscuit_file::to_portable_string(source_root)
         ))
     })?;
 
     if relative.as_os_str().is_empty() {
         return Err(ClaudineError::LinkingError(format!(
             "source path {} resolves to an empty relative path beneath {}",
-            source.display(),
-            source_root.display()
+            biscuit_file::to_portable_string(source),
+            biscuit_file::to_portable_string(source_root)
         )));
     }
 
@@ -82,42 +82,55 @@ pub fn create_resource_link(
     };
 
     #[cfg(unix)]
-    {
-        match std::os::unix::fs::symlink(&link_target, &dest) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                if dest
-                    .symlink_metadata()
-                    .map(|m| m.file_type().is_symlink())
-                    .unwrap_or(false)
-                {
-                    let existing_target = fs::read_link(&dest)?;
-                    if existing_target == link_target {
-                        return Ok(LinkResult::AlreadyLinked);
-                    }
+    let result = std::os::unix::fs::symlink(&link_target, &dest);
 
-                    return Ok(LinkResult::Skipped {
-                        reason: format!(
-                            "symlink exists but points to {} (expected {})",
-                            existing_target.display(),
-                            link_target.display()
-                        ),
-                    });
+    // Windows fixes the link type at creation time, unlike Unix's single
+    // symlink syscall, so select the API from the native source type.
+    #[cfg(windows)]
+    let result = if source.is_dir() {
+        std::os::windows::fs::symlink_dir(&link_target, &dest)
+    } else {
+        std::os::windows::fs::symlink_file(&link_target, &dest)
+    };
+
+    #[cfg(not(any(unix, windows)))]
+    let result = Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "symlink creation is not supported on this platform",
+    ));
+
+    match result {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            if dest
+                .symlink_metadata()
+                .map(|m| m.file_type().is_symlink())
+                .unwrap_or(false)
+            {
+                let existing_target = fs::read_link(&dest)?;
+                if existing_target == link_target {
+                    return Ok(LinkResult::AlreadyLinked);
                 }
 
-                let path_label = if dest.is_dir() { "directory" } else { "file" };
                 return Ok(LinkResult::Skipped {
-                    reason: format!("real {path_label} already exists at {}", dest.display()),
+                    reason: format!(
+                        "symlink exists but points to {} (expected {})",
+                        biscuit_file::to_portable_string(&existing_target),
+                        biscuit_file::to_portable_string(&link_target)
+                    ),
                 });
             }
-            Err(error) => return Err(error.into()),
-        }
-    }
 
-    #[cfg(not(unix))]
-    return Err(ClaudineError::LinkingError(
-        "symlink creation is only supported on Unix".to_string(),
-    ));
+            let path_label = if dest.is_dir() { "directory" } else { "file" };
+            return Ok(LinkResult::Skipped {
+                reason: format!(
+                    "real {path_label} already exists at {}",
+                    biscuit_file::to_portable_string(&dest)
+                ),
+            });
+        }
+        Err(error) => return Err(error.into()),
+    }
 
     Ok(LinkResult::Linked {
         source: source.to_path_buf(),
@@ -143,7 +156,10 @@ pub fn create_skill_link(
     scope: ResourceScope,
 ) -> Result<LinkResult> {
     let source_root = source.parent().ok_or_else(|| {
-        ClaudineError::LinkingError(format!("source path has no parent: {}", source.display()))
+        ClaudineError::LinkingError(format!(
+            "source path has no parent: {}",
+            biscuit_file::to_portable_string(source)
+        ))
     })?;
     create_resource_link(source, source_root, dest_dir, scope)
 }
@@ -169,12 +185,12 @@ pub fn relative_path(from_dir: &Path, target: &Path) -> PathBuf {
         debug_assert!(
             from_dir.is_absolute(),
             "from_dir must be absolute: {}",
-            from_dir.display()
+            biscuit_file::to_portable_string(from_dir)
         );
         debug_assert!(
             target.is_absolute(),
             "target must be absolute: {}",
-            target.display()
+            biscuit_file::to_portable_string(target)
         );
     }
 
@@ -420,5 +436,84 @@ mod tests {
             }
             other => panic!("expected Linked, got {other:?}"),
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_resource_link_creates_file_symlink() {
+        let fixture = TempDir::new().unwrap();
+        let source_root = fixture.path().join("source");
+        let source = source_root.join("prompts/plan.md");
+        let dest_root = fixture.path().join("dest");
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        fs::write(&source, "# Plan").unwrap();
+
+        let result = create_resource_link(
+            &source,
+            &source_root,
+            &dest_root,
+            ResourceScope::User,
+        )
+        .unwrap();
+        let LinkResult::Linked { dest, .. } = result else {
+            panic!("expected a linked file, got {result:?}");
+        };
+        assert!(dest.symlink_metadata().unwrap().file_type().is_symlink());
+        assert_eq!(fs::read_to_string(dest).unwrap(), "# Plan");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_resource_link_skips_real_file_collision() {
+        let fixture = TempDir::new().unwrap();
+        let source_root = fixture.path().join("source");
+        let source = source_root.join("prompts/plan.md");
+        let dest_root = fixture.path().join("dest");
+        let dest = dest_root.join("prompts/plan.md");
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        fs::write(&source, "# Source").unwrap();
+        fs::write(&dest, "# Existing").unwrap();
+
+        let result = create_resource_link(
+            &source,
+            &source_root,
+            &dest_root,
+            ResourceScope::User,
+        )
+        .unwrap();
+        let LinkResult::Skipped { reason } = result else {
+            panic!("expected a collision skip, got {result:?}");
+        };
+        assert!(reason.contains("real file already exists"));
+        assert_eq!(fs::read_to_string(dest).unwrap(), "# Existing");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_resource_link_reports_already_linked_file() {
+        let fixture = TempDir::new().unwrap();
+        let source_root = fixture.path().join("source");
+        let source = source_root.join("prompts/plan.md");
+        let dest_root = fixture.path().join("dest");
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        fs::write(&source, "# Plan").unwrap();
+
+        create_resource_link(
+            &source,
+            &source_root,
+            &dest_root,
+            ResourceScope::User,
+        )
+        .unwrap();
+        let result = create_resource_link(
+            &source,
+            &source_root,
+            &dest_root,
+            ResourceScope::User,
+        )
+        .unwrap();
+
+        assert!(matches!(result, LinkResult::AlreadyLinked));
     }
 }

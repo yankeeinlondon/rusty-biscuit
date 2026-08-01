@@ -2,15 +2,18 @@
 //!
 //! Long absolute paths inside tool call / result slots dominate the line
 //! and hide the interesting tail. When the path lives inside the current
-//! workspace (or the user's `$HOME`), this helper returns an OSC8
-//! hyperlink whose *visible* text is the short form (repo-relative or
-//! `~/`-relative) and whose `href` is the full absolute path so
-//! click-to-open still works.
+//! workspace (or the user's `$HOME`), this helper returns an OSC8 hyperlink
+//! whose *visible* text is the short form (repo-relative or `~/`-relative) and
+//! whose `href` is a file URI for the full absolute path. Paths that cannot be
+//! converted to file URIs remain escaped plain text.
 //!
 //! Keep the helper fast: it is called for every rendered tool event.
 //! Resolution is purely lexical — no `fs::canonicalize`, no I/O.
 
 use std::path::{Path, PathBuf};
+
+use biscuit_file::to_portable_string;
+use url::Url;
 
 /// Maximum length of the *visible* text inside the OSC8 link. Paths
 /// longer than this are truncated with a leading ellipsis so the stderr
@@ -21,10 +24,12 @@ const MAX_VISIBLE_LEN: usize = 80;
 ///
 /// ## Returns
 ///
-/// - When `raw` is an absolute path under `cwd`: a blue OSC8 link whose
-///   visible text is the path relative to `cwd`.
+/// - When `raw` is an absolute path under `cwd`: a blue OSC8 file link whose
+///   visible text is the portable path relative to `cwd`.
 /// - When `raw` is an absolute path under `home`: a blue OSC8 link whose
-///   visible text is `~/<rest>`.
+///   visible text is portable `~/<rest>`.
+/// - When an absolute path cannot be converted to a file URI: the escaped
+///   literal.
 /// - Otherwise: the escaped literal (`escape_prose`-style) so stray
 ///   markup characters in the path cannot break Prose parsing.
 pub fn format_file_link(raw: &str, cwd: &Path, home: Option<&Path>) -> String {
@@ -38,14 +43,20 @@ pub fn format_file_link(raw: &str, cwd: &Path, home: Option<&Path>) -> String {
     if let Some(rel) = strip_prefix(path, cwd)
         && !rel.as_os_str().is_empty()
     {
-        return osc8_link(raw, &rel.to_string_lossy());
+        return match Url::from_file_path(path) {
+            Ok(href) => osc8_link(href.as_str(), &to_portable_string(&rel)),
+            Err(()) => escape_prose(raw),
+        };
     }
     if let Some(home) = home
         && let Some(rel) = strip_prefix(path, home)
         && !rel.as_os_str().is_empty()
     {
-        let visible = format!("~/{}", rel.to_string_lossy());
-        return osc8_link(raw, &visible);
+        let visible = format!("~/{}", to_portable_string(&rel));
+        return match Url::from_file_path(path) {
+            Ok(href) => osc8_link(href.as_str(), &visible),
+            Err(()) => escape_prose(raw),
+        };
     }
     escape_prose(raw)
 }
@@ -113,26 +124,40 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
+    fn file_href(path: &Path) -> String {
+        Url::from_file_path(path).unwrap().to_string()
+    }
+
     #[test]
     fn path_inside_cwd_renders_relative_osc8_link() {
-        let cwd = PathBuf::from("/repo");
-        let raw = "/repo/src/main.rs";
-        let rendered = format_file_link(raw, &cwd, None);
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = tmp.path();
+        let path = cwd.join("src").join("main.rs");
+        let raw = path.to_string_lossy();
+        let rendered = format_file_link(&raw, cwd, None);
         assert_eq!(
             rendered,
-            r#"<blue><a href="/repo/src/main.rs">src/main.rs</a></blue>"#
+            format!(
+                r#"<blue><a href="{}">src/main.rs</a></blue>"#,
+                file_href(&path)
+            )
         );
     }
 
     #[test]
     fn path_inside_home_renders_tilde_prefix() {
-        let cwd = PathBuf::from("/repo");
-        let home = PathBuf::from("/home/ken");
-        let raw = "/home/ken/notes/today.md";
-        let rendered = format_file_link(raw, &cwd, Some(&home));
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = tmp.path().join("repo");
+        let home = tmp.path().join("home").join("ken");
+        let path = home.join("notes").join("today.md");
+        let raw = path.to_string_lossy();
+        let rendered = format_file_link(&raw, &cwd, Some(&home));
         assert_eq!(
             rendered,
-            r#"<blue><a href="/home/ken/notes/today.md">~/notes/today.md</a></blue>"#
+            format!(
+                r#"<blue><a href="{}">~/notes/today.md</a></blue>"#,
+                file_href(&path)
+            )
         );
     }
 
@@ -155,11 +180,13 @@ mod tests {
 
     #[test]
     fn prose_metacharacters_in_path_are_escaped() {
-        let cwd = PathBuf::from("/repo");
-        let raw = "/repo/weird<name>.rs";
-        let rendered = format_file_link(raw, &cwd, None);
-        // Both href and visible must have angle brackets escaped.
-        assert!(rendered.contains(r#"href="/repo/weird\<name\>.rs""#));
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = tmp.path();
+        let path = cwd.join("weird<name>.rs");
+        let raw = path.to_string_lossy();
+        let rendered = format_file_link(&raw, cwd, None);
+        assert!(rendered.contains(&format!(r#"href="{}""#, file_href(&path))));
+        assert!(rendered.contains("weird%3Cname%3E.rs"));
         assert!(rendered.contains(">weird\\<name\\>.rs<"));
     }
 
@@ -178,32 +205,41 @@ mod tests {
 
     #[test]
     fn home_preferred_when_cwd_is_not_prefix() {
-        let cwd = PathBuf::from("/repo");
-        let home = PathBuf::from("/home/ken");
-        let raw = "/home/ken/.config/foo.toml";
-        let rendered = format_file_link(raw, &cwd, Some(&home));
-        assert!(
-            rendered
-                .starts_with(r#"<blue><a href="/home/ken/.config/foo.toml">~/.config/foo.toml"#)
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = tmp.path().join("repo");
+        let home = tmp.path().join("home").join("ken");
+        let path = home.join(".config").join("foo.toml");
+        let raw = path.to_string_lossy();
+        let rendered = format_file_link(&raw, &cwd, Some(&home));
+        assert_eq!(
+            rendered,
+            format!(
+                r#"<blue><a href="{}">~/.config/foo.toml</a></blue>"#,
+                file_href(&path)
+            )
         );
     }
 
     #[test]
     fn cwd_preferred_over_home_when_both_could_match() {
-        let cwd = PathBuf::from("/home/ken/repo");
-        let home = PathBuf::from("/home/ken");
-        let raw = "/home/ken/repo/src/main.rs";
-        let rendered = format_file_link(raw, &cwd, Some(&home));
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home").join("ken");
+        let cwd = home.join("repo");
+        let path = cwd.join("src").join("main.rs");
+        let raw = path.to_string_lossy();
+        let rendered = format_file_link(&raw, &cwd, Some(&home));
         assert!(rendered.contains(">src/main.rs<"));
     }
 
     #[test]
     fn long_path_truncates_visible_text_but_keeps_full_href() {
-        let cwd = PathBuf::from("/repo");
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = tmp.path();
         let long_tail: String = "a/".repeat(60);
-        let raw = format!("/repo/{long_tail}file.rs");
-        let rendered = format_file_link(&raw, &cwd, None);
-        assert!(rendered.contains(&format!(r#"href="{raw}""#)));
+        let path = cwd.join(format!("{long_tail}file.rs"));
+        let raw = path.to_string_lossy();
+        let rendered = format_file_link(&raw, cwd, None);
+        assert!(rendered.contains(&format!(r#"href="{}""#, file_href(&path))));
         let visible_start = rendered.find(r#"">"#).unwrap() + 2;
         let visible_end = rendered.rfind("</a>").unwrap();
         let visible = &rendered[visible_start..visible_end];
@@ -214,5 +250,55 @@ mod tests {
         );
         assert!(visible.starts_with('\u{2026}'));
         assert!(visible.ends_with("file.rs"));
+    }
+
+    #[test]
+    fn file_uri_percent_encodes_reserved_characters() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = tmp.path();
+        let path = cwd.join("prompt #100%.md");
+        let raw = path.to_string_lossy();
+        let rendered = format_file_link(&raw, cwd, None);
+
+        assert!(rendered.contains(&format!(r#"href="{}""#, file_href(&path))));
+        assert!(rendered.contains("prompt%20%23100%25.md"));
+        assert!(rendered.contains(">prompt #100%.md<"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_drive_and_unc_targets_use_valid_file_uris() {
+        let tmp = tempfile::tempdir().unwrap();
+        let drive_path = tmp.path().join("prompt #100%.md");
+        let drive_raw = drive_path.to_string_lossy();
+        let drive_rendered = format_file_link(&drive_raw, tmp.path(), None);
+        let drive_href = file_href(&drive_path);
+        let drive_letter = match drive_path.components().next() {
+            Some(std::path::Component::Prefix(prefix)) => match prefix.kind() {
+                std::path::Prefix::Disk(letter) => letter as char,
+                other => panic!("expected disk path, got {other:?}"),
+            },
+            other => panic!("expected prefixed path, got {other:?}"),
+        };
+        assert!(drive_href.starts_with(&format!("file:///{drive_letter}:/")));
+        assert!(drive_rendered.contains(&format!(r#"href="{drive_href}""#)));
+        assert!(drive_rendered.contains("prompt%20%23100%25.md"));
+
+        let unc_base = Path::new(r"\\server\share");
+        let unc_path = unc_base.join("prompt #100%.md");
+        let unc_raw = unc_path.to_string_lossy();
+        let unc_rendered = format_file_link(&unc_raw, unc_base, None);
+        assert!(unc_rendered.contains(r#"href="file://server/share/prompt%20%23100%25.md""#));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn declined_device_namespace_falls_back_to_plain_text() {
+        let cwd = Path::new(r"\\.\");
+        let raw = r"\\.\COM1";
+        let rendered = format_file_link(raw, cwd, None);
+
+        assert_eq!(rendered, escape_prose(raw));
+        assert!(!rendered.contains("<a "));
     }
 }

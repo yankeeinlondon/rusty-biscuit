@@ -60,6 +60,102 @@ impl Drop for TestWorkspace {
     }
 }
 
+/// Hermetic defaults for tests that execute the shipped `claudine` binary.
+///
+/// Repository topology, prompts, provider memory, and user configuration are
+/// absent until a test writes them into the fixture explicitly.
+pub struct CliProcessFixture {
+    workspace: TestWorkspace,
+    cwd: PathBuf,
+    home: PathBuf,
+    bin_dir: PathBuf,
+}
+
+impl CliProcessFixture {
+    pub fn named(prefix: &str) -> Self {
+        let workspace = TestWorkspace::named(prefix);
+        let cwd = workspace.path().join("cwd");
+        let home = workspace.path().join("home");
+        let bin_dir = workspace.path().join("bin");
+        for path in [&cwd, &home, &bin_dir] {
+            fs::create_dir_all(path).unwrap();
+        }
+        Self {
+            workspace,
+            cwd,
+            home,
+            bin_dir,
+        }
+    }
+
+    pub fn cwd(&self) -> &Path {
+        &self.cwd
+    }
+
+    pub fn home(&self) -> &Path {
+        &self.home
+    }
+
+    pub fn bin_dir(&self) -> &Path {
+        &self.bin_dir
+    }
+
+    pub fn initialize_repository(&self) {
+        assert!(
+            init_git_repo(&self.cwd),
+            "failed to initialize fixture repository at {}",
+            self.cwd.display()
+        );
+    }
+
+    pub fn seed_user_config(&self) {
+        wrap::seed_minimal_config(&self.home);
+    }
+
+    pub fn write_root_system_prompt(&self, content: &str) -> PathBuf {
+        let path = self.cwd.join("system-prompt.md");
+        write(&path, content);
+        path
+    }
+
+    pub fn write_user_system_prompt(&self, content: &str) -> PathBuf {
+        let path = self.home.join(".claudine/system-prompt.md");
+        write(&path, content);
+        path
+    }
+
+    pub fn write_repo_appendix(&self, content: &str) -> PathBuf {
+        let path = self.cwd.join(".claudine/non-interactive.md");
+        write(&path, content);
+        path
+    }
+
+    pub fn write_provider_memory(&self, relative: &str, content: &str) -> PathBuf {
+        let path = self.cwd.join(relative);
+        write(&path, content);
+        path
+    }
+
+    pub fn command(&self) -> assert_cmd::Command {
+        let path = std::env::join_paths([self.bin_dir.as_path()])
+            .expect("fake-only PATH should contain one valid path");
+        let mut command = assert_cmd::Command::cargo_bin("claudine").unwrap();
+        command
+            .current_dir(&self.cwd)
+            .env("HOME", &self.home)
+            .env("USERPROFILE", &self.home)
+            .env_remove("HOMEDRIVE")
+            .env_remove("HOMEPATH")
+            .env_remove("XDG_CONFIG_HOME")
+            .env("APPDATA", &self.home)
+            .env("LOCALAPPDATA", &self.home)
+            .env("PATH", path)
+            .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
+            .env("NO_COLOR", "1");
+        command
+    }
+}
+
 pub fn write(path: &Path, content: &str) {
     ensure_test_tracing_initialized();
     if let Some(parent) = path.parent() {

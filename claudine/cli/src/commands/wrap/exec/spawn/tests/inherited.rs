@@ -3,20 +3,23 @@
 use super::*;
 
 /// Spawn must populate `ProcessResult.agent_pid` immediately after
-/// `command.spawn()?` returns. The captured PID must match a real
-/// positive integer. This test exercises the legacy/interactive spawn
-/// path used by direct wrappers and legacy composition runs.
+/// `command.spawn()?` returns. The captured PID must match a real positive
+/// integer. A platform shell exits successfully so the fixture does not
+/// assume a Unix executable layout. This test exercises the
+/// legacy/interactive spawn path used by direct wrappers and legacy
+/// composition runs.
 #[test]
 fn run_child_captures_agent_pid_after_successful_spawn() {
     let env = minimal_env();
-    let cwd = Path::new("/tmp");
+    let cwd = test_cwd();
+    let (binary, args) = test_shell_command("exit 0", "exit 0");
     let mut child_spawned = false;
 
     let result = run_child(
-        true_binary(),
-        &[],
+        &binary,
+        &args,
         &env,
-        cwd,
+        &cwd,
         None,
         false,
         ChildIoOptions {
@@ -26,7 +29,7 @@ fn run_child_captures_agent_pid_after_successful_spawn() {
         },
         &mut child_spawned,
     )
-    .expect("spawning /usr/bin/true must succeed on the test host");
+    .expect("spawning the platform shell fixture must succeed");
 
     assert!(child_spawned, "child_spawned flag must flip on success");
     let pid = result

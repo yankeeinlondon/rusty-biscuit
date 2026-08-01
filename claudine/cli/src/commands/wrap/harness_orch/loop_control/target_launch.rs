@@ -635,14 +635,15 @@ pub(super) fn rebuild_target_launch(
     let env_overrides =
         rebuild_launch_identity(intent, cli_model, repo_root, target, None)?.env_overrides;
 
-    // Rebuild the early-binding context the same way the pipeline builds the
-    // router's lifecycle context (see `construct_lifecycle_runtime`): capture at
-    // the launch area against the target's own frontmatter+body, then overlay the
-    // rebuilt identity so `env.AGENT`/`env.MODEL`/`env.YOLO` resolve to it.
-    let fm_json = serde_json::to_string(&target.frontmatter).unwrap_or_default();
-    let scan = format!("{fm_json}\n{}", target.prompt);
-    let mut prepared_context =
-        darkmatter::markdown::compose::ComposeContext::capture_for_content(launch_area, &scan);
+    // Reuse the exact context retained with target materialization, then overlay
+    // the rebuilt identity so `env.AGENT`/`env.MODEL`/`env.YOLO` resolve to it.
+    // The ambient branch is retained for synthetic compatibility fixtures that
+    // construct a materialized prompt without canonical preparation.
+    let mut prepared_context = target.compose_context.clone().unwrap_or_else(|| {
+        let fm_json = serde_json::to_string(&target.frontmatter).unwrap_or_default();
+        let scan = format!("{fm_json}\n{}", target.prompt);
+        darkmatter::markdown::compose::ComposeContext::capture_for_content(launch_area, &scan)
+    });
     for (key, value) in &env_overrides {
         prepared_context.env_mut().insert(key.clone(), value.clone());
     }

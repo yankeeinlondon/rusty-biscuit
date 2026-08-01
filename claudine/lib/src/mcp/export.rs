@@ -129,7 +129,7 @@ impl<'a> McpExporter<'a> {
         info.mcp
             .write_native_config(&export_servers, &config_path, &managed_names)?;
 
-        let source = config_path.to_string_lossy().to_string();
+        let source = biscuit_file::to_portable_string(&config_path);
         for removed in managed_entries
             .iter()
             .filter(|entry| !desired_names.contains(&entry.native_name))

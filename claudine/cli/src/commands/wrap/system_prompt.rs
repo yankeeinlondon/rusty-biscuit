@@ -68,14 +68,18 @@ pub(crate) fn describe_source(source: &SystemPromptSource) -> String {
                 StandardPromptScope::User => "user",
                 StandardPromptScope::CurrentDirectory => "cwd",
             };
-            format!("{} ({})", path.display(), scope_label)
+            format!("{} ({})", biscuit_file::to_portable_string(path), scope_label)
         }
         SystemPromptSource::ExplicitFile { path, mode } => {
             let mode_label = match mode {
                 SystemPromptMode::Append => "append",
                 SystemPromptMode::Replace => "replace",
             };
-            format!("{} (explicit {})", path.display(), mode_label)
+            format!(
+                "{} (explicit {})",
+                biscuit_file::to_portable_string(path),
+                mode_label
+            )
         }
         SystemPromptSource::NonInteractiveFile { path, scope } => {
             let scope_label = match scope {
@@ -85,7 +89,11 @@ pub(crate) fn describe_source(source: &SystemPromptSource) -> String {
                 StandardPromptScope::User => "user",
                 StandardPromptScope::CurrentDirectory => "cwd",
             };
-            format!("{} (non-interactive {})", path.display(), scope_label)
+            format!(
+                "{} (non-interactive {})",
+                biscuit_file::to_portable_string(path),
+                scope_label
+            )
         }
         SystemPromptSource::BuiltInNonInteractive => {
             "built-in non-interactive fallback".to_string()

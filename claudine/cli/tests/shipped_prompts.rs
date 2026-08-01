@@ -2,6 +2,7 @@ use darkmatter::markdown::Markdown;
 use std::path::{Path, PathBuf};
 
 mod common;
+#[cfg(unix)]
 use common::{augmented_path, write, write_executable};
 
 fn workspace_root() -> PathBuf {

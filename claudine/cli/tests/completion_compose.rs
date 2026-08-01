@@ -88,44 +88,38 @@ fn compose_word_partial_renders_repo_claudine_scope() {
 }
 
 #[test]
-fn compose_empty_partial_renders_user_global_scope() {
-    let ws = TestWorkspace::named("complete-compose-user-global-empty");
+fn compose_empty_partial_from_nested_cwd_renders_repo_scope() {
+    let ws = TestWorkspace::named("complete-compose-nested-repo-empty");
     seed_cargo_workspace(ws.path());
-    let home = fake_home(ws.path());
+    let nested = ws.path().join("pkg").join("src");
+    fs::create_dir_all(&nested).unwrap();
     write_file(
-        &home.join(".claudine").join("prompts").join("plan.md"),
+        &ws.path().join(".claudine").join("prompts").join("plan.md"),
         "# plan\n",
     );
 
-    let got = run_complete_with_home(ws.path(), &home, &["compose", ""]);
+    let got = run_complete(&nested, &["compose", ""]);
     assert!(
-        got.iter().any(|c| c == "~/.claudine/prompts/plan.md"),
-        "user-global prompt must render home-relative: {got:?}"
-    );
-    assert!(
-        !got.iter().any(|c| c == "prompts/plan.md"),
-        "user-global prompt must not collapse to prompts/: {got:?}"
+        got.iter().any(|c| c == ".claudine/prompts/plan.md"),
+        "repo prompt must render relative to the repo root from nested cwd: {got:?}"
     );
 }
 
 #[test]
-fn compose_word_partial_renders_user_global_scope() {
-    let ws = TestWorkspace::named("complete-compose-user-global-word");
+fn compose_word_partial_from_nested_cwd_renders_repo_scope() {
+    let ws = TestWorkspace::named("complete-compose-nested-repo-word");
     seed_cargo_workspace(ws.path());
-    let home = fake_home(ws.path());
+    let nested = ws.path().join("pkg").join("src");
+    fs::create_dir_all(&nested).unwrap();
     write_file(
-        &home.join(".claudine").join("prompts").join("plan.md"),
+        &ws.path().join(".claudine").join("prompts").join("plan.md"),
         "# plan\n",
     );
 
-    let got = run_complete_with_home(ws.path(), &home, &["compose", "plan"]);
+    let got = run_complete(&nested, &["compose", "plan"]);
     assert!(
-        got.iter().any(|c| c == "~/.claudine/prompts/plan.md"),
-        "user-global word match must render home-relative: {got:?}"
-    );
-    assert!(
-        !got.iter().any(|c| c == "prompts/plan.md"),
-        "user-global word match must not collapse to prompts/: {got:?}"
+        got.iter().any(|c| c == ".claudine/prompts/plan.md"),
+        "repo word match must render relative to the repo root from nested cwd: {got:?}"
     );
 }
 
@@ -395,21 +389,20 @@ fn compose_magic_surfaces_filename_present_in_one_tier() {
 }
 
 #[test]
-fn compose_magic_surfaces_user_global_only_filename() {
-    let ws = TestWorkspace::named("complete-compose-magic-user-only");
+fn compose_magic_surfaces_repo_claudine_only_filename() {
+    let ws = TestWorkspace::named("complete-compose-magic-repo-claudine-only");
     seed_cargo_workspace(ws.path());
-    let home = fake_home(ws.path());
 
     write_file(
-        &home.join(".claudine").join("prompts").join("plan.md"),
-        "# user\n",
+        &ws.path().join(".claudine").join("prompts").join("plan.md"),
+        "# repo claudine\n",
     );
 
-    let got = run_complete_with_home(ws.path(), &home, &["compose", "@plan"]);
+    let got = run_complete(ws.path(), &["compose", "@plan"]);
     assert_eq!(
         got,
         vec!["@plan.md".to_string()],
-        "a filename present only in the user-global scope must still surface"
+        "a filename present only in the repo .claudine scope must still surface"
     );
 }
 
@@ -675,15 +668,14 @@ fn compose_magic_short_prefix_surfaces_no_dirs() {
     // Word-mode (non-`@`) behavior.
     let ws = TestWorkspace::named("complete-compose-magic-short-dirs");
     seed_cargo_workspace(ws.path());
-    let home = fake_home(ws.path());
     write_file(
-        &home.join(".claudine").join("prompts").join("daily.md"),
+        &ws.path().join(".claudine").join("prompts").join("daily.md"),
         "# d\n",
     );
     fs::create_dir_all(ws.path().join("docs")).unwrap();
     fs::create_dir_all(ws.path().join("features")).unwrap();
 
-    let got = run_complete_with_home(ws.path(), &home, &["compose", "@d"]);
+    let got = run_complete(ws.path(), &["compose", "@d"]);
     assert!(
         got.iter().any(|c| c == "@daily.md"),
         "magic short prefix must surface the matching file: {got:?}"

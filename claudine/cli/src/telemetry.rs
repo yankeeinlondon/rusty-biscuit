@@ -584,11 +584,12 @@ mod tests {
 
     #[test]
     fn shorten_source_path_strips_repo_root_prefix() {
-        let shortened = shorten_source_path(
-            "/repo/claudine/cli/src/telemetry.rs",
-            Some(Path::new("/repo")),
-        );
-        assert_eq!(shortened, "claudine/cli/src/telemetry.rs");
+        let repo = tempfile::tempdir().unwrap();
+        let relative = Path::new("claudine").join("cli/src/telemetry.rs");
+        let source = repo.path().join(&relative);
+        let source_text = source.to_string_lossy();
+        let shortened = shorten_source_path(source_text.as_ref(), Some(repo.path()));
+        assert_eq!(Path::new(shortened.as_ref()), relative);
     }
 
     #[test]

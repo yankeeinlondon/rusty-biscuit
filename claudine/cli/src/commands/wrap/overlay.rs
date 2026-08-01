@@ -42,6 +42,8 @@ pub(crate) fn materialize_passthrough_harness_seed(
     prompt: String,
     shell_cwd: Option<&Path>,
     runtime_state: std::sync::Arc<claudine::composition::RuntimeState>,
+    invocation: &claudine::invocation_context::InvocationContext,
+    source_context: &claudine::invocation_context::SourceContext,
 ) -> Result<super::harness_orch::MaterializedHarnessPrompt> {
     let source_text = fs::read_to_string(source_path).map_err(|e| {
         claudine::composition::CompositionError::MarkdownLoad {
@@ -50,11 +52,22 @@ pub(crate) fn materialize_passthrough_harness_seed(
         }
     })?;
     let source_markdown: darkmatter::markdown::Markdown = source_text.into();
+    let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(
+        &source_markdown,
+    );
+    let evidence = invocation.runtime_evidence(source_context, &requirements);
+    let context = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
+        source_context.base_dir(),
+        &requirements,
+        &evidence,
+    );
     let options = claudine::composition::bind_agent_workspace(
-        darkmatter::markdown::compose::ComposeOptions::new(),
+        darkmatter::markdown::compose::ComposeOptions::new_with_context(context.clone())
+            .with_file_resolution_context(source_context.file_resolution_context().clone()),
         source_path,
         shell_cwd,
     );
+    invocation.record_compose_operation();
     let (composed, _report) = source_markdown.compose_with(options)?;
 
     let frontmatter = frontmatter_map_to_value(composed.frontmatter());
@@ -66,7 +79,8 @@ pub(crate) fn materialize_passthrough_harness_seed(
         env_overrides: Vec::new(),
         selection_hints: claudine::composition::EffectiveSelectionHints::default(),
         inline_closure_plan: None,
-        file_resolution_context: None,
+        file_resolution_context: Some(source_context.file_resolution_context().clone()),
+        compose_context: Some(context),
         live_frontmatter,
         runtime_state,
         lifecycle: None,

@@ -6,16 +6,26 @@ use super::{agent, changes, datetime, docs, git, host, languages, repo};
 
 /// Independently captured runtime-context domains.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum ContextGroup {
+pub enum ContextGroup {
+    /// Clock, calendar, and timezone values.
     DateTime,
+    /// Branch, worktree, and merge-conflict values.
     Git,
+    /// Repository and package-topology values.
     Repo,
+    /// Working-tree and package change values.
     FileChanges,
+    /// Programming-language and package-manager values.
     Languages,
+    /// Markdown-document and matching-skill values.
     Documents,
+    /// Operating-system values.
     Os,
+    /// CPU and memory values.
     Hardware,
+    /// GPU values.
     Gpu,
+    /// Agent and model values derived from the captured environment.
     Agent,
 }
 
@@ -37,6 +47,55 @@ impl ContextGroup {
 
     pub(crate) fn for_key(key: &str) -> Option<Self> {
         group_for_key(key)
+    }
+}
+
+/// Runtime-context groups required to compose one document or content fragment.
+///
+/// The set describes capture requirements only; it does not expose how a group
+/// is populated. Date/time is always included because every existing
+/// demand-driven capture entry point provides those zero-discovery values.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextRequirements {
+    groups: HashSet<ContextGroup>,
+}
+
+impl ContextRequirements {
+    /// Scans content for active `ctx.*` references.
+    pub fn for_content(content: &str) -> Self {
+        let mut groups = scan_needed_groups(content);
+        groups.insert(ContextGroup::DateTime);
+        Self { groups }
+    }
+
+    /// Scans both authored frontmatter values and the document body.
+    pub fn for_document(document: &crate::markdown::Markdown) -> Self {
+        let frontmatter =
+            serde_json::to_string(document.frontmatter().as_map()).unwrap_or_default();
+        Self::for_content(&format!("{frontmatter}\n{}", document.content()))
+    }
+
+    /// Requires every public runtime-context group.
+    pub fn all() -> Self {
+        Self {
+            groups: ContextGroup::all().into_iter().collect(),
+        }
+    }
+
+    /// Whether this capture requires `group`.
+    pub fn contains(&self, group: ContextGroup) -> bool {
+        self.groups.contains(&group)
+    }
+
+    /// Iterates the required groups in unspecified order.
+    pub fn iter(&self) -> impl Iterator<Item = ContextGroup> + '_ {
+        self.groups.iter().copied()
+    }
+
+    pub(crate) fn from_groups(groups: impl IntoIterator<Item = ContextGroup>) -> Self {
+        Self {
+            groups: groups.into_iter().collect(),
+        }
     }
 }
 
@@ -143,5 +202,37 @@ mod tests {
         assert!(groups.contains(&ContextGroup::Hardware));
         // `ctx.os` inside a literal must not trigger the OS group.
         assert!(!groups.contains(&ContextGroup::Os));
+    }
+
+    #[test]
+    fn public_requirements_scan_frontmatter_body_aliases_and_literals() {
+        let document: crate::markdown::Markdown = r#"---
+branch: '{{ ctx.branch }}'
+literal: '{{{ ctx.gpu }}}'
+---
+Today is {{ ctx.utc }} on {{ ctx.os }}.
+"#
+        .into();
+
+        let requirements = ContextRequirements::for_document(&document);
+
+        assert!(requirements.contains(ContextGroup::DateTime));
+        assert!(requirements.contains(ContextGroup::Git));
+        assert!(requirements.contains(ContextGroup::Os));
+        assert!(!requirements.contains(ContextGroup::Gpu));
+    }
+
+    #[test]
+    fn public_requirements_scan_every_context_group() {
+        let requirements = ContextRequirements::for_content(
+            "{{ ctx.utc }} {{ ctx.branch }} {{ ctx.repo_root }} \
+             {{ ctx.dirty_files }} {{ ctx.programming_languages_in_repo }} \
+             {{ ctx.docs_readme }} {{ ctx.os }} {{ ctx.cpu_cores }} \
+             {{ ctx.gpu }} {{ ctx.agent }}",
+        );
+
+        for group in ContextGroup::all() {
+            assert!(requirements.contains(group), "missing group: {group:?}");
+        }
     }
 }

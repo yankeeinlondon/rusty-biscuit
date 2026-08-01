@@ -64,11 +64,27 @@ Internally these switches map to `claudine::system_prompt::SystemPromptArgs`.
 
 The library pipeline lives in `claudine/lib/src/system_prompt/`:
 
-1. `LaunchContext::from_cwd()` detects the launch workspace from the directory Claudine was started in
-2. `resolve_system_prompt_source()` picks either an explicit file or a discovered `system-prompt.md`
-3. `prepare_system_prompt()` composes the selected file through Darkmatter
-4. non-interactive sessions append `.claudine/non-interactive.md`, `~/.claudine/non-interactive.md`, or the built-in fallback message
-5. providers apply the prepared result through `WrapperProfile::apply_system_prompt()`
+1. `InvocationContext` captures the launch CWD, HOME, environment, and launch
+   repository observation once; `LaunchContext` is projected from those facts
+2. `resolve_system_prompt_source_with_invocation()` picks either an explicit
+   file or a discovered `system-prompt.md` using launch-scoped resolution
+3. each selected file receives a source-derived `SourceContext` and
+   `FileResolutionContext`
+4. `ContextRequirements` scans the primary prompt and appendix candidates as a
+   union; the invocation supplies one demand-driven runtime snapshot for their
+   composition
+5. `prepare_system_prompt()` composes the selected file through Darkmatter
+6. non-interactive sessions append `.claudine/non-interactive.md`,
+   `~/.claudine/non-interactive.md`, or the built-in fallback message
+7. providers apply the prepared result through
+   `WrapperProfile::apply_system_prompt()`
+
+Candidate selection remains anchored to the launch context. Deriving a source
+context for a prompt in another repository does not move automatic
+`system-prompt.md` or non-interactive appendix discovery there. Repository,
+HOME, and environment evidence comes from the invocation owner: same-worktree
+sources reuse topology, sibling repositories get one request-local
+observation, and trusted files outside Git retain explicit repository absence.
 
 `EffectiveSystemPrompt` is the handoff type between resolution/preparation and runtime delivery:
 
@@ -117,9 +133,23 @@ Selected prompt files are composed with Darkmatter before they ever reach the pr
 Current preparation behavior:
 
 - the source file path is passed into `ComposeOptions::with_source_file(...)`
+- the source-derived `FileResolutionContext` is passed into
+  `ComposeOptions::with_file_resolution_context(...)`
+- primary and appendix composition share one supplied, demand-driven
+  `ComposeContext`; it uses the invocation's frozen environment and does not
+  fall back to ambient Git, topology, HOME, or host capture
 - frontmatter is not forwarded to the provider
 - the canonical output is Markdown as authored after composition
 - if the composed body is empty or whitespace-only, Claudine treats that as an explicit disable for the selected scope
+
+File resolution and shell execution deliberately use different roots.
+References authored inside a prompt resolve from that prompt's source context,
+including when it lives in a sibling repository or outside Git. `::shell`
+directives in both the primary prompt and a file-backed appendix remain pinned
+to the agent's **launch repository root**, not the selected template's parent
+or repository. Outside a launch repository they use the launch CWD. The
+built-in appendix has no fabricated file source and requires no file-resolution
+context.
 
 Important disable rule:
 

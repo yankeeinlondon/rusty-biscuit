@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Integration tests: OpenCode wrapper behavior: model resolution, repo-root launch, structured stdout, and stderr diagnostic classification.
 //!
 //! Split out of the `wrap_commands.rs` god file; shared fixtures live in
@@ -131,7 +133,9 @@ exit 0
     );
 
     assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .current_dir(workspace.path())
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
@@ -260,7 +264,9 @@ exit 0
     );
 
     assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .current_dir(workspace.path())
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("OPENCODE_MODEL", "test-model")
@@ -596,7 +602,9 @@ exit 0
     );
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .current_dir(workspace.path())
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", &fake_home)
         .env("PATH", augmented_path(&path_dir))
         .env("OPENCODE_MODEL", "test-model")
@@ -810,7 +818,9 @@ exit 0
     );
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .current_dir(workspace.path())
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", &fake_home)
         .env("PATH", augmented_path(&path_dir))
         .env("OPENCODE_MODEL", "test-model")
@@ -951,7 +961,9 @@ exit 0
     );
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .current_dir(workspace.path())
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", &fake_home)
         .env("PATH", augmented_path(&path_dir))
         .env("OPENCODE_MODEL", "test-model")

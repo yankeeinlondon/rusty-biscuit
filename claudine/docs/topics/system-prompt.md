@@ -1,6 +1,6 @@
 # System Prompt Handling
 
-The system-prompt refactor moved prompt resolution into a shared library pipeline and turned provider delivery into a launch-plan mutation step. Claudine now resolves a file-backed system prompt once, composes it through Darkmatter, and then lets each wrapped provider apply it with its own runtime strategy.
+The system-prompt pipeline resolves from one request-owned launch context and turns provider delivery into a launch-plan mutation step. Claudine resolves a file-backed system prompt once, retains its source context through Darkmatter composition, and then lets each wrapped provider apply it with its own runtime strategy.
 
 Non-interactive sessions add one more layer on top of that shared pipeline: a mandatory safety appendix that tells the provider not to request permission or ask follow-up questions. This appendix is appended after any resolved system prompt content, or becomes the full effective prompt when no other system prompt exists.
 
@@ -47,13 +47,15 @@ Internally these switches map to `claudine::system_prompt::SystemPromptArgs`.
 
 The library pipeline lives in `claudine/lib/src/system_prompt/`:
 
-1. `LaunchContext::from_cwd()` detects the launch workspace from the directory Claudine was started in
-2. `resolve_system_prompt_source()` picks either an explicit file or a discovered `system-prompt.md`
-3. `prepare_system_prompt()` composes the selected file through Darkmatter
-4. non-interactive sessions append `.claudine/non-interactive.md`, `~/.claudine/non-interactive.md`, or the built-in fallback message
-5. providers apply the prepared result through `WrapperProfile::apply_system_prompt()`
+1. `InvocationContext` captures the launch CWD, HOME, environment, repository observation, and launch file-resolution rules once
+2. its `LaunchContext` projection selects either an explicit file or a discovered `system-prompt.md`; explicit references resolve through the invocation's launch `FileResolutionContext`
+3. each selected file retains a source-derived `SourceContext`, including its repository/package roots and `FileResolutionContext`
+4. the primary prompt and non-interactive candidates contribute one union of requested `ctx.*` groups; the invocation supplies cached evidence for one shared runtime context
+5. each file composes with that shared runtime context and its own retained file-resolution context
+6. non-interactive sessions append `.claudine/non-interactive.md`, `~/.claudine/non-interactive.md`, or the built-in fallback message
+7. providers apply the prepared result through `WrapperProfile::apply_system_prompt()`
 
-`EffectiveSystemPrompt` is the handoff type between resolution/preparation and runtime delivery:
+`ResolvedSystemPrompt` is the handoff type between resolution/preparation and runtime delivery:
 
 - `None` means no file was found or specified
 - `Disabled` means a file was found, but its composed body was empty
@@ -93,6 +95,8 @@ Explicit `--append-system-prompt` / `--replace-system-prompt` files ignore `mode
 - `package_area_root`
 - `package_root`
 
+The owning `InvocationContext` caches repository observations by worktree identity. Sources in the launch repository reuse its topology; multiple sources in one sibling repository add one repository observation and one topology probe for that repository. Non-repository source directories retain explicit absence instead of repeatedly attempting repository discovery.
+
 ## Composition Semantics
 
 Selected prompt files are composed with Darkmatter before they ever reach the provider. That means the system prompt supports the same document-level composition features as other Claudine Markdown flows, including source-aware transclusion and interpolation.
@@ -100,13 +104,16 @@ Selected prompt files are composed with Darkmatter before they ever reach the pr
 Current preparation behavior:
 
 - the source file path is passed into `ComposeOptions::with_source_file(...)`
+- the source-derived `FileResolutionContext` is passed into the same `ComposeOptions`, so transclusion and file-like values use the frozen launch/source roots, HOME, and environment rather than ambient process state
+- requested runtime groups are captured from invocation-owned evidence and shared across the primary prompt and appendix; downstream composition does not rediscover Git or topology
+- `::shell` runs from the launch repository root; outside a repository it runs from the explicit launch CWD, never from the selected prompt's directory
 - frontmatter is not forwarded to the provider
 - the canonical output is Markdown as authored after composition
 - if the composed body is empty or whitespace-only, Claudine treats that as an explicit disable for the selected scope
 
 Important disable rule:
 
-- an empty composed body stops the search and produces `EffectiveSystemPrompt::Disabled`
+- an empty composed body stops the search and produces `ResolvedSystemPrompt::Disabled`
 - Claudine does not continue to lower-priority `system-prompt.md` locations after that
 
 ## Non-Interactive Appendix
@@ -209,6 +216,8 @@ If the composed prompt exceeds this, the wrap errors with a clear message tellin
 ## Harness Integration
 
 The system prompt capability model also informs wrapper-harness source discovery. `find_wrapper_harness_source()` looks at the selected agent's `runtime.system_prompt.memory_files`, ignores home-relative entries such as `~/.gemini/GEMINI.md`, and searches the repo root or current working directory for the first provider-specific memory file that exists on disk.
+
+Harness detection is deliberately split from materialization. With no user prompt, Claudine performs no memory-file lookup. When a candidate exists, Darkmatter parses its authored frontmatter and `has_harness_properties` decides eligibility. A valid ordinary provider memory file stops there: Claudine does not compose its body. Only an enabled harness is fully materialized, using the retained source `FileResolutionContext`, demand-driven invocation evidence, the source repository for shell policy, and the launch-root shell working directory. Malformed frontmatter remains an error rather than being treated as “no harness.”
 
 This is separate from Claudine-managed prompt injection:
 

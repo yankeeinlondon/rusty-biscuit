@@ -82,9 +82,9 @@ impl ShellApprovalFailure {
     /// error is not a licence to reword it.
     fn message(&self, command: &str, source_file: &Path, line: usize) -> String {
         let location = if line > 0 {
-            format!("{}:{}", source_file.display(), line)
+            format!("{}:{line}", biscuit_file::to_portable_string(source_file))
         } else {
-            source_file.display().to_string()
+            biscuit_file::to_portable_string(source_file)
         };
         match self {
             ShellApprovalFailure::Blacklisted(reason) => {
@@ -157,7 +157,10 @@ pub enum CompositionError {
     NotMarkdown(String),
 
     /// The Markdown file could not be loaded or parsed.
-    #[error("failed to load Markdown: {}: {source}", path.display())]
+    #[error(
+        "failed to load Markdown: {}: {source}",
+        biscuit_file::to_portable_string(path)
+    )]
     MarkdownLoad {
         /// The file whose load/parse failed.
         path: PathBuf,
@@ -360,7 +363,10 @@ pub enum CompositionError {
     /// Carries the unboxed [`std::io::Error`] the read+write open probe raised,
     /// so the OS-level reason (`permission denied`, `is a directory`, a broken
     /// symlink) reaches a handler instead of only the flattened `Display` text.
-    #[error("insufficient file permissions (need read+write): {}: {source}", path.display())]
+    #[error(
+        "insufficient file permissions (need read+write): {}: {source}",
+        biscuit_file::to_portable_string(path)
+    )]
     InsufficientFilePermissions {
         /// The file whose read+write probe failed.
         path: PathBuf,
@@ -513,7 +519,7 @@ pub enum CompositionError {
     /// side effects (Discord, Slack, TTS, stderr, desktop notifications).
     #[error(
         "lifecycle interpolation leaked in `{property}`: {expression} ({source_path})",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleInterpolationLeak {
         /// The composed prompt file whose lifecycle frontmatter leaked.
@@ -539,7 +545,7 @@ pub enum CompositionError {
     /// desktop notification) can dispatch the degraded message.
     #[error(
         "lifecycle property `{property}` references undefined variable `{variable}` ({source_path})",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleUndefinedVariable {
         /// The prompt file whose lifecycle frontmatter referenced the variable.
@@ -560,7 +566,7 @@ pub enum CompositionError {
     /// key and points to the lifecycle surface that replaces it.
     #[error(
         "removed validation/handler key `{key}` in {source_path}: {replacement}",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     RemovedValidationKey {
         /// The prompt file whose frontmatter contained the removed key.
@@ -579,7 +585,7 @@ pub enum CompositionError {
     /// the right frontmatter block.
     #[error(
         "invalid lifecycle stack item in `{property}` ({source_path}): {message}",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleStackInvalidShape {
         /// The prompt file whose lifecycle frontmatter held the malformed stack.
@@ -605,7 +611,7 @@ pub enum CompositionError {
     /// [`LifecycleStackInvalidShape`]: CompositionError::LifecycleStackInvalidShape
     #[error(
         "invalid lifecycle stack item in `{property}` ({source_path}): {message}",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleWhenExpressionInvalid {
         /// The prompt file whose lifecycle frontmatter held the condition.
@@ -627,7 +633,7 @@ pub enum CompositionError {
     /// reported through this variant with a `message` that names the cause.
     #[error(
         "invalid lifecycle action `{raw}` in `{property}` ({source_path}): {message}",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleActionInvalidShortForm {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -644,7 +650,7 @@ pub enum CompositionError {
     /// type, or missing required parameter.
     #[error(
         "invalid lifecycle action `{action}` in `{property}` ({source_path}): {message}",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleActionInvalidLongForm {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -673,7 +679,7 @@ pub enum CompositionError {
     /// lifecycle verb.
     #[error(
         "unknown lifecycle action `{verb}` in `{property}` ({source_path}){rewrite}",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleUnknownVerb {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -690,7 +696,7 @@ pub enum CompositionError {
     /// forms because it is a multi-key object without an explicit `action:` key.
     #[error(
         "ambiguous lifecycle stack item in `{property}` ({source_path}): {message}",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleStackAmbiguous {
         /// The prompt file whose lifecycle frontmatter held the stack item.
@@ -708,7 +714,7 @@ pub enum CompositionError {
     #[error(
         "lifecycle action `{verb}` in `{property}` received an object value where a scalar or array is expected; \
          pass object data through a whole-value `{{{{ ... }}}}` interpolation ({source_path})",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleObjectDataThroughInterpolationPositional {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -726,7 +732,7 @@ pub enum CompositionError {
     #[error(
         "lifecycle action `{verb}` parameter `{param}` in `{property}` received an object value where a scalar is expected; \
          pass object data through a whole-value `{{{{ ... }}}}` interpolation ({source_path})",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleObjectDataThroughInterpolationParameter {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -742,7 +748,7 @@ pub enum CompositionError {
     /// `proxy.with` was authored with something other than a YAML mapping.
     #[error(
         "`{property}.{path}` must be a mapping, got {actual} ({source_path})",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleProxyWithNotMapping {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -765,7 +771,7 @@ pub enum CompositionError {
     /// inject typed object or array values at individual keys.
     #[error(
         "`{property}.{path}` cannot be supplied as a whole-mapping interpolation `{raw}` ({source_path})",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleProxyWithWholeMapping {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -783,7 +789,7 @@ pub enum CompositionError {
     /// frontmatter properties and are never interpolated.
     #[error(
         "`{property}.{path}` has a dynamic key `{key}`; `with:` keys must be static strings ({source_path})",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleProxyWithDynamicKey {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -808,7 +814,7 @@ pub enum CompositionError {
     #[error(
         "`{property}.{path}` could not be resolved for the proxy to `{target}`: {message} \
          ({source_path})",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleProxyWithEvaluationFailed {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -829,7 +835,7 @@ pub enum CompositionError {
     #[error(
         "lifecycle action `{verb}` in `{property}` does not accept a `{param}` parameter; \
          `{param}` is only valid on `proxy` ({source_path})",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleProxyOnlyParameter {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -845,7 +851,7 @@ pub enum CompositionError {
     /// A positional lifecycle action received the wrong number of arguments.
     #[error(
         "lifecycle action `{verb}` in `{property}` has the wrong arity ({source_path}): {message}",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleWrongArity {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -866,7 +872,7 @@ pub enum CompositionError {
     #[error(
         "short-form lifecycle action `{raw}` in `{property}` has been removed ({source_path}).\n\n\
          Use the positional or key/value form instead: {rewrite}",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleShortFormRemoved {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -888,7 +894,7 @@ pub enum CompositionError {
     #[error(
         "lifecycle expression function `{verb}` in `{property}` does not support key/value form; \
          use the positional array form (`{verb}: [...]`) ({source_path})",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleExpressionFunctionKeyValueUnsupported {
         /// The prompt file whose frontmatter held the action.
@@ -906,7 +912,7 @@ pub enum CompositionError {
     /// diagnostic can name both the action and the event.
     #[error(
         "lifecycle action `{action}` is not valid in the `{event}` event ({source_path})",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleActionPlacement {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -927,7 +933,7 @@ pub enum CompositionError {
     #[error(
         "lifecycle stack item in `{property}` has more than one lifecycle action; \
          at most one is allowed per item ({source_path})",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleMultipleLifecycleActions {
         /// The prompt file whose lifecycle frontmatter held the stack item.
@@ -943,7 +949,7 @@ pub enum CompositionError {
     /// actions would be unreachable).
     #[error(
         "lifecycle action in `{property}` must be the last action in its stack item ({source_path})",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleActionOrder {
         /// The prompt file whose lifecycle frontmatter held the stack item.
@@ -960,7 +966,7 @@ pub enum CompositionError {
     /// required target).
     #[error(
         "lifecycle action `{action}` in `{property}` has invalid arguments ({source_path}): {message}",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleInvalidArgs {
         /// The prompt file whose lifecycle frontmatter held the action.
@@ -986,7 +992,7 @@ pub enum CompositionError {
     #[error(
         "lifecycle property `{property}` references `err` in the `{event}` event, \
          which never carries an error ({source_path})",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleErrNotAvailable {
         /// The prompt file whose lifecycle frontmatter held the reference.
@@ -1011,7 +1017,7 @@ pub enum CompositionError {
     #[error(
         "lifecycle shell command at `{property}` failed pre-flight resolution: {message} \
          (raw: `{raw}`) ({source_path})",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleShellResolution {
         /// The prompt file whose lifecycle frontmatter held the command.
@@ -1043,7 +1049,7 @@ pub enum CompositionError {
     #[error(
         "lifecycle `resume` requires a live provider session to resume, but none \
          was captured (the provider had not launched) ({source_path})",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleResumeWithoutSession {
         /// The prompt file whose stack requested resume.
@@ -1064,7 +1070,7 @@ pub enum CompositionError {
          to start a fresh session ({source_path})",
         plural = if facets.len() == 1 { "y" } else { "ies" },
         facets = facets.join(", "),
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleResumeIncompatible {
         /// The prompt file whose stack requested resume.
@@ -1085,7 +1091,7 @@ pub enum CompositionError {
         "lifecycle `{action}` at `{event}` is accepted, but its runtime effect is \
          not wired for this event; move the recovery to a post-launch event \
          (`failure`/`finalize`/`success`) ({source_path})",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleSetupPhaseRecoveryUnsupported {
         /// The prompt file whose stack requested the action.
@@ -1106,7 +1112,7 @@ pub enum CompositionError {
          this prompt again later, via the rendezvous scheduler) is not ready to \
          receive prompts — use `retry`/`resume` for in-run recovery for now \
          ({source_path})",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleDeferNotImplemented {
         /// The prompt file whose stack requested `defer`.
@@ -1122,7 +1128,7 @@ pub enum CompositionError {
             Some(r) => format!(", reason `{r}`"),
             None => String::new(),
         },
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleRequeueEnqueueFailed {
         /// The prompt file whose stack requested requeue.
@@ -1146,7 +1152,7 @@ pub enum CompositionError {
         "lifecycle `proxy` hand-off to `{target}` forms a cycle or exceeds the \
          proxy hop limit ({limit}); active chain: {chain} ({source_path})",
         chain = chain.join(" -> "),
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleProxyCycle {
         /// The prompt file whose stack requested the cyclic proxy.
@@ -1169,7 +1175,7 @@ pub enum CompositionError {
     /// diagnostic names the stage rather than claiming the action is invalid.
     #[error(
         "lifecycle `{verb}` cannot be honored at `{stage}`: {reason} ({source_path})",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleTransitionUnownedAtStage {
         /// The document whose stack returned the transition.
@@ -1201,7 +1207,7 @@ pub enum CompositionError {
     #[error(
         "lifecycle `proxy` hand-off to `{target}` has no owning coordinator: \
          `{command}` prepares no active document to hand off to ({source_path})",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleProxyWithoutOwningCoordinator {
         /// The document whose stack authored the proxy.
@@ -1226,8 +1232,8 @@ pub enum CompositionError {
     #[error(
         "proxy target `{target_path}` could not be prepared: {reason} \
          (requested by {property} in {source_path})",
-        target_path = target_path.display(),
-        source_path = source_path.display()
+        target_path = biscuit_file::to_portable_string(target_path),
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleProxyTargetBootstrapFailed {
         /// The resolved target that failed to bootstrap.
@@ -1250,7 +1256,7 @@ pub enum CompositionError {
     /// this error is returned, so callers should not double-emit them.
     #[error(
         "lifecycle `initialize` raised an error: {reason} ({source_path})",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleInitializeFailed {
         /// The prompt file whose `initialize` stack raised the error.
@@ -1269,7 +1275,7 @@ pub enum CompositionError {
     /// propagation table) and never produces this variant.
     #[error(
         "lifecycle `loop` gate raised an error: {reason} ({source_path})",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleLoopGateFailed {
         /// The prompt file whose `loop:` gate stack raised the error.
@@ -1292,7 +1298,7 @@ pub enum CompositionError {
     /// like any other setup failure.
     #[error(
         "lifecycle `{event}` evaluation error in `{surface}`: {message} ({source_path})",
-        source_path = source_path.display()
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleEvaluationError {
         /// The prompt file whose lifecycle event raised the error.
@@ -1936,7 +1942,7 @@ pub enum CompositionError {
     /// Loop execution exceeded its configured safety cap.
     #[error(
         "loop limit exceeded for {prompt_path} at iteration {iteration}; cap is {cap}",
-        prompt_path = prompt_path.display()
+        prompt_path = biscuit_file::to_portable_string(prompt_path)
     )]
     LoopLimitExceeded {
         /// Maximum allowed iteration count.
@@ -2036,7 +2042,7 @@ pub enum CompositionError {
     /// Loop execution was interrupted by the user (SIGINT / Ctrl+C).
     #[error(
         "user interrupted looping operation in {prompt_path}",
-        prompt_path = prompt_path.display()
+        prompt_path = biscuit_file::to_portable_string(prompt_path)
     )]
     LoopInterrupted {
         /// Prompt file being executed when the interrupt was observed.
@@ -2054,7 +2060,7 @@ pub enum CompositionError {
     /// for downstream tooling.
     #[error(
         "loop iteration {iteration} of {prompt_path}: {reason} (exit code {exit_code})",
-        prompt_path = prompt_path.display()
+        prompt_path = biscuit_file::to_portable_string(prompt_path)
     )]
     LoopIterationFailed {
         /// 1-based iteration that failed.
@@ -2093,7 +2099,10 @@ pub enum CompositionError {
     /// constraint grammar rather than file paths.
     ///
     /// [`SchemaParse`]: CompositionError::SchemaParse
-    #[error("schema load failed for {}: {message}", source_path.display())]
+    #[error(
+        "schema load failed for {}: {message}",
+        biscuit_file::to_portable_string(source_path)
+    )]
     SchemaLoad {
         /// The prompt file whose `$schema` reference failed to load.
         source_path: PathBuf,
@@ -2110,7 +2119,10 @@ pub enum CompositionError {
     /// because the path is fine and the body is wrong.
     ///
     /// [`SchemaLoad`]: CompositionError::SchemaLoad
-    #[error("schema parse failed for {}: {message}", source_path.display())]
+    #[error(
+        "schema parse failed for {}: {message}",
+        biscuit_file::to_portable_string(source_path)
+    )]
     SchemaParse {
         /// The prompt file whose `$schema` body failed to parse.
         source_path: PathBuf,
@@ -2133,7 +2145,7 @@ pub enum CompositionError {
     /// here so callers can choose their handling.
     #[error(
         "schema validation failed for {}: {message}",
-        source_path.display()
+        biscuit_file::to_portable_string(source_path)
     )]
     SchemaValidation {
         /// The prompt file being validated.
@@ -2153,7 +2165,7 @@ pub enum CompositionError {
     /// flag, etc.) and when the user has opted out via `prompt_for_missing`.
     #[error(
         "missing required schema {plural} for {}: {names}",
-        source_path.display(),
+        biscuit_file::to_portable_string(source_path),
         plural = if missing.len() == 1 { "property" } else { "properties" },
         names = format_missing_names(missing)
     )]
@@ -2180,7 +2192,7 @@ pub enum CompositionError {
     #[error(
         "missing required property `{property}` in {} has an unsupported \
          schema shape for interactive collection: {shape}",
-        source_path.display()
+        biscuit_file::to_portable_string(source_path)
     )]
     UnsupportedInteractiveSchema {
         /// The prompt file whose schema cannot be collected.
@@ -2205,7 +2217,7 @@ pub enum CompositionError {
     /// `reason` preserves the original file-reference failure text.
     #[error(
         "unresolved file reference for `{property}` in {}: {reason}",
-        source_path.display()
+        biscuit_file::to_portable_string(source_path)
     )]
     UnresolvedFileReference {
         /// The prompt file whose schema declares the property.
@@ -2236,7 +2248,7 @@ pub enum CompositionError {
         provider.as_ref().map(|p| format!(" ({p})")).unwrap_or_default(),
         reset_at.as_ref().map(|r| format!("; resets at {}", r.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M:%S"))).unwrap_or_default(),
         message.as_ref().map(|m| format!("\n  ↳ {m}")).unwrap_or_default(),
-        prompt_path = prompt_path.display()
+        prompt_path = biscuit_file::to_portable_string(prompt_path)
     )]
     LoopRateLimited {
         /// 1-based iteration that produced the rate-limit trailer.
@@ -2293,7 +2305,7 @@ pub enum CompositionError {
     /// circuits here with an actionable error.
     #[error(
         "composed prompt body is empty for {}{}",
-        source_path.display(),
+        biscuit_file::to_portable_string(source_path),
         if provided_overrides.is_empty() {
             String::new()
         } else {
@@ -2752,7 +2764,7 @@ impl DroppedOptionalSource {
 fn render_reference_chain(chain: &[PathBuf]) -> String {
     chain
         .iter()
-        .map(|p| p.display().to_string())
+        .map(|path| biscuit_file::to_portable_string(path))
         .collect::<Vec<_>>()
         .join(" → ")
 }

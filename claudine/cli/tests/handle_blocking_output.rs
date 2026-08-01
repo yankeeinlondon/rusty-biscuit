@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 #[cfg(unix)]
 #[cfg(unix)]
 use serde_json::Value;

@@ -288,7 +288,7 @@ pub(crate) fn spawn_prompt_timing_monitor(
 ) -> (TickerCancel, thread::JoinHandle<()>) {
     let cancel = TickerCancel::new();
     let cancel_flag = cancel.clone();
-    let prompt_path_display = prompt_timing.absolute_path.display().to_string();
+    let prompt_path_display = biscuit_file::to_portable_string(&prompt_timing.absolute_path);
 
     let handle = thread::spawn(move || {
         let term = crate::log::terminal();

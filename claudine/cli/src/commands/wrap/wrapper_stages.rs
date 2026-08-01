@@ -142,6 +142,7 @@ pub(crate) fn resolve_and_apply_system_prompt(
     profile: &dyn WrapperProfile,
     args: &WrapperArgs,
     launch_context: &claudine::system_prompt::LaunchContext,
+    invocation: &claudine::invocation_context::InvocationContext,
     launch_workspace: &claudine::composition::LaunchWorkspaceContext,
     cwd: &Path,
     non_interactive_requested: bool,
@@ -158,10 +159,11 @@ pub(crate) fn resolve_and_apply_system_prompt(
     };
     let mut launch_context = launch_context.clone();
     launch_context.agent = Some(profile.agent_env().to_string());
-    let effective_sp = claudine::system_prompt::resolve_and_prepare_for_session(
+    let effective_sp = claudine::system_prompt::resolve_and_prepare_for_session_with_context(
         &sp_args,
         &launch_context,
         non_interactive_requested,
+        invocation,
     )?;
 
     let mut sp_artifacts: Vec<system_prompt::SystemPromptArtifact> = Vec::new();
@@ -357,6 +359,13 @@ pub(crate) fn prepare_stream_and_prompt(
 }
 
 #[allow(clippy::type_complexity)]
+fn wrapper_harness_frontmatter_enabled(source_path: &Path) -> Result<bool> {
+    let authored = darkmatter::markdown::Markdown::try_from(source_path)?;
+    let frontmatter = super::overlay::frontmatter_map_to_value(authored.frontmatter());
+    Ok(claudine::harness::has_harness_properties(&frontmatter))
+}
+
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub(crate) fn detect_wrapper_harness(
     provider: Provider,
     _profile: &dyn WrapperProfile,
@@ -365,13 +374,17 @@ pub(crate) fn detect_wrapper_harness(
     env_plan: &env::EnvPlan,
     child_cwd: &Path,
     cwd: &Path,
+    invocation: &claudine::invocation_context::InvocationContext,
 ) -> Result<
-    Option<(
-        PathBuf,
-        String,
-        harness_orch::MaterializedHarnessPrompt,
-        claudine::harness::ShellApprovalOptions,
-    )>,
+    (
+        Option<(
+            PathBuf,
+            String,
+            harness_orch::MaterializedHarnessPrompt,
+            claudine::harness::ShellApprovalOptions,
+        )>,
+        Option<std::time::Duration>,
+    ),
 > {
     let base_prompt = prompt_source
         .as_inline()
@@ -382,25 +395,33 @@ pub(crate) fn detect_wrapper_harness(
     });
 
     if let (Some(base_prompt), Some(source_path)) = (base_prompt, harness_source) {
+        invocation.record_harness_eligibility_parse();
+        if !wrapper_harness_frontmatter_enabled(&source_path)? {
+            return Ok((None, None));
+        }
+        let source_context = invocation.derive_source(&source_path)?;
+        invocation.record_harness_materialization();
+        let materialization_started = std::time::Instant::now();
         let seed = harness_orch::materialize_passthrough_harness_seed(
             &source_path,
             base_prompt.clone(),
             Some(child_cwd),
             std::sync::Arc::new(claudine::composition::RuntimeState::new()),
+            invocation,
+            &source_context,
         )?;
-        let harness_enabled = claudine::harness::has_harness_properties(&seed.frontmatter);
-        if harness_enabled {
-            let shell_options = harness_orch::build_harness_shell_options(
-                &source_path,
-                env_plan.repo_root.as_deref(),
-            );
+        let materialization_elapsed = materialization_started.elapsed();
+        let shell_options = harness_orch::build_harness_shell_options_for_source(
+            &source_path,
+            source_context.repository_root(),
+        );
 
-            Ok(Some((source_path, base_prompt, seed, shell_options)))
-        } else {
-            Ok(None)
-        }
+        Ok((
+            Some((source_path, base_prompt, seed, shell_options)),
+            Some(materialization_elapsed),
+        ))
     } else {
-        Ok(None)
+        Ok((None, None))
     }
 }
 
@@ -486,8 +507,15 @@ pub(crate) fn run_execution_stage(
     term: &Terminal,
     wrapper_span: &tracing::Span,
     mut perf_collector: Option<&mut crate::perf::CommandPerfCollector>,
+    invocation: &claudine::invocation_context::InvocationContext,
 ) -> Result<(i32, Option<String>)> {
     if let Some((source_path, base_prompt, initial_materialized, shell_options)) = wrapper_harness {
+        let source_context = invocation.derive_source(&source_path)?;
+        let initial_compose_context = initial_materialized.compose_context.clone();
+        let input_layers = claudine::composition::CallerInputLayers {
+            file_resolution_context: initial_materialized.file_resolution_context.clone(),
+            ..Default::default()
+        };
         let mut prompt_state = harness_orch::HarnessPromptState {
             mode: harness_orch::HarnessPromptMode::Passthrough,
             original_ref: source_path.display().to_string(),
@@ -500,8 +528,10 @@ pub(crate) fn run_execution_stage(
             runtime_state: std::sync::Arc::clone(&initial_materialized.runtime_state),
             suppress_output_commit: false,
             last_final_output: None,
-            input_layers: Default::default(),
+            input_layers,
             entry: claudine::composition::DocumentEntryReason::Direct,
+            invocation_context: Some(invocation.clone()),
+            source_context: Some(source_context),
         };
 
         let mut harness_base_args = child_args.to_vec();
@@ -522,12 +552,8 @@ pub(crate) fn run_execution_stage(
             term,
             source_path: &source_path_for_lifecycle,
             repo_root: env_plan.repo_root.as_deref(),
-            // This stage receives no `LaunchWorkspaceContext`; `ctx.*` capture
-            // falls back to the prompt/source directory.
-            launch_area: None,
-            // No prepared snapshot here; lifecycle falls back to demand-driven
-            // capture rooted at the source directory.
-            context: None,
+            launch_area: Some(invocation.launch_cwd()),
+            context: initial_compose_context.as_ref(),
         };
         let default_lifecycle_emitter = claudine::composition::DefaultLifecycleEmitter;
         let mut lifecycle_guard = claudine::composition::LifecycleRunGuard::new(
@@ -688,198 +714,5 @@ pub(crate) fn run_execution_stage(
 //   #9 policy path emits no native `--yolo` —
 //      `opencode_one_shot_*` (permissions/providers/opencode.rs).
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::Value;
-
-    /// Parse a `WrapperArgs` from a bare arg list via a clap probe so the
-    /// `--stall-timeout` validation can be exercised without constructing the
-    /// struct by hand.
-    fn wrapper_args_from(extra: &[&str]) -> WrapperArgs {
-        use clap::Parser;
-
-        // `WrapperArgs` declares its own `help` field, so the auto-generated
-        // `--help` must be disabled to avoid a duplicate-argument panic.
-        #[derive(Debug, clap::Parser)]
-        #[command(disable_help_flag = true)]
-        struct Probe {
-            #[command(flatten)]
-            args: WrapperArgs,
-        }
-
-        let mut argv = vec!["probe"];
-        argv.extend_from_slice(extra);
-        Probe::try_parse_from(argv)
-            .expect("probe must parse")
-            .args
-    }
-
-    #[test]
-    fn parse_cli_timeouts_rejects_invalid_stall_timeout() {
-        let args = wrapper_args_from(&["--stall-timeout", "nope"]);
-        let err = parse_cli_timeouts(&args).unwrap_err();
-        assert!(
-            err.to_string().contains("invalid --stall-timeout value"),
-            "got: {err}"
-        );
-    }
-
-    #[test]
-    fn parse_cli_timeouts_accepts_zero_and_valid_stall_timeout() {
-        for value in ["0s", "0.5s", "10m"] {
-            let args = wrapper_args_from(&["--stall-timeout", value]);
-            assert!(
-                parse_cli_timeouts(&args).is_ok(),
-                "--stall-timeout {value} should be accepted"
-            );
-        }
-    }
-
-    /// The rebuilt launch identity's MCP facet must track the switches the
-    /// wrapper was actually invoked with. Pinning it to `false` is invisible
-    /// while the direct-wrapper lifecycle stays empty, but it silently
-    /// activates a stale compatibility path the moment retry/resume becomes
-    /// reachable here — a refreshed body's `#tag`s would stop moving the facet.
-    #[test]
-    fn passthrough_launch_intent_mcp_tracks_wrapper_switches() {
-        let cases: [(&[&str], bool); 5] = [
-            (&[], false),
-            (&["--mcp"], true),
-            (&["--use", "context7"], true),
-            (&["--use", "context7,gitnexus"], true),
-            (&["--mcp", "--use", "context7"], true),
-        ];
-
-        for (switches, expected) in cases {
-            let args = wrapper_args_from(switches);
-            let intent = passthrough_launch_intent(
-                Provider::Claude,
-                Path::new("/usr/local/bin/claude"),
-                true,
-                &args,
-                &[],
-                None,
-            );
-            assert_eq!(
-                intent.mcp_enabled, expected,
-                "mcp_enabled for {switches:?} should be {expected}"
-            );
-        }
-    }
-
-    const KEY: &str = "OPENCODE_CONFIG_CONTENT";
-
-    fn env_plan_with(current: Option<&str>) -> env::EnvPlan {
-        let mut plan = env::EnvPlan::default();
-        if let Some(raw) = current {
-            plan.env
-                .insert(std::ffi::OsString::from(KEY), std::ffi::OsString::from(raw));
-        }
-        plan
-    }
-
-    fn config_value(plan: &env::EnvPlan) -> Option<Value> {
-        plan.env
-            .get(std::ffi::OsStr::new(KEY))
-            .and_then(|os| os.to_str())
-            .map(|raw| serde_json::from_str(raw).expect("config is valid JSON"))
-    }
-
-    #[test]
-    fn opencode_yolo_non_interactive_adds_three_allow_keys() {
-        let mut plan = env_plan_with(None);
-        apply_opencode_yolo_config_overlay(Provider::OpenCode, true, true, &mut plan).unwrap();
-
-        let config = config_value(&plan).expect("permission overlay was written");
-        let permission = config.get("permission").and_then(Value::as_object).unwrap();
-        assert_eq!(permission["*"], "allow");
-        assert_eq!(permission["external_directory"], "allow");
-        assert_eq!(permission["doom_loop"], "allow");
-    }
-
-    #[test]
-    fn opencode_yolo_interactive_adds_no_permission_key() {
-        let mut plan = env_plan_with(None);
-        // Interactive mirrors `YoloOutcome::not_applied`: the gate is closed.
-        apply_opencode_yolo_config_overlay(Provider::OpenCode, true, false, &mut plan).unwrap();
-        assert!(config_value(&plan).is_none());
-    }
-
-    #[test]
-    fn opencode_non_yolo_non_interactive_leaves_env_untouched() {
-        let existing = r#"{"instructions":["/tmp/sp.md"]}"#;
-        let mut plan = env_plan_with(Some(existing));
-        apply_opencode_yolo_config_overlay(Provider::OpenCode, false, true, &mut plan).unwrap();
-
-        let config = config_value(&plan).unwrap();
-        assert!(config.get("permission").is_none());
-        assert_eq!(config["instructions"], serde_json::json!(["/tmp/sp.md"]));
-    }
-
-    #[test]
-    fn non_opencode_provider_is_a_no_op() {
-        let mut plan = env_plan_with(None);
-        apply_opencode_yolo_config_overlay(Provider::Claude, true, true, &mut plan).unwrap();
-        assert!(config_value(&plan).is_none());
-    }
-
-    #[test]
-    fn yolo_merge_preserves_instructions_and_mcp() {
-        // Simulate Phase 2 output: both system-prompt and MCP writers ran.
-        let existing = r#"{"instructions":["/tmp/sp.md"],"mcp":{"srv":{}}}"#;
-        let mut plan = env_plan_with(Some(existing));
-        apply_opencode_yolo_config_overlay(Provider::OpenCode, true, true, &mut plan).unwrap();
-
-        let config = config_value(&plan).unwrap();
-        assert_eq!(config["instructions"], serde_json::json!(["/tmp/sp.md"]));
-        assert_eq!(config["mcp"], serde_json::json!({ "srv": {} }));
-        assert_eq!(config["permission"]["*"], "allow");
-        assert_eq!(config["permission"]["external_directory"], "allow");
-        assert_eq!(config["permission"]["doom_loop"], "allow");
-    }
-
-    /// Spawn-spec: a non-interactive YOLO OpenCode child carries
-    /// `--dangerously-skip-permissions` on argv (from the profile) **and** the
-    /// permission block in `OPENCODE_CONFIG_CONTENT` (from Stage 10.5).
-    #[test]
-    fn opencode_yolo_spawn_spec_has_argv_flag_and_config_permission() {
-        let opencode = profile::profile_for_provider(Provider::OpenCode).unwrap();
-        let mut argv = vec!["run".to_string()];
-        let mut env_overrides: Vec<(String, String)> = Vec::new();
-        let outcome = opencode
-            .apply_yolo_for_mode(&mut argv, &mut env_overrides, false)
-            .unwrap();
-        assert!(outcome.applied);
-        assert!(argv.iter().any(|a| a == "--dangerously-skip-permissions"));
-
-        let mut plan = env_plan_with(None);
-        apply_opencode_yolo_config_overlay(Provider::OpenCode, outcome.applied, true, &mut plan)
-            .unwrap();
-        let config = config_value(&plan).unwrap();
-        assert_eq!(config["permission"]["external_directory"], "allow");
-        assert_eq!(config["permission"]["doom_loop"], "allow");
-    }
-
-    /// Dry-run observable: `--dry-run` renders the env from `env_plan.added`
-    /// (not the child `env`), so the merged permission block must appear there
-    /// too — otherwise a dry-run would hide the YOLO config it is meant to show.
-    #[test]
-    fn opencode_yolo_overlay_is_visible_in_added_env() {
-        // Simulate the system-prompt fold having already recorded an entry in
-        // `added`; the overlay must replace it, not duplicate it.
-        let existing = r#"{"instructions":["/tmp/sp.md"]}"#;
-        let mut plan = env_plan_with(Some(existing));
-        plan.added.push((KEY.to_string(), existing.to_string()));
-
-        apply_opencode_yolo_config_overlay(Provider::OpenCode, true, true, &mut plan).unwrap();
-
-        let entries: Vec<&(String, String)> =
-            plan.added.iter().filter(|(k, _)| k == KEY).collect();
-        assert_eq!(entries.len(), 1, "no duplicate OPENCODE_CONFIG_CONTENT entry");
-        let shown: Value = serde_json::from_str(&entries[0].1).unwrap();
-        assert_eq!(shown["instructions"], serde_json::json!(["/tmp/sp.md"]));
-        assert_eq!(shown["permission"]["*"], "allow");
-        assert_eq!(shown["permission"]["external_directory"], "allow");
-        assert_eq!(shown["permission"]["doom_loop"], "allow");
-    }
-}
+#[path = "wrapper_stages/tests.rs"]
+mod tests;

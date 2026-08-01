@@ -49,9 +49,56 @@ pub fn resolve_system_prompt_source(
     args: &SystemPromptArgs,
     context: &LaunchContext,
 ) -> Result<Option<(SystemPromptSource, String)>, crate::error::ClaudineError> {
+    resolve_system_prompt_source_with_home(args, context, dirs::home_dir().as_deref())
+}
+
+/// Resolve a system-prompt source from one invocation's frozen launch facts.
+pub(crate) fn resolve_system_prompt_source_with_invocation(
+    args: &SystemPromptArgs,
+    context: &LaunchContext,
+    invocation: &crate::invocation_context::InvocationContext,
+) -> Result<Option<(SystemPromptSource, String)>, crate::error::ClaudineError> {
+    if let Some(ref file) = args.append_file {
+        return resolve_explicit_file_with_context(
+            file,
+            SystemPromptMode::Append,
+            invocation.launch_file_resolution_context(),
+        );
+    }
+    if let Some(ref file) = args.replace_file {
+        return resolve_explicit_file_with_context(
+            file,
+            SystemPromptMode::Replace,
+            invocation.launch_file_resolution_context(),
+        );
+    }
+    discover_standard_file(context, invocation.home_dir())
+}
+
+fn resolve_explicit_file_with_context(
+    file_ref: &str,
+    mode: SystemPromptMode,
+    resolution_context: &FileResolutionContext,
+) -> Result<Option<(SystemPromptSource, String)>, crate::error::ClaudineError> {
+    let not_found =
+        || crate::error::ClaudineError::SystemPromptFileNotFound(file_ref.to_string());
+    let reference = FileReference::new(file_ref).map_err(|_| not_found())?;
+    let path = reference
+        .resolve_in_context(resolution_context)
+        .map_err(|_| not_found())?
+        .ok_or_else(not_found)?;
+    let text = std::fs::read_to_string(&path)?;
+    Ok(Some((SystemPromptSource::ExplicitFile { path, mode }, text)))
+}
+
+fn resolve_system_prompt_source_with_home(
+    args: &SystemPromptArgs,
+    context: &LaunchContext,
+    home_dir: Option<&std::path::Path>,
+) -> Result<Option<(SystemPromptSource, String)>, crate::error::ClaudineError> {
     // 1. Explicit --append-system-prompt
     if let Some(ref file) = args.append_file {
-        let path = resolve_file_ref(file, context)?;
+        let path = resolve_file_ref(file, context, home_dir)?;
         let text = std::fs::read_to_string(&path)?;
         return Ok(Some((
             SystemPromptSource::ExplicitFile {
@@ -64,7 +111,7 @@ pub fn resolve_system_prompt_source(
 
     // 2. Explicit --replace-system-prompt
     if let Some(ref file) = args.replace_file {
-        let path = resolve_file_ref(file, context)?;
+        let path = resolve_file_ref(file, context, home_dir)?;
         let text = std::fs::read_to_string(&path)?;
         return Ok(Some((
             SystemPromptSource::ExplicitFile {
@@ -76,7 +123,7 @@ pub fn resolve_system_prompt_source(
     }
 
     // 3. Standard discovery
-    discover_standard_file(context)
+    discover_standard_file(context, home_dir)
 }
 
 /// Discover a `system-prompt.md` by filename over the launch context's known
@@ -88,6 +135,7 @@ pub fn resolve_system_prompt_source(
 /// [`resolve_file_ref`], which resolves an author-supplied reference string.
 fn discover_standard_file(
     context: &LaunchContext,
+    home_dir: Option<&std::path::Path>,
 ) -> Result<Option<(SystemPromptSource, String)>, crate::error::ClaudineError> {
     // Search local scopes in precedence order
     let scope_dirs = build_scope_list(context);
@@ -106,7 +154,7 @@ fn discover_standard_file(
     }
 
     // User-home fallback
-    let user_home = dirs::home_dir().map(|h| h.join(".claudine").join(STANDARD_FILENAME));
+    let user_home = home_dir.map(|h| h.join(".claudine").join(STANDARD_FILENAME));
     if let Some(ref home_path) = user_home
         && home_path.is_file()
     {
@@ -130,6 +178,20 @@ fn discover_standard_file(
 pub fn resolve_non_interactive_candidates(
     context: &LaunchContext,
 ) -> Result<Vec<(SystemPromptSource, String)>, crate::error::ClaudineError> {
+    resolve_non_interactive_candidates_with_home(context, dirs::home_dir().as_deref())
+}
+
+pub(crate) fn resolve_non_interactive_candidates_with_invocation(
+    context: &LaunchContext,
+    invocation: &crate::invocation_context::InvocationContext,
+) -> Result<Vec<(SystemPromptSource, String)>, crate::error::ClaudineError> {
+    resolve_non_interactive_candidates_with_home(context, invocation.home_dir())
+}
+
+fn resolve_non_interactive_candidates_with_home(
+    context: &LaunchContext,
+    home_dir: Option<&std::path::Path>,
+) -> Result<Vec<(SystemPromptSource, String)>, crate::error::ClaudineError> {
     let mut candidates = Vec::with_capacity(3);
 
     if let Some(repo_root) = &context.repo_root {
@@ -146,7 +208,7 @@ pub fn resolve_non_interactive_candidates(
     }
 
     if let Some(home_path) =
-        dirs::home_dir().map(|h| h.join(".claudine").join(NON_INTERACTIVE_FILENAME))
+        home_dir.map(|h| h.join(".claudine").join(NON_INTERACTIVE_FILENAME))
         && home_path.is_file()
     {
         candidates.push((
@@ -215,13 +277,17 @@ fn build_scope_list(context: &LaunchContext) -> Vec<(PathBuf, StandardPromptScop
 fn resolve_file_ref(
     file_ref: &str,
     context: &LaunchContext,
+    home_dir: Option<&std::path::Path>,
 ) -> Result<PathBuf, crate::error::ClaudineError> {
     let not_found =
         || crate::error::ClaudineError::SystemPromptFileNotFound(file_ref.to_string());
 
     let reference = FileReference::new(file_ref).map_err(|_| not_found())?;
 
-    let mut resolution_ctx = FileResolutionContext::new(context.cwd.clone());
+    let mut resolution_ctx = match home_dir {
+        Some(home_dir) => FileResolutionContext::new(context.cwd.clone()).with_home_dir(home_dir),
+        None => FileResolutionContext::new(context.cwd.clone()).without_home_dir(),
+    };
     if let Some(root) = context
         .repo_root
         .as_deref()

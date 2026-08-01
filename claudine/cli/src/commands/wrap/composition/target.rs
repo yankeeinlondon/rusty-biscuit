@@ -43,7 +43,9 @@ pub(crate) fn composition_dispatch_context(
     );
     context.insert(
         "composition_source_path".into(),
-        serde_json::Value::String(request.prepared.resolved_path.display().to_string()),
+        serde_json::Value::String(biscuit_file::to_portable_string(
+            &request.prepared.resolved_path,
+        )),
     );
     context.insert(
         "provider_selection_reason".into(),
@@ -436,9 +438,11 @@ pub(crate) fn agent_prompt_message(
 ) -> Option<String> {
     match state {
         AgentResolutionState::SingleInvalid { hint } => {
-            let file_href = format!("file://{}", source_path.display());
-            let file_label = source_path.display().to_string();
-            let file_link = format!("<a href=\"{file_href}\">{file_label}</a>");
+            let file_label = biscuit_file::to_portable_string(source_path);
+            let file_link = crate::cli_utils::file_url(source_path).map_or_else(
+                || file_label.clone(),
+                |file_href| format!("<a href=\"{file_href}\">{file_label}</a>"),
+            );
             Some(invalid_agent_message(hint, &file_link))
         }
         AgentResolutionState::ZeroInstalledList { .. } => Some(agent_state_breakdown(state)),

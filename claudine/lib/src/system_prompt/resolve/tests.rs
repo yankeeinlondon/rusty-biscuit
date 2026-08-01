@@ -130,16 +130,12 @@ fn explicit_append_at_prefix_searches_repository_root() {
 /// A `~`-prefixed `--append-system-prompt` reference is home-pinned through the
 /// shared `Home` kind — support the former grammar lacked.
 #[test]
-#[serial]
 fn explicit_append_tilde_resolves_against_home() {
     let tmp = TempDir::new().unwrap();
     let home = tmp.path().join("home");
     std::fs::create_dir_all(&home).unwrap();
     std::fs::write(home.join("sys.md"), "# home sys\n").unwrap();
 
-    unsafe {
-        std::env::set_var("HOME", &home);
-    }
     let args = SystemPromptArgs {
         append_file: Some("~/sys.md".to_string()),
         ..Default::default()
@@ -151,10 +147,7 @@ fn explicit_append_tilde_resolves_against_home() {
         package_area_root: None,
         package_root: None,
     };
-    let result = resolve_system_prompt_source(&args, &context);
-    unsafe {
-        std::env::remove_var("HOME");
-    }
+    let result = resolve_system_prompt_source_with_home(&args, &context, Some(&home));
 
     let (source, text) = result.unwrap().expect("~ reference resolves against HOME");
     match source {
@@ -473,7 +466,6 @@ fn outside_repo_searches_cwd() {
 }
 
 #[test]
-#[serial]
 fn non_interactive_candidates_prefer_repo_then_home_then_builtin() {
     let tmp = TempDir::new().unwrap();
     let repo = tmp.path().join("repo");
@@ -491,10 +483,6 @@ fn non_interactive_candidates_prefer_repo_then_home_then_builtin() {
     )
     .unwrap();
 
-    unsafe {
-        std::env::set_var("HOME", &home);
-    }
-
     let context = LaunchContext {
         agent: None,
         cwd: repo.clone(),
@@ -503,11 +491,7 @@ fn non_interactive_candidates_prefer_repo_then_home_then_builtin() {
         package_root: None,
     };
 
-    let candidates = resolve_non_interactive_candidates(&context).unwrap();
-
-    unsafe {
-        std::env::remove_var("HOME");
-    }
+    let candidates = resolve_non_interactive_candidates_with_home(&context, Some(&home)).unwrap();
 
     assert_eq!(candidates.len(), 3);
     assert!(matches!(

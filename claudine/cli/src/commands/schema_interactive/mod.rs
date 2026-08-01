@@ -24,7 +24,7 @@
 use std::io;
 use std::path::Path;
 
-use biscuit_file::FileReference;
+use biscuit_file::{FileReference, to_portable_string};
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
@@ -643,7 +643,7 @@ fn extract_file_detail(path: &Path) -> FileDetail {
         .file_stem()
         .and_then(|s| s.to_str())
         .map(str::to_string)
-        .unwrap_or_else(|| path.display().to_string());
+        .unwrap_or_else(|| to_portable_string(path));
     FileDetail {
         badge: "FILE".to_string(),
         name,
@@ -657,20 +657,18 @@ fn extract_file_detail(path: &Path) -> FileDetail {
 fn path_label(path: &Path, ctx: &ScopeContext) -> String {
     if let Some(root) = crate::completion::scopes::effective_repo_root(ctx)
         && let Ok(rel) = path.strip_prefix(root)
-        && let Some(rel_str) = rel.to_str()
-        && !rel_str.is_empty()
+        && !rel.as_os_str().is_empty()
     {
-        return rel_str.to_string();
+        return to_portable_string(rel);
     }
     if let Some(home) = &ctx.home
         && path.starts_with(home)
         && let Ok(rel) = path.strip_prefix(home)
-        && let Some(rel_str) = rel.to_str()
-        && !rel_str.is_empty()
+        && !rel.as_os_str().is_empty()
     {
-        return format!("~/{rel_str}");
+        return format!("~/{}", to_portable_string(rel));
     }
-    path.display().to_string()
+    to_portable_string(path)
 }
 
 fn resolve_file_value(path: &Path) -> io::Result<serde_json::Value> {
@@ -682,7 +680,7 @@ fn resolve_file_value(path: &Path) -> io::Result<serde_json::Value> {
         .ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::NotFound,
-                format!("file not found: {}", path.display()),
+                format!("file not found: {}", to_portable_string(path)),
             )
         })?;
     Ok(serde_json::Value::String(resolved.display().to_string()))

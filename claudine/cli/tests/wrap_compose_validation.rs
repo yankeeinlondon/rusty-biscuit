@@ -7,8 +7,33 @@ use predicates::str::contains;
 use std::fs;
 use tempfile::tempdir;
 mod common;
+#[cfg(unix)]
 use common::wrap::*;
-use common::{augmented_path, strip_ansi, write_executable};
+use common::{augmented_path, strip_ansi, write_dry_run_provider_stub};
+#[cfg(unix)]
+use common::write_executable;
+
+fn assert_retired_wrapper_flag(flag: &str, replacement: &str) {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(workspace.path().join(".claudine")).unwrap();
+    fs::write(workspace.path().join(".claudine/config.json"), "{}").unwrap();
+    write_dry_run_provider_stub(&path_dir, "claude");
+
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .current_dir(workspace.path())
+        .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args(["claude", flag, "file.md"])
+        .assert()
+        .failure()
+        .stdout(predicates::str::is_empty())
+        .stderr(contains(format!("{flag} has been retired")))
+        .stderr(contains(replacement));
+}
 
 #[test]
 fn compose_requires_positional_arg() {
@@ -142,6 +167,8 @@ fn no_cross_provider_retry_after_launch() {
     // from the single provider invocation is returned directly.
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
+    let codex_marker = workspace.path().join("codex-launched");
+    let claude_marker = workspace.path().join("claude-launched");
     fs::create_dir_all(&path_dir).unwrap();
     seed_minimal_config(workspace.path());
 
@@ -152,6 +179,7 @@ fn no_cross_provider_retry_after_launch() {
     write_executable(
         &path_dir.join("codex"),
         r#"#!/bin/sh
+: > "$CODEX_MARKER"
 exit 42
 "#,
     );
@@ -160,18 +188,29 @@ exit 42
     write_executable(
         &path_dir.join("claude"),
         r#"#!/bin/sh
+: > "$CLAUDE_MARKER"
 exit 0
 "#,
     );
 
     // Explicitly select codex. It exits 42. No fallback to claude.
     assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .current_dir(workspace.path())
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
+        .env("CODEX_MARKER", &codex_marker)
+        .env("CLAUDE_MARKER", &claude_marker)
         .args(["compose", "--codex", md_file.to_str().unwrap()])
         .assert()
         .code(42);
+
+    assert!(codex_marker.exists(), "the selected Codex shim must launch");
+    assert!(
+        !claude_marker.exists(),
+        "Claudine must not launch a fallback Claude provider"
+    );
 }
 
 #[test]
@@ -186,35 +225,23 @@ fn old_compose_inline_command_is_unknown() {
 
 #[test]
 fn retired_compose_flag_rejected_in_wrapper() {
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .args(["claude", "--compose", "file.md"])
-        .assert()
-        .failure()
-        .stderr(contains("--compose has been retired"))
-        .stderr(contains("claudine compose"));
+    assert_retired_wrapper_flag("--compose", "claudine compose --<provider> <file>");
 }
 
 #[test]
 fn retired_frontmatter_prompt_flag_rejected_in_wrapper() {
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .args(["claude", "--frontmatter-prompt", "file.md"])
-        .assert()
-        .failure()
-        .stderr(contains("--frontmatter-prompt has been retired"))
-        .stderr(contains("claudine inline-compose"));
+    assert_retired_wrapper_flag(
+        "--frontmatter-prompt",
+        "claudine inline-compose --<provider> <file>",
+    );
 }
 
 #[test]
 fn retired_prompt_file_flag_rejected_in_wrapper() {
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .args(["claude", "--prompt-file", "file.md"])
-        .assert()
-        .failure()
-        .stderr(contains("--prompt-file has been retired"))
-        .stderr(contains("claudine compose"));
+    assert_retired_wrapper_flag(
+        "--prompt-file",
+        "the provider CLI directly (claudine compose has different semantics)",
+    );
 }
 
 /// Data/status discipline: under `compose --dry-run` the composed body is the
@@ -503,7 +530,9 @@ fn compose_success_when_evaluation_error_surfaces_before_finalize_marker() {
     write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
 
     let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .current_dir(workspace.path())
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
         .args(["compose", "--goose", md_file.to_str().unwrap()])

@@ -218,9 +218,15 @@ impl Markdown {
             // re-walking it (F8). Matching is re-evaluated against the current
             // frontmatter in each pass regardless.
             let mut trigger_registry = None;
+            let mut presentation_overrides = std::collections::HashMap::new();
             {
                 let sv_start = perf.is_enabled().then(std::time::Instant::now);
-                schema_validation::run_with_registry(self, &options, &mut trigger_registry)?;
+                schema_validation::run_with_registry(
+                    self,
+                    &options,
+                    &mut trigger_registry,
+                    &mut presentation_overrides,
+                )?;
                 if let Some(start) = sv_start {
                     perf.record(perf::PerfMetricKind::SchemaValidation, start.elapsed());
                 }
@@ -300,7 +306,12 @@ impl Markdown {
                 // snapshot. Re-assemble after shell expansion and interpolation
                 // pass 2 so concrete values can activate or deactivate payloads.
                 if options.trigger_schemas {
-                    schema_validation::run_with_registry(self, &options, &mut trigger_registry)?;
+                    schema_validation::run_with_registry(
+                        self,
+                        &options,
+                        &mut trigger_registry,
+                        &mut presentation_overrides,
+                    )?;
                 }
             }
 
@@ -325,6 +336,7 @@ impl Markdown {
                 .with_context(options.context().clone())
                 .with_allow_ctx_override(options.allow_ctx_override)
                 .with_name_coercion_keys(options.name_coercion_keys.clone())
+                .with_presentation_values(presentation_overrides)
                 .build()?;
             if let Some(start) = esb_start {
                 perf.record(perf::PerfMetricKind::EffectiveStateBuild, start.elapsed());

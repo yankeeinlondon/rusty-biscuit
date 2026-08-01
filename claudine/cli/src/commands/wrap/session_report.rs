@@ -78,7 +78,10 @@ impl SessionPresence {
             details.insert("model".into(), json!(model));
         }
         if let Some(repo) = env_context.repo.as_ref() {
-            details.insert("repo_root".into(), json!(repo.root.display().to_string()));
+            details.insert(
+                "repo_root".into(),
+                json!(biscuit_file::to_portable_string(&repo.root)),
+            );
         }
         if let Some(pid) = env_context.claudine_pid {
             details.insert("claudine_pid".into(), json!(pid));

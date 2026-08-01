@@ -5,10 +5,12 @@
 
 use std::path::{Path, PathBuf};
 
+use biscuit_file::to_portable_string;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::Layout;
+use url::Url;
 
 use crate::system_prompt::{
     PreparedSystemPrompt, ResolvedSystemPrompt, SystemPromptMode, SystemPromptSource,
@@ -38,7 +40,7 @@ fn render_system_prompt_header(action: &str, term: &Terminal) -> String {
 /// inside `base`: Nerd Font terminals with an in-base path get
 /// [`NERD_FONT_REPO_GLYPH`] joined to the relative path; non-Nerd-Font
 /// terminals with an in-base path get a `./`-prefixed relative path;
-/// otherwise the absolute path is returned unchanged.
+/// otherwise the absolute path is rendered with portable separators.
 fn resolve_display_label(
     absolute: &Path,
     base: Option<&Path>,
@@ -46,19 +48,21 @@ fn resolve_display_label(
 ) -> String {
     let rel = base.and_then(|b| absolute.strip_prefix(b).ok());
     match (rel, term.is_nerd_font) {
-        (Some(rel), Some(true)) => format!("{NERD_FONT_REPO_GLYPH}/{}", rel.display()),
-        (Some(rel), _) => format!("./{}", rel.display()),
-        (None, _) => absolute.display().to_string(),
+        (Some(rel), Some(true)) => {
+            format!("{NERD_FONT_REPO_GLYPH}/{}", to_portable_string(rel))
+        }
+        (Some(rel), _) => format!("./{}", to_portable_string(rel)),
+        (None, _) => to_portable_string(absolute),
     }
 }
 
 /// Render the summary view for a system prompt as a single prose sentence
 /// of the form: `The system prompt was **{action}**; the content was
-/// _composed_ from <hyperlink>. {token-message}`.
+/// _composed_ from <file source>. {token-message}`.
 ///
 /// `base_path` is the optional directory used to compute the relative path
-/// displayed in the hyperlink label; when `None`, the absolute path is
-/// shown verbatim.
+/// displayed for the file source; when `None`, the absolute path uses portable
+/// separators.
 fn render_system_prompt_summary(
     source: &SystemPromptSource,
     mode: SystemPromptMode,
@@ -83,11 +87,12 @@ fn render_system_prompt_summary(
         | SystemPromptSource::NonInteractiveFile { path, .. } => {
             let absolute: PathBuf = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
             let label = resolve_display_label(&absolute, base_path, term);
-            let href = format!("file://{}", absolute.display());
-            // Prose handles the OSC8 emission + plain-text fallback for us;
-            // `<blue-400>` styles the visible label so a reader sees it as a
-            // link even when OSC8 is unsupported.
-            format!("the content was _composed_ from <blue-400>[{label}]({href})</blue-400>")
+            match Url::from_file_path(&absolute) {
+                Ok(href) => format!(
+                    "the content was _composed_ from <blue-400>[{label}]({href})</blue-400>"
+                ),
+                Err(()) => format!("the content was _composed_ from <blue-400>{label}</blue-400>"),
+            }
         }
         SystemPromptSource::BuiltInNonInteractive => {
             "the content was _composed_ from the <dim>built-in</dim> non-interactive prompt"

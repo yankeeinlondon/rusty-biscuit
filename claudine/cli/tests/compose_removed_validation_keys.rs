@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! CLI-boundary integration tests for the `RemovedValidationKey` diagnostic.
 //!
 //! Verifies that a prompt file declaring a retired validation/handler DSL key

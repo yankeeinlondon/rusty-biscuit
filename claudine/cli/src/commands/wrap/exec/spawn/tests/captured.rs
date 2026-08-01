@@ -71,14 +71,15 @@ fn capture_volume_cap_disabled_captures_all() {
 #[test]
 fn run_child_capture_captures_agent_pid_after_successful_spawn() {
     let env = minimal_env();
-    let cwd = Path::new("/tmp");
+    let cwd = test_cwd();
+    let (binary, args) = test_shell_command("echo ok", "echo ok");
     let mut child_spawned = false;
 
     let result = run_child_capture(
-        Path::new("/bin/echo"),
-        &["ok".to_string()],
+        &binary,
+        &args,
         &env,
-        cwd,
+        &cwd,
         None,
         false,
         ChildIoOptions {
@@ -90,7 +91,7 @@ fn run_child_capture_captures_agent_pid_after_successful_spawn() {
         None,
         None,
     )
-    .expect("spawning /bin/echo must succeed on the test host");
+    .expect("spawning the platform shell fixture must succeed");
 
     assert!(child_spawned);
     let pid = result
@@ -106,14 +107,14 @@ fn run_child_capture_captures_agent_pid_after_successful_spawn() {
 #[test]
 fn run_child_failed_spawn_returns_err_without_agent_pid() {
     let env = minimal_env();
-    let cwd = Path::new("/tmp");
+    let cwd = test_cwd();
     let mut child_spawned = false;
 
     let result = run_child_capture(
         Path::new("/nonexistent/binary/that/does/not/exist"),
         &[],
         &env,
-        cwd,
+        &cwd,
         None,
         false,
         ChildIoOptions {
@@ -138,8 +139,8 @@ fn run_child_failed_spawn_returns_err_without_agent_pid() {
 
 /// End-to-end proof that `CLAUDINE_PID`, injected by the env-plan
 /// builder in `wrap/env.rs`, actually reaches the spawned child's
-/// environment. Spawns `/usr/bin/env` and inspects the captured
-/// stdout for the `CLAUDINE_PID=<claudine_pid>` line.
+/// environment. Spawns the platform's environment-listing command and
+/// inspects captured stdout for the `CLAUDINE_PID=<claudine_pid>` line.
 #[test]
 fn run_child_capture_propagates_claudine_pid_to_child_environment() {
     let mut env = minimal_env();
@@ -148,14 +149,15 @@ fn run_child_capture_propagates_claudine_pid_to_child_environment() {
         OsString::from("CLAUDINE_PID"),
         OsString::from(claudine_pid.to_string()),
     );
-    let cwd = Path::new("/tmp");
+    let cwd = test_cwd();
+    let (binary, args) = test_shell_command("env", "set");
     let mut child_spawned = false;
 
     let result = run_child_capture(
-        Path::new("/usr/bin/env"),
-        &[],
+        &binary,
+        &args,
         &env,
-        cwd,
+        &cwd,
         None,
         false,
         ChildIoOptions {
@@ -167,7 +169,7 @@ fn run_child_capture_propagates_claudine_pid_to_child_environment() {
         None,
         None,
     )
-    .expect("spawning /usr/bin/env must succeed on the test host");
+    .expect("spawning the platform environment fixture must succeed");
 
     assert!(child_spawned);
     let expected_line = format!("CLAUDINE_PID={claudine_pid}");
@@ -189,14 +191,15 @@ fn run_child_capture_propagates_claudine_pid_to_child_environment() {
 #[test]
 fn consecutive_spawns_produce_distinct_agent_pids() {
     let env = minimal_env();
-    let cwd = Path::new("/tmp");
+    let cwd = test_cwd();
+    let (binary_a, args_a) = test_shell_command("echo first", "echo first");
 
     let mut child_spawned_a = false;
     let result_a = run_child_capture(
-        Path::new("/bin/echo"),
-        &["first".to_string()],
+        &binary_a,
+        &args_a,
         &env,
-        cwd,
+        &cwd,
         None,
         false,
         ChildIoOptions {
@@ -211,11 +214,12 @@ fn consecutive_spawns_produce_distinct_agent_pids() {
     .expect("first spawn must succeed");
 
     let mut child_spawned_b = false;
+    let (binary_b, args_b) = test_shell_command("echo second", "echo second");
     let result_b = run_child_capture(
-        Path::new("/bin/echo"),
-        &["second".to_string()],
+        &binary_b,
+        &args_b,
         &env,
-        cwd,
+        &cwd,
         None,
         false,
         ChildIoOptions {

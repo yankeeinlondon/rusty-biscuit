@@ -46,14 +46,24 @@ pub(super) struct StepComposeContext<'a> {
     pub(super) inline_mode: bool,
     /// Immutable request-scoped file-resolution snapshot.
     pub(super) file_resolution_context: &'a biscuit_file::FileResolutionContext,
+    pub(super) invocation: &'a claudine::invocation_context::InvocationContext,
 }
 
-impl StepComposeContext<'_> {
+impl<'ctx> StepComposeContext<'ctx> {
     /// The same context for a referenced document, whose own frontmatter — not
     /// the sequence's — decides whether composing it rewrites its body.
-    pub(super) fn for_referenced_document(&self, inline_mode: bool) -> Self {
-        Self {
+    pub(super) fn for_referenced_document<'a>(
+        &'a self,
+        inline_mode: bool,
+        source_context: &'a claudine::invocation_context::SourceContext,
+    ) -> StepComposeContext<'a>
+    where
+        'ctx: 'a,
+    {
+        StepComposeContext {
             inline_mode,
+            source_repo_root: source_context.repository_root(),
+            file_resolution_context: source_context.file_resolution_context(),
             ..self.clone()
         }
     }
@@ -159,10 +169,11 @@ pub(super) fn compose_step(
         &step_overrides,
         ctx.launch_area,
         Some(ctx.file_resolution_context),
+        Some(ctx.invocation),
     );
 
     let approval_options = super::super::apply_composition_shell_overrides(
-        super::super::build_harness_shell_options_with_cache(
+        super::super::build_harness_shell_options_for_source_with_cache(
             &step_source.resolved_path,
             ctx.source_repo_root,
             Some(Arc::clone(&ctx.approval_cache)),
@@ -201,6 +212,7 @@ pub(super) fn compose_step(
             .collect(),
         allow_empty_body,
         defer_schema_verdict: false,
+        invocation_context: Some(ctx.invocation.clone()),
     };
 
     // Inline steps prepare via `prepare_inline_with_schema` so the composed
@@ -241,6 +253,7 @@ pub(super) fn build_template_preflight_options(
     set_overrides: &Value,
     launch_area: Option<&Path>,
     file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
+    invocation: Option<&claudine::invocation_context::InvocationContext>,
 ) -> (
     darkmatter::markdown::compose::ComposeOptions,
     darkmatter::markdown::compose::ComposeContext,
@@ -248,9 +261,24 @@ pub(super) fn build_template_preflight_options(
     let anchor = launch_area
         .or_else(|| source_path.parent())
         .unwrap_or_else(|| Path::new("."));
-    let mut ctx = darkmatter::markdown::compose::ComposeContext::capture_for_document(
-        anchor, markdown,
-    );
+    let derived_source_context = invocation.map(|invocation| {
+        invocation
+            .derive_source(source_path)
+            .expect("resolved sequence document always has a parent directory")
+    });
+    let mut ctx = match (invocation, derived_source_context.as_ref()) {
+        (Some(invocation), Some(source_context)) => {
+            let requirements =
+                darkmatter::markdown::compose::ContextRequirements::for_document(markdown);
+            let evidence = invocation.runtime_evidence(source_context, &requirements);
+            darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
+                source_context.base_dir(),
+                &requirements,
+                &evidence,
+            )
+        }
+        _ => darkmatter::markdown::compose::ComposeContext::capture_for_document(anchor, markdown),
+    };
     for (key, value) in env_overrides {
         ctx.env_mut().insert(key.clone(), value.clone());
     }
@@ -264,7 +292,9 @@ pub(super) fn build_template_preflight_options(
         // check before that event fires. Lifecycle shell commands are audited
         // separately via `collect_lifecycle_shell_commands`.
         .with_exclude_keys(LIFECYCLE_EVENT_KEYS.iter().copied());
-    if let Some(context) = file_resolution_context {
+    if let Some(source_context) = derived_source_context.as_ref() {
+        opts = opts.with_file_resolution_context(source_context.file_resolution_context().clone());
+    } else if let Some(context) = file_resolution_context {
         opts = opts.with_file_resolution_context(context.clone());
     }
     if let Some(launch_area) = launch_area {

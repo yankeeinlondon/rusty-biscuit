@@ -1236,6 +1236,7 @@ fn value_needs_composition_detects_nested_templates() {
 
 // -- post-shell validation -------------------------------------------
 
+#[cfg(unix)]
 fn approve_echo() -> std::collections::HashSet<String> {
     let mut set = std::collections::HashSet::new();
     set.insert("echo small".to_string());

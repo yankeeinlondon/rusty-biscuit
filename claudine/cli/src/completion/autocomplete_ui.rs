@@ -14,8 +14,9 @@
 //!   and vertically (detail above) in narrow ones per [`stacks_vertically`].
 
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use biscuit_file::to_portable_string;
 use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::compose::Compose;
 use biscuit_terminal::components::prose::Prose;
@@ -33,14 +34,16 @@ use ratatui::{
     text::Text,
     widgets::{Paragraph, StatefulWidget, Widget},
 };
+use url::Url;
 
 /// Render the detail block for a candidate file.
 ///
 /// Layout per spec: `<badge> <name-or-path-line>`, blank line, blockquoted
 /// description, a `Schema:` header, and the `$schema` block rendered as a
-/// syntax-highlighted YAML code block, plus an inline OSC8 path link. Built
-/// from [`Compose`], [`BlockQuote`], [`CodeBlock`], and [`Prose`] components
-/// rather than a hand-rolled markup string.
+/// syntax-highlighted YAML code block, plus an inline OSC8 path link when the
+/// absolute path can be represented as a file URL. A declined URL renders as
+/// plain path text. Built from [`Compose`], [`BlockQuote`], [`CodeBlock`], and
+/// [`Prose`] components rather than a hand-rolled markup string.
 ///
 /// The `$schema` code block is pre-rendered against `term` (rather than left
 /// as a lazy component) so darkmatter's syntax highlighter runs — the Compose
@@ -68,18 +71,18 @@ pub fn render_confirmation_dialog(detail: &FileDetail, term: &Terminal) -> Compo
 
 fn name_line_prose(detail: &FileDetail) -> Prose {
     let badge = badge_markup(&detail.badge);
-    let abs_href = Prose::quoted_attr(&detail.path.display().to_string());
     let label = path_label(&detail.path);
+    let escaped_label = Prose::escape_text(&label);
+    let linked_label = file_href(&detail.path).map_or_else(
+        || escaped_label.clone(),
+        |href| format!("<a href={}>{escaped_label}</a>", Prose::quoted_attr(&href)),
+    );
 
     let body = if detail.has_custom_name {
         let name = Prose::escape_text(&detail.name);
-        let escaped_label = Prose::escape_text(&label);
-        format!(
-            "{badge} <bold>{name}</bold> (<a href={abs_href}><dim><blue>{escaped_label}</blue></dim></a>)",
-        )
+        format!("{badge} <bold>{name}</bold> (<dim><blue>{linked_label}</blue></dim>)",)
     } else {
-        let escaped_label = Prose::escape_text(&label);
-        format!("{badge} <a href={abs_href}>{escaped_label}</a>")
+        format!("{badge} {linked_label}")
     };
 
     Prose::new(body)
@@ -350,8 +353,19 @@ fn badge_markup(badge: &str) -> String {
 
 fn path_label(path: &Path) -> String {
     path.canonicalize()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|_| path.display().to_string())
+        .map(|p| to_portable_string(&p))
+        .unwrap_or_else(|_| to_portable_string(path))
+}
+
+fn file_href(path: &Path) -> Option<String> {
+    let absolute: PathBuf = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        path.canonicalize().ok()?
+    };
+    Url::from_file_path(absolute)
+        .ok()
+        .map(|url| url.to_string())
 }
 
 #[cfg(test)]
@@ -370,7 +384,7 @@ mod tests {
         FileDetail {
             badge: "COMPOSE".to_string(),
             name: "Review Plan".to_string(),
-            path: PathBuf::from("/tmp/review-plan.md"),
+            path: std::env::temp_dir().join("review-plan.md"),
             description: Some("A helpful prompt".to_string()),
             schema_lines: vec!["title: 'string(required)'".to_string()],
             has_custom_name: true,
@@ -381,7 +395,7 @@ mod tests {
         FileDetail {
             badge: "FILE".to_string(),
             name: "notes".to_string(),
-            path: PathBuf::from("/tmp/notes.md"),
+            path: std::env::temp_dir().join("notes.md"),
             description: None,
             schema_lines: Vec::new(),
             has_custom_name: false,
@@ -395,7 +409,7 @@ mod tests {
         FileDetail {
             badge: "COMPOSE".to_string(),
             name: "Plan".to_string(),
-            path: PathBuf::from("/tmp/plan.md"),
+            path: std::env::temp_dir().join("plan.md"),
             description: Some("Write an implementation _plan_".to_string()),
             schema_lines: vec![
                 "spec: file(required;match(**/*spec*.md);eager)".to_string(),
@@ -564,5 +578,42 @@ mod tests {
         let rendered =
             render_confirmation_dialog(&detail, &term(80)).render_optimistic(Some(80));
         assert!(rendered.contains("Use this file? (Y/n)"));
+    }
+
+    #[test]
+    fn path_label_portably_renders_windows_shaped_segments() {
+        assert_eq!(
+            path_label(&PathBuf::from("docs").join(r"nested\plan.md")),
+            "docs/nested/plan.md"
+        );
+    }
+
+    #[test]
+    fn relative_hyperlink_target_declines_to_plain_text() {
+        let detail = FileDetail {
+            path: PathBuf::from(r"relative\plan.md"),
+            ..unnamed_detail()
+        };
+        let rendered = render_file_detail_prose(&detail, &term(80)).render_optimistic(Some(80));
+        assert!(!rendered.contains("\u{1b}]8;"), "{rendered}");
+        assert!(strip_ansi(&rendered).contains("relative/plan.md"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_drive_hyperlink_encodes_reserved_characters() {
+        assert_eq!(
+            file_href(Path::new(r"C:\Program Files\claudine#100%.md")).as_deref(),
+            Some("file:///C:/Program%20Files/claudine%23100%25.md")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_unc_hyperlink_uses_authority_and_encodes_path() {
+        assert_eq!(
+            file_href(Path::new(r"\\server\share\plan #%.md")).as_deref(),
+            Some("file://server/share/plan%20%23%25.md")
+        );
     }
 }

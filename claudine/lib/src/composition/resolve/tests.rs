@@ -233,7 +233,8 @@ fn validate_permissions_readonly_file() {
     let dir = TempDir::new().unwrap();
     let file = dir.path().join("readonly.md");
     fs::write(&file, "# Hello").unwrap();
-    let mut perms = fs::metadata(&file).unwrap().permissions();
+    let original_permissions = fs::metadata(&file).unwrap().permissions();
+    let mut perms = original_permissions.clone();
     perms.set_readonly(true);
     fs::set_permissions(&file, perms).unwrap();
 
@@ -244,17 +245,7 @@ fn validate_permissions_readonly_file() {
     ));
 
     // Cleanup: restore permissions so TempDir can delete
-    let mut perms = fs::metadata(&file).unwrap().permissions();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        perms.set_mode(0o644);
-    }
-    #[cfg(not(unix))]
-    {
-        perms.set_readonly(false);
-    }
-    fs::set_permissions(&file, perms).unwrap();
+    fs::set_permissions(&file, original_permissions).unwrap();
 }
 
 #[test]

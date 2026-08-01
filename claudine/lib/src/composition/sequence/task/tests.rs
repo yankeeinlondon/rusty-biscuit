@@ -1107,6 +1107,24 @@ mod shell_tasks {
         assert_eq!(output.stdout.trim_end(), "task-shell-ok");
     }
 
+    /// Windows `cmd /C` must receive nested quotes as shell syntax, not as an
+    /// argv value escaped by `Command`.
+    #[cfg(windows)]
+    #[test]
+    fn the_system_shell_preserves_nested_quotes() {
+        let output = SystemTaskShell::default()
+            .run(
+                r#"cmd /D /C "echo nested-quote-ok""#,
+                Duration::from_secs(30),
+                None,
+                None,
+            )
+            .unwrap();
+
+        assert_eq!(output.exit_code, 0);
+        assert_eq!(output.stdout.trim_end(), "nested-quote-ok");
+    }
+
     /// Killing an overrunning child is the one shell behavior with no portable
     /// command to exercise it, so the sleep is gated rather than the assertion.
     #[cfg(unix)]
@@ -1157,15 +1175,15 @@ mod shell_tasks {
         );
     }
 
-    /// The same contract in `cmd` terms. Compile-checked under
-    /// `just check-windows`; not executed on a Windows host.
+    /// The same contract in `cmd` terms, using Windows' `ping.exe` as a
+    /// non-interactive long-running fixture.
     #[cfg(windows)]
     #[test]
     fn the_system_shell_kills_a_backgrounded_descendant_holding_stdout() {
         let start = std::time::Instant::now();
         let output = SystemTaskShell::default()
             .run(
-                "start /b cmd /c \"timeout /t 300 >nul & echo late\" & echo early & timeout /t 300 >nul",
+                r#"start "" /b cmd /D /C "%SYSTEMROOT%\System32\PING.EXE -n 301 127.0.0.1 >nul & echo late" & echo early & %SYSTEMROOT%\System32\PING.EXE -n 301 127.0.0.1 >nul"#,
                 Duration::from_secs(2),
                 None,
                 None,
@@ -1197,8 +1215,7 @@ mod shell_tasks {
         assert!(!output.interrupted);
     }
 
-    /// Compile-checked under `just check-windows`; not executed on a Windows
-    /// host.
+    /// The Windows counterpart uses the native command pipeline.
     #[cfg(windows)]
     #[test]
     fn the_system_shell_captures_a_pipeline() {
@@ -1227,15 +1244,15 @@ mod shell_tasks {
         assert!(output.runaway.is_none());
     }
 
-    /// Compile-checked under `just check-windows`; not executed on a Windows
-    /// host.
+    /// The Windows counterpart runs a nested `cmd` tree against the OS-owned
+    /// `PING.EXE` fixture.
     #[cfg(windows)]
     #[test]
     fn the_system_shell_times_out_a_nested_tree() {
         let start = std::time::Instant::now();
         let output = SystemTaskShell::default()
             .run(
-                "cmd /c \"cmd /c timeout /t 300 >nul\"",
+                r#"cmd /D /C "cmd /D /C %SYSTEMROOT%\System32\PING.EXE -n 301 127.0.0.1 >nul""#,
                 Duration::from_secs(2),
                 None,
                 None,
@@ -1511,25 +1528,30 @@ mod shell_tasks {
 /// [`FakeTaskShell`], because every claim here is about when bytes leave a pipe
 /// — which a fake decides by construction and therefore cannot falsify.
 mod shell_streaming {
+    #[cfg(unix)]
     use std::time::Instant;
 
     use super::*;
-    use crate::render::{TaskBar, TaskStream, TaskStreamOutcome};
+    #[cfg(unix)]
+    use crate::render::TaskStreamOutcome;
+    use crate::render::{TaskBar, TaskStream};
 
-    /// One frame group, stamped with when the sink received it.
+    /// One frame group, with its Unix reception timestamp when available.
     #[derive(Debug, Clone)]
     struct Recorded {
         channel: Channel,
         lines: Vec<String>,
+        #[cfg(unix)]
         at: Duration,
     }
 
-    /// A [`TaskStreamSink`] that timestamps every write against a fixed origin.
+    /// A [`TaskStreamSink`] that records writes and timestamps them on Unix.
     ///
     /// The timestamp is the whole point: "streamed" and "buffered until the
     /// command returned" produce identical *content*, and differ only in when
     /// the sink saw it.
     struct TimedSink {
+        #[cfg(unix)]
         origin: Instant,
         writes: Mutex<Vec<Recorded>>,
     }
@@ -1537,6 +1559,7 @@ mod shell_streaming {
     impl TimedSink {
         fn new() -> Arc<Self> {
             Arc::new(Self {
+                #[cfg(unix)]
                 origin: Instant::now(),
                 writes: Mutex::new(Vec::new()),
             })
@@ -1546,6 +1569,7 @@ mod shell_streaming {
             self.writes.lock().unwrap().push(Recorded {
                 channel,
                 lines: frames.iter().map(|line| strip_ansi(line)).collect(),
+                #[cfg(unix)]
                 at: self.origin.elapsed(),
             });
         }
@@ -1575,6 +1599,7 @@ mod shell_streaming {
         }
 
         /// When the sink first saw `needle` on `channel`.
+        #[cfg(unix)]
         fn first_seen(&self, channel: Channel, needle: &str) -> Option<Duration> {
             self.writes()
                 .into_iter()
@@ -1607,8 +1632,7 @@ mod shell_streaming {
     #[cfg(unix)]
     const TWO_CHANNEL_COMMAND: &str = "printf 'out-payload\\n'; printf 'err-payload\\n' >&2";
 
-    /// The `cmd` twin. Compile-checked under `just check-windows`; not executed
-    /// on a Windows host.
+    /// The `cmd` twin used by the native Windows channel-contract tests.
     #[cfg(windows)]
     const TWO_CHANNEL_COMMAND: &str = "echo out-payload& echo err-payload 1>&2";
 

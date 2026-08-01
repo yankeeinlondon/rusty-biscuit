@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use crate::path_semantics::{is_exact_or_descendant, normalize, segments};
+
 /// Checks whether a path matches a pattern.
 ///
 /// Supports:
@@ -7,51 +9,33 @@ use std::path::Path;
 /// - prefix match (pattern ends with `/*` or pattern is a parent directory)
 /// - simple glob with `*` as a single-segment wildcard
 /// - `**` as a multi-segment wildcard
-/// ## Notes
-///
-/// Every directory-scoped branch below tests for a `/` byte at the segment
-/// boundary, so on Windows — where the path uses `\` — they all return `false`.
-/// A caller cannot distinguish that from a genuine non-match, and for a *deny*
-/// rule the false answer means the denial never applies. The caller is warned
-/// once; see `protect::path::warn_windows_path_matching_is_broken`.
 pub fn path_matches(path: &Path, pattern: &str) -> bool {
-    crate::protect::path::warn_windows_path_matching_is_broken();
     let path_str = path.to_string_lossy();
-    let pattern = pattern.trim();
+    let path_str = normalize(&path_str);
+    let pattern = normalize(pattern.trim());
 
     if pattern == "*" || pattern == "**" {
         return true;
     }
 
-    // Exact match
     if path_str == pattern {
         return true;
     }
 
-    // Prefix match: pattern ends with "/*"
     if let Some(prefix) = pattern.strip_suffix("/*") {
-        return path_str.starts_with(prefix)
-            && path_str.len() > prefix.len()
-            && path_str.as_bytes().get(prefix.len()) == Some(&b'/');
+        return path_str.as_ref() != prefix && is_exact_or_descendant(&path_str, prefix);
     }
 
-    // Trailing slash prefix match
     if pattern.ends_with('/') {
         let prefix = pattern.trim_end_matches('/');
-        return path_str.starts_with(prefix);
+        return is_exact_or_descendant(&path_str, prefix);
     }
 
-    // Glob patterns
     if pattern.contains('*') {
-        return glob_matches(&path_str, pattern);
+        return glob_matches(&path_str, &pattern);
     }
 
-    // Implicit prefix match: path is under the pattern directory
-    if path_str.starts_with(pattern) && path_str.as_bytes().get(pattern.len()) == Some(&b'/') {
-        return true;
-    }
-
-    false
+    is_exact_or_descendant(&path_str, &pattern)
 }
 
 /// Checks whether a command matches a pattern.
@@ -133,7 +117,7 @@ fn glob_matches(text: &str, pattern: &str) -> bool {
             let prefix = parts[0].trim_end_matches('/');
             let suffix = parts[1].trim_start_matches('/');
 
-            if !prefix.is_empty() && !text.starts_with(prefix) {
+            if !prefix.is_empty() && !is_exact_or_descendant(text, prefix) {
                 return false;
             }
             if suffix.is_empty() {
@@ -145,7 +129,7 @@ fn glob_matches(text: &str, pattern: &str) -> bool {
                 if suffix_parts.len() == 2 {
                     let (before, after) = (suffix_parts[0], suffix_parts[1]);
                     // Find the filename portion of text (last segment)
-                    if let Some(filename) = text.rsplit('/').next() {
+                    if let Some(filename) = segments(text).next_back() {
                         let before_ok = before.is_empty() || filename.starts_with(before);
                         let after_ok = after.is_empty() || filename.ends_with(after);
                         return before_ok && after_ok;
@@ -157,8 +141,8 @@ fn glob_matches(text: &str, pattern: &str) -> bool {
     }
 
     // Handle single * (matches within one segment)
-    let pattern_segments: Vec<&str> = pattern.split('/').collect();
-    let text_segments: Vec<&str> = text.split('/').collect();
+    let pattern_segments: Vec<&str> = segments(pattern).collect();
+    let text_segments: Vec<&str> = segments(text).collect();
 
     if pattern_segments.len() != text_segments.len() {
         return false;
@@ -275,6 +259,38 @@ mod tests {
             Path::new("/foo/bar/baz/qux.txt"),
             "/foo/**/*.txt",
         ));
+    }
+
+    #[test]
+    fn path_separator_spellings_are_interchangeable() {
+        assert!(path_matches(
+            Path::new(r"C:\proj\src\main.rs"),
+            r"C:\proj\src\main.rs",
+        ));
+        assert!(path_matches(
+            Path::new(r"C:\proj\src\main.rs"),
+            "C:/proj/src/main.rs",
+        ));
+        assert!(path_matches(
+            Path::new("C:/proj/src/main.rs"),
+            r"C:\proj\src\main.rs",
+        ));
+    }
+
+    #[test]
+    fn portable_directory_matching_covers_every_pattern_form() {
+        let child = Path::new(r"C:\proj\src\main.rs");
+        assert!(path_matches(child, r"C:\proj\src\main.rs"));
+        assert!(path_matches(child, r"C:\proj\*"));
+        assert!(path_matches(child, r"C:\proj\"));
+        assert!(path_matches(child, r"C:\proj"));
+        assert!(path_matches(child, r"C:\proj\*\main.rs"));
+        assert!(path_matches(child, r"C:\proj\**\*.rs"));
+    }
+
+    #[test]
+    fn directory_prefix_requires_a_segment_boundary() {
+        assert!(!path_matches(Path::new(r"C:\proj2\file.txt"), r"C:\proj"));
     }
 
     #[test]

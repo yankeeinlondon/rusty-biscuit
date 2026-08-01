@@ -24,6 +24,12 @@
 # 4 was the empirical sweet spot here: zero flakes, far fewer spurious slow marks.
 tts-audio = { max-threads = 4 }
 
+# Claudine's L1 library and CLI tests repeatedly perform repository discovery
+# and spawn nested processes. Unrestricted concurrency on high-core Windows
+# hosts starves otherwise bounded tests past the 30s termination ceiling; the
+# victim changes between runs, while the same suite is stable at four threads.
+claudine-windows-l1 = { max-threads = 4 }
+
 [profile.default]
 # Retry failed tests up to 3 times to mitigate flakiness in PTY tests or timing issues
 retries = 3
@@ -37,6 +43,11 @@ slow-timeout = { period = "5s", terminate-after = 6 }
 # clean tests are not slowed — only an actual leak waits the window out. To
 # downgrade leaks back to a non-fatal warning, drop `result = "fail"`.
 leak-timeout = { period = "100ms", result = "fail" }
+
+[[profile.default.overrides]]
+platform = { host = "cfg(windows)" }
+filter = 'package(claudine) + package(claudine-cli)'
+test-group = 'claudine-windows-l1'
 
 # Tests that intentionally wait on a real clock (e.g. rate-limit pause policies)
 # need an even longer leash than the default termination window.

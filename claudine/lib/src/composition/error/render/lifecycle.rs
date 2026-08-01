@@ -18,15 +18,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             unknown_field,
             expected_fields,
         } => {
-            let file_display = source_file.display().to_string();
-            let escaped = escape_prose_path(&file_display);
-            let file_link = format!(
-                "<a href=\"{escaped}\">{}</a>",
-                escape_prose_path(&source_file.file_name().map_or_else(
-                    || file_display.to_string(),
-                    |n| n.to_string_lossy().to_string()
-                ))
-            );
+            let file_link = render_file_link(source_file);
 
             // An unknown-field error carries a field catalog; render the
             // "Unknown property / Expected one of" form. Any other serde
@@ -776,7 +768,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             if candidates.len() >= 2 {
                 body.push_str("\n\nTried:");
                 for (index, probed) in candidates.iter().enumerate() {
-                    let path = probed.candidate().path().display().to_string();
+                    let path = biscuit_file::to_portable_string(probed.candidate().path());
                     body.push_str(&format!("\n  {}. {}", index + 1, Prose::escape_text(&path)));
                 }
             }

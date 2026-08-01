@@ -2136,6 +2136,7 @@ dependencies = [
  "criterion",
  "darkmatter",
  "dirs",
+ "dunce",
  "iana-time-zone",
  "indexmap 2.14.0",
  "libc",

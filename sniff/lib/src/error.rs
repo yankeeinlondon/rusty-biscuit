@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// Error types for the Sniff library.
 ///
@@ -23,6 +24,18 @@ pub enum SniffError {
         /// The underlying backend error.
         #[source]
         source: Box<dyn std::error::Error + Send + Sync + 'static>,
+    },
+
+    /// A request reused a previously failed observation.
+    ///
+    /// The original typed error remains available through the source chain.
+    /// Wrapping it in an [`Arc`] lets request-scoped owners retain one failure
+    /// and project it to multiple strict consumers without retrying the work.
+    #[error("{source}")]
+    RetainedObservation {
+        /// The original observation failure.
+        #[source]
+        source: Arc<SniffError>,
     },
 
     /// A committed-tip merge would require repository-defined executable behavior.

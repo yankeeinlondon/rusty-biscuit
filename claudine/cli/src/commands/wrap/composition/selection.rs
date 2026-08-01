@@ -34,7 +34,14 @@ pub(crate) fn load_selection_config(cwd: &Path) -> Option<SelectionConfig> {
 /// the source repo root (typically via [`super::CompositionPrepContext`]) avoid a
 /// redundant filesystem walk on the compose hot path.
 pub(crate) fn load_selection_config_for_repo(repo_root: Option<&Path>) -> Option<SelectionConfig> {
-    let config = claudine::dispatch::loader::load_claudine_config(None, repo_root).ok()?;
+    load_selection_config_from_paths(None, repo_root)
+}
+
+pub(super) fn load_selection_config_from_paths(
+    user_path: Option<&Path>,
+    repo_root: Option<&Path>,
+) -> Option<SelectionConfig> {
+    let config = claudine::dispatch::loader::load_claudine_config(user_path, repo_root).ok()?;
     Some(SelectionConfig {
         favorite: config.preferred_agent,
         model_overrides: config.models,
