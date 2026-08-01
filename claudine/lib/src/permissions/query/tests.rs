@@ -180,3 +180,32 @@ fn trust_unknown_warnings_make_query_results_unknown() {
     assert_eq!(result.warnings.len(), 1);
     assert!(result.explanation.summary.contains("Trust is unknown"));
 }
+
+fn windows_directory_rule_snapshot(effect: PolicyEffect) -> ConfiguredPolicySnapshot {
+    let mut snapshot = mcp_snapshot(Vec::new(), Vec::new());
+    snapshot
+        .canonical
+        .axes
+        .filesystem
+        .write_rules
+        .push(PathAccessRule {
+            pattern: r"\workspace\project".to_owned(),
+            effect,
+            provenance: CanonicalRuleProvenance::exact("test", "filesystem.write"),
+        });
+    snapshot
+}
+
+#[test]
+fn windows_directory_deny_rule_blocks_child_path() {
+    let result = windows_directory_rule_snapshot(PolicyEffect::Deny).can_write("src/main.rs");
+    assert!(result.is_denied());
+    assert_eq!(result.matched_rules[0].effect, PolicyEffect::Deny);
+}
+
+#[test]
+fn windows_directory_allow_rule_grants_child_path() {
+    let result = windows_directory_rule_snapshot(PolicyEffect::Allow).can_write("src/main.rs");
+    assert!(result.is_allowed());
+    assert_eq!(result.matched_rules[0].effect, PolicyEffect::Allow);
+}

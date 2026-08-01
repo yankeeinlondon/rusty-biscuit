@@ -90,6 +90,10 @@ Path checks are implemented lexically in `path.rs`. Relative write paths are
 resolved against the event `cwd`, `~` is expanded, and `.` / `..` segments are
 collapsed before matching.
 
+Path comparison accepts `/` and `\` rule separators on every host. Exact,
+directory-prefix, sensitive-prefix, and allow-path matches require a path-segment
+boundary, so a rule for `C:\proj` includes `C:\proj\src` but not `C:\proj2`.
+
 Current built-in sensitive prefixes are:
 
 - Absolute prefixes: `/bin`, `/boot`, `/dev`, `/etc`, `/opt`, `/proc`, `/root`,
@@ -149,7 +153,9 @@ Command-path matching behavior:
   anchored component-sequence prefix of the target. `allow_paths = ["build"]`
   allows `build/output.o` but does **not** allow `/etc/build/passwd`.
 - Absolute allow entries match the exact path or a descendant path with a
-  component boundary, so `/var/tmp` does not permit `/var/tmpevil`.
+  component boundary, so `/var/tmp` does not permit `/var/tmpevil`. POSIX,
+  Windows drive-rooted, and UNC spellings are recognized portably; drive-relative
+  spellings such as `C:tmp` remain relative.
 - For destructive bash commands, all extracted target operands must be allowed
   or the rule still blocks.
 

@@ -1,50 +1,8 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-/// Warn once that path-based protection does not function on Windows.
-///
-/// This is instrumentation for a known gap, not a fix. Every matcher in this
-/// module and in `permissions::matchers` hardcodes `/` as the path-segment
-/// boundary, while a Windows path uses `\`. Because each matcher returns `bool`
-/// with no error channel, a separator mismatch is indistinguishable from a
-/// legitimate "this path is not under that prefix" — so the negative branch is
-/// taken, and for these particular checks the negative branch is the *permissive*
-/// one:
-///
-/// - a sensitive-path check returning `false` means "not sensitive", so
-///   `~/.ssh`, `~/.aws`, `~/.gnupg`, and `~/.claude` are unprotected;
-/// - a *deny* rule that fails to match is a denial that never applies.
-///
-/// An allow rule failing to match is merely inconvenient; the two above are not.
-/// Until the real fix lands, a Windows user is told rather than left to assume
-/// the control is working. A red CI cell would never reach them.
+use crate::path_semantics::{is_absolute_spelling, is_exact_or_descendant, normalize, segments};
 #[cfg(windows)]
-pub(crate) fn warn_windows_path_matching_is_broken() {
-    use std::sync::OnceLock;
-    static WARNED: OnceLock<()> = OnceLock::new();
-    WARNED.get_or_init(|| {
-        tracing::warn!(
-            "path matching does not function on Windows: sensitive-path \
-             classification and directory-scoped permission rules compare against \
-             a hardcoded '/' separator. `~/.ssh`, `~/.aws`, `~/.gnupg` and \
-             `~/.claude` are NOT classified sensitive, and directory-scoped deny \
-             rules do NOT apply. See claudine/fixes/2026-07-29-windows-paths."
-        );
-    });
-}
-
-#[cfg(not(windows))]
-pub(crate) fn warn_windows_path_matching_is_broken() {}
-
-/// Check if `path` is exactly `prefix` or starts with `prefix/`.
-///
-/// ## Notes
-///
-/// The `/` boundary is hardcoded, so this returns `false` for every Windows path
-/// regardless of whether it is genuinely under `prefix`. See
-/// [`warn_windows_path_matching_is_broken`].
-fn is_prefix_match(path: &str, prefix: &str) -> bool {
-    path == prefix || (path.starts_with(prefix) && path.as_bytes().get(prefix.len()) == Some(&b'/'))
-}
+use crate::path_semantics::is_windows_absolute_spelling;
 
 /// Prefixes for absolute sensitive paths.
 ///
@@ -104,30 +62,33 @@ impl SensitivePathChecker {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn with_home_dir(home_dir: PathBuf) -> Self {
+        Self {
+            home_dir: Some(home_dir),
+        }
+    }
+
     /// Returns true if the path is under a sensitive prefix.
-    ///
-    /// ## Notes
-    ///
-    /// On Windows this currently returns `false` for every home-relative
-    /// sensitive path, because the prefix is spliced with a hardcoded `/` against
-    /// a `\`-separated path. The caller is warned once rather than left assuming
-    /// the check succeeded — see [`warn_windows_path_matching_is_broken`].
     pub fn is_sensitive(&self, path: &str) -> bool {
-        warn_windows_path_matching_is_broken();
         let normalized = normalize_path(path);
+        let normalized = canonicalize_native_spelling(&normalized);
         let path_str = normalized.to_string_lossy();
+        let path_str = normalize(&path_str);
 
         for prefix in SENSITIVE_PREFIXES {
-            if is_prefix_match(&path_str, prefix) {
+            if is_exact_or_descendant(&path_str, prefix) {
                 return true;
             }
         }
 
         if let Some(home) = &self.home_dir {
-            let home_str = home.to_string_lossy();
             for prefix in SENSITIVE_HOME_PREFIXES {
-                let full_prefix = format!("{home_str}/{prefix}");
-                if is_prefix_match(&path_str, &full_prefix) {
+                let full_prefix = home.join(prefix);
+                let full_prefix = full_prefix.to_string_lossy();
+                let full_prefix = normalize(&full_prefix);
+                let full_prefix = canonical_comparison(&full_prefix);
+                if is_exact_or_descendant(&path_str, &full_prefix) {
                     return true;
                 }
             }
@@ -248,38 +209,63 @@ pub fn all_targets_allowed(targets: &[String], allow_paths: &[String]) -> bool {
 /// `/etc/build/passwd`. Absolute allow entries use boundary-aware prefix
 /// semantics so `/var/tmp` does not allow `/var/tmpevil`.
 pub fn is_path_allowed(target: &str, allow_paths: &[String]) -> bool {
+    let target = normalize(target);
     let target = target.trim_start_matches("./");
-    let target_components: Vec<&str> = target.split('/').collect();
+    let target_is_absolute = is_absolute_spelling(target);
 
     for allowed in allow_paths {
+        let allowed = normalize(allowed);
         let allowed = allowed.trim_start_matches("./");
-        if allowed.starts_with('/') {
-            let allowed_normalized = normalize_path(allowed);
-            let allowed_canonical = canonicalize_existing_ancestor(&allowed_normalized);
-            let allowed_str = allowed_canonical.to_string_lossy();
-            let target_normalized = if target.starts_with('/') {
-                canonicalize_existing_ancestor(&normalize_path(target))
-                    .to_string_lossy()
-                    .to_string()
-            } else {
-                target.to_string()
-            };
-            if target_normalized == allowed_str.as_ref()
-                || target_normalized.starts_with(&format!("{}/", allowed_str.as_ref()))
-            {
+        if is_absolute_spelling(allowed) {
+            if !target_is_absolute {
+                continue;
+            }
+            let allowed = canonical_comparison(allowed);
+            let target = canonical_comparison(target);
+            if is_exact_or_descendant(&target, &allowed) {
                 return true;
             }
         } else {
-            let allowed_components: Vec<&str> = allowed.split('/').collect();
+            let allowed_components: Vec<&str> = segments(allowed).collect();
             if allowed_components.is_empty() {
                 continue;
             }
+            let target_components: Vec<&str> = segments(target).collect();
             if target_components.starts_with(&allowed_components) {
                 return true;
             }
         }
     }
     false
+}
+
+fn canonical_comparison(path: &str) -> String {
+    if is_native_absolute_spelling(path) {
+        let canonical = canonicalize_existing_ancestor(&normalize_path(path));
+        normalize(&canonical.to_string_lossy()).into_owned()
+    } else {
+        path.to_owned()
+    }
+}
+
+pub(crate) fn canonicalize_native_spelling(path: &Path) -> PathBuf {
+    let spelling = path.to_string_lossy();
+    if is_native_absolute_spelling(&spelling) {
+        canonicalize_existing_ancestor(path)
+    } else {
+        path.to_path_buf()
+    }
+}
+
+#[cfg(windows)]
+fn is_native_absolute_spelling(path: &str) -> bool {
+    let path = normalize(path);
+    is_windows_absolute_spelling(&path)
+}
+
+#[cfg(not(windows))]
+fn is_native_absolute_spelling(path: &str) -> bool {
+    Path::new(path).is_absolute()
 }
 
 #[cfg(test)]
@@ -313,6 +299,19 @@ mod tests {
         assert!(checker.is_sensitive(ssh_config.to_str().unwrap()));
         let gnupg = home.join(".gnupg/pubring.kbx");
         assert!(checker.is_sensitive(gnupg.to_str().unwrap()));
+    }
+
+    #[test]
+    fn windows_home_credential_paths_are_sensitive_on_every_host() {
+        let checker = SensitivePathChecker::with_home_dir(PathBuf::from(r"C:\Users\user"));
+        for path in [
+            r"C:\Users\user\.ssh\config",
+            r"C:\Users\user\.aws\credentials",
+            r"C:\Users\user\.gnupg\pubring.kbx",
+            r"C:\Users\user\.claude\settings.json",
+        ] {
+            assert!(checker.is_sensitive(path), "{path} should be sensitive");
+        }
     }
 
     #[test]
@@ -390,6 +389,21 @@ mod tests {
             !is_path_allowed("/var/tmpevil", &allow),
             "absolute allow must use boundary-aware prefix matching"
         );
+    }
+
+    #[test]
+    fn windows_absolute_allow_is_portable_and_boundary_aware() {
+        let allow = vec![r"C:\proj".to_string()];
+        assert!(is_path_allowed(r"C:\proj\src\main.rs", &allow));
+        assert!(is_path_allowed("C:/proj/src/main.rs", &allow));
+        assert!(!is_path_allowed(r"C:\proj2\src\main.rs", &allow));
+    }
+
+    #[test]
+    fn windows_drive_relative_allow_is_not_absolute() {
+        let allow = vec![r"C:proj".to_string()];
+        assert!(!is_absolute_spelling(&normalize(&allow[0])));
+        assert!(!is_path_allowed(r"C:\proj\file.txt", &allow));
     }
 
     #[test]

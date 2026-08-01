@@ -14,6 +14,7 @@ pub mod mcp;
 pub mod messaging;
 pub mod model_catalog;
 pub mod opencode_config;
+mod path_semantics;
 pub mod permissions;
 pub mod protect;
 pub mod provider;
