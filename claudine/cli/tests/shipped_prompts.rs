@@ -54,13 +54,8 @@ fn shipped_prompt_corpus_parses_frontmatter() {
 fn shipped_implement_prompt_runs_real_router_target() {
     let fixture = tempfile::tempdir().expect("fixture directory");
     let feature = fixture.path().join("features/2026-07-20-router-fixture");
-    let spec = feature.join("spec.md");
-    let review = feature.join("review-1.md");
-    write(
-        &spec,
-        "---\nimplemented: true\nreview_iterations: 1\n---\n# Router fixture\n",
-    );
-    write(&review, "---\nready: false\n---\n# Review\n");
+    let review = feature.join("review.md");
+    write(&review, "---\nimplemented: false\n---\n# Router fixture\n");
 
     let bin_dir = fixture.path().join("bin");
     std::fs::create_dir_all(&bin_dir).expect("provider bin directory");
@@ -80,7 +75,7 @@ exit 0
 
     let root = workspace_root();
     let router = root.join("prompts/implement.md");
-    let spec_arg = format!("spec={}", spec.display());
+    let review_arg = format!("review={}", review.display());
     assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", fixture.path())
@@ -91,14 +86,14 @@ exit 0
             "compose",
             "--claude",
             router.to_str().expect("UTF-8 router path"),
-            &spec_arg,
+            &review_arg,
         ])
         .assert()
         .success();
 
     let delivered = std::fs::read_to_string(&capture).expect("captured provider prompt");
     assert!(
-        delivered.contains("Implement Review Suggestions for Router Fixture"),
+        delivered.contains("Implementation of Review Findings"),
         "the shipped router must deliver the resolved target prompt:\n{delivered}"
     );
     assert!(
