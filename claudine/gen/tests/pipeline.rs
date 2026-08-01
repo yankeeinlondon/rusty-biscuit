@@ -10,6 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use claudine_gen::{GenError, Provenance, generate_for_area};
+use darkmatter::markdown::compose::find_git_root_from;
 
 /// Research topics the registry consumes (fixture copy set).
 const TOPICS: &[&str] = &[
@@ -44,7 +45,14 @@ impl Fixture {
     /// so the workspace-relative unchained-ai artifact resolves at
     /// `<tmp>/unchained-ai/artifacts/models-catalog.json`.
     fn new() -> Self {
-        let dir = tempfile::tempdir().unwrap();
+        Self::from_dir(tempfile::tempdir().unwrap())
+    }
+
+    fn new_in(parent: &Path) -> Self {
+        Self::from_dir(tempfile::tempdir_in(parent).unwrap())
+    }
+
+    fn from_dir(dir: tempfile::TempDir) -> Self {
         let real = real_area();
         let copy = |rel: &str| {
             let to = dir.path().join("claudine").join(rel);
@@ -125,7 +133,12 @@ fn skip_research_roster_entry_is_rejected_loudly() {
 
 #[test]
 fn pipeline_generates_from_all_declared_sources() {
-    let generation = Fixture::new().generate().unwrap();
+    let fixture = Fixture::new();
+    assert!(
+        find_git_root_from(&fixture.area()).is_none(),
+        "the no-repository fixture exercises the discovery-compatible fallback"
+    );
+    let generation = fixture.generate().unwrap();
     let data_rs = &generation.data_rs;
     // Roster-fed identity.
     assert!(data_rs.contains("    slug: \"claude\",\n"));
@@ -150,6 +163,23 @@ fn pipeline_generates_from_all_declared_sources() {
     // `support`) joined with the facts client/events halves.
     assert!(data_rs.contains("        server_mode: AcpServerMode::Adapter,\n"));
     assert!(data_rs.contains("        client_supported: false,\n"));
+}
+
+#[test]
+fn relative_area_inside_a_repository_uses_one_absolute_resolution_boundary() {
+    let cwd = std::env::current_dir().expect("current directory");
+    let fixture = Fixture::new_in(&cwd);
+    fs::create_dir(fixture.dir.path().join(".git")).expect("temporary repository marker");
+    let relative_area = fixture
+        .area()
+        .strip_prefix(&cwd)
+        .expect("fixture was created below the current directory")
+        .to_path_buf();
+
+    let generation = generate_for_area(&relative_area, "claude")
+        .expect("relative area and schema paths must share one absolute boundary");
+
+    assert!(generation.data_rs.contains("    slug: \"claude\",\n"));
 }
 
 /// The unchained-ai artifact is a hard generation input: absence and a

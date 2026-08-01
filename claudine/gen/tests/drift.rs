@@ -1,8 +1,9 @@
 //! Drift tests over the REAL committed inputs.
 //!
-//! The drift test and the CLI `check` subcommand are the same code path:
-//! both call [`claudine_gen::check_area`]. For every provider slug,
-//! `generate(committed inputs)` must byte-equal the committed
+//! The provider-data drift test and the CLI `check` subcommand share
+//! [`claudine_gen::check_area`]. The catalog, families, signals, and vocabulary
+//! drift tests use their artifact's production check function. For every
+//! provider slug, `generate(committed inputs)` must byte-equal the committed
 //! `lib/src/provider/<slug>/data.rs`.
 
 use std::path::Path;
@@ -88,8 +89,7 @@ fn committed_data_matches_regenerated_inputs() {
 }
 
 /// build_signals(committed signals corpus) == committed
-/// lib/src/signals/generated.rs (full scope, all nine docs — including the
-/// dormant kilo/pi tables).
+/// lib/src/signals/generated.rs (full scope, all ten provider documents).
 #[test]
 fn committed_signals_match_regenerated_inputs() {
     match check_signals(area()).expect("signals generation must succeed") {
@@ -126,10 +126,10 @@ fn committed_vocabulary_matches_regenerated_inputs() {
 }
 
 /// build_catalog(committed inputs) == committed docs/providers/catalog.json
-/// (the full-scope superset projection travels with the compiled subset).
+/// (the full wired-scope superset projection travels with the compiled subset).
 #[test]
 fn committed_catalog_matches_regenerated_inputs() {
-    let generations = generate_all(area()).expect("full-scope generation must succeed");
+    let generations = generate_all(area()).expect("full wired-scope generation must succeed");
     match check_catalog(area(), &generations).expect("catalog check must run") {
         CheckOutcome::Clean => {}
         CheckOutcome::Drift { details } => panic!(
@@ -146,10 +146,10 @@ fn committed_catalog_matches_regenerated_inputs() {
 
 /// build_families(committed artifact + inputs) == committed
 /// lib/src/model_catalog/families_generated.rs (the vendored family
-/// slice tracks the expected-offering joins AND the artifact).
+/// wired-scope slice tracks the expected-offering joins AND the artifact).
 #[test]
 fn committed_families_match_regenerated_inputs() {
-    let generations = generate_all(area()).expect("full-scope generation must succeed");
+    let generations = generate_all(area()).expect("full wired-scope generation must succeed");
     match check_families(area(), &generations).expect("families generation must succeed") {
         CheckOutcome::Clean => {}
         CheckOutcome::Drift { details } => panic!(
