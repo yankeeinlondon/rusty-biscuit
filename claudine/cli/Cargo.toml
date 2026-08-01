@@ -111,18 +111,7 @@ biscuit-test-harness = { path = "../../biscuit-test-harness" }
 rendezvous-core = { path = "../rendezvous/core", features = ["test-support"] }
 
 # The daemon-spawning fixtures boot through `spawn_local_server`, which binds a
-# Unix socket or a named pipe depending on the target — the daemon is not
-# Unix-only, so the gate below is on the *ABI*, not the OS.
-#
-# `rendezvous-daemon` pulls `duckdb` with `features = ["bundled"]`, whose unity
-# build emits translation units of >40k COFF sections. GNU `as` caps out below
-# that ("too many sections … file too big"); clearing it would need
-# `-Wa,-mbig-obj` plumbed through `duckdb-sys`' build script, which is not ours
-# to set. MSVC's assembler has no such cap, so `x86_64-pc-windows-msvc` keeps the
-# fixtures — only the `-gnu` cross-check target drops them, and that target
-# exists here purely to type-check the Windows sources. Dropping the dependency
-# is what makes `cargo check -p claudine-cli --tests
-# --target x86_64-pc-windows-gnu` reach the Windows test suites at all: a
-# `#![cfg(unix)]` inside a test file still builds every dev-dependency.
-[target.'cfg(not(all(windows, target_env = "gnu")))'.dev-dependencies]
+# Unix socket or a named pipe depending on the target. Bundled DuckDB is part of
+# that test contract on every platform; the Windows-GNU recipe supplies the
+# large-COFF-object flags its unity build requires.
 rendezvous-daemon = { path = "../rendezvous/daemon" }
