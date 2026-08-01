@@ -147,7 +147,7 @@ gitnexus:
         exit 0
     fi
 
-    gitnexus analyze --skip-agents-md
+    gitnexus analyze --skip-agents-md --force
 
 # ---------------------------------------------------------------------------
 # JUnit report staging
