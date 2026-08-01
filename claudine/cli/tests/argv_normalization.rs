@@ -310,11 +310,14 @@ fn headline_compose_with_setter_before_late_flags_preserves_flag_semantics() {
 // ──────────────────────────────────────────────────────────────────────
 
 /// `--version` is a root-level flag with no subcommand; the normalizer
-/// must not touch it.
+/// must not touch it. Completion-only variables are cleared so an invoking
+/// shell cannot redirect this subprocess into clap's completion bootstrap.
 #[test]
 fn passthrough_version_flag_still_prints_version_string() {
     let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env_remove("COMPLETE")
+        .env_remove("_CLAP_COMPLETE_INDEX")
         .arg("--version")
         .assert()
         .success()
