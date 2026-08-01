@@ -155,6 +155,10 @@ pub struct EffectiveState {
     /// interpolated in inline string context. Empty by default; only the
     /// inline `get_string` path consults it.
     name_coercion_keys: Vec<String>,
+
+    /// Alternate values used only when a side-effect-free variable/member/index
+    /// path is rendered into Markdown body text.
+    presentation_values: HashMap<String, Value>,
 }
 
 impl EffectiveState {
@@ -188,6 +192,7 @@ impl EffectiveState {
             context,
             ctx_diagnostics: Vec::new(),
             name_coercion_keys: Vec::new(),
+            presentation_values: HashMap::new(),
         }
     }
 
@@ -258,6 +263,10 @@ impl EffectiveState {
     /// Returns the underlying data map.
     pub fn data(&self) -> &HashMap<String, Value> {
         &self.data
+    }
+
+    pub(crate) fn presentation_values(&self) -> &HashMap<String, Value> {
+        &self.presentation_values
     }
 
     /// Returns the runtime context.
@@ -438,6 +447,7 @@ pub struct EffectiveStateBuilder {
     context: Option<ComposeContext>,
     allow_ctx_override: bool,
     name_coercion_keys: Vec<String>,
+    presentation_values: HashMap<String, Value>,
 }
 
 impl EffectiveStateBuilder {
@@ -451,6 +461,7 @@ impl EffectiveStateBuilder {
             context: None,
             allow_ctx_override: false,
             name_coercion_keys: Vec::new(),
+            presentation_values: HashMap::new(),
         }
     }
 
@@ -505,6 +516,13 @@ impl EffectiveStateBuilder {
     #[must_use]
     pub fn with_name_coercion_keys(mut self, keys: Vec<String>) -> Self {
         self.name_coercion_keys = keys;
+        self
+    }
+
+    /// Sets alternate values used only for side-effect-free body path presentation.
+    #[must_use]
+    pub(crate) fn with_presentation_values(mut self, values: HashMap<String, Value>) -> Self {
+        self.presentation_values = values;
         self
     }
 
@@ -574,6 +592,7 @@ impl EffectiveStateBuilder {
             context,
             ctx_diagnostics,
             name_coercion_keys: self.name_coercion_keys,
+            presentation_values: self.presentation_values,
         })
     }
 }

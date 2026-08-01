@@ -72,12 +72,13 @@
 //! ```
 
 use crate::catalog::{describe_for_error, suggest};
+use crate::markdown::compose::ComposeWarning;
 use crate::markdown::compose::context::catalog::CONTEXT_VARIABLE_DESCRIPTORS;
 use crate::markdown::compose::expression::{
     EvaluationLookup, Expr, ExpressionError, evaluate, interpolation_output_string,
 };
-use crate::markdown::compose::ComposeWarning;
 use serde_json::Value;
+use std::collections::HashMap;
 use tracing::{debug, trace};
 
 /// Result of evaluating an expression.
@@ -209,12 +210,23 @@ impl EvalValue {
 /// an [`EvaluationLookup`] implementation to produce string output.
 pub struct Evaluator<'a, L: EvaluationLookup> {
     state: &'a L,
+    presentation_values: Option<&'a HashMap<String, Value>>,
 }
 
 impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
     /// Creates a new evaluator with the given lookup state.
     pub fn new(state: &'a L) -> Self {
-        Self { state }
+        Self {
+            state,
+            presentation_values: None,
+        }
+    }
+
+    /// Supplies alternate values for side-effect-free path string rendering.
+    /// All other expression evaluation continues to use the native lookup values.
+    pub(crate) fn with_presentation_values(mut self, values: &'a HashMap<String, Value>) -> Self {
+        self.presentation_values = Some(values);
+        self
     }
 
     /// Evaluates an expression to a string result.
@@ -234,6 +246,10 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
     /// - Function calls (`length()`, `number()`, `round()`)
     pub fn eval(&self, expr: &Expr) -> EvalResult {
         trace!(expr = ?expr, "interpolation: evaluating expression");
+
+        if let Some(value) = self.presentation_value(expr) {
+            return EvalResult::Value(interpolation_output_string(&value));
+        }
 
         // Preserve debug/trace logging for variable resolution
         if let Expr::Variable(name) = expr {
@@ -264,6 +280,48 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
                 original: expr.to_string(),
             },
         }
+    }
+
+    fn presentation_value(&self, expr: &Expr) -> Option<Value> {
+        match expr {
+            Expr::Variable(path) => self.presentation_path_value(path),
+            Expr::Paren(inner) => self.presentation_value(inner),
+            Expr::MemberAccess { base, name } => {
+                let mut value = self.presentation_value(base)?;
+                for segment in name.split('.') {
+                    value = value.as_object()?.get(segment)?.clone();
+                }
+                Some(value)
+            }
+            Expr::Index { base, index } => {
+                let value = self.presentation_value(base)?;
+                match (value, static_selector(index)?) {
+                    (Value::Array(values), StaticSelector::Array(index)) => {
+                        select_array_value(&values, index)
+                    }
+                    (Value::Object(values), StaticSelector::Object(key)) => {
+                        values.get(key).cloned()
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn presentation_path_value(&self, path: &str) -> Option<Value> {
+        let path = match path.strip_prefix("doc.") {
+            Some(path) => path,
+            None if path == "doc" => return None,
+            None => path,
+        };
+        let mut segments = path.split('.');
+        let first = segments.next()?;
+        let mut value = self.presentation_values?.get(first)?;
+        for segment in segments {
+            value = value.as_object()?.get(segment)?;
+        }
+        Some(value.clone())
     }
 
     /// Evaluates an expression to a value (for truthiness checks).
@@ -368,6 +426,44 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
             _ => {}
         }
     }
+}
+
+enum StaticSelector<'a> {
+    Array(i64),
+    Object(&'a str),
+}
+
+fn static_selector(expr: &Expr) -> Option<StaticSelector<'_>> {
+    match expr {
+        Expr::NumberLiteral(value) => integer_literal(*value).map(StaticSelector::Array),
+        Expr::UnaryMinus(inner) => match inner.as_ref() {
+            Expr::NumberLiteral(value) => integer_literal(-*value).map(StaticSelector::Array),
+            _ => None,
+        },
+        Expr::StringLiteral(value) => Some(StaticSelector::Object(value)),
+        _ => None,
+    }
+}
+
+fn integer_literal(value: f64) -> Option<i64> {
+    (value.is_finite()
+        && value.fract() == 0.0
+        && value >= i64::MIN as f64
+        && value <= i64::MAX as f64)
+        .then_some(value as i64)
+}
+
+fn select_array_value(values: &[Value], index: i64) -> Option<Value> {
+    let len = i64::try_from(values.len()).ok()?;
+    let index = if index < 0 {
+        len.checked_add(index)?
+    } else {
+        index
+    };
+    usize::try_from(index)
+        .ok()
+        .and_then(|index| values.get(index))
+        .cloned()
 }
 
 #[cfg(test)]
@@ -530,6 +626,68 @@ mod tests {
 
     mod eval_simple_variable {
         use super::*;
+
+        #[test]
+        fn presentation_values_apply_only_to_string_rendering() {
+            let state = create_test_state(json!({
+                "path": r"C:\work\spec.md",
+                "unrelated": r"C:\work\spec.md",
+                "files": [r"C:\work\first.md", r"C:\work\second.md"],
+                "unrelated_files": [r"C:\work\first.md", r"C:\work\second.md"],
+                "records": [{"path": r"C:\work\first.md"}],
+                "mapping": {"primary": r"C:\work\first.md"},
+                "index": 0,
+            }));
+            let presentation = HashMap::from([
+                ("path".to_string(), json!("C:/work/spec.md")),
+                (
+                    "files".to_string(),
+                    json!(["C:/work/first.md", "C:/work/second.md"]),
+                ),
+                (
+                    "records".to_string(),
+                    json!([{"path": "C:/work/first.md"}]),
+                ),
+                (
+                    "mapping".to_string(),
+                    json!({"primary": "C:/work/first.md"}),
+                ),
+            ]);
+            let evaluator = Evaluator::new(&state).with_presentation_values(&presentation);
+            let direct = parse("path").unwrap();
+            let fallback = parse(r#"path || "missing""#).unwrap();
+            let unrelated = parse("unrelated").unwrap();
+            let unrelated_fallback = parse(r#"unrelated || "missing""#).unwrap();
+            let first_file = parse("files[0]").unwrap();
+            let last_file = parse("files[-1]").unwrap();
+            let unrelated_file = parse("unrelated_files[0]").unwrap();
+            let dynamic_index = parse("files[index]").unwrap();
+            let member_path = parse("records[0].path").unwrap();
+            let string_index = parse(r#"mapping["primary"]"#).unwrap();
+            let render = |expr| match evaluator.eval(expr) {
+                EvalResult::Value(value) => value,
+                EvalResult::Error { error, .. } => panic!("unexpected evaluation error: {error}"),
+            };
+
+            assert_eq!(
+                evaluator.eval_json(&direct).unwrap(),
+                json!(r"C:\work\spec.md")
+            );
+            assert_eq!(render(&direct), "C:/work/spec.md");
+            assert_eq!(render(&fallback), r"C:\work\spec.md");
+            assert_eq!(render(&unrelated), r"C:\work\spec.md");
+            assert_eq!(render(&unrelated_fallback), r"C:\work\spec.md");
+            assert_eq!(render(&first_file), "C:/work/first.md");
+            assert_eq!(render(&last_file), "C:/work/second.md");
+            assert_eq!(
+                evaluator.eval_json(&first_file).unwrap(),
+                json!(r"C:\work\first.md")
+            );
+            assert_eq!(render(&unrelated_file), r"C:\work\first.md");
+            assert_eq!(render(&dynamic_index), r"C:\work\first.md");
+            assert_eq!(render(&member_path), "C:/work/first.md");
+            assert_eq!(render(&string_index), "C:/work/first.md");
+        }
 
         #[test]
         fn resolves_string_variable() {

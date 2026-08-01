@@ -711,11 +711,14 @@ fn a_file_valued_overlay_property_resolves_through_the_targets_own_context() {
         "the target's resolver anchored the overlay's relative reference on the \
          caller's launch area and rewrote it to the resolved path"
     );
+    let presentation_path = launch_area
+        .join("spec.md")
+        .display()
+        .to_string()
+        .replace('\\', "/");
     assert!(
-        materialized
-            .prompt
-            .contains(&launch_area.join("spec.md").display().to_string()),
-        "and the body sees that same resolved value; got: {}",
+        materialized.prompt.contains(&presentation_path),
+        "the body sees a portable presentation of the resolved value; got: {}",
         materialized.prompt
     );
 }

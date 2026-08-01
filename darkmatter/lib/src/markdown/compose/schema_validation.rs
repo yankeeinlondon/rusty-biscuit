@@ -27,6 +27,7 @@
 //! `$(...)` shell expression or an unresolved `{{ ... }}` template — are left
 //! untouched here; their real type is resolved at post-shell re-validation.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::markdown::Markdown;
@@ -39,7 +40,7 @@ use crate::markdown::types::{MarkdownError, MarkdownResult};
 /// Single-pass convenience wrapper used by this module's tests.
 #[cfg(test)]
 pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> MarkdownResult<()> {
-    run_with_registry(markdown, options, &mut None)
+    run_with_registry(markdown, options, &mut None, &mut HashMap::new())
 }
 
 fn trigger_discovery_boundary(options: &ComposeOptions, document_path: &Path) -> Option<PathBuf> {
@@ -84,7 +85,9 @@ pub(crate) fn run_with_registry(
     markdown: &mut Markdown,
     options: &ComposeOptions,
     trigger_registry: &mut Option<crate::markdown::schemas::triggers::TriggerRegistry>,
+    presentation_overrides: &mut HashMap<String, serde_json::Value>,
 ) -> MarkdownResult<()> {
+    presentation_overrides.clear();
     let has_document_schema = markdown.frontmatter().as_map().contains_key("$schema");
     let has_baseline = options.baseline_schema.is_some();
 
@@ -169,12 +172,17 @@ pub(crate) fn run_with_registry(
         .as_ref()
         .map(|effective| resolve_eager_caller_file_overrides(effective, options))
         .unwrap_or_default();
-    if !caller_file_overrides.is_empty() {
+    if !caller_file_overrides.native.is_empty() {
         let fm_map = markdown.frontmatter_mut().as_map_mut();
-        for (key, value) in &caller_file_overrides {
+        for (key, value) in &caller_file_overrides.native {
             fm_map.insert(key.clone(), value.clone());
         }
     }
+    *presentation_overrides = caller_file_overrides
+        .presentation
+        .iter()
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
 
     if let Some(effective) = effective.as_ref() {
         // Coerce schema-recognized scalars to their declared types and write the
@@ -259,7 +267,7 @@ pub(crate) fn run_with_registry(
                 p.code,
                 crate::markdown::schemas::ValidationProblemCode::InvalidFileReference
             ) && top_level_pointer_segment(&p.path)
-                .is_some_and(|name| caller_file_overrides.contains_key(&name))
+                .is_some_and(|name| caller_file_overrides.native.contains_key(&name))
             {
                 return false;
             }
@@ -289,10 +297,12 @@ pub(crate) fn run_with_registry(
     // Eager-`file` normalization (Decision #4: "a document with final
     // validation problems is never rewritten"). We only reach here when the
     // composition-independent gate passed, so it is safe to rewrite present
-    // eager-`file` values to their resolved repo-relative paths. The rewrite
-    // shares the same instance-construction loop as coercion, so `$schema`
-    // and `options.exclude_keys` stay outside the write-back; pending keys
-    // are skipped the same way.
+    // document-authored eager-`file` values to resolved repo-relative paths.
+    // Caller-originated overrides are restored as absolute native paths so
+    // later consumers retain their launch-area provenance. The rewrite shares
+    // the same instance-construction loop as coercion, so `$schema` and
+    // `options.exclude_keys` stay outside the write-back; pending keys are
+    // skipped the same way.
     if let Some(effective) = effective.as_ref() {
         let (instance, composition_pending) = build_validation_instance(markdown, options);
         let outcome = effective.normalize_frontmatter(&instance, &composition_pending);
@@ -304,7 +314,11 @@ pub(crate) fn run_with_registry(
                 if composition_pending.contains(&key) {
                     continue;
                 }
-                let value = caller_file_overrides.get(&key).cloned().unwrap_or(value);
+                let value = caller_file_overrides
+                    .native
+                    .get(&key)
+                    .cloned()
+                    .unwrap_or(value);
                 fm_map.insert(key, value);
             }
         }
@@ -325,13 +339,16 @@ pub(crate) fn run_with_registry(
 fn resolve_eager_caller_file_overrides(
     effective: &crate::markdown::schemas::EffectiveSchema,
     options: &ComposeOptions,
-) -> serde_json::Map<String, serde_json::Value> {
+) -> ResolvedCallerFileOverrides {
     let Some(fallback) = options.file_ref_fallback_dir.as_ref() else {
-        return serde_json::Map::new();
+        return ResolvedCallerFileOverrides::default();
     };
-    let Some(overrides) = options.set_overrides.as_ref().and_then(serde_json::Value::as_object)
+    let Some(overrides) = options
+        .set_overrides
+        .as_ref()
+        .and_then(serde_json::Value::as_object)
     else {
-        return serde_json::Map::new();
+        return ResolvedCallerFileOverrides::default();
     };
     let context = options
         .file_resolution_context
@@ -342,7 +359,7 @@ fn resolve_eager_caller_file_overrides(
         // overrides cross back to this captured boundary.
         .map(|context| context.for_trusted_external_base(fallback))
         .unwrap_or_else(|| biscuit_file::FileResolutionContext::new(fallback));
-    let mut resolved = serde_json::Map::new();
+    let mut resolved = ResolvedCallerFileOverrides::default();
     for (key, value) in overrides {
         let mut fragments = Vec::new();
         collect_property_schema_fragments(&effective.json_schema, key, &mut fragments);
@@ -350,7 +367,10 @@ fn resolve_eager_caller_file_overrides(
             .into_iter()
             .find_map(|fragment| resolve_eager_caller_value(value, fragment, &context))
         {
-            resolved.insert(key.clone(), value);
+            resolved.native.insert(key.clone(), value.native);
+            resolved
+                .presentation
+                .insert(key.clone(), value.presentation);
         }
     }
     resolved
@@ -377,39 +397,59 @@ fn collect_property_schema_fragments<'a>(
     }
 }
 
+#[derive(Default)]
+struct ResolvedCallerFileOverrides {
+    native: serde_json::Map<String, serde_json::Value>,
+    presentation: serde_json::Map<String, serde_json::Value>,
+}
+
+struct ResolvedCallerFileValue {
+    native: serde_json::Value,
+    presentation: serde_json::Value,
+}
+
 fn resolve_eager_caller_value(
     value: &serde_json::Value,
     schema: &serde_json::Value,
     context: &biscuit_file::FileResolutionContext,
-) -> Option<serde_json::Value> {
+) -> Option<ResolvedCallerFileValue> {
     if schema.get("format").and_then(serde_json::Value::as_str)
         == Some(crate::markdown::schemas::format::DARKMATTER_FILE_FORMAT)
     {
         let raw = value.as_str()?;
         let reference = biscuit_file::FileReference::new(raw).ok()?;
         let resolved = reference.resolve_in_context(context).ok()??;
-        return Some(serde_json::Value::String(
-            resolved.to_string_lossy().into_owned(),
-        ));
+        let native = resolved.to_string_lossy().into_owned();
+        #[cfg(windows)]
+        let presentation = native.replace('\\', "/");
+        #[cfg(not(windows))]
+        let presentation = native.clone();
+        return Some(ResolvedCallerFileValue {
+            native: serde_json::Value::String(native),
+            presentation: serde_json::Value::String(presentation),
+        });
     }
     if let Some(items) = schema.get("items")
         && let Some(values) = value.as_array()
     {
         let mut changed = false;
-        let values = values
-            .iter()
-            .map(|value| {
-                resolve_eager_caller_value(value, items, context).map_or_else(
-                    || value.clone(),
-                    |resolved| {
-                        changed = true;
-                        resolved
-                    },
-                )
-            })
-            .collect();
+        let mut native = Vec::with_capacity(values.len());
+        let mut presentation = Vec::with_capacity(values.len());
+        for value in values {
+            if let Some(resolved) = resolve_eager_caller_value(value, items, context) {
+                changed = true;
+                native.push(resolved.native);
+                presentation.push(resolved.presentation);
+            } else {
+                native.push(value.clone());
+                presentation.push(value.clone());
+            }
+        }
         if changed {
-            return Some(serde_json::Value::Array(values));
+            return Some(ResolvedCallerFileValue {
+                native: serde_json::Value::Array(native),
+                presentation: serde_json::Value::Array(presentation),
+            });
         }
     }
     for combinator in ["allOf", "anyOf", "oneOf"] {
@@ -1530,10 +1570,9 @@ mod tests {
         let resolved = launch_dir.join("spec.md");
         std::fs::write(&resolved, "# Spec\n").unwrap();
         let doc_path = document_dir.join("prompt.md");
-        let md = md_with_schema_and_source(
-            "$schema:\n  spec: 'file(eager; required)'\nspec: authored.md\n",
-            &doc_path,
-        );
+        let content = "---\n$schema:\n  spec: 'file(eager; required)'\nspec: authored.md\n---\nspec says: {{ spec }}\n";
+        let md: Markdown = content.into();
+        let md = md.with_source(ComposeSource::File(doc_path.clone()));
         let options = ComposeOptions::new()
             .with_source_file(&doc_path)
             .with_file_ref_fallback_dir(&launch_dir)
@@ -1543,6 +1582,14 @@ mod tests {
         assert_eq!(
             composed.frontmatter().as_map().get("spec"),
             Some(&serde_json::json!(resolved.to_string_lossy())),
+        );
+        assert_eq!(
+            composed.content(),
+            format!(
+                "spec says: {}\n",
+                resolved.to_string_lossy().replace('\\', "/")
+            ),
+            "Markdown presentation uses forward slashes without changing effective frontmatter",
         );
     }
 
@@ -1592,10 +1639,9 @@ mod tests {
         std::fs::write(&first, "# First\n").unwrap();
         std::fs::write(&second, "# Second\n").unwrap();
         let doc_path = document_dir.join("prompt.md");
-        let md = md_with_schema_and_source(
-            "$schema:\n  specs: 'file(eager)[]'\nspecs: []\n",
-            &doc_path,
-        );
+        let content = "---\n$schema:\n  specs: 'file(eager)[]'\nspecs: []\n---\nfirst: {{ specs[0] }}\n";
+        let md: Markdown = content.into();
+        let md = md.with_source(ComposeSource::File(doc_path.clone()));
         let options = ComposeOptions::new()
             .with_source_file(&doc_path)
             .with_file_ref_fallback_dir(&launch_dir)
@@ -1608,6 +1654,14 @@ mod tests {
                 first.to_string_lossy(),
                 second.to_string_lossy(),
             ])),
+        );
+        assert_eq!(
+            composed.content(),
+            format!(
+                "first: {}\n",
+                first.to_string_lossy().replace('\\', "/")
+            ),
+            "indexed eager-file presentation uses forward slashes without changing the native array",
         );
     }
 
