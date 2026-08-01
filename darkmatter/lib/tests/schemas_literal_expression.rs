@@ -5,7 +5,8 @@
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::expression::{parse, parse_condition};
 use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, ValidationReport, parse_yaml_schema, to_json_schema,
+    DarkmatterSchemas, ValidationReport, coerce::coerce_frontmatter, parse_yaml_schema,
+    to_json_schema,
     simplified::{grammar::parse_type_expr, serialize_property_atom},
 };
 use serde_json::Value;
@@ -624,14 +625,17 @@ fn literal_large_integer_validates_exact_and_rejects_neighbor() {
 }
 
 #[test]
-fn literal_large_integer_coerces_string_document_value() {
+fn literal_large_integer_coercion_is_exact() {
     for (lit, _) in LARGE_INT_CASES {
         let expected: Value = serde_json::from_str(lit).expect("literal is a JSON number");
-        let value = compose_value(
-            &format!("---\n$schema:\n  version: literal({lit})\nversion: '{lit}'\n---\nbody\n"),
-            "version",
+        let schema = json_schema(&format!("version: literal({lit})\n"));
+        let instance = serde_json::json!({"version": lit});
+        let outcome = coerce_frontmatter(&schema, &instance);
+        assert!(outcome.changed, "string '{lit}' must be coerced");
+        assert_eq!(
+            outcome.value["version"], expected,
+            "string '{lit}' must coerce to the exact integer"
         );
-        assert_eq!(value, expected, "string '{lit}' must coerce to the exact integer");
     }
 }
 
