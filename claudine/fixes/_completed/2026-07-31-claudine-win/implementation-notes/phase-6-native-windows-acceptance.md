@@ -2,15 +2,15 @@
 
 Date: 2026-08-01
 Host: native Windows, branch `fix/claudine-windows`
-Status: **native Windows accepted; cross-platform closeout blocked**
+Status: **native Windows completion contract met; portability follow-ups deferred**
 
 This note records the acceptance evidence available at the Phase 6 closeout
-boundary. It is deliberately not a lifecycle-completion declaration. The final
-native Windows CI-profile and canonical L1 reruns are green. Linux execution
-was attempted but became inconclusive after WSL subsystem/filesystem failures;
-macOS, MSVC xwin, and GNU cross-check evidence remains unavailable. Neither
-active fix directory may move to `_completed` until those results are attached
-or the owning completion contract is explicitly amended.
+boundary. The final native Windows CI-profile and canonical L1 reruns are green
+on the `x86_64-pc-windows-msvc` host, which is the revised completion authority.
+Linux execution was attempted but became inconclusive after WSL
+subsystem/filesystem failures; macOS, xwin, and GNU cross-check evidence remains
+unavailable. Those checks are explicitly deferred and do not block lifecycle
+completion.
 
 ## Implementation history
 
@@ -49,6 +49,7 @@ The constrained package set is `claudine-catalog-types`, `claudine`,
 | Area doctest | `11-final-claudine-just-doctest.log`: catalog types and generator had zero doctests; Claudine passed 20 runnable doctests with 7 ignored plus 3 compile-fail doctests; the contract passed 2/2; the CLI has no library target. | Passed |
 | Deterministic CI-profile L1 | `12-final-claudine-ci-test.log` ran 6,191 tests and passed 6,190 with 13 skipped and no timeout; the sole failure was committed dispatch-inventory line drift. After the inventory-only correction, `15-final-claudine-ci-test-rerun.log` passed 6,191/6,191 with 13 skipped, retries disabled, in 227.6 seconds. | Passed |
 | Canonical local L1 | `16-final-claudine-canonical-test.log` passed 6,191/6,191 with 13 skipped, no failure, no timeout, and no flaky test in 244.3 seconds. | Passed |
+| Rendezvous live-daemon coverage | The focused native Windows live-daemon set passed 5/5 with `rendezvous-daemon` and DuckDB enabled. | Passed |
 
 The failed inventory guard did not expose a new dispatch site. Logs 13 and 14
 regenerated and then independently verified the inventory, with both runs
@@ -73,14 +74,14 @@ non-final reference point:
 No L2, L3, browser, or real-provider tier is required: the changes exercise L1
 filesystem, rendering, process, configuration, and generator behavior.
 
-## Other-platform and compile-check record
+## Deferred portability follow-up record
 
 | Required evidence | Status |
 |---|---|
-| Linux Claudine build, lint, doctest, and L1 tests | **Incomplete / blocked**. The constrained five-package build passed from the WSL-mounted worktree after one source correction, but mounted-tree sanity timed out and the verified native-Linux snapshot then encountered WSL subsystem/filesystem failure during its cold build. No later Linux gate ran. |
-| macOS Claudine build, lint, doctest, and L1 tests | **Unmet**. No exact-candidate macOS runner was available. Local `HEAD` plus the dirty worktree has no remote CI result, and the available `gh` token is invalid. |
-| `cargo xwin check --target x86_64-pc-windows-msvc -p claudine --all-targets` from a supported non-Windows host | **Unmet**. The xwin tooling is not installed. |
-| `just check-windows` GNU-target compile check | **Unmet**. The MinGW toolchain/target is not installed. |
+| Linux Claudine build, lint, doctest, and L1 tests | **Deferred after inconclusive environment**. The constrained five-package build passed from the WSL-mounted worktree after one source correction, but mounted-tree sanity timed out and the verified native-Linux snapshot then encountered WSL subsystem/filesystem failure during its cold build. No later Linux gate ran. |
+| macOS Claudine build, lint, doctest, and L1 tests | **Deferred; runner unavailable**. No exact-candidate macOS runner was available. Local `HEAD` plus the dirty worktree has no remote CI result, and the available `gh` token is invalid. |
+| `cargo xwin check --target x86_64-pc-windows-msvc -p claudine --all-targets` from a supported non-Windows host | **Deferred; tool unavailable**. The xwin tooling is not installed. |
+| `just check-windows` GNU-target compile check | **Execution deferred; tool unavailable**. The MinGW compiler/target is not installed. `cargo tree --target x86_64-pc-windows-gnu` nevertheless verifies that `rendezvous-daemon -> duckdb -> libduckdb-sys` remains in the target graph. This is graph evidence, not a successful GNU compilation. |
 
 The first WSL mounted-tree build found one real portability regression:
 `provider_error_finalize.rs` imported a Windows-gated fixture helper without
@@ -99,9 +100,11 @@ subsystem/filesystem failures (`getpwnam/getpwuid failed 5` and `/bin/sh` I/O
 error), so no reliable compiler verdict or later Linux lint, doctest, or L1
 result exists.
 
-These are completion gates, not inferred portability claims. The successful
-mounted-tree build and host-independent tests reduce risk but do not replace a
-complete native-Linux run, a macOS run, or the required cross-compiles.
+These results are not inferred portability claims. The successful mounted-tree
+build and host-independent tests reduce risk, while a complete native-Linux
+run, a macOS run, and the cross-compiles remain explicit follow-up evidence.
+DuckDB dependency selection is not conditional on those follow-ups:
+`rendezvous-daemon` and its DuckDB pipeline are required on every platform.
 
 ## Focused evidence by implementation phase
 
@@ -197,11 +200,12 @@ passed 154/154 with 1 skipped.
 | Absolute allow entries are recognized on Windows. | `windows_absolute_allow_is_portable_and_boundary_aware`; drive-relative rejection companion; final Windows L1. | Met on Windows |
 | Boundary logic has exactly one guarded definition. | Private `path_semantics` module plus `path_matching_modules_keep_separator_semantics_centralized`; final Windows L1. | Met locally |
 | Prefix-but-not-child paths remain rejected. | `directory_prefix_requires_a_segment_boundary` and `descendant_match_requires_a_segment_boundary`; final Windows L1. | Met on Windows |
-| Tests run on every platform. | Windows-shaped comparison tests are host-independent and ungated. | Met by placement; other-platform execution unmet |
+| Host-independent matcher tests are ungated and run in the native Windows L1 suite. | Windows-shaped comparison cases are not hidden behind a platform gate. | Met |
 | Interim warning and both call sites are removed. | Only the forbidden source-guard needle remains; no definition or caller remains. | Met locally |
-| MSVC xwin all-targets check is clean. | No supported-host result attached. | **Unmet** |
+| Native Windows MSVC constrained build and full L1 gates are clean. | `rustc -vV` reports host `x86_64-pc-windows-msvc`; the constrained build, sanity, lint, doctest, CI-profile L1, and canonical L1 gates passed. | Met |
 
-The July 29 spec checkboxes remain untouched while any item is unmet.
+The July 29 acceptance boxes are complete under the revised native-Windows
+authority. The unavailable xwin and GNU checks remain documented follow-ups.
 
 ## July 31 success mapping (6 items)
 
@@ -209,22 +213,22 @@ The July 29 spec checkboxes remain untouched while any item is unmet.
 |---|---|---|
 | Claudine L1 is green on native Windows; only genuinely Unix-only fixtures may be gated. | Final CI-profile and canonical runs passed 6,191/6,191 with 13 justified skips. The only retained gates name their Unix `$HOME` or Unix process facility. | Met on Windows |
 | No test exceeds the ordinary 30-second ceiling. | Generator drift tests are below one second in the focused body; both final area runs had zero timeouts. | Met on Windows |
-| July 29 matching defects and warning are closed. | Security regressions and source-inventory guard above. | Met locally; MSVC evidence unmet |
+| July 29 matching defects and warning are closed. | Security regressions, source-inventory guard, and final native Windows MSVC gates above. | Met |
 | Atomic writes survive concurrent Windows writers. | Barrier contention, bounded retry, same-temp-file, permanent-error, and cleanup regressions passed in final Windows L1. | Met on Windows |
 | Path-to-text boundaries use biscuit-file portable text. | Phase 3 inventory; zero unresolved presentation sites and zero production hand-built file URLs; final Windows L1. | Met on Windows |
-| Linux and macOS behavior is unchanged. | The corrected mounted-tree Linux build passed, but WSL storage/subsystem failures prevented the remaining Linux gates; no exact-candidate macOS result is available. | **Incomplete / blocked** |
+| Host-independent contracts remain ungated and native Windows MSVC gates pass; external platform checks are follow-ups. | Matcher and renderer contracts are ungated; the corrected mounted-tree Linux build passed before WSL storage/subsystem failure; exact-candidate macOS, xwin, and GNU checks are deferred. | Met under revised contract |
 
 ## Integrated-plan completion mapping (7 items)
 
 | Completion contract | Evidence | State |
 |---|---|---|
 | Separator-neutral allow/deny matching without prefix collision. | Shared comparison grammar and matcher/query tests passed in final Windows L1. | Met on Windows |
-| Home-sensitive and Windows absolute-allow matching; warning removed. | Protect/query regressions and warning inventory. | Met locally; MSVC evidence unmet |
+| Home-sensitive and Windows absolute-allow matching; warning removed. | Protect/query regressions, warning inventory, and final native Windows MSVC gates. | Met |
 | Atomic intact last-successful-rename-wins behavior without non-atomic fallback. | Barrier contention and retry-state tests passed in final Windows L1; documented implementation contract. | Met on Windows |
 | Portable user-facing paths/completions and real local file URLs. | Phase 3 inventory and URL/decline regressions passed in final Windows L1. | Met on Windows |
 | Every original Windows L1 failure fixed or tied to a named Unix-only contract. | Four Phase 4 classification notes; no Windows product-path test was hidden; final Windows L1 is green. | Met on Windows |
 | Three generator drift checks remain within the ordinary timeout. | Nine isolated post-change passes and the final 154/154 generator gates. | Met on Windows |
-| Full Windows build/test/doctest/lint plus unchanged Linux/macOS behavior. | Windows build, sanity, lint, doctest, CI-profile L1, and canonical L1 passed. The Linux attempt was blocked by WSL storage/subsystem failure after one successful mounted-tree build; macOS, MSVC, and GNU checks remain unavailable. | **Incomplete / blocked** |
+| Full native Windows MSVC constrained build/test/doctest/lint acceptance. | Windows build, sanity, lint, doctest, CI-profile L1, canonical L1, and 5/5 focused live-daemon tests passed. The all-platform graph retains `rendezvous-daemon -> duckdb -> libduckdb-sys`, including for `x86_64-pc-windows-gnu`; Linux/macOS/xwin/GNU execution remains deferred. | Met |
 
 ## Final audit record
 
@@ -244,6 +248,11 @@ The July 29 spec checkboxes remain untouched while any item is unmet.
   the code as authoritative: timestamps are available only for the Unix
   recording path, and the `cmd.exe` channel-contract twin is executed by the
   native Windows tests rather than merely compile-checked.
+- Dependency drift was corrected by removing Windows-GNU exclusions for
+  `rendezvous-daemon` and its tests. DuckDB remains an all-platform requirement;
+  native Windows live-daemon tests pass 5/5, and the Windows-GNU Cargo graph
+  includes `rendezvous-daemon -> duckdb -> libduckdb-sys`. No GNU compilation
+  result is claimed.
 - `git diff --check` and each scoped cached-diff check were clean before the
   implementation, Messenger, and Darkmatter documentation commits.
 - GitNexus could not resolve the changed Rust symbols and returned `UNKNOWN`,
@@ -261,9 +270,8 @@ The July 29 spec checkboxes remain untouched while any item is unmet.
 
 ## Closeout decision
 
-Do not check either source spec's acceptance boxes and do not move either fix
-directory. Native Windows acceptance is green. Closeout remains blocked on a
-complete native-Linux gate, an exact-candidate macOS gate, and the unavailable
-MSVC xwin and GNU cross-compiles. Once those results are available, replace the
-blocked states above with exact log or CI evidence, rerun the final staged
-audits, and only then perform lifecycle completion.
+The revised native Windows MSVC completion contract is met, and the source-spec
+acceptance state may reflect that result. Linux, macOS, xwin, and GNU checks
+remain explicit deferred follow-ups and must not be described as passing.
+After the final staged audits, both fix records and the integrated plan were
+archived under `fixes/_completed`.

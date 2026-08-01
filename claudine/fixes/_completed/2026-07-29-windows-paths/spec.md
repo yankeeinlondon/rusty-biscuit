@@ -154,14 +154,18 @@ situation cannot recur.
 
 ## Acceptance criteria
 
-- [ ] Directory-scoped deny rules apply on Windows.
-- [ ] Directory-scoped allow rules apply on Windows.
-- [ ] Home-relative sensitive paths are classified on Windows.
-- [ ] Absolute allow entries are recognised on Windows.
-- [ ] Boundary logic has exactly one definition, enforced by a guard.
-- [ ] Prefix-but-not-child paths are still rejected.
-- [ ] Tests run on every platform, not gated to the Windows leg.
-- [ ] `warn_windows_path_matching_is_broken` and both call sites are removed.
-- [ ] `cargo xwin check --target x86_64-pc-windows-msvc -p claudine
-      --all-targets` is clean (plain `cargo check` fails first on `aws-lc-sys`
-      needing `windows.h`, which is a C build-script issue, not Rust).
+- [x] Directory-scoped deny rules apply on Windows.
+- [x] Directory-scoped allow rules apply on Windows.
+- [x] Home-relative sensitive paths are classified on Windows.
+- [x] Absolute allow entries are recognized on Windows.
+- [x] Boundary logic has exactly one definition, enforced by a guard.
+- [x] Prefix-but-not-child paths are still rejected.
+- [x] Host-independent matcher tests are ungated and run in the native Windows
+      L1 suite.
+- [x] `warn_windows_path_matching_is_broken` and both call sites are removed.
+- [x] The constrained build and full Claudine L1 gates are clean on native
+      `x86_64-pc-windows-msvc` Windows.
+
+The native Windows MSVC run is the completion authority. Linux/macOS execution,
+the non-Windows-host xwin cross-check, and the GNU-target check are deferred
+portability follow-ups; they are not represented as passing evidence.

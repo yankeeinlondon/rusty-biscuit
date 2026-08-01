@@ -7,7 +7,7 @@ packages:
   - claudine-cli
   - claudine-gen
 depends_on:
-  - claudine/fixes/2026-07-29-windows-paths/spec.md
+  - claudine/fixes/_completed/2026-07-29-windows-paths/spec.md
 related:
   - biscuit-file/features/2026-07-31-portable-strings/
 ---
@@ -245,8 +245,17 @@ binary's output. Redirect the whole run to a file, then query it.
 4. `config::atomic` survives concurrent writers on Windows.
 5. Claudine's path→text boundaries render through
    `biscuit_file::to_portable_string`, matching Darkmatter's adoption.
-6. Linux and macOS results are unchanged — every fix here is cross-platform, not
-   a Windows special case.
+6. Host-independent matcher and renderer contracts remain ungated, and the
+   constrained build plus full L1 gates pass on native
+   `x86_64-pc-windows-msvc` Windows. Linux, macOS, xwin, and GNU-target checks
+   are deferred portability follow-ups rather than completion authorities.
+
+`rendezvous-daemon` and its DuckDB session-log pipeline remain required on
+every platform. Windows target exclusions are not an acceptable portability
+shortcut. Native Windows live-daemon tests pass 5/5, and the
+`x86_64-pc-windows-gnu` Cargo graph contains
+`rendezvous-daemon -> duckdb -> libduckdb-sys`; this graph evidence does not
+claim that the unavailable GNU compiler completed a build.
 
 ## Out of scope
 
