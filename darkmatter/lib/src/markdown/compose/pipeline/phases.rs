@@ -18,7 +18,7 @@ use super::super::{
 };
 use tracing::{debug, info};
 
-use transclusion::{ApplyTarget, SectionSlot, TransclusionEngine};
+use transclusion::{ApplyTarget, ResolvedTransclusion, SectionSlot, TransclusionEngine};
 
 impl Markdown {
     pub(crate) fn run_inline_pre_operation(
@@ -333,13 +333,23 @@ impl Markdown {
         let results = prepared
             .into_par_iter()
             .map(|item| {
-                engine.resolve_prepared_transclusion(
-                    item,
-                    state,
-                    state_identity,
-                    options,
-                    &runtime_mutex,
-                )
+                // The anchor is taken before `item` is consumed: a resolution
+                // error carries no span, and without one a tolerated failure
+                // can only be skipped — which leaves the authored directive
+                // text in the document.
+                let anchor = item.failure_anchor();
+                engine
+                    .resolve_prepared_transclusion(
+                        item,
+                        state,
+                        state_identity,
+                        options,
+                        &runtime_mutex,
+                    )
+                    // Boxed because this pair is the `Err` of a hot `Result`
+                    // returned for every prepared item, and the anchor makes it
+                    // large enough to widen the success path's stack footprint.
+                    .map_err(|error| Box::new((anchor, error)))
             })
             .collect::<Vec<_>>();
 
@@ -366,7 +376,8 @@ impl Markdown {
         for result in results {
             let resolved = match result {
                 Ok(resolved) => resolved,
-                Err(error) => {
+                Err(failure) => {
+                    let (anchor, error) = *failure;
                     let is_structural = matches!(
                         error,
                         MarkdownError::Transclusion(ref inner)
@@ -380,8 +391,23 @@ impl Markdown {
                     if is_structural || options.fail_fast {
                         return Err(error);
                     }
-                    report.add_warning(ComposeWarning::new("transclusion", error.to_string()));
-                    continue;
+                    // Tolerating the failure is a promise that the output stays
+                    // usable, and a document that silently omits a transcluded
+                    // section does not keep it — the gap has to be visible in
+                    // the artifact, not only in a warning on stderr. This
+                    // matches the removal-and-warn the engine already applies
+                    // to resolution failures under `ignore_invalid`, except
+                    // that the span is filled rather than emptied.
+                    let mut skipped = ComposeReport::new();
+                    skipped.transclusions_skipped = 1;
+                    skipped.add_warning(ComposeWarning::new("transclusion", error.to_string()));
+                    ResolvedTransclusion {
+                        order: anchor.order,
+                        content: Some(self.fit_notice_to_span(&anchor.target, anchor.notice)),
+                        target: anchor.target,
+                        report: skipped,
+                        source_file: None,
+                    }
                 }
             };
 
@@ -470,5 +496,29 @@ impl Markdown {
         }
 
         Ok(())
+    }
+
+    /// Shapes a failure notice to sit where the directive it replaces did.
+    ///
+    /// Every directive parser starts a span at its line's first byte and ends
+    /// it past the newline, so the replaced range owns both the leading
+    /// indentation and the line break. A bare notice would therefore unnest a
+    /// directive written inside a list item and glue the following line onto
+    /// itself. Successful replacements carry their own indentation from the
+    /// renderer that built them; this is the failure path's equivalent.
+    fn fit_notice_to_span(&self, target: &ApplyTarget, notice: String) -> String {
+        let ApplyTarget::Replace(span) = target else {
+            return notice;
+        };
+        let indent: String = self.content[span.start..]
+            .chars()
+            .take_while(|character| *character == ' ' || *character == '\t')
+            .collect();
+        let newline = if self.content[..span.end].ends_with('\n') {
+            "\n"
+        } else {
+            ""
+        };
+        format!("{indent}{notice}{newline}")
     }
 }

@@ -28,6 +28,7 @@ use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Layout, LayoutTerminalExt};
 
 use crate::markdown::Markdown;
+use crate::markdown::compose::{ComposeContext, ComposeOptions};
 use crate::markdown::reference::ReferenceError;
 use crate::markdown::reference::types::{ReferenceGraph, ReferenceGraphOptions};
 use crate::markdown::reference::validate::{
@@ -167,14 +168,28 @@ impl FileTree {
     }
 
     /// Creates a FileTree from an already-loaded Markdown document.
+    ///
+    /// ## Notes
+    ///
+    /// The graph and validation options share one runtime context, captured
+    /// from `md` rather than eagerly. Taking `ReferenceGraphOptions::default()`
+    /// and `ReferenceValidationOptions::default()` instead would run the
+    /// repo-wide sniff scan (git, repo, file changes, languages, docs, OS,
+    /// hardware, GPU) *twice* — 2.8s measured on this working tree — before the
+    /// tree knows whether the document reads any `ctx.*` at all.
     pub fn from_markdown(md: Markdown) -> Self {
+        let base_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let compose =
+            ComposeOptions::new_with_context(ComposeContext::capture_for_document(&base_dir, &md));
+        let graph_options = ReferenceGraphOptions::with_compose(compose);
+        let validation_options = ReferenceValidationOptions::with_graph(graph_options.clone());
         Self {
             md,
             follow: false,
             do_validate: false,
             show_root: true,
-            graph_options: ReferenceGraphOptions::default(),
-            validation_options: ReferenceValidationOptions::default(),
+            graph_options,
+            validation_options,
             layout: Layout::default(),
             model: None,
             graph: None,

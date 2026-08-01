@@ -6,11 +6,22 @@
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{
-    ComposeOperation, ComposeOptions,
+    ComposeContext, ComposeOperation, ComposeOptions,
     shell_expansion::types::{ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest},
 };
 use std::sync::Arc;
 use tempfile::TempDir;
+
+/// Compose options without the repo-wide capture `ComposeOptions::new()` runs
+/// (git, repo, file changes, languages, docs, OS, hardware, GPU via sniff —
+/// 1.4s per call on this working tree). No fixture here reads `ctx.*`, and a
+/// group an expression does ask for is still captured on demand.
+fn context_free_options() -> ComposeOptions {
+    ComposeOptions::new_with_context(ComposeContext::capture_for_content(
+        std::path::Path::new("."),
+        "",
+    ))
+}
 
 fn write_files(dir: &TempDir, files: &[(&str, &str)]) {
     for (name, content) in files {
@@ -61,7 +72,7 @@ fn compose_single_shell_block() {
         )],
     );
 
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .with_source_file(dir.path().join("doc.md"))
         .with_shell_policy_root(dir.path())
         .with_shell_working_directory(std::env::current_dir().unwrap())
@@ -93,7 +104,7 @@ fn compose_multiple_shell_blocks() {
         )],
     );
 
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .with_source_file(dir.path().join("doc.md"))
         .with_shell_policy_root(dir.path())
         .with_shell_working_directory(std::env::current_dir().unwrap())
@@ -122,7 +133,7 @@ fn compose_shell_block_with_multiple_commands() {
         &[("doc.md", "::shell-block\necho a\necho b\n::end-block\n")],
     );
 
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .with_source_file(dir.path().join("doc.md"))
         .with_shell_policy_root(dir.path())
         .with_shell_working_directory(std::env::current_dir().unwrap())
@@ -152,7 +163,7 @@ fn compose_shell_block_with_empty_output_commands() {
         )],
     );
 
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .with_source_file(dir.path().join("doc.md"))
         .with_shell_policy_root(dir.path())
         .with_shell_working_directory(std::env::current_dir().unwrap())
@@ -184,7 +195,7 @@ fn shell_block_inside_true_page_block_executes() {
         )],
     );
 
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .with_source_file(dir.path().join("doc.md"))
         .with_shell_policy_root(dir.path())
         .with_shell_working_directory(std::env::current_dir().unwrap())
@@ -212,7 +223,7 @@ fn shell_block_inside_false_page_block_is_removed() {
         )],
     );
 
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .with_source_file(dir.path().join("doc.md"))
         .with_shell_policy_root(dir.path())
         .with_shell_working_directory(std::env::current_dir().unwrap())
@@ -248,7 +259,7 @@ fn shell_block_in_transcluded_document_executes() {
         ],
     );
 
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .with_source_file(dir.path().join("parent.md"))
         .with_shell_policy_root(dir.path())
         .with_shell_working_directory(std::env::current_dir().unwrap())
@@ -279,7 +290,7 @@ fn shell_block_with_conditional_transclusion() {
         ],
     );
 
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .with_source_file(dir.path().join("parent.md"))
         .with_shell_policy_root(dir.path())
         .with_shell_working_directory(std::env::current_dir().unwrap())
@@ -310,7 +321,7 @@ fn shell_block_skipped_when_transclusion_condition_false() {
         ],
     );
 
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .with_source_file(dir.path().join("parent.md"))
         .with_shell_policy_root(dir.path())
         .with_shell_working_directory(std::env::current_dir().unwrap())
@@ -342,7 +353,7 @@ fn compose_fails_when_shell_block_command_denied() {
         )],
     );
 
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .with_source_file(dir.path().join("doc.md"))
         .with_shell_policy_root(dir.path())
         .with_shell_working_directory(std::env::current_dir().unwrap())
@@ -362,7 +373,7 @@ fn compose_fails_on_unterminated_shell_block() {
     let dir = TempDir::new().unwrap();
     write_files(&dir, &[("doc.md", "# Test\n\n::shell-block\necho hello\n")]);
 
-    let options = ComposeOptions::new().with_source_file(dir.path().join("doc.md"));
+    let options = context_free_options().with_source_file(dir.path().join("doc.md"));
 
     let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
     let result = md.compose_with(options);
@@ -393,7 +404,7 @@ fn shell_block_after_interpolation() {
         )],
     );
 
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .with_source_file(dir.path().join("doc.md"))
         .with_shell_policy_root(dir.path())
         .with_shell_working_directory(std::env::current_dir().unwrap())
@@ -413,21 +424,18 @@ fn shell_block_after_interpolation() {
 //  Performance: linear parsing
 // ═══════════════════════════════════════════════════════════════════
 
-#[test]
-fn linear_parsing_performance() {
-    use std::time::Instant;
-
+/// Composes `block_count` trivial shell blocks and returns the wall time plus
+/// the composed output and report.
+fn compose_shell_blocks(block_count: usize) -> (std::time::Duration, String, usize) {
     let dir = TempDir::new().unwrap();
 
-    // Build a document with many shell blocks
-    let block_count = 100;
     let mut content = String::new();
     for i in 0..block_count {
         content.push_str(&format!("::shell-block\necho block-{i}\n::end-block\n\n"));
     }
     write_files(&dir, &[("doc.md", &content)]);
 
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .with_source_file(dir.path().join("doc.md"))
         .with_shell_policy_root(dir.path())
         .with_shell_working_directory(std::env::current_dir().unwrap())
@@ -435,27 +443,45 @@ fn linear_parsing_performance() {
 
     let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
 
-    let start = Instant::now();
+    let start = std::time::Instant::now();
     let (composed, report) = md.compose_with(options).unwrap();
     let elapsed = start.elapsed();
 
-    let output = composed.content();
+    (
+        elapsed,
+        composed.content().to_string(),
+        report.shell_blocks_applied,
+    )
+}
 
-    // All blocks should have been processed
-    assert_eq!(
-        report.shell_blocks_applied, block_count,
-        "Expected all {block_count} shell blocks to be applied"
-    );
+/// Block handling must stay linear in block count, not quadratic.
+///
+/// Asserted as a ratio between two sizes rather than an absolute deadline. Cost
+/// here is dominated by one real process spawn per block, so an absolute bound
+/// measures the host's spawn throughput — it failed at 5.05s against a 5s
+/// ceiling under parallel-suite load while the code was perfectly linear.
+/// Contention inflates both measurements together, so their ratio survives it.
+/// Quadratic growth would put the 4× size step near 16×; the 8× bound leaves
+/// generous slack while still catching that.
+#[test]
+fn linear_parsing_performance() {
+    // 12 + 48 spawns 40% fewer processes than the absolute-deadline version's
+    // 100 while keeping the 4× size step. Process spawn dominates the wall
+    // clock here, so the smaller counts are what keep the test off nextest's
+    // slow list under full-suite contention.
+    let (small_elapsed, _, small_applied) = compose_shell_blocks(12);
+    let (large_elapsed, output, large_applied) = compose_shell_blocks(48);
 
-    // Verify a few outputs
+    assert_eq!(small_applied, 12, "Expected all 12 shell blocks to be applied");
+    assert_eq!(large_applied, 48, "Expected all 48 shell blocks to be applied");
+
     assert!(output.contains("block-0"), "Expected block-0 in output");
-    assert!(output.contains("block-99"), "Expected block-99 in output");
+    assert!(output.contains("block-47"), "Expected block-47 in output");
 
-    // Performance assertion: should complete in under 5 seconds for 100 blocks
-    // (This is generous; actual time should be much less)
     assert!(
-        elapsed.as_secs() < 5,
-        "Processing {block_count} shell blocks took too long: {elapsed:?}"
+        large_elapsed.as_secs_f64() < small_elapsed.as_secs_f64() * 8.0,
+        "4× the blocks took {large_elapsed:?} against {small_elapsed:?} for the \
+         baseline — growth is super-linear"
     );
 }
 
@@ -474,7 +500,7 @@ fn compose_shell_block_with_when_error() {
         )],
     );
 
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .with_source_file(dir.path().join("doc.md"))
         .with_shell_policy_root(dir.path())
         .with_shell_working_directory(std::env::current_dir().unwrap())
@@ -502,7 +528,7 @@ fn compose_shell_block_with_timeout() {
         &[("doc.md", "::shell-block timeout=1\nsleep 5\n::end-block\n")],
     );
 
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .with_source_file(dir.path().join("doc.md"))
         .with_shell_policy_root(dir.path())
         .with_shell_working_directory(std::env::current_dir().unwrap())
@@ -534,7 +560,7 @@ fn compose_mixed_shell_directive_and_shell_block() {
         )],
     );
 
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .with_source_file(dir.path().join("doc.md"))
         .with_shell_policy_root(dir.path())
         .with_shell_working_directory(std::env::current_dir().unwrap())

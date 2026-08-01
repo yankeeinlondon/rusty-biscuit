@@ -28,7 +28,7 @@ fn test_compose_with_custom_options() {
     let content = "# Hello\n\nWorld";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .disable(ComposeOperation::Cleanup)
         .disable(ComposeOperation::Normalization);
 
@@ -45,7 +45,7 @@ fn test_compose_cleanup_stage() {
     let content = "# Header\nParagraph";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().only(&[ComposeOperation::Cleanup]);
+    let options = context_free_options().only(&[ComposeOperation::Cleanup]);
 
     let (composed, report) = md.compose_with(options).unwrap();
 
@@ -59,7 +59,7 @@ fn test_compose_cleanup_strips_incidental_newlines_by_default() {
     let content = "This paragraph was wrapped\nat a fixed column.";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().only(&[ComposeOperation::Cleanup]);
+    let options = context_free_options().only(&[ComposeOperation::Cleanup]);
 
     let (composed, report) = md.compose_with(options).unwrap();
 
@@ -91,7 +91,7 @@ fn test_compose_cleanup_preserves_mixed_document_structure_and_word_boundaries()
         "    \n",
         "    second paragraph\n",
     );
-    let options = ComposeOptions::new().only(&[ComposeOperation::Cleanup]);
+    let options = context_free_options().only(&[ComposeOperation::Cleanup]);
 
     let (composed, report) = Markdown::from(content).compose_with(options).unwrap();
 
@@ -104,7 +104,7 @@ fn test_compose_cleanup_can_preserve_incidental_newlines() {
     let content = "This paragraph keeps\nits single newline.\n";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .only(&[ComposeOperation::Cleanup])
         .with_incidental_newline_mode(crate::markdown::cleanup::IncidentalNewlineMode::Preserve);
 
@@ -119,7 +119,7 @@ fn test_compose_cleanup_fixed_width_reflows_prose() {
     let content = "This paragraph starts with incidental wrapping\nand should be reflowed into lines that fit.";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .only(&[ComposeOperation::Cleanup])
         .with_fixed_width(40);
 
@@ -142,7 +142,7 @@ fn test_compose_cleanup_fixed_width_forces_strip_over_preserve() {
     let content = "Short first line.\nShort second line.\n";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .only(&[ComposeOperation::Cleanup])
         .with_incidental_newline_mode(crate::markdown::cleanup::IncidentalNewlineMode::Preserve)
         .with_fixed_width(80);
@@ -163,14 +163,14 @@ fn test_compose_cleanup_list_modes_match_direct_library_cleanup() {
 
     let source = "- Alpha beta gamma delta\n    epsilon zeta eta theta.";
 
-    let strip_options = ComposeOptions::new().only(&[ComposeOperation::Cleanup]);
+    let strip_options = context_free_options().only(&[ComposeOperation::Cleanup]);
     let (stripped, _) = Markdown::from(source).compose_with(strip_options).unwrap();
     let mut direct: Markdown = source.into();
     direct.cleanup();
     assert_eq!(stripped.content(), direct.content());
     assert_eq!(stripped.content(), "- Alpha beta gamma delta epsilon zeta eta theta.\n");
 
-    let preserve_options = ComposeOptions::new()
+    let preserve_options = context_free_options()
         .only(&[ComposeOperation::Cleanup])
         .with_incidental_newline_mode(IncidentalNewlineMode::Preserve);
     let (preserved, _) = Markdown::from(source).compose_with(preserve_options).unwrap();
@@ -181,7 +181,7 @@ fn test_compose_cleanup_list_modes_match_direct_library_cleanup() {
     assert_eq!(preserved.content(), expected_preserved);
     assert_eq!(preserved.content(), "- Alpha beta gamma delta\n    epsilon zeta eta theta.\n");
 
-    let fixed_options = ComposeOptions::new()
+    let fixed_options = context_free_options()
         .only(&[ComposeOperation::Cleanup])
         .with_incidental_newline_mode(IncidentalNewlineMode::Preserve)
         .with_fixed_width(24);
@@ -219,14 +219,14 @@ fn test_compose_cleanup_preserves_nested_lists_inside_blockquotes() {
     ];
 
     for source in fixtures {
-        let default_options = ComposeOptions::new().only(&[ComposeOperation::Cleanup]);
+        let default_options = context_free_options().only(&[ComposeOperation::Cleanup]);
         let (default, _) = Markdown::from(source)
             .compose_with(default_options)
             .unwrap();
         let direct_default = cleanup_content(source);
         assert_eq!(default.content(), direct_default);
 
-        let configured_options = ComposeOptions::new()
+        let configured_options = context_free_options()
             .only(&[ComposeOperation::Cleanup])
             .with_indent_size(2);
         let (configured, _) = Markdown::from(source)
@@ -234,7 +234,7 @@ fn test_compose_cleanup_preserves_nested_lists_inside_blockquotes() {
             .unwrap();
         assert_eq!(configured.content(), cleanup_content_with_indent(source, 2));
 
-        let fixed_options = ComposeOptions::new()
+        let fixed_options = context_free_options()
             .only(&[ComposeOperation::Cleanup])
             .with_fixed_width(24);
         let (fixed, _) = Markdown::from(source).compose_with(fixed_options).unwrap();
@@ -254,7 +254,7 @@ fn test_compose_indent_eight_matches_exact_library_cleanup() {
         "> - [ ] Quote task parent alpha beta gamma delta.\n",
         ">   - [x] Quote task child alpha beta gamma delta epsilon.\n"
     );
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .only(&[ComposeOperation::Cleanup])
         .with_indent_size(8)
         .with_fixed_width(30);
@@ -306,7 +306,7 @@ fn test_compose_cleanup_preserves_additional_paragraphs_inside_blockquoted_items
             ListSpacingMode::Loose => cleanup_content_with_indent_loose(source, indent),
         };
         let expected = reflow_to_width(&direct, 24);
-        let options = ComposeOptions::new()
+        let options = context_free_options()
             .only(&[ComposeOperation::Cleanup])
             .with_list_spacing(spacing)
             .with_indent_size(indent)
@@ -405,7 +405,7 @@ fn test_compose_cleanup_preserves_markers_in_protected_bodies() {
     ];
 
     for (source, expected) in fixtures {
-        let options = ComposeOptions::new()
+        let options = context_free_options()
             .only(&[ComposeOperation::Cleanup])
             .with_fixed_width(24);
         let (first, _) = Markdown::from(source).compose_with(options.clone()).unwrap();
@@ -434,7 +434,7 @@ fn test_compose_cleanup_preserves_ten_digit_prose_boundary() {
         "2) second ordered item\n"
     );
     let expected = cleanup_content(source);
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .only(&[ComposeOperation::Cleanup])
         .with_list_spacing(ListSpacingMode::Normal);
 
@@ -462,13 +462,13 @@ fn slow_compose_cleanup_preserves_quoted_marker_looking_indented_code() {
     for source in fixtures {
         let direct_default = cleanup_content(source);
         let (default, _) = Markdown::from(source)
-            .compose_with(ComposeOptions::new().only(&[ComposeOperation::Cleanup]))
+            .compose_with(context_free_options().only(&[ComposeOperation::Cleanup]))
             .unwrap();
         assert_eq!(default.content(), direct_default);
 
         let (configured, _) = Markdown::from(source)
             .compose_with(
-                ComposeOptions::new()
+                context_free_options()
                     .only(&[ComposeOperation::Cleanup])
                     .with_indent_size(4),
             )
@@ -477,7 +477,7 @@ fn slow_compose_cleanup_preserves_quoted_marker_looking_indented_code() {
 
         let (fixed, _) = Markdown::from(source)
             .compose_with(
-                ComposeOptions::new()
+                context_free_options()
                     .only(&[ComposeOperation::Cleanup])
                     .with_fixed_width(24),
             )
@@ -485,7 +485,7 @@ fn slow_compose_cleanup_preserves_quoted_marker_looking_indented_code() {
         assert_eq!(fixed.content(), reflow_to_width(&direct_default, 24));
         let (fixed_second, _) = Markdown::from(fixed.content())
             .compose_with(
-                ComposeOptions::new()
+                context_free_options()
                     .only(&[ComposeOperation::Cleanup])
                     .with_fixed_width(24),
             )
@@ -504,7 +504,7 @@ fn test_compose_cleanup_fixed_width_keeps_reference_definitions_intact() {
         "[ref]: https://example.com/a/very/long/path \"A descriptive title\"\n"
     );
 
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .only(&[ComposeOperation::Cleanup])
         .with_fixed_width(24);
     let (fixed, _) = Markdown::from(source).compose_with(options).unwrap();
@@ -529,7 +529,7 @@ fn test_compose_normalization_stage_no_change() {
     let content = "# Hello\n\n## World";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().only(&[ComposeOperation::Normalization]);
+    let options = context_free_options().only(&[ComposeOperation::Normalization]);
 
     let (_, report) = md.compose_with(options).unwrap();
 
@@ -577,7 +577,7 @@ fn test_compose_stages_all_disabled() {
     let content = "# Header\nParagraph";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().only(&[]);
+    let options = context_free_options().only(&[]);
 
     let (composed, report) = md.compose_with(options).unwrap();
 
@@ -595,7 +595,7 @@ fn test_compose_stages_run_in_order() {
     std::fs::write(&root, content).unwrap();
     std::fs::write(&code, "fn main() {}\n").unwrap();
 
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .with_source_file(&root)
         .with_shell_policy_root(dir.path())
         .only(&[
@@ -625,7 +625,7 @@ fn test_compose_with_external_state() {
     let md: Markdown = content.into();
 
     let options =
-        ComposeOptions::new().with_external_state(serde_json::json!({"key": "value"}));
+        context_free_options().with_external_state(serde_json::json!({"key": "value"}));
 
     // Should not fail
     let result = md.compose_with(options);
@@ -649,7 +649,7 @@ fn test_compose_fail_fast_false_continues_on_warning() {
     let content = "# Hello";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().with_fail_fast(false);
+    let options = context_free_options().with_fail_fast(false);
 
     let result = md.compose_with(options);
     assert!(result.is_ok());
@@ -662,7 +662,7 @@ fn test_effective_state_available_to_stages() {
 
     // External state should merge with frontmatter
     let options =
-        ComposeOptions::new().with_external_state(serde_json::json!({"external": "data"}));
+        context_free_options().with_external_state(serde_json::json!({"external": "data"}));
 
     let result = md.compose_with(options);
     assert!(result.is_ok());
@@ -677,7 +677,7 @@ fn test_replacement_stage_with_frontmatter() {
     let content = "---\nreplace:\n  foo: bar\n---\n# Hello foo\n\nContent with foo here.";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().only(&[ComposeOperation::TextReplacement]);
+    let options = context_free_options().only(&[ComposeOperation::TextReplacement]);
 
     let (composed, report) = md.compose_with(options).unwrap();
 
@@ -692,7 +692,7 @@ fn test_replacement_stage_overlap_resolution() {
     let content = "---\nreplace:\n  foo: short\n  foobar: long\n---\nfoobar and foo";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().only(&[ComposeOperation::TextReplacement]);
+    let options = context_free_options().only(&[ComposeOperation::TextReplacement]);
 
     let (composed, report) = md.compose_with(options).unwrap();
 
@@ -706,7 +706,7 @@ fn test_replacement_stage_non_recursive() {
     let content = "---\nreplace:\n  foo: foobar\n  foobar: baz\n---\nfoo";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().only(&[ComposeOperation::TextReplacement]);
+    let options = context_free_options().only(&[ComposeOperation::TextReplacement]);
 
     let (composed, report) = md.compose_with(options).unwrap();
 
@@ -720,7 +720,7 @@ fn test_replacement_stage_null_value() {
     let content = "---\nreplace:\n  remove_me: null\n---\nHello remove_me world";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().only(&[ComposeOperation::TextReplacement]);
+    let options = context_free_options().only(&[ComposeOperation::TextReplacement]);
 
     let (composed, report) = md.compose_with(options).unwrap();
 
@@ -733,7 +733,7 @@ fn test_replacement_stage_number_value() {
     let content = "---\nreplace:\n  VERSION: 42\n---\nVersion: VERSION";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().only(&[ComposeOperation::TextReplacement]);
+    let options = context_free_options().only(&[ComposeOperation::TextReplacement]);
 
     let (composed, report) = md.compose_with(options).unwrap();
 
@@ -746,7 +746,7 @@ fn test_replacement_stage_no_replace_in_frontmatter() {
     let content = "---\ntitle: Test\n---\n# Hello foo";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().only(&[ComposeOperation::TextReplacement]);
+    let options = context_free_options().only(&[ComposeOperation::TextReplacement]);
 
     let (composed, report) = md.compose_with(options).unwrap();
 
@@ -761,7 +761,7 @@ fn test_replacement_stage_with_external_state() {
     let content = "# Hello foo";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .only(&[ComposeOperation::TextReplacement])
         .with_external_state(serde_json::json!({
             "replace": {"foo": "bar"}
@@ -779,7 +779,7 @@ fn test_replacement_stage_frontmatter_overrides_external_with_deep_merge() {
     let content = "---\nreplace:\n  foo: from_fm\n  baz: qux\n---\nfoo baz";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .only(&[ComposeOperation::TextReplacement])
         .with_external_state(serde_json::json!({
             "replace": {"foo": "from_external"}
@@ -796,7 +796,7 @@ fn test_replacement_stage_report_summary() {
     let content = "---\nreplace:\n  a: b\n---\na a a";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().only(&[ComposeOperation::TextReplacement]);
+    let options = context_free_options().only(&[ComposeOperation::TextReplacement]);
 
     let (_, report) = md.compose_with(options).unwrap();
 
@@ -812,7 +812,7 @@ fn test_replacement_then_cleanup() {
     let md: Markdown = content.into();
 
     // Enable both replacement and cleanup
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .only(&[ComposeOperation::TextReplacement, ComposeOperation::Cleanup]);
 
     let (composed, report) = md.compose_with(options).unwrap();
@@ -835,7 +835,7 @@ fn test_interpolation_simple_variable() {
     let content = "---\nname: Alice\n---\n# Hello {{ name }}!";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
+    let options = context_free_options().only(&[ComposeOperation::Interpolation]);
 
     let (composed, report) = md.compose_with(options).unwrap();
 
@@ -848,7 +848,7 @@ fn test_interpolation_nested_variable() {
     let content = "---\nuser:\n  name: Bob\n---\nWelcome {{ user.name }}";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
+    let options = context_free_options().only(&[ComposeOperation::Interpolation]);
 
     let (composed, report) = md.compose_with(options).unwrap();
 
@@ -861,7 +861,7 @@ fn test_interpolation_missing_variable() {
     let content = "---\ntitle: Test\n---\nHello {{ missing }}!";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
+    let options = context_free_options().only(&[ComposeOperation::Interpolation]);
 
     let (composed, report) = md.compose_with(options).unwrap();
 
@@ -875,7 +875,7 @@ fn test_interpolation_fallback_uses_default() {
     let content = "---\ntitle: Test\n---\nColor: {{ color || \"unknown\" }}";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
+    let options = context_free_options().only(&[ComposeOperation::Interpolation]);
 
     let (composed, report) = md.compose_with(options).unwrap();
 
@@ -888,7 +888,7 @@ fn test_interpolation_fallback_missing_variable_renders_default() {
     let content = "---\ntitle: Test\n---\nValue: {{ missing || \"default\" }}";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
+    let options = context_free_options().only(&[ComposeOperation::Interpolation]);
 
     let (composed, report) = md.compose_with(options).unwrap();
 
@@ -901,7 +901,7 @@ fn test_interpolation_fallback_uses_primary() {
     let content = "---\ncolor: blue\n---\nColor: {{ color || \"unknown\" }}";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
+    let options = context_free_options().only(&[ComposeOperation::Interpolation]);
 
     let (composed, report) = md.compose_with(options).unwrap();
 
@@ -914,7 +914,7 @@ fn test_interpolation_ternary_true() {
     let content = "---\nactive: true\n---\nStatus: {{ active ? \"on\" : \"off\" }}";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
+    let options = context_free_options().only(&[ComposeOperation::Interpolation]);
 
     let (composed, report) = md.compose_with(options).unwrap();
 
@@ -927,7 +927,7 @@ fn test_interpolation_ternary_false() {
     let content = "---\nactive: false\n---\nStatus: {{ active ? \"on\" : \"off\" }}";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
+    let options = context_free_options().only(&[ComposeOperation::Interpolation]);
 
     let (composed, report) = md.compose_with(options).unwrap();
 
@@ -940,7 +940,7 @@ fn test_interpolation_comparison_equal() {
     let content = "---\ncount: 5\n---\n{{ count == 5 ? \"five\" : \"other\" }}";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
+    let options = context_free_options().only(&[ComposeOperation::Interpolation]);
 
     let (composed, report) = md.compose_with(options).unwrap();
 
@@ -953,7 +953,7 @@ fn test_interpolation_comparison_greater_than() {
     let content = "---\ncount: 10\n---\n{{ count > 5 ? \"many\" : \"few\" }}";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
+    let options = context_free_options().only(&[ComposeOperation::Interpolation]);
 
     let (composed, report) = md.compose_with(options).unwrap();
 
@@ -966,7 +966,7 @@ fn test_interpolation_multiple_expressions() {
     let content = "---\nfirst: Alice\nlast: Smith\n---\n{{ first }} {{ last }}";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
+    let options = context_free_options().only(&[ComposeOperation::Interpolation]);
 
     let (composed, report) = md.compose_with(options).unwrap();
 
@@ -981,7 +981,7 @@ fn test_interpolation_scans_inline_code_spans() {
     let content = "---\nname: Alice\n---\nHello {{ name }}! Code: `{{ name }}`";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
+    let options = context_free_options().only(&[ComposeOperation::Interpolation]);
 
     let (composed, report) = md.compose_with(options).unwrap();
 
@@ -995,7 +995,7 @@ fn test_interpolation_code_blocks_via_option() {
     let content = "---\nname: Alice\n---\nHello {{ name }}!\n\n```\n{{ name }}\n```";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .only(&[ComposeOperation::Interpolation])
         .with_interpolate_code_blocks(true);
 
@@ -1012,7 +1012,7 @@ fn test_interpolation_code_blocks_via_frontmatter() {
     let content = "---\nname: Alice\ninterpolate_code_blocks: true\n---\nHello {{ name }}!\n\n```\n{{ name }}\n```";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
+    let options = context_free_options().only(&[ComposeOperation::Interpolation]);
 
     let (composed, report) = md.compose_with(options).unwrap();
 
@@ -1027,7 +1027,7 @@ fn test_interpolation_skips_fenced_code() {
     let content = "---\nname: Alice\n---\nHello {{ name }}!\n\n```\n{{ name }}\n```";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
+    let options = context_free_options().only(&[ComposeOperation::Interpolation]);
 
     let (composed, report) = md.compose_with(options).unwrap();
 
@@ -1042,7 +1042,7 @@ fn test_interpolation_no_expressions() {
     let content = "---\nname: Alice\n---\n# Just plain text";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
+    let options = context_free_options().only(&[ComposeOperation::Interpolation]);
 
     let (composed, report) = md.compose_with(options).unwrap();
 
@@ -1055,7 +1055,7 @@ fn test_interpolation_with_external_state() {
     let content = "# Hello {{ name }}!";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .only(&[ComposeOperation::Interpolation])
         .with_external_state(serde_json::json!({"name": "External"}));
 
@@ -1070,7 +1070,7 @@ fn test_interpolation_frontmatter_overrides_external() {
     let content = "---\nname: Frontmatter\n---\n# Hello {{ name }}!";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .only(&[ComposeOperation::Interpolation])
         .with_external_state(serde_json::json!({"name": "External"}));
 
@@ -1086,7 +1086,7 @@ fn test_interpolation_chained_fallback() {
     let content = "---\nbackup: second\n---\nValue: {{ missing || backup || \"default\" }}";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
+    let options = context_free_options().only(&[ComposeOperation::Interpolation]);
 
     let (composed, report) = md.compose_with(options).unwrap();
 
@@ -1100,7 +1100,7 @@ fn test_interpolation_parse_error_preserves_original() {
     let content = "---\nname: Alice\n---\nHello {{ @invalid }}!";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .only(&[ComposeOperation::Interpolation])
         .with_fail_fast(false);
 
@@ -1116,7 +1116,7 @@ fn test_interpolation_parse_error_fail_fast_returns_error() {
     let content = "---\nname: Alice\n---\nHello {{ @invalid }}!";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .only(&[ComposeOperation::Interpolation])
         .with_fail_fast(true);
 
@@ -1130,7 +1130,7 @@ fn test_interpolation_bare_pipe_produces_parse_error() {
     let content = "---\nname: Alice\n---\nHello {{ name | \"default\" }}!";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .only(&[ComposeOperation::Interpolation])
         .with_fail_fast(false);
 
@@ -1146,7 +1146,7 @@ fn test_interpolation_bare_pipe_fail_fast_error_message() {
     let content = "---\nname: Alice\n---\nHello {{ name | \"default\" }}!";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .only(&[ComposeOperation::Interpolation])
         .with_fail_fast(true);
 
@@ -1178,7 +1178,7 @@ fn test_interpolation_report_summary() {
     let content = "---\na: 1\nb: 2\n---\n{{ a }} {{ b }}";
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
+    let options = context_free_options().only(&[ComposeOperation::Interpolation]);
 
     let (_, report) = md.compose_with(options).unwrap();
 
@@ -1206,7 +1206,7 @@ PLACEHOLDER content here.
 
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().with_external_state(serde_json::json!({
+    let options = context_free_options().with_external_state(serde_json::json!({
         "extra": "external_value"
     }));
 
@@ -1243,7 +1243,7 @@ Hello :wave: {{ greeting }} :smile:"#;
 
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().only(&[
+    let options = context_free_options().only(&[
         ComposeOperation::TextReplacement,
         ComposeOperation::Interpolation,
     ]);
@@ -1271,7 +1271,7 @@ Rounded: {{ round(pi) }}"#;
 
     let md: Markdown = content.into();
 
-    let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
+    let options = context_free_options().only(&[ComposeOperation::Interpolation]);
 
     let (composed, report) = md.compose_with(options).unwrap();
 
@@ -1401,7 +1401,7 @@ fn body_file_transclusion_stays_document_relative_with_fallback() {
     std::fs::write(&fallback_reviewer, "# From Fallback").unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = ComposeOptions::new()
+    let options = context_free_options()
         .with_source_file(&root)
         .with_file_ref_fallback_dir(fallback_dir.path().to_path_buf());
     let (composed, report) = md.compose_with(options).unwrap();

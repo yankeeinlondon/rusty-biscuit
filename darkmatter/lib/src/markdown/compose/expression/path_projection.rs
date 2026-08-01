@@ -108,13 +108,13 @@ pub(crate) fn make_relative_in_context(
 /// Projects an absolute path to a repo/base/home-relative string with `/`
 /// separators, suitable for persisted Markdown.
 ///
-/// Identical to [`make_relative`] except the result is normalized so backslashes
-/// (Windows' native separator) become forward slashes. This is the function the
-/// eager-`file` rewrite pass calls so a committed value stays byte-identical
-/// regardless of the OS it was authored on.
+/// The context-free wrapper over [`make_portable_relative_in_context`]. It
+/// routes through the shared [`Projection`] rather than re-rendering
+/// [`make_relative`]'s output, so the tests exercise the same prefix policy
+/// production does instead of a parallel separator swap.
 #[cfg(test)]
 pub(crate) fn make_portable_relative(abs: &Path, base_dir: &Path) -> String {
-    make_relative(abs, base_dir).replace('\\', "/")
+    make_portable_relative_in_context(abs, base_dir, None)
 }
 
 /// Renders the projection through [`biscuit_file::to_portable_string`],

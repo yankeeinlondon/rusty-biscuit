@@ -133,6 +133,22 @@ deps:
     echo
     sniff repo package-dependencies "$(sniff repo package-area)"
 
+# Refresh the GitNexus index without rewriting agent instruction files.
+gitnexus:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    status_output=""
+    status_exit=0
+    status_output="$(gitnexus status 2>&1)" || status_exit=$?
+    printf '%s\n' "${status_output}"
+
+    if (( status_exit == 0 )) && grep -Eq '^Status: .*up-to-date[[:space:]]*$' <<< "${status_output}"; then
+        exit 0
+    fi
+
+    gitnexus analyze --skip-agents-md
+
 # ---------------------------------------------------------------------------
 # JUnit report staging
 #

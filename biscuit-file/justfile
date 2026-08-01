@@ -64,6 +64,46 @@ sanity:
 # run tests for biscuit-file packages
 test *args="":
     @just _test_all "biscuit-file biscuit-file-cli" {{args}}
+    @just test-minimal {{args}}
+
+# Proves the path→text boundary is genuinely unfeatured.
+#
+# `to_portable_string` / `try_portable_string` are documented as available
+# without `file-reference` and its gix/cargo_metadata/walkdir/dirs/url stack, so
+# a consumer can render a path without paying for a resolver. Nothing about the
+# default-feature suite would notice that guarantee lapsing — the module would
+# still compile and its tests would still pass — which is why this runs its own
+# feature resolution rather than a filter over the run above. Plain `cargo test`
+# on purpose: this invocation is fixed and must not inherit `test`'s nextest
+# partitioning arguments.
+#
+# Skipped in archive mode. `--archive-file` means prebuilt binaries are being
+# executed in the WSL2 guest, which deliberately installs neither Cargo nor
+# rustc; a second feature resolution has to compile, so there is nothing for it
+# to run there. The archive's own contents are the same either way — this gate
+# is owned by the three native runners. The signal is `--archive-file` rather
+# than "Cargo is missing" on purpose: the latter would also swallow a native
+# runner whose toolchain failed to provision.
+test-minimal *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # Matched as one quoted string rather than split into an array: a nextest
+    # filterset reaches here with its parentheses already unquoted by `just`,
+    # and word-splitting it would be a bash syntax error before the flag is
+    # ever inspected.
+    case " {{ args }} " in
+        *" --archive-file "* | *" --archive-file="*)
+            echo ""
+            echo -e "Skipping the {{ ITALIC }}--no-default-features{{ RESET }} gate: archive mode has no Rust toolchain."
+            exit 0
+            ;;
+    esac
+
+    echo ""
+    echo -e "Testing {{ BOLD }}biscuit-file{{ RESET }} with {{ ITALIC }}--no-default-features{{ RESET }}"
+    echo "--------------------------"
+    cargo test -p biscuit-file --no-default-features --lib path_text
 
 # not applicable: biscuit-file has no real-terminal (Level-2) tests
 test-l2:
