@@ -2,6 +2,15 @@
 
 use super::*;
 
+#[cfg(windows)]
+fn windows_ping() -> std::path::PathBuf {
+    std::env::var_os("SYSTEMROOT")
+        .map(std::path::PathBuf::from)
+        .expect("Windows test host must provide SYSTEMROOT")
+        .join("System32")
+        .join("PING.EXE")
+}
+
 /// Regression: a disconnected watchdog channel must log a warning rather
 /// than silently disabling timeout enforcement. The wait loop should still
 /// return normally once the child exits.
@@ -147,18 +156,21 @@ fn escalation_signal_compresses_ladder_when_non_interactive() {
     assert_eq!(escalation_signal(false, 3), libc::SIGKILL);
 }
 
-/// Smoke-test for the non-Unix parity path. Only runs on Windows, but the
-/// branch is compile-checked on every target.
-#[cfg(not(unix))]
+/// Smoke-test for the Windows parity path using an OS executable rather than
+/// the `timeout` name, which may resolve to a Unix compatibility tool earlier
+/// on `PATH`.
+#[cfg(windows)]
 #[test]
 fn non_unix_wait_loop_returns_on_child_exit() {
-    use std::process::Command;
+    use std::process::{Command, Stdio};
     use std::sync::mpsc::channel;
 
-    let mut child = Command::new("cmd")
-        .args(["/C", "timeout /T 1 /nobreak >nul"])
+    let mut child = Command::new(windows_ping())
+        .args(["-n", "2", "127.0.0.1"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()
-        .expect("cmd must be available");
+        .expect("Windows ping fixture must be available");
     let (_early_tx, early_rx) = channel::<EarlyTermination>();
     let (_watchdog_tx, watchdog_rx) = channel::<WatchdogTermination>();
 
@@ -183,15 +195,17 @@ fn non_unix_wait_loop_returns_on_child_exit() {
 #[test]
 fn windows_completion_termination_uses_job_object_path() {
     use std::os::windows::process::CommandExt;
-    use std::process::Command;
+    use std::process::{Command, Stdio};
     use std::sync::mpsc::channel;
 
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-    let mut child = Command::new("cmd")
-        .args(["/C", "timeout /T 30 /nobreak >nul"])
+    let mut child = Command::new(windows_ping())
+        .args(["-n", "31", "127.0.0.1"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .creation_flags(CREATE_NEW_PROCESS_GROUP)
         .spawn()
-        .expect("cmd must be available");
+        .expect("Windows ping fixture must be available");
     let (_early_tx, early_rx) = channel::<EarlyTermination>();
     let (completion_tx, completion_rx) = channel::<CompletionTermination>();
 

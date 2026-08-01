@@ -14,27 +14,21 @@ use common::wrap::seed_minimal_config;
 
 /// Locate the `md` binary in the workspace target directory.
 ///
-/// `assert_cmd::cargo::cargo_bin` works for binaries of the crate under
-/// test; `md` lives in `darkmatter-cli`, so we resolve it relative to the
-/// shared workspace target directory via `CARGO_BIN_EXE_md` when available
-/// (cargo sets it when the binary is a dependency artifact) and fall back to
-/// the first ancestor `Cargo.toml` that declares a `[workspace]` section.
+/// `assert_cmd::cargo::cargo_bin` works for binaries of the crate under test;
+/// `md` lives in `darkmatter-cli`, so use `CARGO_BIN_EXE_md` when Cargo provides
+/// it and otherwise resolve the sibling binary next to this test's profile
+/// directory. Deriving that directory from `current_exe` respects custom
+/// target directories and the platform executable suffix.
 fn md_bin() -> std::path::PathBuf {
     if let Ok(path) = std::env::var("CARGO_BIN_EXE_md") {
         return path.into();
     }
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let workspace_root = std::path::Path::new(&manifest_dir)
-        .ancestors()
-        .find(|p| {
-            let cargo_toml = p.join("Cargo.toml");
-            cargo_toml.exists()
-                && std::fs::read_to_string(&cargo_toml)
-                    .map(|contents| contents.contains("[workspace]"))
-                    .unwrap_or(false)
-        })
-        .expect("workspace root with [workspace] in Cargo.toml");
-    let path = workspace_root.join("target/debug/md");
+    let test_exe = std::env::current_exe().expect("current test executable");
+    let profile_dir = test_exe
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("integration test executable under <profile>/deps");
+    let path = profile_dir.join(format!("md{}", std::env::consts::EXE_SUFFIX));
     assert!(
         path.exists(),
         "md binary not found at {path:?}; run `cargo build -p darkmatter-cli --bin md`"
@@ -45,8 +39,9 @@ fn md_bin() -> std::path::PathBuf {
 /// Write a fake `goose` provider that prints a fixed, deterministic replacement
 /// body and exits 0, discoverable on `PATH` on every platform.
 ///
-/// Mirrors `common::write_dry_run_provider_stub`: a `#!/bin/sh` script on Unix
-/// and a `<binary>.cmd` batch file on Windows. The replacement body is
+/// Uses a shell script on Unix and compiles a tiny native executable on
+/// Windows. A batch file is not a valid stand-in here because the composed
+/// prompt intentionally contains newlines. The replacement body is
 /// intentionally *dirty* — a heading immediately followed by a paragraph with no
 /// blank line between them — so the test also covers the cleanup→hash
 /// consistency path (the document is normalized before the hash is stamped, and
@@ -61,12 +56,26 @@ fn write_goose_provider(bin_dir: &Path) {
     }
     #[cfg(windows)]
     {
-        // PATH resolution finds `goose.cmd` via `PATHEXT`. Each `echo` emits one
-        // line; the heading line is followed directly by the paragraph line with
-        // no intervening blank line, producing the same dirty body as the Unix arm.
+        let source = bin_dir.join("goose-fixture.rs");
         common::write(
-            &bin_dir.join("goose.cmd"),
-            "@echo off\r\necho # Replacement heading\r\necho Replacement body content\r\nexit /b 0\r\n",
+            &source,
+            r##"fn main() {
+    println!("# Replacement heading");
+    println!("Replacement body content");
+}
+"##,
+        );
+        let output = Command::new("rustc")
+            .arg("--edition=2024")
+            .arg(&source)
+            .arg("-o")
+            .arg(bin_dir.join("goose.exe"))
+            .output()
+            .expect("rustc must build the Windows provider fixture");
+        assert!(
+            output.status.success(),
+            "provider fixture compilation failed: {}",
+            String::from_utf8_lossy(&output.stderr)
         );
     }
 }

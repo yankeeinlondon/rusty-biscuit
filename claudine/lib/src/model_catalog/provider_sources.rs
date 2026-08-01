@@ -280,10 +280,16 @@ mod tests {
         );
     }
 
-    /// End-to-end smoke over a real subprocess (`echo`, not `opencode`):
-    /// spawn, capture stdout, parse newline-separated ids.
+    /// End-to-end smoke over a real subprocess (not `opencode`): spawn,
+    /// capture stdout, and parse newline-separated ids. Windows uses `cmd`
+    /// because `echo` is shell syntax there, not an executable contract.
     #[tokio::test]
     async fn fetch_shell_command_models_spawns_and_parses() {
+        #[cfg(windows)]
+        let models = fetch_shell_command_models("cmd", &["/D", "/C", "echo model-a& echo model-b"])
+            .await
+            .unwrap();
+        #[cfg(not(windows))]
         let models = fetch_shell_command_models("echo", &["model-a\nmodel-b"])
             .await
             .unwrap();
