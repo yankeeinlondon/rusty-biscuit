@@ -3,10 +3,13 @@ area: claudine
 status: draft
 created: 2026-08-01
 packages:
+    - darkmatter
+    - sniff
     - claudine
     - claudine-cli
 related:
     - ../../features/2026-07-13-file-resolution/spec.md
+    - ../../features/2026-08-01-faster-compose/spec.md
 review_iterations: 0
 ---
 
@@ -46,7 +49,9 @@ remain supporting evidence, not flaky test gates.
 
 ## Relationship to unified file-reference resolution
 
-The completed Unified File-Reference Resolution feature established
+The Unified File-Reference Resolution feature (implemented through nine
+recorded review iterations; its spec directory has not yet moved to
+`_completed/`) established
 `FileResolutionContext` as the explicit, request-scoped authority for CWD,
 HOME, environment, repository root, package area, and configured roots. Its
 acceptance criterion 12 requires Claudine and Darkmatter document-backed
@@ -58,8 +63,11 @@ the remaining propagation and ownership gaps:
 
 - Claudine captures equivalent repository evidence several times while
   preparing the first composition document;
+- sequence task preparation and failure reporting re-enter the context-free
+  resolution entry point, repeating a full launch capture per task;
 - system-prompt composition supplies a source path and runtime expression
-  context but not a `FileResolutionContext`;
+  context but not a `FileResolutionContext` — even though explicit
+  `--append`/`--replace` resolution already builds one and then discards it;
 - wrapper harness eligibility fully materializes a provider memory file before
   deciding whether harness behavior is enabled; and
 - performance reporting leaves material CWD-sensitive work unattributed.
@@ -173,6 +181,11 @@ Performance reporting must distinguish them.
 launch, and workspace contexts. Promptless interactive wrappers launched at a
 repository root can omit repository topology entirely.
 
+One residual wrinkle: deciding whether the promptless-at-repo-root shortcut
+applies performs its own `GitRepo::discover` before the detection plan runs,
+so even this path pays two Git-root discoveries. The invocation owner should
+absorb that probe into the shared capture.
+
 This is the architectural pattern the other paths should follow. The fix must
 not regress the direct wrapper into multiple independent scans.
 
@@ -193,6 +206,36 @@ work:
 The source re-anchoring step is semantically necessary when a selected source
 lives in another repository. Repeating discovery when the source remains in
 the launch repository is not.
+
+Verified accounting for a single live `claudine compose <file>` run whose
+source sits in the launch repository: the four sites above produce **four
+unconditional repository-structure enumerations**, each with its own Git-root
+discovery and no shared manifest parsing between them. When the document
+references `ctx.repo` or `ctx.area`, Darkmatter's demand-driven runtime
+capture adds up to **three more** — the preparation path captures a runtime
+context for the same document twice with identical arguments (once for
+shell-preflight compose options, once for the prepared context), and the
+lifecycle path performs a third near-identical capture over the effective
+frontmatter and prompt. Each of those captures also re-snapshots the full
+process environment.
+
+Beyond the numbered sites, three smaller paths repeat discovery:
+
+- sequence task runs, JIT step reloads, and sequence failure reporting call
+  the context-free resolution entry point, which performs a fresh CWD read,
+  Git discovery, repository-structure scan, and environment snapshot per
+  call;
+- the file-reference error-enrichment path rebuilds prompt magic roots with
+  its own CWD/Git/structure triple; and
+- harness shell-option preparation runs a hand-rolled `.git` ancestor walk —
+  twice per run on the composition path — even though the preparation context
+  already holds the resolved source repository root.
+
+The doc comment on `derive_request_context_for_source` claiming that
+re-anchoring performs no later ambient reads is drifted: it holds for
+HOME/environment but not for the Git and repository-structure discovery the
+function performs. Per repository policy the code is authoritative; this fix
+corrects the comment alongside the behavior change.
 
 The underlying ownership problem is that each layer receives enough path data
 to rediscover context, but no one layer owns and propagates the complete
@@ -242,8 +285,16 @@ frontmatter. Full body composition is unnecessary in that case. At the
 rusty-biscuit root, this path accounted for roughly 760 ms that was not covered
 by the environment-setup timer.
 
+The materialization is also more expensive than it needs to be even when a
+harness is enabled: it builds its compose options with the default
+`ComposeOptions::new()`, which triggers Darkmatter's full ten-group runtime
+capture — Git, repository structure, docs scan, OS, hardware, and GPU probes —
+instead of the demand-driven capture the system-prompt path already uses, and
+it attaches no `FileResolutionContext`.
+
 The defect is not memory-file discovery itself. It is using full
-materialization as an eligibility probe.
+materialization as an eligibility probe, and using the full ambient runtime
+capture inside that materialization.
 
 ### CWD and HOME are legitimate inputs but accidental test dependencies
 
@@ -271,8 +322,16 @@ not pay repeated discovery costs either.
 The wrapper performance collector starts before environment setup and stops
 that bucket before prompt delivery, harness detection, and execution. Material
 harness eligibility/materialization work therefore lands in the synthetic
-`unattributed` bucket. The system-prompt stage similarly combines candidate
-lookup, context construction, composition, and delivery preparation.
+`unattributed` bucket.
+
+The direct wrapper path currently records **no substages at all**: its
+`prep phase` is hardcoded to zero, no substage marks exist between collector
+start and environment-setup completion, and the environment-plan substages
+that do exist are computed only behind a flag the wrapper never passes — so
+they are never read back into the collector. Startup detection, the entire
+system-prompt resolve-and-compose stage, child-environment construction, and
+MCP composition all merge into one opaque environment-setup total, and that
+total's entire duration reappears as its own `unattributed` child.
 
 Without narrower measurements, a regression can be misdiagnosed as a Sniff
 problem even when the dominant work is Darkmatter composition or harness
@@ -394,8 +453,8 @@ The following semantics are required:
 - an empty selected prompt still disables lower-priority prompt discovery;
 - an empty appendix still falls through to the next appendix candidate;
 - append/replace mode and every provider delivery strategy remain unchanged;
-- `::shell` remains pinned to the agent launch workspace according to the
-  existing contract; and
+- `::shell` in system-prompt and appendix composition remains pinned to the
+  launch repository root according to the existing contract; and
 - built-in appendix text requires no fabricated file source.
 
 Once the snapshot is attached, Darkmatter must not invoke its ambient Git,
@@ -425,8 +484,12 @@ treated as “no harness.”
 
 When harness behavior is enabled, the fully materialized prompt must be
 identical to current behavior and must receive the correct propagated
-file-resolution and shell contexts. Lifecycle, approval, retry, resume, proxy,
-MCP-tag, and overlay behavior must not be weakened.
+file-resolution and shell contexts. The materialization must also stop using
+the full ambient runtime capture: it composes with a demand-driven runtime
+context anchored on the memory file, sharing the invocation's captured
+repository evidence, matching the pattern the system-prompt path already
+established. Lifecycle, approval, retry, resume, proxy, MCP-tag, and overlay
+behavior must not be weakened.
 
 ### D6 — No late ambient context reads on propagated paths
 
@@ -438,15 +501,31 @@ This applies to:
 
 - top-level composition after its launch capture;
 - active-document preparation;
-- sequence step preparation;
+- sequence step preparation, JIT step reloads, and sequence failure
+  reporting;
 - system-prompt and non-interactive appendix composition;
 - Darkmatter expression, schema, transclusion, normalization, and link phases
-  invoked by those paths; and
-- wrapper harness eligibility/materialization.
+  invoked by those paths;
+- Darkmatter demand-driven runtime-context capture for the repository-backed
+  `ctx.*` groups (`ctx.repo`, `ctx.area`, file changes), which must be able
+  to consume the invocation's captured Git and topology evidence instead of
+  probing — today only `ctx.area`/`ctx.os` can be pre-supplied through
+  external state; and
+- wrapper harness eligibility/materialization, including its hand-rolled
+  `.git` ancestor walk, which must reuse the captured source repository root.
 
 Compatibility APIs may retain ambient fallback behavior for callers that have
 no request snapshot. Claudine's canonical CLI paths must not rely on those
 fallbacks.
+
+This fix may add narrow, additive evidence-aware capture seams to Darkmatter
+and Sniff so Claudine can supply an already captured environment, Git handle,
+or repository observation. It does not own Darkmatter compose-session caching,
+collapsing repeated in-memory compose/capture passes, or reducing the cost of a
+single Sniff detector. Those pipeline-internal optimizations remain with the
+related faster-compose feature. Repeated compatibility calls may remain during
+this fix, but canonical Claudine paths must make them projections of the same
+request-scoped evidence rather than new ambient probes.
 
 Changing process CWD for child execution or changing child HOME for a provider
 overlay must never alter the already captured context.
@@ -514,6 +593,13 @@ counter that makes parallel tests serial or flaky. Dependency injection,
 request-local accounting, tracing capture, or another scoped seam is
 acceptable.
 
+Counting seams must observe every probe, not only the first: Darkmatter's
+existing "one trusted discovery" capture instrumentation counts the primary
+Git discovery but misses the second, uninstrumented discovery performed on
+the file-changes capture thread, so its guard passes while two discoveries
+occur. This fix either eliminates that second discovery or brings it under
+the same accounting.
+
 Ignored diagnostic benchmarks may record cold and warm wall-clock results.
 Before/after evidence must use the same binary, provider stub, CWD, HOME,
 prompt inputs, and host. A material reduction is expected, but absolute
@@ -572,6 +658,10 @@ symlink support.
 - Disabling provider memory-file harness support
 - Changing lifecycle retry/resume document freshness
 - Optimizing Sniff's individual workspace detectors or nested-marker walk
+  (deferred to the faster-compose feature)
+- Reducing work inside Darkmatter's compose pipeline itself — parse sharing,
+  allocation reduction, schema/trigger caching (deferred to the
+  faster-compose feature)
 - Adding a process-global repository cache or persistent discovery database
 - Caching fully composed prompts across invocations
 - Weakening or replacing real CLI tests with mocked unit tests
@@ -659,6 +749,9 @@ symlink support.
 - A valid enabled harness uses the full existing materialization path and
   preserves its prompt, frontmatter, lifecycle, approvals, overlays, MCP tags,
   and file-resolution context.
+- An enabled harness materialization composes with a demand-driven runtime
+  context and adds no ambient host probes (OS, hardware, GPU) or repository
+  topology probes beyond the invocation's shared evidence.
 - Malformed memory-file frontmatter retains its typed error.
 - Repository-root and non-repository launch roots preserve their current
   candidate behavior.
@@ -709,9 +802,10 @@ Before implementation:
    request-context owner, `derive_request_context_for_source`,
    `CompositionPrepContext::new`, `resolve_and_prepare_for_session`,
    `compose_prompt_markdown`, and `detect_wrapper_harness`;
-2. inventory every production call to `detect_repo_structure` in the Claudine
-   package area and classify it as invocation capture, distinct-source capture,
-   compatibility fallback, or redundant;
+2. inventory every production call to `detect_repo_structure`,
+   `GitRepo::discover`/`detect_git`, and any hand-rolled `.git` ancestor walk
+   in the Claudine package area and classify each as invocation capture,
+   distinct-source capture, compatibility fallback, or redundant;
 3. inventory every Claudine-created Darkmatter `ComposeOptions` for a
    file-backed document and verify that a request-scoped
    `FileResolutionContext` is supplied; and
@@ -777,7 +871,9 @@ or ownership boundaries change:
       the composition source belongs to another repository.
 - [ ] Provider memory files without harness properties avoid full body
       materialization, while enabled and malformed harness files retain their
-      complete existing behavior.
+      complete existing user-visible behavior; enabled materialization uses a
+      demand-driven runtime context with propagated file-resolution and
+      repository evidence.
 - [ ] Retry and resume preserve document freshness without recapturing
       immutable launch inputs or repeating topology work for an already seen
       repository.
