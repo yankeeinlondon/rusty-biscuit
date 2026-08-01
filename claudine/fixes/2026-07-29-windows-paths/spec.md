@@ -82,30 +82,26 @@ a normalized `C:\Users\ken\.ssh`. Hardcoded `/` on both sides of the seam.
 Windows. Surfaced by `path.rs:389`; `path.rs:373` and likely `:353` fail
 identically.
 
-### 4. `render/prompt/system.rs` — mixed separators in output
+## Ownership boundary
 
-`:49-50` emits `./.claude\system-prompt.md` — neither correct POSIX nor correct
-Windows. `:86` builds `file://C:\Users\…`, an invalid Windows file URL, so the
-OSC8 hyperlink is broken. Sibling `tests.rs:177` fails identically.
+This fix owns permission matching, sensitive-path classification, absolute allow
+entries, the single comparison boundary, and removal of the interim warning.
+Path-to-text rendering, mixed-separator output, and file-URI construction are
+owned by the dependent July 31 umbrella fix,
+[`2026-07-31-claudine-win`](../2026-07-31-claudine-win/spec.md).
 
-## Design decision required
+## Design decision
 
-Two coherent approaches; pick one and apply it uniformly rather than patching
-separators site by site.
+Normalize both separator spellings once at the public matching boundary into a
+private comparison representation whose grammar uses `/`. Exact, descendant,
+and glob comparisons consume that representation. The segment-boundary logic
+must exist in exactly one private module so the four-copy situation cannot
+recur.
 
-**Normalize at the boundary.** Convert to one canonical separator on the way in
-and compare in that space. This is the approach `biscuit-file` took with
-`dunce::simplified`, so there is in-repo precedent and a consistent mental model.
-Risk: a value that escapes normalization reintroduces the bug silently, which is
-exactly how this arose.
-
-**Compare separator-agnostically.** Replace boundary checks with a helper that
-accepts either separator, e.g. `is_segment_boundary(byte)` matching `/` and — on
-Windows only — `\`. More local, no canonical form to maintain, but every call
-site must use the helper and nothing enforces that.
-
-Whichever is chosen, the boundary logic MUST exist in exactly one place. Four
-independent copies of `== Some(&b'/')` is what produced this.
+This representation is comparison-only: it does not emit user-facing text and
+must not use `biscuit_file::to_portable_string`. Portable rendering can preserve
+path spellings that are unsuitable for security identity, so it belongs solely
+to the July 31 output work.
 
 ## Required behavior
 
@@ -116,7 +112,6 @@ independent copies of `== Some(&b'/')` is what produced this.
 - `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.claude` are classified sensitive on every
   platform.
 - An absolute allow entry is recognised on Windows.
-- Rendered paths and `file://` URLs use one separator, valid for the platform.
 - A pattern written with either separator matches the equivalent path.
 
 ## Test plan
@@ -143,7 +138,6 @@ Required cases:
 - a sibling directory whose name merely *prefixes* the pattern is NOT matched
   (`C:\proj2` must not match a rule for `C:\proj`) — the boundary check exists to
   prevent this, so removing it is not an acceptable fix
-- rendered paths and `file://` URLs contain no mixed separators
 
 Add a guard that the boundary logic has a single definition, so the four-copy
 situation cannot recur.
@@ -166,7 +160,6 @@ situation cannot recur.
 - [ ] Absolute allow entries are recognised on Windows.
 - [ ] Boundary logic has exactly one definition, enforced by a guard.
 - [ ] Prefix-but-not-child paths are still rejected.
-- [ ] No rendered path or URL mixes separators.
 - [ ] Tests run on every platform, not gated to the Windows leg.
 - [ ] `warn_windows_path_matching_is_broken` and both call sites are removed.
 - [ ] `cargo xwin check --target x86_64-pc-windows-msvc -p claudine
