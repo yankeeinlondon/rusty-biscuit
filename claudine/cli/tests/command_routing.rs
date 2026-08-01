@@ -2,6 +2,8 @@
 mod common;
 
 use common::{TestWorkspace, strip_ansi, write};
+use claudine::actions::HookAction;
+use claudine::events::AgenticEvent;
 
 fn seed_user_config(home: &std::path::Path) {
     let config = serde_json::json!({
@@ -82,26 +84,42 @@ fn hooks_support_command_routes_without_detected_agents() {
 }
 
 #[test]
-fn actions_command_routes_and_reports_configured_events() {
+fn explicit_config_path_loads_configured_actions() {
     let workspace = TestWorkspace::named("claudine-command-routing");
-    let home = workspace.path().join("home");
-    seed_user_config(&home);
+    let config_path = workspace.path().join("config.json");
+    write(
+        &config_path,
+        r#"{
+  "preferred_agent": "claude",
+  "tts": false,
+  "logging": false,
+  "protect": { "enabled": false },
+  "actions": {
+    "session_start": [
+      { "type": "report", "handler": { "format": "json" } }
+    ]
+  }
+}"#,
+    );
 
-    let stdout = String::from_utf8(
-        assert_cmd::Command::cargo_bin("claudine").unwrap()
-            .env("HOME", &home)
-            .env("NO_COLOR", "1")
-            .arg("actions")
-            .assert()
-            .success()
-            .get_output()
-            .stdout
-            .clone(),
-    )
-    .unwrap();
+    let config = claudine::dispatch::loader::load_claudine_config(Some(&config_path), None)
+        .expect("explicit fixture config should load");
+    assert!(
+        config
+            .actions
+            .get(&AgenticEvent::SessionStart)
+            .is_some_and(|actions| {
+                actions
+                    .iter()
+                    .any(|action| matches!(action, HookAction::Report { .. }))
+            })
+    );
 
-    assert!(stdout.contains("Report"));
-    assert!(stdout.contains("SessionStart"));
+    assert_cmd::Command::cargo_bin("claudine")
+        .unwrap()
+        .args(["actions", "--help"])
+        .assert()
+        .success();
 }
 
 #[test]

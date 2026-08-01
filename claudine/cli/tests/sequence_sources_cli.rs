@@ -296,7 +296,9 @@ fn a_shell_expanded_source_becomes_a_classified_list() {
 /// the *authoring document's* directory, so the families below work without the
 /// sequence code reimplementing any of them — including the two that a
 /// hand-rolled suffix splitter would break: a path holding a space, and a path
-/// holding an `@`.
+/// holding an `@`. The home-pinned case uses the same explicit request-context
+/// seam because native Windows home discovery cannot be isolated by overriding
+/// environment variables in a child process.
 #[test]
 fn file_references_resolve_from_the_authoring_document() {
     let workspace = tempdir().unwrap();
@@ -309,8 +311,6 @@ fn file_references_resolve_from_the_authoring_document() {
         ("relative.md", "\"nested/data.yaml -> items\"", "nested-hit"),
         ("spaced.md", "\"my data/data.yaml -> items\"", "spaced-hit"),
         ("at.md", "\"a@b/data.yaml -> items\"", "at-hit"),
-        // `HOME` is the workspace for this run, so `~` lands on `tilde.yaml`.
-        ("tilde.md", "\"~/tilde.yaml -> items\"", "tilde-hit"),
     ] {
         let doc = source_doc(&workspace, name, source);
         assert_eq!(
@@ -319,6 +319,27 @@ fn file_references_resolve_from_the_authoring_document() {
             "`{source}` did not resolve"
         );
     }
+
+    let doc = source_doc(&workspace, "tilde.md", "\"~/tilde.yaml -> items\"");
+    let request_context = biscuit_file::FileResolutionContext::new(workspace.path())
+        .with_home_dir(workspace.path())
+        .with_source_path(&doc);
+    let source = claudine::composition::resolve_composition_source_in_context(
+        doc.to_str().unwrap(),
+        &request_context,
+    )
+    .unwrap();
+    let plan = claudine::composition::resolve_sequence_plan_with(
+        &source,
+        claudine::composition::SequenceSourceOptions {
+            shell_runner: None,
+            file_resolution_context: Some(&request_context),
+        },
+    )
+    .unwrap()
+    .expect("tilde fixture declares a sequence");
+    assert_eq!(plan.steps.len(), 1);
+    assert_eq!(plan.steps[0].name, "tilde-hit");
 }
 
 #[test]

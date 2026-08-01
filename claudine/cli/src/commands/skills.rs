@@ -405,3 +405,26 @@ impl LinkableResourceDisplay for SkillInfo {
         &self.skill_md_path
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::link_display::footer_messages;
+
+    #[test]
+    fn non_git_footer_reports_user_only_scope() {
+        let messages = footer_messages(
+            false,
+            false,
+            false,
+            1,
+            false,
+            &[],
+            "skills",
+            "unused verbose hint",
+        );
+        assert!(messages.iter().any(|message| {
+            message.contains("not</b> a <b>git</b> repo")
+                && message.contains("only showing user-based scope")
+        }));
+    }
+}

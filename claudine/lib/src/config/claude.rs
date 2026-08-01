@@ -240,11 +240,28 @@ impl ClaudeConfigurator {
 
 /// Check if a command string is a Claudine-managed hook.
 ///
-/// Matches both short form ("claudine handle ...") and full path
-/// ("/path/to/claudine handle ...").
+/// The executable must be the first shell token. Full paths and quoted paths
+/// are accepted; the Windows `.exe` basename is matched case-insensitively.
 fn is_claudine_command(cmd: &str) -> bool {
-    // Check for "claudine handle" anywhere (covers full paths)
-    cmd.contains("claudine handle") || cmd.contains("claudine ")
+    claudine_command_args(cmd).is_some_and(|args| !args.is_empty())
+}
+
+fn claudine_command_args(cmd: &str) -> Option<&str> {
+    let cmd = cmd.trim_start();
+    let (executable, tail) = match cmd.as_bytes().first().copied() {
+        Some(quote @ (b'\'' | b'"')) => {
+            let closing = cmd[1..].find(char::from(quote))? + 1;
+            (&cmd[1..closing], &cmd[closing + 1..])
+        }
+        Some(_) => {
+            let boundary = cmd.find(char::is_whitespace).unwrap_or(cmd.len());
+            (&cmd[..boundary], &cmd[boundary..])
+        }
+        None => return None,
+    };
+    let basename = executable.rsplit(['/', '\\']).next()?;
+    (basename == "claudine" || basename.eq_ignore_ascii_case("claudine.exe"))
+        .then(|| tail.trim_start())
 }
 
 /// Check if a hook group entry contains a Claudine-managed command.
@@ -263,9 +280,8 @@ fn is_claudine_hook_group(entry: &Value) -> bool {
 
 /// Extract the event name from a Claudine hook entry.
 ///
-/// Handles both short form ("claudine handle before_tool --provider claude")
-/// and full path ("/path/to/claudine handle before_tool --provider claude")
-/// -> "before_tool".
+/// Handles short and full-path forms, with or without a native Windows
+/// executable suffix.
 fn extract_claudine_event(entry: &Value) -> Option<String> {
     entry
         .get("hooks")
@@ -275,21 +291,9 @@ fn extract_claudine_event(entry: &Value) -> Option<String> {
                 hook.get("command")
                     .and_then(|c| c.as_str())
                     .and_then(|cmd| {
-                        // Find "claudine handle " and extract event after it
-                        if let Some(idx) = cmd.find("claudine handle ") {
-                            let after_handle = &cmd[idx + "claudine handle ".len()..];
-                            let event = after_handle.split_whitespace().next()?;
-                            return Some(event.to_string());
-                        }
-                        // Fallback for old format "claudine <subcommand> <event>"
-                        if let Some(idx) = cmd.find("claudine ") {
-                            let after_claudine = &cmd[idx + "claudine ".len()..];
-                            // Skip subcommand, get event
-                            let mut parts = after_claudine.split_whitespace();
-                            parts.next(); // skip subcommand
-                            return parts.next().map(|s| s.to_string());
-                        }
-                        None
+                        let mut args = claudine_command_args(cmd)?.split_whitespace();
+                        args.next();
+                        args.next().map(str::to_string)
                     })
             })
         })

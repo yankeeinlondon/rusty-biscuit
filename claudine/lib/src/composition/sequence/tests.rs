@@ -622,7 +622,6 @@ fn external_sequence_reuses_request_snapshot_after_environment_mutation() {
 /// home-pinned AND existence-checked: an existing `~/steps.yaml` resolves to
 /// the home-relative path.
 #[test]
-#[serial]
 fn tilde_reference_expands_against_home_directory() {
     let dir = TempDir::new().unwrap();
     let home_dir = dir.path().join("home");
@@ -634,13 +633,11 @@ fn tilde_reference_expands_against_home_directory() {
     fs::create_dir_all(source_path.parent().unwrap()).unwrap();
     fs::write(&source_path, "---\n---\nbody\n").unwrap();
 
-    unsafe {
-        std::env::set_var("HOME", &home_dir);
-    }
-    let resolved = resolve_sequence_reference("~/steps.yaml", &source_path).unwrap();
-    unsafe {
-        std::env::remove_var("HOME");
-    }
+    let request_context = FileResolutionContext::new(source_path.parent().unwrap())
+        .with_home_dir(&home_dir);
+    let resolved =
+        resolve_sequence_reference_in_context("~/steps.yaml", &source_path, &request_context)
+            .unwrap();
 
     assert_eq!(resolved, home_dir.join("steps.yaml"));
 }

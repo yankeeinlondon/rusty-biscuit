@@ -759,10 +759,41 @@ fn direct_composition_block_strips_everything_returns_composed_body_empty() {
 fn direct_composition_runs_shell_in_configured_working_directory() {
     let source_dir = TempDir::new().unwrap();
     let work_dir = TempDir::new().unwrap();
-    let source = make_source(&source_dir, &[("title", json!("T"))], "::shell pwd\n");
+    let probe_source = work_dir.path().join("cwd_probe.rs");
+    let probe_executable = work_dir
+        .path()
+        .join(format!("cwd-probe{}", std::env::consts::EXE_SUFFIX));
+    fs::write(
+        &probe_source,
+        r#"fn main() {
+    println!("{}", std::env::current_dir().unwrap().display());
+}
+"#,
+    )
+    .unwrap();
+    let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+    let compilation = std::process::Command::new(compiler)
+        .arg(&probe_source)
+        .arg("-o")
+        .arg(&probe_executable)
+        .output()
+        .unwrap();
+    assert!(
+        compilation.status.success(),
+        "failed to compile cwd probe: {}",
+        String::from_utf8_lossy(&compilation.stderr)
+    );
+
+    let executable = biscuit_file::to_portable_string(&probe_executable);
+    let command = format!("\"{executable}\"");
+    let source = make_source(
+        &source_dir,
+        &[("title", json!("T"))],
+        &format!("::shell {command}\n"),
+    );
 
     let mut approved = std::collections::HashSet::new();
-    approved.insert("pwd".to_string());
+    approved.insert(executable);
     let options = PrepareOptions {
         pre_approved_commands: Some(approved),
         shell_working_directory: Some(work_dir.path().to_path_buf()),
@@ -770,18 +801,16 @@ fn direct_composition_runs_shell_in_configured_working_directory() {
     };
 
     let prepared = prepare_direct(&source, options).unwrap();
-    // `pwd` reports the physical path, so compare against canonicalized
-    // temp dirs (macOS routes `/var` through a `/private` symlink).
-    let work_canon = std::fs::canonicalize(work_dir.path()).unwrap();
-    let source_canon = std::fs::canonicalize(source_dir.path()).unwrap();
+    let work_leaf = work_dir.path().file_name().unwrap().to_string_lossy();
+    let source_leaf = source_dir.path().file_name().unwrap().to_string_lossy();
     assert!(
-        prepared.prompt.contains(work_canon.to_str().unwrap()),
-        "expected shell to run in work_dir; got: {}",
+        prepared.prompt.contains(work_leaf.as_ref()),
+        "expected shell cwd to contain {work_leaf}; got: {}",
         prepared.prompt
     );
     assert!(
-        !prepared.prompt.contains(source_canon.to_str().unwrap()),
-        "shell must not run in the prompt's parent dir; got: {}",
+        !prepared.prompt.contains(source_leaf.as_ref()),
+        "shell must not run next to the prompt source; got: {}",
         prepared.prompt
     );
 }

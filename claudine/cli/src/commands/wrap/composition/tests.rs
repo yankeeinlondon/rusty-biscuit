@@ -141,7 +141,6 @@ fn the_repo_abort_surfaces_the_captured_diagnostic_identity() {
 }
 
 #[test]
-#[serial_test::serial]
 fn load_selection_config_returns_both_favorite_and_overrides() {
     use claudine::config::claudine_config::{
         DetailedModelOverride, ModelOverrideMode, ProviderModelOverride,
@@ -173,20 +172,7 @@ fn load_selection_config_returns_both_favorite_and_overrides() {
     let config_path = claudine_dir.join("config.json");
     claudine::dispatch::loader::save_claudine_config(&config, &config_path).unwrap();
 
-    let old_home = std::env::var("HOME").ok();
-    unsafe {
-        std::env::set_var("HOME", home);
-    }
-
-    let result = load_selection_config(home);
-
-    unsafe {
-        if let Some(old) = old_home {
-            std::env::set_var("HOME", old);
-        } else {
-            std::env::remove_var("HOME");
-        }
-    }
+    let result = selection::load_selection_config_from_paths(Some(&config_path), None);
 
     let cfg = result.expect("should load config");
     assert_eq!(cfg.favorite, Some(Provider::Codex));

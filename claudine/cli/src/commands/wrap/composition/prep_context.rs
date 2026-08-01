@@ -294,7 +294,24 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
-    use claudine::config::claudine_config::ClaudineConfig;
+
+    struct ScopedCwd {
+        previous: PathBuf,
+    }
+
+    impl ScopedCwd {
+        fn enter(path: &Path) -> Self {
+            let previous = std::env::current_dir().expect("read current directory");
+            std::env::set_current_dir(path).expect("enter fixture repository");
+            Self { previous }
+        }
+    }
+
+    impl Drop for ScopedCwd {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.previous);
+        }
+    }
 
     /// Site C: the captured launch-detection failure is now a
     /// `DiagnosticSnapshot` projected from the typed `sniff::SniffError`
@@ -411,46 +428,43 @@ mod tests {
 
     #[test]
     #[serial_test::serial]
-    fn prep_context_loads_cwd_config_when_source_repo_root_is_none() {
-        let home = tempfile::tempdir().unwrap();
-        let claudine_dir = home.path().join(".claudine");
-        std::fs::create_dir_all(&claudine_dir).unwrap();
-
-        let config = ClaudineConfig {
-            preferred_agent: Some(Provider::Codex),
-            ..ClaudineConfig::default()
-        };
-        let config_path = claudine_dir.join("config.json");
-        claudine::dispatch::loader::save_claudine_config(&config, &config_path).unwrap();
-
-        let old_home = std::env::var("HOME").ok();
-        unsafe {
-            std::env::set_var("HOME", home.path());
-        }
+    fn prep_context_uses_cwd_repo_when_source_repo_root_is_none() {
+        let repo = tempfile::tempdir().unwrap();
+        let git_status = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(repo.path())
+            .status()
+            .expect("git should initialize the fixture repository");
+        assert!(git_status.success());
+        let repo_root = std::fs::canonicalize(repo.path()).unwrap();
 
         let source_dir = tempfile::tempdir().unwrap();
         let source_file = source_dir.path().join("prompt.md");
         std::fs::write(&source_file, "# Test\n").unwrap();
 
+        let _cwd = ScopedCwd::enter(&repo_root);
         let excluded = BTreeSet::new();
         let ctx = CompositionPrepContext::new("prompt.md", &source_file, &excluded).unwrap();
-
-        unsafe {
-            if let Some(old) = old_home {
-                std::env::set_var("HOME", old);
-            } else {
-                std::env::remove_var("HOME");
-            }
-        }
 
         assert!(
             ctx.source_repo_root.is_none(),
             "source outside git should have no repo root"
         );
-        let cfg = ctx
-            .selection_config
-            .expect("should fall back to CWD and load config");
-        assert_eq!(cfg.favorite, Some(Provider::Codex));
+        assert_eq!(
+            std::fs::canonicalize(ctx.effective_root()).unwrap(),
+            repo_root,
+            "selection fallback should use the launch CWD repository"
+        );
+        assert_eq!(
+            ctx.launch_workspace
+                .repo_root
+                .as_deref()
+                .map(std::fs::canonicalize)
+                .transpose()
+                .unwrap(),
+            Some(repo_root),
+            "launch workspace should retain the CWD repository root"
+        );
     }
 
     /// Regression (compose hangs from `$HOME` / any non-repo directory):

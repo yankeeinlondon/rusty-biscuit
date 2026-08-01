@@ -81,12 +81,11 @@ fn volatile_state_files_match_live_dbs_only() {
 #[test]
 #[serial]
 fn codex_sqlite_home_defaults_to_pre_shadow_codex_home() {
-    let tmp = TempDir::new().unwrap();
-    let _home = EnvGuard::set_safe("HOME", tmp.path());
     let _codex_home = EnvGuard::remove_safe("CODEX_HOME");
     let _sqlite_home = EnvGuard::remove_safe("CODEX_SQLITE_HOME");
+    let native_home = dirs::home_dir().expect("native user home should resolve");
 
-    assert_eq!(codex_sqlite_home().unwrap(), tmp.path().join(".codex"));
+    assert_eq!(codex_sqlite_home().unwrap(), native_home.join(".codex"));
 }
 
 #[test]

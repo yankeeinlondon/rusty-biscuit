@@ -31,16 +31,16 @@ The current worktree has:
 
 | Scope | Matching lines | Occurrences | Files |
 |---|---:|---:|---:|
-| Strict production | 136 | 137 | 66 |
-| Tests and fixtures | 122 | 122 | 48 |
+| Strict production | 137 | 138 | 67 |
+| Tests and fixtures | 125 | 125 | 50 |
 | Comments | 0 | 0 | 0 |
-| Union | 258 | 259 | 106 |
+| Union | 262 | 263 | 109 |
 
 The extra production occurrence is the two `to_string_lossy()` calls on
-`wrapper_stages.rs:186`. By spelling, the current totals are 129 `D`
-occurrences, 117 `L` occurrences on 116 lines, and 13 `U` occurrences.
+`wrapper_stages.rs:186`. By spelling, the current totals are 130 `D`
+occurrences, 120 `L` occurrences on 119 lines, and 13 `U` occurrences.
 
-Relative to the historical 408-line inventory, 150 matching lines have been
+Relative to the historical 408-line inventory, 146 matching lines have been
 removed. Most importantly, there are **zero production hand-built `file://`
 URLs**. All 13 remaining `U` occurrences are test fixtures or assertions for
 `Url::from_file_path` output.
@@ -59,6 +59,7 @@ must not use portable display spelling.
 | `cli/src/commands/wrap/composition/pipeline.rs` | L536,925,928,934,935 | Reads child environment and system-prompt delivery values. |
 | `cli/src/commands/wrap/env/mod.rs` | D430 | Supplies the native child working directory to launch setup. |
 | `cli/src/commands/wrap/env/sanitize.rs` | L51,108 | Classifies native environment keys; it is not display output. |
+| `cli/src/commands/wrap/exec/spawn/setup.rs` | L43 | Compares opaque native environment keys case-insensitively before insertion; it is not presentation. |
 | `cli/src/commands/wrap/launch_plan.rs` | L441,720,769,935 | Handles environment keys/values, provider arguments, and temporary output paths. |
 | `cli/src/commands/wrap/policy.rs` | L23 | Builds provider argv from a native path. |
 | `cli/src/commands/wrap/profile/claude.rs` | D35,47 | Passes temporary-file paths to the provider. |
@@ -164,7 +165,8 @@ not URL construction sites.
 | `cli/src/commands/wrap/harness_orch/loop_control/tests/unowned_handoff.rs` | D26,118 |
 | `cli/src/commands/wrap/harness_orch/prompt.rs` | D292 |
 | `cli/src/commands/wrap/harness_orch/session_key/tests.rs` | D210 |
-| `cli/src/commands/wrap/live_semantic_sink/tests/provider_extension_and_opencode.rs` | U747 |
+| `cli/src/commands/wrap/live_semantic_sink/tests/provider_extension_and_opencode.rs` | D727; U749 |
+| `cli/src/telemetry.rs` | L590 |
 | `cli/src/commands/wrap/system_prompt/tests.rs` | L79 |
 | `cli/src/completion/autocomplete_ui.rs` | U607,616 |
 | `cli/src/completion/walker/tests.rs` | D88,112,144,197,225,241 |
@@ -175,18 +177,20 @@ not URL construction sites.
 | `lib/src/composition/looping/config/tests.rs` | L19 |
 | `lib/src/composition/looping/engine/tests/mod.rs` | L67,89 |
 | `lib/src/composition/preflight/tests.rs` | D812 |
+| `lib/src/composition/prepare/tests.rs` | D769; L804,805 |
 | `lib/src/composition/prepare/service/tests.rs` | D20 |
 | `lib/src/composition/sequence/expr.rs` | D200 |
 | `lib/src/composition/sequence/preflight/tests.rs` | D33,135,265; L159,211,440 |
 | `lib/src/composition/sequence/task/tests.rs` | D59,1391,1420,1449,1492,2410 |
 | `lib/src/composition/sequence/tests.rs` | D589 |
 | `lib/src/config/backup.rs` | L103 |
-| `lib/src/config/codex.rs` | D536 |
+| `lib/src/config/codex.rs` | L536 |
 | `lib/src/dispatch/loader/tests.rs` | L12 |
 | `lib/src/harness/report.rs` | U233 |
 | `lib/src/harness/resolve/tests.rs` | D399; L244,255,263,311,322,330 |
 | `lib/src/mcp/export.rs` | L752,802 |
 | `lib/src/mcp/state.rs` | D296 |
+| `lib/src/permissions/providers/codex/tests.rs` | L28 |
 | `lib/src/protect/path.rs` | D440,444,492,493,494,495,496,497,498,499; L485 |
 | `lib/src/protect/scrub.rs` | D202 |
 | `lib/src/protect/service/tests.rs` | D57,98,230; L354 |

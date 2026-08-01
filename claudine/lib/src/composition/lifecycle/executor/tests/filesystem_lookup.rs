@@ -120,8 +120,8 @@ fn ctx_capture_follows_ctx_base_dir_not_base_dir() {
 
     // Canonicalize: macOS temp dirs are symlinks (`/var` → `/private/var`),
     // and sniff reports the canonical repo root.
-    let ctx_root = std::fs::canonicalize(ctx_dir.path()).unwrap();
-    let base_root = std::fs::canonicalize(base_dir.path()).unwrap();
+    let ctx_root = dunce::canonicalize(ctx_dir.path()).unwrap();
+    let base_root = dunce::canonicalize(base_dir.path()).unwrap();
 
     let (_engine_dir, engine) = temp_engine();
     let shell = MockShell::new(0);
@@ -200,13 +200,13 @@ fn lifecycle_reuses_prepared_snapshot_for_prompt_outside_launch_area() {
     // The launch area: the package area the caller launched from.
     let launch_dir = tempfile::tempdir().unwrap();
     git_init(launch_dir.path());
-    let launch_root = std::fs::canonicalize(launch_dir.path()).unwrap();
+    let launch_root = dunce::canonicalize(launch_dir.path()).unwrap();
 
     // A separate repo whose `prompts/` subdir holds the prompt file — the
     // "prompt outside any area" shape. `base_dir` points here.
     let prompt_repo = tempfile::tempdir().unwrap();
     git_init(prompt_repo.path());
-    let prompt_repo_root = std::fs::canonicalize(prompt_repo.path()).unwrap();
+    let prompt_repo_root = dunce::canonicalize(prompt_repo.path()).unwrap();
     let prompts_dir = prompt_repo_root.join("prompts");
     std::fs::create_dir(&prompts_dir).unwrap();
     let source_path = prompts_dir.join("implement-plan.md");

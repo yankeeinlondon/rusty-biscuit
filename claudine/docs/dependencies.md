@@ -1,5 +1,11 @@
 # Claudine Dependencies
 
+## Native Path Test Fixtures
+
+- The `claudine` library uses `dunce` as a dev dependency so tests that need a
+  canonical filesystem identity can remove safely reducible Windows verbatim
+  prefixes without converting paths through display text.
+
 ## Executable Lookup
 
 - `which` is pinned to major version `8` across both `claudine` (library) and

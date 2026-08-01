@@ -44,7 +44,7 @@ use sniff::programs::{InstalledAiClients, ProgramMetadata, find_program::find_pr
 
 use crate::provider::{PROVIDERS_DISPLAY_ORDER, Provider, provider_info};
 
-/// Resolve the full path to the claudine executable.
+/// Resolve the full path to the Claudine executable.
 ///
 /// Returns the absolute path to `claudine` if found on PATH, otherwise
 /// falls back to just "claudine" (relying on PATH at runtime).
@@ -57,11 +57,39 @@ pub(crate) fn claudine_command() -> String {
 /// Return a provider-bound builder for `claudine handle` shell commands.
 ///
 /// The first call fixes the provider, and the returned closure receives
-/// the normalized event name to dispatch.
+/// the normalized event name to dispatch. Executable paths containing
+/// whitespace are quoted for the host shell; simple executable tokens retain
+/// their existing spelling.
 pub(crate) fn claudine_handle_command(provider: Provider) -> impl Fn(&str) -> String {
     let claudine_bin = claudine_command();
     let provider = provider.as_slug().to_string();
-    move |event| format!("{claudine_bin} handle {event} --provider {provider}")
+    move |event| format_claudine_handle_command(&claudine_bin, event, &provider)
+}
+
+fn format_claudine_handle_command(executable: &str, event: &str, provider: &str) -> String {
+    let executable = hook_executable_token(executable);
+    format!("{executable} handle {event} --provider {provider}")
+}
+
+fn hook_executable_token(executable: &str) -> String {
+    if !executable.chars().any(char::is_whitespace) {
+        return executable.to_string();
+    }
+
+    #[cfg(windows)]
+    {
+        // Double quotes are forbidden in native Windows path components, so
+        // this token needs no inner escaping.
+        format!(r#""{executable}""#)
+    }
+
+    #[cfg(not(windows))]
+    {
+        // The shell-valid apostrophe splice is intentionally not a general
+        // shell parser contract. Managed-hook recognition remains bounded to
+        // ordinary leading quoted tokens.
+        format!("'{}'", executable.replace('\'', r#"'\''"#))
+    }
 }
 
 /// Rich information about a detected agent.
@@ -151,6 +179,40 @@ pub fn detect_agents() -> Vec<(Provider, Box<dyn AgentConfigurator>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn handle_command_keeps_simple_executable_token_unchanged() {
+        assert_eq!(
+            format_claudine_handle_command("claudine", "before_tool", "claude"),
+            "claudine handle before_tool --provider claude"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn handle_command_quotes_native_windows_executable_path() {
+        assert_eq!(
+            format_claudine_handle_command(
+                r"C:\Program Files\Claudine\claudine.exe",
+                "before_tool",
+                "claude",
+            ),
+            r#""C:\Program Files\Claudine\claudine.exe" handle before_tool --provider claude"#
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn handle_command_quotes_unix_executable_path() {
+        assert_eq!(
+            format_claudine_handle_command(
+                "/opt/Claudine Tools/claudine",
+                "before_tool",
+                "claude",
+            ),
+            "'/opt/Claudine Tools/claudine' handle before_tool --provider claude"
+        );
+    }
 
     #[test]
     fn detect_agents_returns_vec() {

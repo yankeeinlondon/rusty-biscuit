@@ -161,8 +161,7 @@ pub(crate) fn build_provider_header(provider_name: &str, resource: LinkableResou
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn render_footer(
-    term: &Terminal,
+pub(crate) fn footer_messages(
     has_exceptions: bool,
     applied_fix: bool,
     is_git_repo: bool,
@@ -171,7 +170,7 @@ pub(crate) fn render_footer(
     filters: &[String],
     resource_plural: &str,
     verbose_hint: &str,
-) {
+) -> Vec<String> {
     let mut messages = Vec::new();
 
     if has_exceptions && !applied_fix {
@@ -197,6 +196,32 @@ pub(crate) fn render_footer(
             "<dim><i>using parameters in the CLI call will act as <b>filters</b> to help reduce the {resource_plural} to only those you are interested in</i></dim>"
         ));
     }
+
+    messages
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn render_footer(
+    term: &Terminal,
+    has_exceptions: bool,
+    applied_fix: bool,
+    is_git_repo: bool,
+    item_count: usize,
+    verbose: bool,
+    filters: &[String],
+    resource_plural: &str,
+    verbose_hint: &str,
+) {
+    let messages = footer_messages(
+        has_exceptions,
+        applied_fix,
+        is_git_repo,
+        item_count,
+        verbose,
+        filters,
+        resource_plural,
+        verbose_hint,
+    );
 
     if messages.is_empty() {
         return;

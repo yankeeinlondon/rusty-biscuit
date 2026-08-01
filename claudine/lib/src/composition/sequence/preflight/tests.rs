@@ -61,7 +61,7 @@ mod loading {
     #[serial_test::serial(file_resolution_snapshot)]
     fn nested_references_reuse_all_request_resolution_inputs() {
         let request = TempDir::new().unwrap();
-        let request_root = fs::canonicalize(request.path()).unwrap();
+        let request_root = dunce::canonicalize(request.path()).unwrap();
         let source_dir = request_root.join("sequences");
         let home = request_root.join("home");
         let env_root = request_root.join("env");
