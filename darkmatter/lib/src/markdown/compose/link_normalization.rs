@@ -3,7 +3,12 @@
 //! Converts absolute paths back to portable forms in the Finalization stage.
 //! Runs only on the root document.
 
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
+// Every `OsStr`-typed binding below sits behind `#[cfg(windows)]`; importing it
+// unconditionally is an `unused_imports` error under the `-D warnings` lint
+// gate that CI runs on Ubuntu.
+#[cfg(windows)]
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use crate::markdown::Markdown;
@@ -47,7 +52,7 @@ use biscuit_file::{to_portable_string, try_portable_string};
 /// - [`Path::components`] drops a `.` and reads `..` as a parent hop. Under a
 ///   verbatim prefix both are ordinary directory names, so re-parsing would let
 ///   `strip_prefix` hand back a remainder naming a different file.
-/// - [`OsStr`] is not UTF-8 on Windows. A key built through `to_string_lossy`
+/// - [`OsStr`](std::ffi::OsStr) is not UTF-8 on Windows. A key built through `to_string_lossy`
 ///   maps two paths differing only in unpaired surrogates onto one
 ///   U+FFFD-bearing identity, which is enough for the wrong anchor to match and
 ///   for a destination to be rewritten as some other path.
@@ -182,7 +187,15 @@ fn survives_namespace_removal(components: &[OsString]) -> bool {
         let Some(name) = component.to_str() else {
             return false;
         };
-        if name == "." || name == ".." || name.chars().count() > 255 {
+        if name == "." || name == ".." {
+            return false;
+        }
+        // UTF-16 units, not Unicode scalar values: that is what Windows and
+        // `dunce` count. One astral character is a single `char` but two units,
+        // so 128 emoji is a 256-unit name that `chars().count()` would wave
+        // through — and an anchored arm would then emit the legacy spelling of
+        // a name the filesystem cannot hold without its `\\?\` prefix.
+        if name.encode_utf16().count() > 255 {
             return false;
         }
         if name.ends_with('.') || name.ends_with(' ') {
@@ -1049,7 +1062,11 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn unsafe_components_do_not_survive_namespace_removal() {
-        for unsafe_name in [".", "..", "CON", "con.txt", "com1", "trailing.", "trailing "] {
+        let unsafe_names = [
+            ".", "..", "CON", "con.txt", "com1", "trailing.", "trailing ", "a<b", "a>b", "a:b",
+            "a\"b", "a|b", "a?b", "a*b", "a\u{1}b",
+        ];
+        for unsafe_name in unsafe_names {
             let components = vec![OsString::from(unsafe_name), OsString::from("f.md")];
             assert!(
                 !survives_namespace_removal(&components),
@@ -1066,48 +1083,134 @@ mod tests {
         }
     }
 
-    /// The repository anchor must not become a way around the decline.
+    /// A name Rust cannot render without U+FFFD is never a faithful anchored
+    /// replacement.
     ///
-    /// Rewriting `\\?\C:\…\repo\.\assets\image.png` relative to a document
-    /// inside the repository drops both the namespace and, if the remainder is
-    /// re-parsed as an ordinary Windows path, the literal `.` directory — so
-    /// the emitted link names `assets\image.png`, a different location. The
-    /// authored text must survive byte-identical instead, with a warning.
+    /// This case is helper-level only by necessity: a destination reaches this
+    /// stage as document text, and a Rust `str` cannot carry an unpaired
+    /// surrogate, so no authored link can produce one. The consumer-level
+    /// categories are covered by the anchor-arm tests below.
     #[cfg(windows)]
     #[test]
-    fn anchored_unsafe_verbatim_destination_is_preserved_and_warned() {
-        let dir = tempdir().unwrap();
-        let repo = dir.path().join("repo");
-        fs::create_dir_all(repo.join(".git")).unwrap();
-        let docs = repo.join("docs");
-        fs::create_dir_all(&docs).unwrap();
-        let source_file = docs.join("source.md");
-        fs::write(&source_file, "").unwrap();
+    fn non_unicode_component_does_not_survive_namespace_removal() {
+        use std::os::windows::ffi::OsStringExt;
 
-        // `canonicalize` yields the verbatim spelling on Windows, so the
-        // destination below is a genuine descendant of the repository root.
-        let verbatim_repo = std::fs::canonicalize(&repo).unwrap();
-        let destination = format!(r"{}\.\assets\image.png", verbatim_repo.display());
-        assert!(
-            try_portable_string(Path::new(&destination)).is_none(),
-            "fixture must be one `dunce` declines"
-        );
+        let lone_surrogate = OsString::from_wide(&[0xD800]);
+        assert!(lone_surrogate.to_str().is_none());
 
-        let content = format!("<img src=\"{destination}\">\n");
-        let mut md = Markdown::new(&content);
-        let options = ComposeOptions::new().with_source_file(&source_file);
+        let components = vec![lone_surrogate, OsString::from("f.md")];
+        assert!(!survives_namespace_removal(&components));
+    }
+
+    /// The component limit is 255 UTF-16 units — not scalar values, not bytes.
+    ///
+    /// Windows and `dunce` both count UTF-16 units, and the two other measures
+    /// each get it wrong in a different direction: scalar values under-count an
+    /// astral name (letting an unrepresentable one through) and bytes
+    /// over-count a multi-byte BMP name (blocking a representable one).
+    #[cfg(windows)]
+    #[test]
+    fn component_length_is_measured_in_utf16_units() {
+        let accepts = |name: String| survives_namespace_removal(&[OsString::from(name)]);
+
+        // ASCII: one byte, one scalar value, one unit — all three agree.
+        assert!(accepts("a".repeat(255)));
+        assert!(!accepts("a".repeat(256)));
+
+        // BMP, three bytes each: 255 units but 765 bytes. A byte count would
+        // reject a name Windows accepts.
+        assert!(accepts("漢".repeat(255)));
+        assert!(!accepts("漢".repeat(256)));
+
+        // Astral, two units each: 128 of them is 128 scalar values but 256
+        // units. This is the case a `chars().count()` limit waved through.
+        assert!(accepts("🦀".repeat(127)));
+        assert!(accepts(format!("{}a", "🦀".repeat(127))));
+        assert!(!accepts("🦀".repeat(128)));
+    }
+
+    /// Every way a verbatim component stops meaning itself, in the spelling an
+    /// author can actually put in a document.
+    ///
+    /// Driven through [`normalize_links`] rather than
+    /// [`survives_namespace_removal`] by each anchor-arm test below, because
+    /// the audit is only one step of the decision: the arm has to reach it with
+    /// the right slice, and a helper-level example cannot show that it does.
+    ///
+    /// Non-Unicode is absent because it is unreachable from document text; see
+    /// [`non_unicode_component_does_not_survive_namespace_removal`].
+    #[cfg(windows)]
+    fn unsafe_component_fixtures() -> Vec<(&'static str, String)> {
+        vec![
+            ("literal dot", ".".to_string()),
+            ("literal dot-dot", "..".to_string()),
+            ("reserved DOS name", "CON".to_string()),
+            ("reserved DOS name with extension", "com1.txt".to_string()),
+            ("trailing dot", "trailing.".to_string()),
+            ("trailing space", "trailing ".to_string()),
+            ("invalid Win32 character", "a*b".to_string()),
+            // 128 astral scalar values are 128 `char`s but 256 UTF-16 units,
+            // and UTF-16 units are what Windows measures. Driving this one
+            // end to end is the point: a scalar-value limit passes the audit
+            // while `dunce` declines, and only the consumer path shows the
+            // legacy spelling actually being emitted.
+            ("overlong in UTF-16 units", "🦀".repeat(128)),
+        ]
+    }
+
+    /// Composes `content` and asserts the destination survived byte-identical
+    /// with the anchored-preservation warning.
+    #[cfg(windows)]
+    fn assert_anchor_preserves_and_warns(content: &str, options: &ComposeOptions, label: &str) {
+        let mut md = Markdown::new(content);
         let mut report = ComposeReport::new();
 
-        normalize_links(&mut md, &options, &mut report).unwrap();
+        normalize_links(&mut md, options, &mut report).unwrap();
 
-        assert_eq!(md.content(), content);
-        assert_eq!(report.link_normalizations_applied, 0);
+        assert_eq!(md.content(), content, "{label}: destination was rewritten");
+        assert_eq!(report.link_normalizations_applied, 0, "{label}");
         assert!(
             report.warnings.iter().any(|w| w.stage == "link_normalization"
                 && w.message.contains("would not preserve every component")),
-            "expected an anchored-preservation warning, got: {:?}",
+            "{label}: expected an anchored-preservation warning, got: {:?}",
             report.warnings
         );
+    }
+
+    /// The repository anchor must not become a way around the decline.
+    ///
+    /// Rewriting `\\?\C:\…\repo\assets\.\image.png` relative to a document
+    /// inside the repository drops both the namespace and, if the remainder is
+    /// re-parsed as an ordinary Windows path, the literal `.` directory — so
+    /// the emitted link names `assets\image.png`, a different location. Each
+    /// other category fails the same way for its own reason, and the authored
+    /// text must survive byte-identical instead, with a warning.
+    #[cfg(windows)]
+    #[test]
+    fn repo_anchor_preserves_every_unsafe_category() {
+        for (label, unsafe_name) in unsafe_component_fixtures() {
+            let dir = tempdir().unwrap();
+            let repo = dir.path().join("repo");
+            fs::create_dir_all(repo.join(".git")).unwrap();
+            let docs = repo.join("docs");
+            fs::create_dir_all(&docs).unwrap();
+            let source_file = docs.join("source.md");
+            fs::write(&source_file, "").unwrap();
+
+            // `canonicalize` yields the verbatim spelling on Windows, so the
+            // destination below is a genuine descendant of the repository root.
+            let verbatim_repo = std::fs::canonicalize(&repo).unwrap();
+            let destination =
+                format!(r"{}\assets\{unsafe_name}\image.png", verbatim_repo.display());
+            assert!(
+                try_portable_string(Path::new(&destination)).is_none(),
+                "{label}: fixture must be one `dunce` declines"
+            );
+
+            let content = format!("<img src=\"{destination}\">\n");
+            let options = ComposeOptions::new().with_source_file(&source_file);
+            assert_anchor_preserves_and_warns(&content, &options, label);
+        }
     }
 
     /// The other half of the same rule: an anchored descendant whose only
@@ -1147,43 +1250,132 @@ mod tests {
         assert_eq!(report.link_normalizations_applied, 1);
     }
 
-    /// The environment anchor takes the same route as the repository one, and
-    /// needs its own regression: it reaches `strip_prefix` through a different
-    /// arm and, unlike the repository rule, does not require a source file.
+    /// Builds a resolution context anchored on `root`, with no repository root
+    /// so the repository arm cannot claim the destination first.
     #[cfg(windows)]
-    #[test]
-    fn env_anchored_unsafe_verbatim_destination_is_preserved_and_warned() {
-        let dir = tempdir().unwrap();
-        let root = std::fs::canonicalize(dir.path()).unwrap();
-        let destination = format!(r"{}\.\docs\f.md", root.display());
-        assert!(try_portable_string(Path::new(&destination)).is_none());
-
+    fn env_options(root: &Path) -> ComposeOptions {
         let mut env = std::collections::HashMap::new();
         env.insert(
             "PROJECT_ROOT".to_string(),
             root.to_string_lossy().into_owned(),
         );
-        let snapshot = biscuit_file::FileResolutionContext::new(&root)
+        let snapshot = biscuit_file::FileResolutionContext::new(root)
             .without_home_dir()
             .with_env(env);
 
+        ComposeOptions::new()
+            .with_env_path_whitelist(vec!["PROJECT_ROOT".to_string()])
+            .with_file_resolution_context(snapshot)
+    }
+
+    /// As [`env_options`], but the anchor is the home directory and the
+    /// environment snapshot is empty, so `~/` is the only arm that can match.
+    #[cfg(windows)]
+    fn home_options(home: &Path) -> ComposeOptions {
+        let snapshot = biscuit_file::FileResolutionContext::new(home)
+            .with_home_dir(home)
+            .with_env(std::collections::HashMap::new());
+
+        ComposeOptions::new().with_file_resolution_context(snapshot)
+    }
+
+    /// The environment anchor takes the same route as the repository one, and
+    /// needs its own regression: it reaches `strip_prefix` through a different
+    /// arm and, unlike the repository rule, does not require a source file.
+    #[cfg(windows)]
+    #[test]
+    fn env_anchor_preserves_every_unsafe_category() {
+        for (label, unsafe_name) in unsafe_component_fixtures() {
+            let dir = tempdir().unwrap();
+            let root = std::fs::canonicalize(dir.path()).unwrap();
+            let destination = format!(r"{}\docs\{unsafe_name}\f.md", root.display());
+            assert!(
+                try_portable_string(Path::new(&destination)).is_none(),
+                "{label}: fixture must be one `dunce` declines"
+            );
+
+            let content = format!("<a href=\"{destination}\">f</a>\n");
+            assert_anchor_preserves_and_warns(&content, &env_options(&root), label);
+        }
+    }
+
+    /// The home arm is the third route to `strip_prefix` and the only one whose
+    /// replacement is prefixed rather than relative, so it needs the same gate.
+    #[cfg(windows)]
+    #[test]
+    fn home_anchor_preserves_every_unsafe_category() {
+        for (label, unsafe_name) in unsafe_component_fixtures() {
+            let dir = tempdir().unwrap();
+            let home = std::fs::canonicalize(dir.path()).unwrap();
+            let destination = format!(r"{}\docs\{unsafe_name}\f.md", home.display());
+            assert!(
+                try_portable_string(Path::new(&destination)).is_none(),
+                "{label}: fixture must be one `dunce` declines"
+            );
+
+            let content = format!("<a href=\"{destination}\">f</a>\n");
+            assert_anchor_preserves_and_warns(&content, &home_options(&home), label);
+        }
+    }
+
+    /// The success control for [`env_anchor_preserves_every_unsafe_category`].
+    ///
+    /// Without it the arm's gate cannot be told apart from a blanket refusal to
+    /// anchor anything `try_portable_string` declined — which would silently
+    /// stop normalizing every over-`MAX_PATH` descendant.
+    #[cfg(windows)]
+    #[test]
+    fn env_anchored_over_max_path_destination_still_normalizes() {
+        let dir = tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let long_name = "a".repeat(250);
+        let destination = format!(r"{}\docs\{long_name}\f.md", root.display());
+        assert!(
+            try_portable_string(Path::new(&destination)).is_none(),
+            "fixture must exceed MAX_PATH or it proves nothing"
+        );
+
         let content = format!("<a href=\"{destination}\">f</a>\n");
         let mut md = Markdown::new(&content);
-        let options = ComposeOptions::new()
-            .with_env_path_whitelist(vec!["PROJECT_ROOT".to_string()])
-            .with_file_resolution_context(snapshot);
         let mut report = ComposeReport::new();
 
-        normalize_links(&mut md, &options, &mut report).unwrap();
+        normalize_links(&mut md, &env_options(&root), &mut report).unwrap();
 
-        assert_eq!(md.content(), content);
-        assert_eq!(report.link_normalizations_applied, 0);
         assert!(
-            report.warnings.iter().any(|w| w.stage == "link_normalization"
-                && w.message.contains("would not preserve every component")),
-            "expected an anchored-preservation warning, got: {:?}",
-            report.warnings
+            md.content()
+                .contains(&format!("${{PROJECT_ROOT}}/docs/{long_name}/f.md")),
+            "Content was: {}",
+            md.content()
         );
+        assert_eq!(report.link_normalizations_applied, 1);
+    }
+
+    /// The success control for [`home_anchor_preserves_every_unsafe_category`].
+    #[cfg(windows)]
+    #[test]
+    fn home_anchored_over_max_path_destination_still_normalizes() {
+        let dir = tempdir().unwrap();
+        let home = std::fs::canonicalize(dir.path()).unwrap();
+        let long_name = "a".repeat(250);
+        let destination = format!(r"{}\docs\{long_name}\f.md", home.display());
+        assert!(
+            try_portable_string(Path::new(&destination)).is_none(),
+            "fixture must exceed MAX_PATH or it proves nothing"
+        );
+
+        let content = format!("<a href=\"{destination}\">f</a>\n");
+        let mut md = Markdown::new(&content);
+        let mut report = ComposeReport::new();
+
+        normalize_links(&mut md, &home_options(&home), &mut report).unwrap();
+
+        assert!(
+            md.content()
+                .contains(&format!("~/docs/{long_name}/f.md")),
+            "Content was: {}",
+            md.content()
+        );
+        assert_eq!(report.link_normalizations_applied, 1);
     }
 
     /// Finalization runs after transclusion, so an authored destination it
