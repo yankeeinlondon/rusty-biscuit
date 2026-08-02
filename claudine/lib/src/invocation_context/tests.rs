@@ -64,7 +64,10 @@ fn one_launch_observation_projects_every_existing_context() {
     let after = invocation.work_snapshot();
 
     assert_eq!(file_resolution.base_dir(), fixture.path());
-    assert_eq!(launch.repo_root.as_deref(), Some(fixture.path()));
+    // `LaunchContext` canonicalizes every path it projects so search-dir
+    // dedup compares one form; the authored roots below are unaffected.
+    let canonical_fixture = fixture.path().canonicalize().unwrap();
+    assert_eq!(launch.repo_root.as_deref(), Some(canonical_fixture.as_path()));
     assert_eq!(workspace.repo_root.as_deref(), Some(fixture.path()));
     assert_eq!(environment.git.as_ref().map(|git| git.repo_root.as_path()), Some(fixture.path()));
     assert_eq!(after.git_root_discoveries, before.git_root_discoveries);
@@ -249,7 +252,92 @@ fn repeated_derivation_for_retry_resume_and_jit_reuses_invocation_evidence() {
     assert_eq!(work.topology_probes, 1);
     assert!(work.topology_reuses >= 6);
     assert_eq!(work.ambient_fallbacks, 0);
-    assert_eq!(work.runtime_evidence_captures.get("repo"), Some(&1));
+    // `repo` clones what the repository entry already holds, so no iteration
+    // may be charged as capture work; all six are reuses.
+    assert_eq!(work.runtime_evidence_captures.get("repo"), None);
+    assert_eq!(work.runtime_evidence_reuses.get("repo"), Some(&6));
+}
+
+/// A group whose evidence costs real work must be computed once per source
+/// directory no matter how many documents or derivations ask for it.
+#[test]
+fn repeated_requests_for_one_source_capture_costly_evidence_once() {
+    let fixture = TempDir::new().unwrap();
+    init_repo(fixture.path());
+    write_workspace(fixture.path());
+    let first = fixture.path().join("area/pkg/first.md");
+    let second = fixture.path().join("area/pkg/second.md");
+    fs::write(&first, "first").unwrap();
+    fs::write(&second, "second").unwrap();
+    let requirements =
+        darkmatter::markdown::compose::ContextRequirements::for_content("{{ ctx.dirty_files }}");
+
+    let invocation = InvocationContext::capture_at(fixture.path());
+    let first_context = invocation.derive_source(&first).unwrap();
+    let _ = invocation.runtime_evidence(&first_context, &requirements);
+    let _ = invocation.runtime_evidence(&first_context, &requirements);
+    let second_context = invocation.derive_source(&second).unwrap();
+    let _ = invocation.runtime_evidence(&second_context, &requirements);
+
+    assert_eq!(first_context.base_dir(), second_context.base_dir());
+    let work = invocation.work_snapshot();
+    assert_eq!(work.runtime_evidence_captures.get("file_changes"), Some(&1));
+    assert_eq!(work.runtime_evidence_reuses.get("file_changes"), Some(&2));
+    // `datetime` holds no evidence at all and must never look like work.
+    assert_eq!(work.runtime_evidence_captures.get("datetime"), None);
+    assert_eq!(work.runtime_evidence_reuses.get("datetime"), Some(&3));
+    assert_eq!(work.git_root_discoveries, 1);
+}
+
+/// The supplied-evidence OS request must stay the request Darkmatter's own
+/// ambient capture issues, so that replacing ambient capture with request-owned
+/// evidence changes neither the cost of `ctx.os*` nor its value.
+#[test]
+fn supplied_os_evidence_matches_ambient_os_capture() {
+    let fixture = TempDir::new().unwrap();
+    let content =
+        "{{ ctx.os }} {{ ctx.os_distro }} {{ ctx.os_version }} {{ ctx.os_package_manager }}";
+    let source = fixture.path().join("prompt.md");
+    fs::write(&source, content).unwrap();
+    let requirements = darkmatter::markdown::compose::ContextRequirements::for_content(content);
+
+    let invocation = InvocationContext::capture_at(fixture.path());
+    let source_context = invocation.derive_source(&source).unwrap();
+    let evidence = invocation.runtime_evidence(&source_context, &requirements);
+    let supplied = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
+        source_context.base_dir(),
+        &requirements,
+        &evidence,
+    );
+    let ambient = darkmatter::markdown::compose::ComposeContext::capture_for_content(
+        source_context.base_dir(),
+        content,
+    );
+
+    let os_keys = |context: &darkmatter::markdown::compose::ComposeContext| {
+        context
+            .keys()
+            .filter(|key| *key == "os" || key.starts_with("os_"))
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    };
+    let supplied_keys = os_keys(&supplied);
+    assert!(
+        !supplied_keys.is_empty(),
+        "supplied capture projected no `ctx.os*` key for a document that references them"
+    );
+    assert_eq!(
+        supplied_keys,
+        os_keys(&ambient),
+        "supplied and ambient capture must project the same `ctx.os*` keys"
+    );
+    for key in supplied_keys {
+        assert_eq!(
+            supplied.get(&key),
+            ambient.get(&key),
+            "supplied and ambient capture must agree on `ctx.{key}`"
+        );
+    }
 }
 
 #[test]
@@ -409,6 +497,69 @@ fn parallel_sources_in_one_unseen_repository_are_single_flight() {
     assert_eq!(work.git_root_discoveries, 2);
     assert_eq!(work.topology_probes, 1);
     assert!(work.topology_reuses >= 1);
+}
+
+/// A launch reached through a symlinked ancestor must not re-discover Git for
+/// sources inside it, and must keep projecting the authored root it was given.
+///
+/// Unix-gated: creating a directory symlink on Windows needs Developer Mode or
+/// elevation, so the guarantee is pinned on the platforms that can express it.
+#[test]
+#[cfg(unix)]
+fn symlinked_launch_ancestor_reuses_one_observation_and_authored_root() {
+    let fixture = TempDir::new().unwrap();
+    let real = fixture.path().join("real");
+    fs::create_dir_all(&real).unwrap();
+    init_repo(&real);
+    write_workspace(&real);
+    let aliased = fixture.path().join("aliased");
+    std::os::unix::fs::symlink(&real, &aliased).unwrap();
+    let source = aliased.join("area/pkg/prompt.md");
+    fs::write(&source, "prompt").unwrap();
+
+    let invocation = InvocationContext::capture_at(&aliased);
+    let source_context = invocation.derive_source(&source).unwrap();
+
+    assert_eq!(source_context.repository_root(), Some(aliased.as_path()));
+    assert_eq!(
+        invocation.launch_repository().repo_root(),
+        Some(aliased.as_path())
+    );
+    assert_eq!(
+        source_context.package_area_root(),
+        Some(aliased.join("area").as_path())
+    );
+    let work = invocation.work_snapshot();
+    assert_eq!(work.git_root_discoveries, 1);
+    assert_eq!(work.topology_probes, 1);
+    assert!(work.topology_reuses >= 1);
+}
+
+/// A repository nested under a symlinked launch still earns its own entry.
+#[test]
+#[cfg(unix)]
+fn symlinked_launch_ancestor_still_separates_nested_repositories() {
+    let fixture = TempDir::new().unwrap();
+    let real = fixture.path().join("real");
+    fs::create_dir_all(&real).unwrap();
+    init_repo(&real);
+    write_workspace(&real);
+    let nested = real.join("nested");
+    fs::create_dir_all(&nested).unwrap();
+    init_repo(&nested);
+    let aliased = fixture.path().join("aliased");
+    std::os::unix::fs::symlink(&real, &aliased).unwrap();
+    let source = aliased.join("nested/prompt.md");
+    fs::write(&source, "prompt").unwrap();
+
+    let invocation = InvocationContext::capture_at(&aliased);
+    let source_context = invocation.derive_source(&source).unwrap();
+
+    assert_eq!(
+        source_context.repository_root(),
+        Some(aliased.join("nested").as_path())
+    );
+    assert_eq!(invocation.work_snapshot().git_root_discoveries, 2);
 }
 
 #[test]

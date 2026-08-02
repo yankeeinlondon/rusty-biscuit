@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-f934e9430f37658d
-last_updated: 2026-08-01
+hash: ef46db3751d8e999-064eb2d7d6f425fe
+last_updated: 2026-08-02
 ---
 # Claudine Composition
 
@@ -92,6 +92,15 @@ Canonical `::shell` composition remains pinned to
 invocation began in a repository, otherwise the launch CWD. A prompt from a
 sibling repository therefore resolves its authored file references from that
 source while its shell commands continue to run at the launch root.
+
+A sequence step's explicit task stack is the one exception to "the document a
+step composes and runs owns its `SourceContext`": `setup`, `teardown`, and the
+primary `side_effect` action derive their `SourceContext` from the document
+that authored the task, not the document the step composes and runs.
+`set_frontmatter` and other file-touching effects in that stack therefore
+target files next to the task's origin document, including when an
+externalized `task:`/`group:` file lives in a different repository from the
+step's `prompt:` document.
 
 ### Positional Arguments
 

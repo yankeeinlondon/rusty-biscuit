@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-49d3b4e99f8b2cae
-last_updated: 2026-08-01
+hash: ef46db3751d8e999-0cc73e5d25e0f525
+last_updated: 2026-08-02
 ---
 # Claudine Composition
 
@@ -902,6 +902,8 @@ Darkmatter scans each document for its required `ctx.*` groups and receives the 
 Repository observations are cached per worktree identity, with topology initialized once per distinct repository even when parallel sequence tasks enter it together. Same-repository sources reuse launch topology; multiple sources in one sibling worktree share one additional observation and topology probe; exact non-repository directories cache explicit absence. File resolution remains source-aware because every compose receives the selected source's retained `FileResolutionContext`.
 
 Shell execution follows workspace intent rather than source location. Composition documents and system prompts run `::shell` from the launch repository root; for a launch outside a repository, the explicit launch CWD is used. A prompt or harness stored in another directory or repository does not move the agent's shell working directory.
+
+A sequence step's explicit task stack is the one exception to "the document a step composes and runs owns its `SourceContext`": `setup`, `teardown`, and the primary `side_effect` action derive their `SourceContext` from the document that authored the task, not the document the step composes and runs. `set_frontmatter` and other file-touching effects in that stack therefore target files next to the task's origin document, including when an externalized `task:`/`group:` file lives in a different repository from the step's `prompt:` document.
 
 ## Performance Reporting
 

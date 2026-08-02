@@ -116,7 +116,8 @@ pub fn capture_file_resolution_context() -> Result<FileResolutionContext, Compos
 ///   `repository_root` and `@` magic search falls back to the home directory
 ///   — matching the legacy trusted-external behavior.
 /// - Environment and home directory are retained from the provisional
-///   snapshot. Re-anchoring performs no later ambient process-state reads.
+///   snapshot, but Git root and repository topology are rediscovered
+///   ambiently by this compatibility helper.
 ///
 /// ## Errors
 ///

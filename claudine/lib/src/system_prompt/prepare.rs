@@ -216,23 +216,32 @@ fn build_shared_compose_context_with_invocation(
                     .iter()
                     .find_map(|input| input.source_context.clone())
             })
-        })
-        .map(Ok)
-        .unwrap_or_else(|| {
-            let anchor = invocation
-                .launch_cwd()
-                .join(".claudine-built-in-system-prompt.md");
-            invocation
-                .derive_source(&anchor)
-                .map_err(invocation_context_error)
-        })?;
+        });
     let requirements = darkmatter::markdown::compose::ContextRequirements::for_content(&combined);
-    let evidence = invocation.runtime_evidence(&source_context, &requirements);
-    let mut runtime = ComposeContext::capture_with_evidence(
-        source_context.base_dir(),
-        &requirements,
-        &evidence,
-    );
+    let mut runtime = match source_context.as_ref() {
+        Some(source_context) => {
+            let evidence = invocation.runtime_evidence(source_context, &requirements);
+            ComposeContext::capture_with_evidence(
+                source_context.base_dir(),
+                &requirements,
+                &evidence,
+            )
+        }
+        // Built-in appendix only: neither the primary prompt nor any
+        // appendix candidate has a file source to derive from. This stays
+        // on the request-owned evidence path (D4/D6): no fabricated
+        // `source_path` is invented to feed `derive_source`, and no ambient
+        // `std::env::vars()`/CWD read is substituted either — the evidence
+        // bundle carries only the invocation's captured environment, so any
+        // Git/repo/OS/etc. group a future built-in appendix might reference
+        // resolves to null rather than a live ambient read.
+        None => {
+            let evidence = darkmatter::markdown::compose::ContextCaptureEvidence::new(
+                invocation.environment().clone(),
+            );
+            ComposeContext::capture_with_evidence(invocation.launch_cwd(), &requirements, &evidence)
+        }
+    };
     if let Some(agent) = launch_context.agent.as_ref() {
         runtime.env_mut().insert("AGENT".to_string(), agent.clone());
     }

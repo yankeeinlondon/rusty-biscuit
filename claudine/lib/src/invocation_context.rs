@@ -39,6 +39,12 @@ pub enum InvocationContextError {
 }
 
 /// Request-local accounting for discovery and preparation work.
+///
+/// `runtime_evidence_captures` counts, per group, the calls that ran the
+/// group's initializer; `runtime_evidence_reuses` counts the calls a cache or
+/// already-retained evidence answered. A group requested `n` times therefore
+/// sums to `n` across the two maps, and a second capture is a duplicate
+/// computation rather than an invisible repeat.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InvocationWorkSnapshot {
     pub git_root_discoveries: usize,
@@ -50,6 +56,7 @@ pub struct InvocationWorkSnapshot {
     pub harness_materializations: usize,
     pub ambient_fallbacks: usize,
     pub runtime_evidence_captures: BTreeMap<String, usize>,
+    pub runtime_evidence_reuses: BTreeMap<String, usize>,
     pub system_prompt_timings: BTreeMap<String, std::time::Duration>,
 }
 
@@ -64,6 +71,7 @@ struct InvocationWork {
     harness_materializations: AtomicUsize,
     ambient_fallbacks: AtomicUsize,
     runtime_evidence_captures: Mutex<BTreeMap<String, usize>>,
+    runtime_evidence_reuses: Mutex<BTreeMap<String, usize>>,
     system_prompt_timings: Mutex<BTreeMap<String, std::time::Duration>>,
 }
 
@@ -85,6 +93,11 @@ impl InvocationWork {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .clone(),
+            runtime_evidence_reuses: self
+                .runtime_evidence_reuses
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone(),
             system_prompt_timings: self
                 .system_prompt_timings
                 .lock()
@@ -94,6 +107,12 @@ impl InvocationWork {
     }
 }
 
+/// Canonical cache identity for one repository.
+///
+/// Both paths are [`canonical_key`] form so that a launch reached through a
+/// symlinked ancestor keys the same entry a later lookup finds. The key is
+/// never projected: [`RepositoryEntry::repo_root`] keeps the authored root Git
+/// reported, and `worktree_root` is only ever compared against another key.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct RepositoryKey {
     worktree_root: PathBuf,
@@ -103,8 +122,8 @@ struct RepositoryKey {
 impl RepositoryKey {
     fn from_identity(identity: &GitRepositoryIdentity) -> Self {
         Self {
-            worktree_root: identity.repo_root().to_path_buf(),
-            git_dir: identity.git_dir().to_path_buf(),
+            worktree_root: canonical_key(identity.repo_root()),
+            git_dir: canonical_key(identity.git_dir()),
         }
     }
 }
@@ -299,6 +318,11 @@ impl SourceContext {
     }
 }
 
+/// Request-local repository evidence, keyed entirely in [`canonical_key`] form.
+///
+/// Every insert and every lookup on both maps must canonicalize first; an
+/// asymmetric key is a silent cache miss that re-discovers Git and swaps the
+/// projected repository root mid-invocation.
 #[derive(Debug, Default)]
 struct RepositoryCache {
     repositories: HashMap<RepositoryKey, Arc<RepositoryEntry>>,
@@ -408,7 +432,7 @@ impl InvocationContext {
         } else {
             cache
                 .exact_non_repositories
-                .insert(cwd.clone(), launch_repository.clone());
+                .insert(canonical_key(&cwd), launch_repository.clone());
         }
 
         Self {
@@ -487,6 +511,14 @@ impl InvocationContext {
         )
     }
 
+    /// Derive the definitive request context for one resolved document source.
+    ///
+    /// Repository evidence is shared — a second source in an already observed
+    /// repository reuses that entry and its topology — but the returned value
+    /// is not memoized: calling this twice for one path rebuilds the package
+    /// projection and the resolution context. A caller that needs the same
+    /// source context at two stages should carry the value rather than derive
+    /// it again.
     pub fn derive_source(
         &self,
         source_path: &Path,
@@ -533,6 +565,12 @@ impl InvocationContext {
     /// The returned evidence is complete for every requested group. Repository
     /// and host observations are cached by this invocation; no ambient CWD,
     /// HOME, environment, or Git discovery is performed.
+    ///
+    /// Every requested group lands in exactly one work counter: the group is a
+    /// capture when this call ran the initializer behind its cache, and a reuse
+    /// when retained evidence answered it. Groups that hold no evidence at all
+    /// (`datetime`, `agent`) and groups that only clone what the repository
+    /// entry already carries (`git`, `repo`) are therefore always reuses.
     pub fn runtime_evidence(
         &self,
         source: &SourceContext,
@@ -554,7 +592,10 @@ impl InvocationContext {
         };
 
         for group in requirements.iter() {
-            self.record_runtime_evidence_capture(context_group_name(group));
+            // Set only from inside a cache initializer, so the counters below
+            // separate the one call that computed the evidence from every call
+            // the cache answered.
+            let mut captured = false;
             match group {
                 ContextGroup::DateTime | ContextGroup::Agent => {}
                 ContextGroup::Git => {
@@ -576,6 +617,7 @@ impl InvocationContext {
                     if let Ok(changes) = source_evidence
                         .file_changes
                         .get_or_init(|| {
+                            captured = true;
                             repository
                                 .observation
                                 .detect_file_changes()
@@ -592,6 +634,7 @@ impl InvocationContext {
                     if let Ok(languages) = source_evidence
                         .languages
                         .get_or_init(|| {
+                            captured = true;
                             detect_source_filesystem(repository, &source.base_dir, true, false)
                                 .map(|filesystem| filesystem.languages)
                                 .map_err(Arc::new)
@@ -605,6 +648,7 @@ impl InvocationContext {
                     if let Ok(documents) = source_evidence
                         .documents
                         .get_or_init(|| {
+                            captured = true;
                             detect_source_filesystem(repository, &source.base_dir, false, true)
                                 .map(|filesystem| filesystem.docs)
                                 .map_err(Arc::new)
@@ -624,8 +668,18 @@ impl InvocationContext {
                         .inner
                         .os
                         .get_or_init(|| {
-                            sniff::os::detect_os_with_request(&OsRequest::full().include_ntp_status(false))
-                                .map_err(Arc::new)
+                            captured = true;
+                            // Deliberately the same request Darkmatter's ambient
+                            // capture issues, so a supplied `ctx.os*` costs the
+                            // same and reads the same as an ambient one. Locale
+                            // and timezone are unread by `populate_os` and their
+                            // probes are not free — locale shells out to
+                            // PowerShell on a Windows host with no `LC_*` set.
+                            let request = OsRequest::full()
+                                .include_locale(false)
+                                .include_timezone(false)
+                                .include_ntp_status(false);
+                            sniff::os::detect_os_with_request(&request).map_err(Arc::new)
                         })
                         .as_ref()
                     {
@@ -637,6 +691,7 @@ impl InvocationContext {
                         .inner
                         .hardware
                         .get_or_init(|| {
+                            captured = true;
                             sniff::hardware::detect_hardware_with_request(&HardwareRequest::summary())
                                 .map_err(Arc::new)
                         })
@@ -649,39 +704,53 @@ impl InvocationContext {
                     let gpus = self
                         .inner
                         .gpus
-                        .get_or_init(sniff::hardware::detect_gpus)
+                        .get_or_init(|| {
+                            captured = true;
+                            sniff::hardware::detect_gpus()
+                        })
                         .clone();
                     evidence = evidence.with_gpus(gpus);
                 }
+            }
+            let name = context_group_name(group);
+            if captured {
+                self.record_runtime_evidence_capture(name);
+            } else {
+                self.record_runtime_evidence_reuse(name);
             }
         }
         evidence
     }
 
+    /// Resolve the repository entry enclosing an authored source directory.
+    ///
+    /// `base_dir` stays authored: it is what Git discovers against, so a newly
+    /// observed repository projects the root the caller named rather than a
+    /// resolved-symlink alias. Only `lookup_key` is canonicalized, and only to
+    /// address the cache and to test containment against another key.
     fn repository_for_base(&self, base_dir: &Path) -> Arc<RepositoryEntry> {
-        let base_dir = std::fs::canonicalize(base_dir).unwrap_or_else(|_| base_dir.to_path_buf());
+        let lookup_key = canonical_key(base_dir);
         let mut cache = self
             .inner
             .repositories
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-        if let Some(entry) = cache.exact_non_repositories.get(&base_dir) {
+        if let Some(entry) = cache.exact_non_repositories.get(&lookup_key) {
             return entry.clone();
         }
 
         let mut enclosing = cache
             .repositories
-            .values()
-            .filter_map(|entry| entry.repo_root().map(|root| (root, entry)))
-            .filter(|(root, _)| base_dir.starts_with(root))
+            .iter()
+            .map(|(key, entry)| (key.worktree_root.as_path(), entry))
+            .filter(|(root, _)| lookup_key.starts_with(root))
             .collect::<Vec<_>>();
         enclosing.sort_by_key(|(root, _)| std::cmp::Reverse(root.components().count()));
-        if let Some((root, entry)) = enclosing
+        if let Some((_, entry)) = enclosing
             .into_iter()
-            .find(|(root, _)| !contains_nested_repository_boundary(&base_dir, root))
+            .find(|(root, _)| !contains_nested_repository_boundary(&lookup_key, root))
         {
-            let _ = root;
             return entry.clone();
         }
 
@@ -689,21 +758,21 @@ impl InvocationContext {
             .work
             .git_root_discoveries
             .fetch_add(1, Ordering::Relaxed);
-        let observation = FilesystemObservation::discover(&base_dir);
+        let observation = FilesystemObservation::discover(base_dir);
         let identity = match observation.repository_identity() {
             Ok(Some(identity)) => identity.clone(),
             Ok(None) => {
                 let entry = Arc::new(RepositoryEntry::absent(observation));
                 cache
                     .exact_non_repositories
-                    .insert(base_dir.clone(), entry.clone());
+                    .insert(lookup_key, entry.clone());
                 return entry;
             }
             Err(error) => {
                 let entry = Arc::new(RepositoryEntry::failed(observation, error));
                 cache
                     .exact_non_repositories
-                    .insert(base_dir.clone(), entry.clone());
+                    .insert(lookup_key, entry.clone());
                 return entry;
             }
         };
@@ -757,14 +826,14 @@ impl InvocationContext {
         self.inner.work.snapshot()
     }
 
+    /// Record one runtime-evidence group whose value this call computed.
     pub fn record_runtime_evidence_capture(&self, group: impl Into<String>) {
-        let mut groups = self
-            .inner
-            .work
-            .runtime_evidence_captures
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        groups.entry(group.into()).or_insert(1);
+        record_group(&self.inner.work.runtime_evidence_captures, group);
+    }
+
+    /// Record one runtime-evidence group answered without computing anything.
+    pub fn record_runtime_evidence_reuse(&self, group: impl Into<String>) {
+        record_group(&self.inner.work.runtime_evidence_reuses, group);
     }
 
     pub fn record_system_prompt_lookup(&self) {
@@ -925,6 +994,13 @@ fn detect_source_filesystem(
     sniff::filesystem::detect_filesystem_with_observation(base_dir, &request, &observation)
 }
 
+fn record_group(counts: &Mutex<BTreeMap<String, usize>>, group: impl Into<String>) {
+    let mut counts = counts
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *counts.entry(group.into()).or_insert(0) += 1;
+}
+
 fn context_group_name(group: darkmatter::markdown::compose::ContextGroup) -> &'static str {
     use darkmatter::markdown::compose::ContextGroup;
 
@@ -988,6 +1064,11 @@ fn package_roots(base_dir: &Path, repo: Option<&RepoInfo>) -> (Option<PathBuf>, 
     (package_area, package)
 }
 
+/// Whether a `.git` boundary separates a directory from its enclosing root.
+///
+/// Both arguments must be [`canonical_key`] form; the walk compares components
+/// against `enclosing_root` to terminate, so a canonical/authored mix would
+/// walk past the root and probe unrelated ancestors.
 fn contains_nested_repository_boundary(base_dir: &Path, enclosing_root: &Path) -> bool {
     let mut cursor = base_dir;
     while cursor != enclosing_root && cursor.starts_with(enclosing_root) {
@@ -1003,9 +1084,20 @@ fn contains_nested_repository_boundary(base_dir: &Path, enclosing_root: &Path) -
 }
 
 fn paths_equivalent(left: &Path, right: &Path) -> bool {
-    let left = std::fs::canonicalize(left).unwrap_or_else(|_| left.to_path_buf());
-    let right = std::fs::canonicalize(right).unwrap_or_else(|_| right.to_path_buf());
-    left == right
+    canonical_key(left) == canonical_key(right)
+}
+
+/// Cache-key form of a path, canonicalized when the filesystem allows.
+///
+/// Canonicalization fails for a missing path or an unreadable ancestor; the
+/// authored path is then its own key, degrading to the per-path cache misses
+/// that predate symmetric keying rather than failing the invocation.
+///
+/// Keys are only ever compared against other keys. On Windows `canonicalize`
+/// yields a `\\?\` verbatim path, which must never reach a projection or a
+/// comparison against an authored path.
+fn canonical_key(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 fn absolutize(path: &Path) -> PathBuf {
