@@ -144,7 +144,7 @@ mod fixture_tests {
 
     #[test]
     fn prepend_to_path_round_trips_through_split_paths() {
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().expect("temp dir");
         let extra = tmp.path().join("extra-bin");
 
@@ -161,7 +161,7 @@ mod fixture_tests {
 
     #[test]
     fn prepend_to_path_preserves_existing_entries() {
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().expect("temp dir");
         let existing = tmp.path().join("existing-bin");
         let extra = tmp.path().join("extra-bin");

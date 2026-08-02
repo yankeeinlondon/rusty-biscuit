@@ -338,8 +338,8 @@ pub(crate) fn prepare_directive(
             return Err(ShellExpansionError::ApprovalRequired {
                 ctx: Box::new(directive.ctx.clone()),
                 command: display_command,
-                whitelist_path: policy_paths.whitelist.clone(),
-                blacklist_path: policy_paths.blacklist.clone(),
+                whitelist_path: Box::new(policy_paths.whitelist.clone()),
+                blacklist_path: Box::new(policy_paths.blacklist.clone()),
                 origin: directive.origin.clone(),
             });
         }
@@ -447,8 +447,8 @@ pub(crate) fn prepare_directive(
         Err(ShellExpansionError::ApprovalRequired {
             ctx: Box::new(directive.ctx.clone()),
             command: display_command,
-            whitelist_path: policy_paths.whitelist.clone(),
-            blacklist_path: policy_paths.blacklist.clone(),
+            whitelist_path: Box::new(policy_paths.whitelist.clone()),
+            blacklist_path: Box::new(policy_paths.blacklist.clone()),
             origin: directive.origin.clone(),
         })
     }
@@ -1207,13 +1207,18 @@ mod integration_tests {
     #[test]
     fn pipeline_timeout_fallback_emits_warning() {
         let temp_dir = TempDir::new().unwrap();
-        let content = "::shell sleep 1 && echo after\n";
+        // `execute_pipeline_detailed` spends one timeout budget on every `&&`
+        // segment, so `echo after` must spawn and exit inside it too. The sleep
+        // therefore has to overshoot the budget by a wide margin while the
+        // budget stays wide enough for a slow spawn under parallel-suite load.
+        // The sleeping child is killed at the timeout, so its length is free.
+        let content = "::shell sleep 10 && echo after\n";
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
             .with_shell(ShellExpansionOptions {
-                timeout: std::time::Duration::from_millis(100),
+                timeout: std::time::Duration::from_secs(2),
                 timeout_behavior: ShellTimeoutBehavior::EmptyString,
                 policy_root: Some(temp_dir.path().to_path_buf()),
                 approval_handler: Some(Arc::new(MockApprovalHandler {
@@ -2250,9 +2255,13 @@ name: world
     /// Helper to find python3 for integration tests.
     fn find_test_python() -> Option<String> {
         ["python3", "python"].into_iter().find_map(|candidate| {
-            which::which(candidate)
+            let path = which::which(candidate).ok()?;
+            std::process::Command::new(&path)
+                .arg("--version")
+                .output()
                 .ok()
-                .map(|p| p.to_string_lossy().to_string())
+                .filter(|output| output.status.success())
+                .map(|_| path.to_string_lossy().to_string())
         })
     }
 

@@ -377,7 +377,7 @@ fn prompt_decision(term: &Terminal, path: &std::path::Path) -> Decision {
         let name = path
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| path.display().to_string());
+            .unwrap_or_else(|| biscuit_file::to_portable_string(path));
         print!("{}", report::prompt(term, &name));
         let _ = std::io::stdout().flush();
         let mut line = String::new();

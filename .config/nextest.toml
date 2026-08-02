@@ -24,6 +24,12 @@
 # 4 was the empirical sweet spot here: zero flakes, far fewer spurious slow marks.
 tts-audio = { max-threads = 4 }
 
+# Claudine's L1 library and CLI tests repeatedly perform repository discovery
+# and spawn nested processes. Unrestricted concurrency on high-core Windows
+# hosts starves otherwise bounded tests past the 30s termination ceiling; the
+# victim changes between runs, while the same suite is stable at four threads.
+claudine-windows-l1 = { max-threads = 4 }
+
 [profile.default]
 # Retry failed tests up to 3 times to mitigate flakiness in PTY tests or timing issues
 retries = 3
@@ -37,6 +43,11 @@ slow-timeout = { period = "5s", terminate-after = 6 }
 # clean tests are not slowed — only an actual leak waits the window out. To
 # downgrade leaks back to a non-fatal warning, drop `result = "fail"`.
 leak-timeout = { period = "100ms", result = "fail" }
+
+[[profile.default.overrides]]
+platform = { host = "cfg(windows)" }
+filter = 'package(claudine) + package(claudine-cli)'
+test-group = 'claudine-windows-l1'
 
 # Tests that intentionally wait on a real clock (e.g. rate-limit pause policies)
 # need an even longer leash than the default termination window.
@@ -66,6 +77,15 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 
 [[profile.default.overrides]]
 filter = 'test(=inline_compose_perf_stdout_matches_non_perf)'
+slow-timeout = { period = "30s", terminate-after = 3 }
+
+# This real shipped-prompt test performs repository-aware composition, a proxy
+# handoff, and a fake provider launch. It is bounded and finishes well below the
+# default ceiling alone, but can exceed 30s when debug-build composition tests
+# contend for the host. Keep the override specific so ordinary L1 hangs still
+# fail at the default deadline.
+[[profile.default.overrides]]
+filter = 'test(=shipped_implement_prompt_runs_real_router_target)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
 # This integration test shells out to the CLI multiple times; it is below the
@@ -188,16 +208,6 @@ filter = 'package(claudine-cli) & test(/level2_/)'
 leak-timeout = { period = "1s", result = "fail" }
 slow-timeout = { period = "30s", terminate-after = 3 }
 
-# The sequence idle-flush pane test is slow by construction, not by contention.
-# `spawn_flush_if_idle_ticker`'s silence window and cadence are both a
-# hardcoded 30s with no env override, and the stall must clear the ticker's
-# second tick to be reliable (the first only fires if the block was stamped as
-# the ticker started), so the run costs ~80s plus pane setup. The default 30s
-# termination window would kill it mid-stall.
-[[profile.default.overrides]]
-filter = 'test(=level2_prompt_idle_flush_keeps_the_task_bar_in_tmux)'
-slow-timeout = { period = "30s", terminate-after = 6 }
-
 # The error-propagation D10 characterization baseline
 # (`claudine/features/2026-07-13-error-propogation/`) spawns the real claudine
 # binary once per route, which in turn forks short-lived children (git
@@ -220,8 +230,25 @@ leak-timeout = { period = "1s", result = "fail" }
 # masking flakes and quadrupling wasted time. Only the resource-sensitive tiers
 # below keep a scoped, justified retry.
 retries = 0
-# Stricter slow-test marker for CI, same generous termination ceiling.
-slow-timeout = { period = "10s", terminate-after = 3 }
+# Mark slow at 30s, kill at 90s (3 x 30s).
+#
+# Was `10s x 3` = a 30-second kill, which was below what correct tests need on a
+# contended runner and, with `retries = 0`, gave them no second chance. Measured
+# on run 30562649123: the claudine shards reported 11 timeouts and ZERO assertion
+# failures — every "failure" was the harness killing a slow test. One of them
+# (`agent_errors_fleet::exhausted_remediation_fails_finalize_and_preserves_findings`)
+# takes ~21s alone on an 8-core dev machine and 83s under full-suite contention;
+# a 2-core runner is slower still.
+#
+# 90s is not a licence to be slow — it is the difference between "this is hung"
+# and "this is slow", which is what a termination ceiling should express. The
+# fifteen per-test overrides already in this file all raise the period to 30s for
+# exactly this reason; that many exceptions is evidence the global default was
+# the thing that was wrong.
+#
+# `retries = 0` deliberately stays. A timeout must not be retried into looking
+# healthy — it should either fit the ceiling or be reported.
+slow-timeout = { period = "30s", terminate-after = 3 }
 # Leaked child processes are a hard failure in CI as well.
 leak-timeout = { period = "100ms", result = "fail" }
 # JUnit XML for CI dashboards.
@@ -320,12 +347,6 @@ leak-timeout = { period = "1s", result = "fail" }
 [[profile.ci.overrides]]
 filter = 'package(claudine-cli) & test(/level2_/)'
 leak-timeout = { period = "1s", result = "fail" }
-
-# See the default-profile note: the idle-flush pane test stalls ~80s by
-# construction, well past CI's 30s termination ceiling.
-[[profile.ci.overrides]]
-filter = 'test(=level2_prompt_idle_flush_keeps_the_task_bar_in_tmux)'
-slow-timeout = { period = "30s", terminate-after = 6 }
 
 # See the default-profile note: the error-propagation characterization baseline
 # spawns the real claudine binary per route and draws spurious LEAK-FAILs from

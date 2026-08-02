@@ -30,35 +30,21 @@ impl From<WsRoleArg> for AsyncWsRole {
 }
 
 /// Runs the OpenAPI import command.
-pub fn run_import_command(
-    input: &str,
-    api_name: Option<&str>,
-    module_path: Option<&str>,
-    output: &str,
-    dry_run: bool,
-    strict: bool,
-    verbose: u8,
-) -> Result<(), GeneratorError> {
+pub fn run_import_command(options: ImportOptions, verbose: u8) -> Result<(), GeneratorError> {
     if verbose > 0 {
-        eprintln!("Importing OpenAPI spec: {}", input);
-        eprintln!("Output directory: {}", output);
-        if dry_run {
+        eprintln!("Importing OpenAPI spec: {}", options.input);
+        eprintln!(
+            "Output directory: {}",
+            options.definitions_out.as_deref().unwrap_or(&options.output)
+        );
+        if options.dry_run {
             eprintln!("Dry run mode - no files will be written");
         }
     }
 
     println!("{}", "Importing OpenAPI specification...".dimmed());
 
-    let options = ImportOptions {
-        input: input.to_string(),
-        api_name: api_name.map(String::from),
-        module_path: module_path.map(String::from),
-        output: output.to_string(),
-        dry_run,
-        strict,
-        verbose: verbose > 0,
-    };
-
+    let dry_run = options.dry_run;
     let result = import_pipeline::run_import(&options)?;
 
     let warn_count = result

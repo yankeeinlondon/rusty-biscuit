@@ -150,7 +150,7 @@ impl ProtectService {
         };
 
         // Canonicalize existing ancestors to resolve symlinks
-        let resolved = super::path::canonicalize_existing_ancestor(&resolved);
+        let resolved = super::path::canonicalize_native_spelling(&resolved);
         let resolved_str = resolved.to_string_lossy();
 
         if self.path_checker.is_sensitive(&resolved_str) {

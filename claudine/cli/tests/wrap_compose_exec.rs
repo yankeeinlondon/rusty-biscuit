@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Integration tests: compose provider selection, env-agent resolution, interactive prompt seeding, and MCP runtime.
 //!
 //! Split out of the `wrap_commands.rs` god file; shared fixtures live in
@@ -7,7 +9,7 @@ use std::fs;
 use tempfile::tempdir;
 mod common;
 use common::wrap::*;
-use common::{strip_ansi, write_executable};
+use common::{CliProcessFixture, strip_ansi, write_executable};
 
 #[cfg(unix)]
 #[test]
@@ -37,9 +39,11 @@ exit 99
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
+        .current_dir(workspace.path())
         .args([
             "compose",
             "--codex",
@@ -79,8 +83,10 @@ exit 0
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
+        .current_dir(workspace.path())
         .args(["compose", "--codex", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -122,9 +128,11 @@ exit 0
 
     assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("CLAUDINE_STDIN_FILE", &stdin_path)
+        .current_dir(workspace.path())
         .args(["compose", "--codex", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -200,13 +208,11 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn compose_preflight_error_includes_source_provenance() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-preflight-provenance");
+    seed_minimal_config(fixture.home());
 
     // Markdown with a ::shell directive that is NOT whitelisted.
-    let md_file = workspace.path().join("template.md");
+    let md_file = fixture.cwd().join("template.md");
     fs::write(
         &md_file,
         "---\ntitle: provenance test\n---\n::shell curl https://example.com\n",
@@ -215,16 +221,14 @@ fn compose_preflight_error_includes_source_provenance() {
 
     // Provider binary (should never be reached — preflight should abort first).
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         "#!/bin/sh\necho 'ERROR: provider should not run' >&2\nexit 99\n",
     );
 
     // Run without --interactive so preflight has no approval handler →
     // the non-whitelisted command triggers a clear error with provenance.
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    let assert = fixture
+        .command()
         .args(["compose", "--codex", md_file.to_str().unwrap()])
         .assert()
         .failure();
@@ -271,9 +275,11 @@ exit 0
 
     assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
+        .current_dir(workspace.path())
         .args([
             "compose",
             "--interactive",
@@ -320,8 +326,10 @@ exit 0
 
     assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
+        .current_dir(workspace.path())
         .args([
             "compose",
             "--interactive",
@@ -378,9 +386,11 @@ exit 0
     assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("HOME", &home)
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("PATH", &path_dir)
         .env("CLAUDINE_STDIN_FILE", &stdin_path)
         .env("CLAUDINE_ENV_FILE", &env_path)
+        .current_dir(workspace.path())
         .args(["compose", "--codex", "--mcp", md_file.to_str().unwrap()])
         .assert()
         .success();

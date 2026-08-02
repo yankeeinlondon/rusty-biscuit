@@ -47,15 +47,12 @@ impl SnoreToastHelper {
         }
     }
 
-    /// Mark the AppID as registered for the lifetime of this process.
-    ///
-    /// Used by tests to bypass the registration shell-out, and by
-    /// `ensure_app_id_registered` after a successful `-install` call.
+    #[cfg(test)]
     pub(crate) fn mark_app_id_registered(&self) {
         let _ = self.app_id_registered.set(());
     }
 
-    /// Whether the AppID has already been registered in this process.
+    #[cfg(test)]
     pub(crate) fn app_id_registered(&self) -> bool {
         self.app_id_registered.get().is_some()
     }

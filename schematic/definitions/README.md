@@ -19,7 +19,7 @@ These definitions are consumed by `schematic-gen` to generate strongly-typed Rus
 | Artificial Analysis Data | `artificial_analysis` | `define_artificial_analysis_data_api()` | 6 | Artificial Analysis free data API for LLM and media-model benchmarks |
 | Artificial Analysis CritPt | `artificial_analysis` | `define_artificial_analysis_critpt_api()` | 1 | Artificial Analysis CritPt benchmark evaluation API |
 | Bitbucket | `bitbucket` | `define_bitbucket_api()` | 15 | Bitbucket Cloud REST API for repos, PRs, issues, tags |
-| OpenAI | `openai` | `define_openai_api()` | 3 | OpenAI Models API (list, retrieve, delete models) |
+| OpenAI | `openai` | `define_openai_api()` | 265 | Full OpenAI platform surface, imported from the vendored spec (see `specs/openai/`) |
 | HuggingFace Hub | `huggingface` | `define_huggingface_hub_api()` | 28+ | Hugging Face Hub API (models, datasets, spaces, repos) |
 | LM Studio | `lmstudio` | `define_lmstudio_api()` | 6 | LM Studio local inference API |
 | Ollama Native | `ollama` | `define_ollama_native_api()` | 11 | Ollama local inference API (generate, chat, embeddings) |

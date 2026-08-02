@@ -43,7 +43,10 @@ fn wait_for_sentinel(
 fn run_with_sentinel(harness: &mut TmuxHarness, cmd: &str, colorfgbg: &str) -> CapturedFrame {
     let id = SENTINEL_COUNTER.fetch_add(1, Ordering::Relaxed);
     let sentinel = format!("__DM_SCHEMA_ABOUT_L2_DONE_{id}__");
-    let wrapped = format!("{cmd}; printf '\\n{sentinel}\\n'");
+    let sequence = format!("{cmd}; printf '\\n{sentinel}\\n'");
+    // Keep the harness-prefixed color environment active across the full
+    // sequence rather than scoping it to only the first simple command.
+    let wrapped = format!("sh -c {}", shell_quote(&sequence));
 
     harness
         .send_command_with_env(
@@ -68,13 +71,21 @@ fn run_with_sentinel(harness: &mut TmuxHarness, cmd: &str, colorfgbg: &str) -> C
     }
 }
 
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
 fn md_bin() -> String {
     std::env::var("CARGO_BIN_EXE_md").unwrap_or_else(|_| "md".to_string())
 }
 
 fn capture_schema_about(harness: &mut TmuxHarness, colorfgbg: &str) -> CapturedFrame {
     run_with_sentinel(harness, "clear", colorfgbg);
-    let _visible = run_with_sentinel(harness, &format!("{} schema about", md_bin()), colorfgbg);
+    // The broker pane can outlive a prior fixture CWD, so every invocation
+    // reestablishes a stable package directory before terminal discovery.
+    let working_dir = shell_quote(env!("CARGO_MANIFEST_DIR"));
+    let command = format!("cd {working_dir} && {} schema about", shell_quote(&md_bin()));
+    let _visible = run_with_sentinel(harness, &command, colorfgbg);
     capture_scrollback(harness, 300).unwrap_or(_visible)
 }
 

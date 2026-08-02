@@ -413,7 +413,10 @@ impl HopRejection {
         CompositionError::LifecycleProxyCycle {
             source_path,
             target,
-            chain: chain.iter().map(|p| p.display().to_string()).collect(),
+            chain: chain
+                .iter()
+                .map(|path| biscuit_file::to_portable_string(path))
+                .collect(),
             limit: MAX_PROXY_HOPS,
         }
     }

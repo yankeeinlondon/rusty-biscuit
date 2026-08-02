@@ -17,6 +17,9 @@ on:
   workflow_dispatch: {}
 
 env:
+  # The repository tracks no rustc wrapper; cleared explicitly so a stray
+  # environment value cannot silently intercept this workflow's builds.
+  RUSTC_WRAPPER: ""
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 concurrency:

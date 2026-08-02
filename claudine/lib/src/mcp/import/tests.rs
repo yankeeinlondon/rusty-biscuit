@@ -343,7 +343,7 @@ fn import_provider_projects_a_diagnostic_snapshot_for_a_parse_failure() {
 
     let report = importer.import_provider(Provider::Claude, Some(repo_root));
 
-    let planted_str = planted.to_string_lossy().to_string();
+    let planted_str = biscuit_file::to_portable_string(&planted);
     let error = report
         .errors
         .iter()

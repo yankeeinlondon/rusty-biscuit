@@ -16,7 +16,9 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::Markdown;
+use darkmatter::markdown::compose::find_git_root_from;
 use darkmatter::markdown::schemas::{DarkmatterSchemas, coerce};
 use serde_json::Value;
 
@@ -50,18 +52,26 @@ pub struct ProviderInputs {
 ///
 /// `topics` names the research topics the mapping registry consumes; each
 /// must exist and validate against its sidecar schema.
+/// Relative area paths have the same meaning as their absolute form.
 ///
 /// ## Errors
 ///
-/// Fails loudly on missing roster entry, a roster entry flagged
-/// `skip_research: true` (a skipped provider must never generate
-/// silently), unparsable YAML, a missing research document/sidecar, or
-/// research frontmatter that does not satisfy its sidecar schema.
+/// Fails loudly when `area` cannot be absolutized; when a roster entry is
+/// missing or flagged `skip_research: true`; when YAML cannot be parsed; when
+/// a research document or sidecar is missing; or when research frontmatter
+/// does not satisfy its sidecar schema.
 pub fn load(area: &Path, slug: &str, topics: &[&str]) -> Result<ProviderInputs, GenError> {
+    let area = std::path::absolute(area).map_err(|source| GenError::Io {
+        path: area.to_path_buf(),
+        source,
+    })?;
     let roster = load_roster_entry(&area.join("docs/providers.yaml"), slug)?;
     let facts = load_optional_yaml_map(&area.join(format!("docs/providers/facts/{slug}.yaml")))?;
     let overrides =
         load_overrides(&area.join(format!("docs/providers/overrides/{slug}.yaml")))?;
+    // Schema resolution otherwise rediscovers the same repository and package
+    // area for every research topic in this provider generation pass.
+    let schemas = generator_schemas(&area);
 
     let mut research = BTreeMap::new();
     let mut sidecars = BTreeMap::new();
@@ -71,7 +81,7 @@ pub fn load(area: &Path, slug: &str, topics: &[&str]) -> Result<ProviderInputs, 
         if !sidecar.is_file() {
             return Err(GenError::SidecarMissing { path: sidecar });
         }
-        let frontmatter = load_validated_frontmatter(&doc_path)?;
+        let frontmatter = load_validated_frontmatter_with_api(&doc_path, &schemas)?;
         research.insert((*topic).to_string(), frontmatter);
         sidecars.insert((*topic).to_string(), sidecar);
     }
@@ -190,11 +200,17 @@ fn load_overrides(path: &Path) -> Result<BTreeMap<String, OverrideEntry>, GenErr
 /// frontmatter object (so `boolish`/`numberlike` quirks never reach the
 /// mapping layer).
 pub(crate) fn load_validated_frontmatter(path: &Path) -> Result<Value, GenError> {
+    load_validated_frontmatter_with_api(path, &DarkmatterSchemas::new())
+}
+
+fn load_validated_frontmatter_with_api(
+    path: &Path,
+    api: &DarkmatterSchemas,
+) -> Result<Value, GenError> {
     let md = Markdown::try_from(path).map_err(|err| GenError::Markdown {
         path: path.to_path_buf(),
         message: err.to_string(),
     })?;
-    let api = DarkmatterSchemas::new();
     let effective = api
         .effective_for(&md)
         .map_err(|err| GenError::Markdown {
@@ -227,6 +243,16 @@ pub(crate) fn load_validated_frontmatter(path: &Path) -> Result<Value, GenError>
     }
 
     Ok(coerce::coerce_frontmatter(&effective.json_schema, &frontmatter).value)
+}
+
+fn generator_schemas(area: &Path) -> DarkmatterSchemas {
+    let Some(repository_root) = find_git_root_from(area) else {
+        return DarkmatterSchemas::new();
+    };
+    let context = FileResolutionContext::new(area)
+        .with_repository_root(repository_root)
+        .with_package_area(area);
+    DarkmatterSchemas::new().with_file_resolution_context(context)
 }
 
 /// Parses a YAML file into a `serde_json::Value`.

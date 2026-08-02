@@ -333,13 +333,13 @@ pub(crate) fn log_dry_run(
     log::message(
         &Prose::new(format!(
             "<bold>Working directory:</bold> <dim>{}</dim>",
-            child_cwd.display()
+            biscuit_file::to_portable_string(child_cwd)
         ))
         .render(term),
     );
 
     // Full command line
-    let cmd_parts: Vec<String> = std::iter::once(binary_path.display().to_string())
+    let cmd_parts: Vec<String> = std::iter::once(biscuit_file::to_portable_string(binary_path))
         .chain(child_args.iter().map(|a| shell_escape(a)))
         .collect();
     log::message(
@@ -419,7 +419,7 @@ pub(crate) fn repo_flag_info_message(
     let shadow_msg = if let Some(path) = shadow_home {
         format!(
             " A shadow HOME has been created at <blue>{}</blue> to preserve authentication.",
-            path.display()
+            biscuit_file::to_portable_string(path)
         )
     } else {
         String::new()
@@ -530,7 +530,7 @@ fn log_mcp_runtime(term: &Terminal, mcp_runtime: &McpRuntimeInfo) {
             mcp_runtime
                 .temp_files
                 .iter()
-                .map(|path| path.display().to_string())
+                .map(|path| biscuit_file::to_portable_string(path))
                 .collect::<Vec<_>>()
                 .join(", ")
         ))));
@@ -682,7 +682,7 @@ pub(crate) fn clear_user_interrupt_for_tests() {
 pub(crate) fn format_launch_directory(directory: &Path) -> String {
     Prose::new(format!(
         "- <dim>starting agent in</dim> <blue>{}</blue>",
-        directory.display()
+        biscuit_file::to_portable_string(directory)
     ))
     .with_word_wrap(WordWrap::WrapProse(None, Some(2)))
     .render(&crate::log::terminal())

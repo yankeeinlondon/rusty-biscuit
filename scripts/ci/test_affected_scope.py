@@ -187,16 +187,6 @@ class AffectedScopeTests(unittest.TestCase):
         self.assertTrue(scope["full_scope"])
         self.assertEqual("full", scope["change_class"])
 
-    def test_kache_version_change_selects_full_scope(self) -> None:
-        scope = calculate_scope(
-            [".github/kache-version"],
-            self.root,
-            self.metadata,
-            self.area_config,
-        )
-        self.assertTrue(scope["full_scope"])
-        self.assertEqual("full", scope["change_class"])
-
     def test_documentation_only_change_uses_scope_host_preflight(self) -> None:
         scope = calculate_scope(
             ["docs/architecture.md"],

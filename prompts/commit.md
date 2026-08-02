@@ -13,11 +13,11 @@ initialize:
               - message: "🤨  `just commit` was called in **{{ctx.area}}** but there were no staged filed to commit!"
               - warn: "no staged files to commit so exiting commit task"
               - stop
-success: 
+success:
     message: "staged files committed in {{ctx.area}}"
     stack:
         - action:
-            - shell: gitnexus analyze --force
+              - shell: "just gitnexus"
 ---
 
 # Commit Staged Files

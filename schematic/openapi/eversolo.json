@@ -44,6 +44,19 @@
         "summary": "Send a remote control key command to the device",
         "description": "Send a remote control key command to the device",
         "operationId": "RemoteSendKey",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "key",
+            "description": "Remote key constant (e.g., Key.VolumeUp, Key.MediaPlay, Key.PowerOff)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -71,6 +84,19 @@
         "summary": "Send text input to the device",
         "description": "Send text input to the device",
         "operationId": "RemoteInputText",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "text",
+            "description": "Text string to input",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -206,6 +232,19 @@
         "summary": "Seek to a position in the current track",
         "description": "Seek to a position in the current track",
         "operationId": "MusicSeekTo",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "time",
+            "description": "Target position in milliseconds",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -260,6 +299,19 @@
         "summary": "Set the active audio input",
         "description": "Set the active audio input",
         "operationId": "MusicSetInput",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "tag",
+            "description": "Input tag from getInputAndOutputList",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -287,6 +339,19 @@
         "summary": "Set the active audio output",
         "description": "Set the active audio output",
         "operationId": "MusicSetOutput",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "tag",
+            "description": "Output tag from getInputAndOutputList",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -314,6 +379,19 @@
         "summary": "Set the absolute volume level",
         "description": "Set the absolute volume level",
         "operationId": "MusicSetVolume",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "volume",
+            "description": "Volume level (0 to maxVolume)",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -341,6 +419,19 @@
         "summary": "Set or clear mute state",
         "description": "Set or clear mute state",
         "operationId": "MusicSetMute",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "isMute",
+            "description": "Mute state: 0 = unmuted, 1 = muted",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -395,6 +486,19 @@
         "summary": "Execute a power action (poweroff, reboot, screen, timeshutdown)",
         "description": "Execute a power action (poweroff, reboot, screen, timeshutdown)",
         "operationId": "PowerSetOption",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "tag",
+            "description": "Power option tag (poweroff, reboot, screen, timeshutdown)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -449,6 +553,19 @@
         "summary": "Set screen brightness level (community-discovered)",
         "description": "Set screen brightness level (community-discovered)",
         "operationId": "SystemSetScreenBrightness",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "index",
+            "description": "Brightness level index",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -503,6 +620,19 @@
         "summary": "Set knob LED brightness level (community-discovered)",
         "description": "Set knob LED brightness level (community-discovered)",
         "operationId": "SystemSetKnobBrightness",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "index",
+            "description": "Brightness level index",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -557,6 +687,19 @@
         "summary": "Set the VU meter display mode (community-discovered)",
         "description": "Set the VU meter display mode (community-discovered)",
         "operationId": "SystemSetVuMode",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "index",
+            "description": "VU mode index from getVUModeList",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -611,6 +754,19 @@
         "summary": "Set the spectrum display mode (community-discovered)",
         "description": "Set the spectrum display mode (community-discovered)",
         "operationId": "SystemSetSpectrumMode",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "index",
+            "description": "Spectrum mode index from getSpPlayModeList",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -638,6 +794,19 @@
         "summary": "Toggle VU display open/close (community-discovered)",
         "description": "Toggle VU display open/close (community-discovered)",
         "operationId": "SystemChangeVuDisplay",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "openType",
+            "description": "Display open type",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",

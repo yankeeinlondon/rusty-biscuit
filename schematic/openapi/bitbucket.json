@@ -122,42 +122,6 @@
             "type": "string"
           },
           "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "workspace",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "repo_slug",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "commit",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "path",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
         }
       ]
     },
@@ -166,6 +130,38 @@
         "summary": "List pull requests (all states)",
         "description": "List pull requests (all states)",
         "operationId": "ListPullRequests",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "description": "Page number (1-indexed, default: 1)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "pagelen",
+            "description": "Items per page (default: 50, max: 100)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "description": "Filter by state (OPEN, MERGED, DECLINED, SUPERSEDED)",
+            "schema": {
+              "type": "string"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -269,6 +265,28 @@
         "summary": "List comments on a pull request",
         "description": "List comments on a pull request",
         "operationId": "ListPullRequestComments",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "description": "Page number (1-indexed, default: 1)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "pagelen",
+            "description": "Items per page (default: 50, max: 100)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -325,6 +343,28 @@
         "summary": "List repository issues",
         "description": "List repository issues",
         "operationId": "ListIssues",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "description": "Page number (1-indexed, default: 1)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "pagelen",
+            "description": "Items per page (default: 50, max: 100)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -428,6 +468,28 @@
         "summary": "List comments on an issue",
         "description": "List comments on an issue",
         "operationId": "ListIssueComments",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "description": "Page number (1-indexed, default: 1)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "pagelen",
+            "description": "Items per page (default: 50, max: 100)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -484,6 +546,28 @@
         "summary": "List change history for an issue",
         "description": "List change history for an issue",
         "operationId": "ListIssueChanges",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "description": "Page number (1-indexed, default: 1)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "pagelen",
+            "description": "Items per page (default: 50, max: 100)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -540,6 +624,28 @@
         "summary": "List repository tags",
         "description": "List repository tags",
         "operationId": "ListTags",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "description": "Page number (1-indexed, default: 1)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "pagelen",
+            "description": "Items per page (default: 50, max: 100)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -643,6 +749,28 @@
         "summary": "List repository downloads (release artifacts)",
         "description": "List repository downloads (release artifacts)",
         "operationId": "ListDownloads",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "description": "Page number (1-indexed, default: 1)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "pagelen",
+            "description": "Items per page (default: 50, max: 100)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -742,6 +870,28 @@
         "summary": "List repositories in a workspace",
         "description": "List repositories in a workspace",
         "operationId": "ListWorkspaceRepos",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "description": "Page number (1-indexed, default: 1)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "pagelen",
+            "description": "Items per page (default: 50, max: 100)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",

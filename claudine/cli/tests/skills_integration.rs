@@ -3,7 +3,7 @@ use std::path::Path;
 
 use predicates::str::contains;
 mod common;
-use common::{TestWorkspace, write};
+use common::{TestWorkspace, init_git_repo, write};
 
 fn setup_skill(base: &Path, name: &str, description: &str) {
     write(
@@ -89,17 +89,18 @@ fn skills_shows_no_skills_message_when_empty() {
 // ── Listing skills ───────────────────────────────────────────────────
 
 #[test]
-fn skills_lists_user_scoped_skill() {
+fn skills_lists_repo_scoped_skill_from_nested_directory() {
     let workspace = TestWorkspace::new();
-    let home_dir = workspace.path().join("home");
-    let cwd = workspace.path().join("project");
-    let skills_dir = home_dir.join(".claude/skills");
+    let repo_root = workspace.path().join("repo");
+    let cwd = repo_root.join("nested");
+    let skills_dir = repo_root.join(".claude/skills");
+    fs::create_dir_all(&repo_root).unwrap();
+    assert!(init_git_repo(&repo_root));
     fs::create_dir_all(&cwd).unwrap();
     setup_skill(&skills_dir, "my-tool", "A useful tool");
 
     assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
-        .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
         .arg("skills")
         .assert()
@@ -173,15 +174,16 @@ fn skills_filter_no_match_shows_message() {
 #[test]
 fn skills_verbose_shows_descriptions() {
     let workspace = TestWorkspace::new();
-    let home_dir = workspace.path().join("home");
-    let cwd = workspace.path().join("project");
-    let skills_dir = home_dir.join(".claude/skills");
+    let repo_root = workspace.path().join("repo");
+    let cwd = repo_root.join("nested");
+    let skills_dir = repo_root.join(".claude/skills");
+    fs::create_dir_all(&repo_root).unwrap();
+    assert!(init_git_repo(&repo_root));
     fs::create_dir_all(&cwd).unwrap();
     setup_skill(&skills_dir, "my-tool", "A useful testing tool");
 
     assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
-        .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
         .args(["-v", "skills"])
         .assert()
@@ -229,15 +231,20 @@ fn skills_apply_flag_accepted() {
 #[test]
 fn skills_fix_shows_summary() {
     let workspace = TestWorkspace::new();
-    let home_dir = workspace.path().join("home");
-    let cwd = workspace.path().join("project");
-    let skills_dir = home_dir.join(".claude/skills");
+    let repo_root = workspace.path().join("repo");
+    let cwd = repo_root.join("nested");
+    let skills_dir = repo_root.join(".claude/skills");
+    fs::create_dir_all(&repo_root).unwrap();
+    assert!(init_git_repo(&repo_root));
     fs::create_dir_all(&cwd).unwrap();
+    write(
+        &repo_root.join(".claudine/config.json"),
+        r#"{ "canonical_provider": "claude" }"#,
+    );
     setup_skill(&skills_dir, "fixable", "A fixable skill");
 
     assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
-        .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
         .args(["skills", "--fix"])
         .assert()
@@ -275,9 +282,11 @@ fn skills_fix_does_not_show_fix_hint() {
 #[test]
 fn skills_detail_view_shows_filesystem() {
     let workspace = TestWorkspace::new();
-    let home_dir = workspace.path().join("home");
-    let cwd = workspace.path().join("project");
-    let skills_dir = home_dir.join(".claude/skills");
+    let repo_root = workspace.path().join("repo");
+    let cwd = repo_root.join("nested");
+    let skills_dir = repo_root.join(".claude/skills");
+    fs::create_dir_all(&repo_root).unwrap();
+    assert!(init_git_repo(&repo_root));
     fs::create_dir_all(&cwd).unwrap();
     // Create a skill with an extra file so the tree is non-trivial
     setup_skill(&skills_dir, "my-tool", "A useful tool");
@@ -289,7 +298,6 @@ fn skills_detail_view_shows_filesystem() {
 
     let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
-        .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
         .args(["skills", "my-tool"])
         .output()
@@ -340,15 +348,16 @@ fn skills_filter_suppresses_unrelated_exceptions() {
 #[test]
 fn skills_footer_shows_filter_hint() {
     let workspace = TestWorkspace::new();
-    let home_dir = workspace.path().join("home");
-    let cwd = workspace.path().join("project");
-    let skills_dir = home_dir.join(".claude/skills");
+    let repo_root = workspace.path().join("repo");
+    let cwd = repo_root.join("nested");
+    let skills_dir = repo_root.join(".claude/skills");
+    fs::create_dir_all(&repo_root).unwrap();
+    assert!(init_git_repo(&repo_root));
     fs::create_dir_all(&cwd).unwrap();
     setup_skill(&skills_dir, "my-tool", "A tool");
 
     let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
-        .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
         .arg("skills")
         .output()
@@ -386,18 +395,18 @@ fn skills_footer_hides_filter_hint_with_filter() {
 }
 
 #[test]
-fn skills_not_in_git_repo_shows_user_only_hint() {
+fn skills_in_git_repo_does_not_show_user_only_hint() {
     let workspace = TestWorkspace::new();
-    let home_dir = workspace.path().join("home");
-    // Use a temp dir that is definitely not a git repo
-    let cwd = workspace.path().join("not-a-repo");
-    let skills_dir = home_dir.join(".claude/skills");
+    let repo_root = workspace.path().join("repo");
+    let cwd = repo_root.join("nested");
+    let skills_dir = repo_root.join(".claude/skills");
+    fs::create_dir_all(&repo_root).unwrap();
+    assert!(init_git_repo(&repo_root));
     fs::create_dir_all(&cwd).unwrap();
     setup_skill(&skills_dir, "my-tool", "A tool");
 
     let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
-        .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
         .arg("skills")
         .output()
@@ -405,8 +414,8 @@ fn skills_not_in_git_repo_shows_user_only_hint() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("not") && stdout.contains("git"),
-        "footer should indicate CWD is not a git repo, got:\n{stdout}"
+        !stdout.contains("current working directory is not a git repo"),
+        "git-repo footer must not claim only user scope is available, got:\n{stdout}"
     );
 }
 
@@ -415,9 +424,11 @@ fn skills_not_in_git_repo_shows_user_only_hint() {
 #[test]
 fn skills_negation_with_dash_prefix_excludes_match() {
     let workspace = TestWorkspace::new();
-    let home_dir = workspace.path().join("home");
-    let cwd = workspace.path().join("project");
-    let skills_dir = home_dir.join(".claude/skills");
+    let repo_root = workspace.path().join("repo");
+    let cwd = repo_root.join("nested");
+    let skills_dir = repo_root.join(".claude/skills");
+    fs::create_dir_all(&repo_root).unwrap();
+    assert!(init_git_repo(&repo_root));
     fs::create_dir_all(&cwd).unwrap();
     setup_skill(&skills_dir, "alpha", "Alpha skill");
     setup_skill(&skills_dir, "beta", "Beta skill");
@@ -425,7 +436,6 @@ fn skills_negation_with_dash_prefix_excludes_match() {
 
     let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
-        .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
         .args(["skills", "--", "-beta"])
         .output()
@@ -449,9 +459,11 @@ fn skills_negation_with_dash_prefix_excludes_match() {
 #[test]
 fn skills_negation_with_bang_prefix_excludes_match() {
     let workspace = TestWorkspace::new();
-    let home_dir = workspace.path().join("home");
-    let cwd = workspace.path().join("project");
-    let skills_dir = home_dir.join(".claude/skills");
+    let repo_root = workspace.path().join("repo");
+    let cwd = repo_root.join("nested");
+    let skills_dir = repo_root.join(".claude/skills");
+    fs::create_dir_all(&repo_root).unwrap();
+    assert!(init_git_repo(&repo_root));
     fs::create_dir_all(&cwd).unwrap();
     setup_skill(&skills_dir, "alpha", "Alpha skill");
     setup_skill(&skills_dir, "beta", "Beta skill");
@@ -459,7 +471,6 @@ fn skills_negation_with_bang_prefix_excludes_match() {
 
     let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
-        .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
         .args(["skills", "!beta"])
         .output()
@@ -516,9 +527,11 @@ fn skills_exact_filter_matches_only_full_name() {
 #[test]
 fn skills_combined_positive_and_negation() {
     let workspace = TestWorkspace::new();
-    let home_dir = workspace.path().join("home");
-    let cwd = workspace.path().join("project");
-    let skills_dir = home_dir.join(".claude/skills");
+    let repo_root = workspace.path().join("repo");
+    let cwd = repo_root.join("nested");
+    let skills_dir = repo_root.join(".claude/skills");
+    fs::create_dir_all(&repo_root).unwrap();
+    assert!(init_git_repo(&repo_root));
     fs::create_dir_all(&cwd).unwrap();
     setup_skill(&skills_dir, "alpha", "Alpha skill");
     setup_skill(&skills_dir, "beta", "Beta skill");
@@ -527,7 +540,6 @@ fn skills_combined_positive_and_negation() {
     // "a" matches alpha, beta, and gamma; "-alpha" excludes alpha
     let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
-        .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
         .args(["skills", "--", "a", "-alpha"])
         .output()

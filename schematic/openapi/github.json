@@ -64,6 +64,19 @@
         "summary": "Get a Git tree recursively (may truncate at 100k entries or 7MB)",
         "description": "Get a Git tree recursively (may truncate at 100k entries or 7MB)",
         "operationId": "GetGitTreeRecursive",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "recursive",
+            "description": "Fetch tree recursively (always true for this endpoint)",
+            "required": true,
+            "schema": {
+              "type": "boolean"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -86,33 +99,6 @@
         }
       },
       "parameters": [
-        {
-          "in": "path",
-          "name": "owner",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "repo",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "tree_sha",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
         {
           "in": "path",
           "name": "owner",
@@ -204,6 +190,73 @@
         "summary": "List pull requests with metadata",
         "description": "List pull requests with metadata",
         "operationId": "ListPullRequests",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "description": "Page number (1-indexed, default: 1)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "description": "Items per page (default: 100, max: 100)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "description": "Filter by PR state",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "open",
+                "closed",
+                "all"
+              ]
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "description": "Sort field",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "created",
+                "updated",
+                "popularity",
+                "long-running"
+              ]
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "direction",
+            "description": "Sort direction",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -251,6 +304,28 @@
         "summary": "List files changed in a pull request",
         "description": "List files changed in a pull request",
         "operationId": "ListPullRequestFiles",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "description": "Page number (1-indexed, default: 1)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "description": "Items per page (default: 100, max: 100)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -307,6 +382,72 @@
         "summary": "List issues (includes PRs; filter by pull_request field)",
         "description": "List issues (includes PRs; filter by pull_request field)",
         "operationId": "ListIssues",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "description": "Page number (1-indexed, default: 1)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "description": "Items per page (default: 100, max: 100)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "description": "Filter by issue state",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "open",
+                "closed",
+                "all"
+              ]
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "description": "Sort field",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "created",
+                "updated",
+                "comments"
+              ]
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "direction",
+            "description": "Sort direction",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -410,6 +551,28 @@
         "summary": "List comments on an issue",
         "description": "List comments on an issue",
         "operationId": "ListIssueComments",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "description": "Page number (1-indexed, default: 1)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "description": "Items per page (default: 100, max: 100)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -466,6 +629,28 @@
         "summary": "List timeline events for an issue",
         "description": "List timeline events for an issue",
         "operationId": "ListIssueTimeline",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "description": "Page number (1-indexed, default: 1)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "description": "Items per page (default: 100, max: 100)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -522,6 +707,28 @@
         "summary": "List repository tags",
         "description": "List repository tags",
         "operationId": "ListTags",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "description": "Page number (1-indexed, default: 1)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "description": "Items per page (default: 100, max: 100)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -569,6 +776,28 @@
         "summary": "List releases (linked to tags via tag_name)",
         "description": "List releases (linked to tags via tag_name)",
         "operationId": "ListReleases",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "description": "Page number (1-indexed, default: 1)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "description": "Items per page (default: 100, max: 100)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -728,6 +957,74 @@
         "summary": "List workflow runs for a repository",
         "description": "List workflow runs for a repository",
         "operationId": "ListWorkflowRuns",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "description": "Page number (1-indexed, default: 1)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "description": "Items per page (default: 100, max: 100)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "description": "Filter by workflow run status",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "completed",
+                "action_required",
+                "cancelled",
+                "failure",
+                "neutral",
+                "skipped",
+                "stale",
+                "success",
+                "timed_out",
+                "in_progress",
+                "queued",
+                "requested",
+                "waiting",
+                "pending"
+              ]
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "branch",
+            "description": "Filter by branch name",
+            "schema": {
+              "type": "string"
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "event",
+            "description": "Filter by event type (e.g., push, pull_request)",
+            "schema": {
+              "type": "string"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -775,6 +1072,76 @@
         "summary": "List repositories for an organization",
         "description": "List repositories for an organization",
         "operationId": "ListOrgRepos",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "description": "Page number (1-indexed, default: 1)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "description": "Items per page (default: 100, max: 100)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "repo_type",
+            "description": "Filter by repository type (API param: type)",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "public",
+                "private",
+                "forks",
+                "sources",
+                "member"
+              ]
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "description": "Sort field",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "created",
+                "updated",
+                "pushed",
+                "full_name"
+              ]
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "direction",
+            "description": "Sort direction",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",

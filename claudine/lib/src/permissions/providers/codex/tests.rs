@@ -23,16 +23,21 @@ fn setup_ctx() -> (tempfile::TempDir, PolicyContext) {
 async fn codex_backend_models_workspace_write() {
     let (_dir, ctx) = setup_ctx();
     let path = ctx.repo_root.as_ref().unwrap().join(".codex/config.toml");
+    let writable_root = _dir.path().join("build-output");
+    let writable_root_literal =
+        toml::Value::String(writable_root.to_string_lossy().into_owned()).to_string();
     tokio::fs::write(
         &path,
-        r#"
+        format!(
+            r#"
 sandbox_mode = "workspace-write"
 approval_policy = "on-request"
 
 [sandbox_workspace_write]
-writable_roots = ["/tmp/build-output"]
+writable_roots = [{writable_root_literal}]
 network_access = false
 "#,
+        ),
     )
     .await
     .unwrap();
@@ -52,10 +57,10 @@ network_access = false
     );
     assert!(
         snapshot
-            .can_write("/tmp/build-output/file.txt")
+            .can_write(writable_root.join("file.txt"))
             .is_allowed()
     );
-    assert!(snapshot.can_write("/etc/hosts").is_ask());
+    assert!(snapshot.can_write(_dir.path().join("outside/hosts")).is_ask());
     assert!(
         snapshot
             .can_execute(&CommandQuery::from_raw("git status"))

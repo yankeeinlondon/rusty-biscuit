@@ -37,6 +37,28 @@ compatible archived phase, OS, runner class, and request shape.
 If a counter drops after code adds work, first suspect missing worker
 propagation.
 
+### Seeded observation accounting
+
+`FilesystemObservation::discover` records one `GIT_DISCOVERIES` attempt at the
+upward-search chokepoint, including absence and failure. Running
+`detect_filesystem_with_observation` or
+`detect_with_plan_and_filesystem_observation` with that seed records **zero
+additional** Git discoveries. Later `detect_git` and `detect_file_changes`
+calls reuse the same handle; they still record the work they actually perform,
+such as `GIT_STATUS_WALKS`, blob loads, or diffs.
+
+`FilesystemObservation::for_root` performs no Git discovery or known-path Git
+open. Its bounded same-worktree validation is visible through
+`FS_CANONICALIZATIONS` and `FS_METADATA_PROBES`, including the ancestor checks
+that protect nested repositories. `GIT_OPENS` remains reserved for actual
+known-path repository opens, not observation cloning or rebasing.
+
+To measure acquisition and seeded execution as one request, install the same
+collector around both operations. If acquisition happened before collection,
+the execution report correctly shows zero `GIT_DISCOVERIES`; use the caller's
+request-local accounting for the already completed acquisition rather than
+inventing a second Sniff increment.
+
 ## Known baseline boundaries
 
 - Early filesystem baselines undercount manifest-index file opens and bytes.

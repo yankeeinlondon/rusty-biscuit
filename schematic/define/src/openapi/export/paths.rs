@@ -5,6 +5,7 @@ use super::super::OpenApiError;
 use super::super::extensions::SchematicOpExtension;
 use super::super::options::ExportOptions;
 use super::components::SchemaRegistryLike;
+use super::parameters::map_parameters;
 use super::request_body::map_request_body;
 use super::responses::map_responses;
 use crate::types::{Endpoint, RestMethod};
@@ -36,8 +37,23 @@ pub(super) fn map_paths<R: SchemaRegistryLike>(
             RestMethod::Options => path_item.options = Some(operation),
         }
 
+        // Endpoints sharing a path each contribute the same path parameters, but
+        // OpenAPI forbids duplicates in a parameter list, so add each name once.
         for param in path_params {
-            path_item.parameters.push(ReferenceOr::Item(param));
+            let openapiv3::Parameter::Path { parameter_data, .. } = &param else {
+                continue;
+            };
+            let already_declared = path_item.parameters.iter().any(|existing| {
+                matches!(
+                    existing,
+                    ReferenceOr::Item(openapiv3::Parameter::Path { parameter_data: declared, .. })
+                        if declared.name == parameter_data.name
+                )
+            });
+
+            if !already_declared {
+                path_item.parameters.push(ReferenceOr::Item(param));
+            }
         }
     }
 
@@ -80,7 +96,7 @@ pub(super) fn map_operation<R: SchemaRegistryLike>(
         description: Some(endpoint.description.clone()),
         request_body,
         responses,
-        parameters: vec![],
+        parameters: map_parameters(endpoint.params.as_ref()),
         extensions,
         ..Default::default()
     })

@@ -160,13 +160,13 @@ impl OpenApiImport {
     /// - Required fields are missing
     /// - Strict mode is enabled and any diagnostics were generated
     pub fn build(self) -> Result<OpenApiImportResult, super::super::error::OpenApiError> {
-        let doc = self.parse_source()?;
+        let mut diagnostics = Vec::new();
+
+        let doc = self.parse_source(&mut diagnostics)?;
 
         self.validate_constraints(&doc)?;
 
         let resolver = RefResolver::new(&doc);
-
-        let mut diagnostics = Vec::new();
 
         let mut api = self.map_to_rest_api(&doc, &resolver, &mut diagnostics)?;
 
@@ -216,7 +216,13 @@ impl OpenApiImport {
     }
 
     /// Parses the OpenAPI document from the configured source.
-    fn parse_source(&self) -> Result<openapiv3::OpenAPI, super::super::error::OpenApiError> {
+    ///
+    /// Text sources are normalized by [`clamp_numeric_bounds`] first; any
+    /// clamped schema bound is reported through `diagnostics`.
+    fn parse_source(
+        &self,
+        diagnostics: &mut Vec<OpenApiDiagnostic>,
+    ) -> Result<openapiv3::OpenAPI, super::super::error::OpenApiError> {
         match &self.source {
             OpenApiSource::Path(path) => {
                 let content = std::fs::read_to_string(path).map_err(|e| {
@@ -226,6 +232,7 @@ impl OpenApiImport {
                     }
                 })?;
 
+                let content = Self::normalize(&content, diagnostics);
                 serde_yaml_ng::from_str(&content).map_err(|e| {
                     super::super::error::OpenApiError::Parse {
                         message: e.to_string(),
@@ -233,20 +240,27 @@ impl OpenApiImport {
                     }
                 })
             }
-            OpenApiSource::Json(content) => serde_json::from_str(content).map_err(|e| {
-                super::super::error::OpenApiError::Parse {
-                    message: e.to_string(),
-                    location: Some(format!("line {}, column {}", e.line(), e.column())),
-                }
-            }),
-            OpenApiSource::Yaml(content) => serde_yaml_ng::from_str(content).map_err(|e| {
-                super::super::error::OpenApiError::Parse {
-                    message: e.to_string(),
-                    location: None,
-                }
-            }),
+            OpenApiSource::Json(content) => {
+                let content = Self::normalize(content, diagnostics);
+                serde_json::from_str(&content).map_err(|e| {
+                    super::super::error::OpenApiError::Parse {
+                        message: e.to_string(),
+                        location: Some(format!("line {}, column {}", e.line(), e.column())),
+                    }
+                })
+            }
+            OpenApiSource::Yaml(content) => {
+                let content = Self::normalize(content, diagnostics);
+                serde_yaml_ng::from_str(&content).map_err(|e| {
+                    super::super::error::OpenApiError::Parse {
+                        message: e.to_string(),
+                        location: None,
+                    }
+                })
+            }
             OpenApiSource::Bytes(bytes) => {
                 let content = String::from_utf8_lossy(bytes);
+                let content = Self::normalize(&content, diagnostics);
                 serde_yaml_ng::from_str(&content).map_err(|e| {
                     super::super::error::OpenApiError::Parse {
                         message: e.to_string(),
@@ -256,6 +270,14 @@ impl OpenApiImport {
             }
             OpenApiSource::Document(doc) => Ok(*doc.clone()),
         }
+    }
+
+    /// Applies source-text normalization, forwarding its diagnostics.
+    fn normalize(content: &str, diagnostics: &mut Vec<OpenApiDiagnostic>) -> String {
+        let (normalized, mut normalization_diagnostics) =
+            super::normalize::clamp_numeric_bounds(content);
+        diagnostics.append(&mut normalization_diagnostics);
+        normalized
     }
 
     /// Validates input constraints (max depth, component count).

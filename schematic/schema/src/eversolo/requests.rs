@@ -23,16 +23,16 @@ impl DeviceGetModelRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/ZidooControlCenter/getModel".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for DeviceGetModelRequest {
@@ -72,13 +72,13 @@ impl RemoteSendKeyRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = "/ZidooControlCenter/RemoteControl/sendkey".to_string();
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
@@ -99,7 +99,7 @@ impl RemoteSendKeyRequest {
                 path.push_str(&format!("?{}", query_string));
             }
         }
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for RemoteSendKeyRequest {
@@ -139,13 +139,13 @@ impl RemoteInputTextRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = "/ZidooControlCenter/RemoteControl/inputtext".to_string();
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
@@ -166,7 +166,7 @@ impl RemoteInputTextRequest {
                 path.push_str(&format!("?{}", query_string));
             }
         }
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for RemoteInputTextRequest {
@@ -193,16 +193,16 @@ impl MusicGetStateRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/ZidooMusicControl/v2/getState".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for MusicGetStateRequest {
@@ -229,16 +229,16 @@ impl MusicPlayOrPauseRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/ZidooMusicControl/v2/playOrPause".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for MusicPlayOrPauseRequest {
@@ -265,16 +265,16 @@ impl MusicPlayNextRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/ZidooMusicControl/v2/playNext".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for MusicPlayNextRequest {
@@ -301,16 +301,16 @@ impl MusicPlayLastRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/ZidooMusicControl/v2/playLast".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for MusicPlayLastRequest {
@@ -350,13 +350,13 @@ impl MusicSeekToRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = "/ZidooMusicControl/v2/seekTo".to_string();
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
@@ -377,7 +377,7 @@ impl MusicSeekToRequest {
                 path.push_str(&format!("?{}", query_string));
             }
         }
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for MusicSeekToRequest {
@@ -404,16 +404,16 @@ impl MusicGetInputOutputListRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/ZidooMusicControl/v2/getInputAndOutputList".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for MusicGetInputOutputListRequest {
@@ -453,13 +453,13 @@ impl MusicSetInputRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = "/ZidooMusicControl/v2/setInputList".to_string();
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
@@ -480,7 +480,7 @@ impl MusicSetInputRequest {
                 path.push_str(&format!("?{}", query_string));
             }
         }
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for MusicSetInputRequest {
@@ -520,13 +520,13 @@ impl MusicSetOutputRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = "/ZidooMusicControl/v2/setOutInputList".to_string();
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
@@ -547,7 +547,7 @@ impl MusicSetOutputRequest {
                 path.push_str(&format!("?{}", query_string));
             }
         }
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for MusicSetOutputRequest {
@@ -587,13 +587,13 @@ impl MusicSetVolumeRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = "/ZidooMusicControl/v2/setDevicesVolume".to_string();
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
@@ -614,7 +614,7 @@ impl MusicSetVolumeRequest {
                 path.push_str(&format!("?{}", query_string));
             }
         }
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for MusicSetVolumeRequest {
@@ -655,13 +655,13 @@ impl MusicSetMuteRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = "/ZidooMusicControl/v2/setMuteVolume".to_string();
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
@@ -682,7 +682,7 @@ impl MusicSetMuteRequest {
                 path.push_str(&format!("?{}", query_string));
             }
         }
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for MusicSetMuteRequest {
@@ -709,16 +709,16 @@ impl PowerGetOptionsRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/ZidooMusicControl/v2/getPowerOption".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for PowerGetOptionsRequest {
@@ -758,13 +758,13 @@ impl PowerSetOptionRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = "/ZidooMusicControl/v2/setPowerOption".to_string();
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
@@ -785,7 +785,7 @@ impl PowerSetOptionRequest {
                 path.push_str(&format!("?{}", query_string));
             }
         }
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for PowerSetOptionRequest {
@@ -812,16 +812,16 @@ impl SystemGetScreenBrightnessRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/SystemSettings/displaySettings/getScreenBrightness".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for SystemGetScreenBrightnessRequest {
@@ -861,13 +861,13 @@ impl SystemSetScreenBrightnessRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = "/SystemSettings/displaySettings/setScreenBrightness".to_string();
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
@@ -888,7 +888,7 @@ impl SystemSetScreenBrightnessRequest {
                 path.push_str(&format!("?{}", query_string));
             }
         }
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for SystemSetScreenBrightnessRequest {
@@ -915,16 +915,16 @@ impl SystemGetKnobBrightnessRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/SystemSettings/displaySettings/getKnobBrightness".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for SystemGetKnobBrightnessRequest {
@@ -964,13 +964,13 @@ impl SystemSetKnobBrightnessRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = "/SystemSettings/displaySettings/setKnobBrightness".to_string();
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
@@ -991,7 +991,7 @@ impl SystemSetKnobBrightnessRequest {
                 path.push_str(&format!("?{}", query_string));
             }
         }
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for SystemSetKnobBrightnessRequest {
@@ -1018,16 +1018,16 @@ impl SystemGetVuModeListRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/SystemSettings/displaySettings/getVUModeList".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for SystemGetVuModeListRequest {
@@ -1067,13 +1067,13 @@ impl SystemSetVuModeRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = "/SystemSettings/displaySettings/setVUMode".to_string();
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
@@ -1094,7 +1094,7 @@ impl SystemSetVuModeRequest {
                 path.push_str(&format!("?{}", query_string));
             }
         }
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for SystemSetVuModeRequest {
@@ -1121,16 +1121,16 @@ impl SystemGetSpectrumModeListRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/SystemSettings/displaySettings/getSpPlayModeList".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for SystemGetSpectrumModeListRequest {
@@ -1170,13 +1170,13 @@ impl SystemSetSpectrumModeRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = "/SystemSettings/displaySettings/setSpPlayModeList".to_string();
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
@@ -1197,7 +1197,7 @@ impl SystemSetSpectrumModeRequest {
                 path.push_str(&format!("?{}", query_string));
             }
         }
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for SystemSetSpectrumModeRequest {
@@ -1238,13 +1238,13 @@ impl SystemChangeVuDisplayRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = "/ZidooMusicControl/v2/changVUDisplay".to_string();
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
@@ -1265,7 +1265,7 @@ impl SystemChangeVuDisplayRequest {
                 path.push_str(&format!("?{}", query_string));
             }
         }
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for SystemChangeVuDisplayRequest {

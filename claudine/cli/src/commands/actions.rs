@@ -41,6 +41,23 @@ fn action_type_name(action: &HookAction) -> &'static str {
 }
 
 fn run_simple(config: &ClaudineConfig, term: &Terminal) -> Result<()> {
+    let Some(rendered) = render_simple(config, term) else {
+        log::data("");
+        log::data("No configured actions found.");
+        log::data("");
+        log::data(
+            &Prose::new("<dim>Run <blue>claudine config</blue> to configure event hooks.</dim>")
+                .render(term),
+        );
+        return Ok(());
+    };
+
+    log::data(&format!("\n{}", rendered));
+
+    Ok(())
+}
+
+fn render_simple(config: &ClaudineConfig, term: &Terminal) -> Option<String> {
     let mut action_to_events: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
     for (event, actions) in &config.actions {
@@ -54,14 +71,7 @@ fn run_simple(config: &ClaudineConfig, term: &Terminal) -> Result<()> {
     }
 
     if action_to_events.is_empty() {
-        log::data("");
-        log::data("No configured actions found.");
-        log::data("");
-        log::data(
-            &Prose::new("<dim>Run <blue>claudine config</blue> to configure event hooks.</dim>")
-                .render(term),
-        );
-        return Ok(());
+        return None;
     }
 
     let columns = vec![
@@ -83,10 +93,7 @@ fn run_simple(config: &ClaudineConfig, term: &Terminal) -> Result<()> {
         table.add_row(vec![action_name.clone().into(), events_str.into()]);
     }
 
-    let rendered = table.render(term);
-    log::data(&format!("\n{}", rendered));
-
-    Ok(())
+    Some(table.render(term))
 }
 
 fn action_with_params(action: &HookAction) -> String {
@@ -211,4 +218,30 @@ fn run_verbose(config: &ClaudineConfig, term: &Terminal) -> Result<()> {
     log::data(&format!("\n{}", rendered));
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use claudine::events::AgenticEvent;
+
+    #[test]
+    fn configured_actions_render_session_start_report() {
+        let config: ClaudineConfig = serde_json::from_str(
+            r#"{
+  "actions": {
+    "session_start": [
+      { "type": "report", "handler": { "format": "json" } }
+    ]
+  }
+}"#,
+        )
+        .unwrap();
+        assert!(config.actions.contains_key(&AgenticEvent::SessionStart));
+
+        let rendered = render_simple(&config, &crate::log::optimistic_terminal(Some(100)))
+            .expect("configured actions should render a table");
+        assert!(rendered.contains("Report"));
+        assert!(rendered.contains("SessionStart"));
+    }
 }

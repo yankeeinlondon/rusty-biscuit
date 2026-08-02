@@ -7,10 +7,11 @@
 mod body;
 mod derives;
 mod endpoint_spec;
+mod form;
 mod into_parts;
 mod path_params;
 mod query_params;
-mod shared;
+pub(crate) mod shared;
 mod single;
 #[cfg(test)]
 mod tests;
@@ -101,15 +102,17 @@ pub fn generate_request_struct_with_options(
     let struct_name_str = format!("{}{}", endpoint.id, suffix);
     let path_params = extract_path_params(&endpoint.path);
     let query_params = extract_query_params(&endpoint.params);
-    // Only JSON requests have a typed body field
-    let has_body = matches!(&endpoint.request, Some(ApiRequest::Json(_)));
     let method_str = endpoint.method.to_string();
 
-    // Extract body type name for new() constructor
-    let body_type_name = match &endpoint.request {
-        Some(ApiRequest::Json(schema)) => Some(schema.type_name.as_str()),
+    // Form endpoints get a synthesized `{EndpointId}Form` body type, so from here
+    // down they follow exactly the same path as JSON bodies.
+    let form_type_name = form::form_body_type_name(endpoint);
+    let body_type_name = match (&endpoint.request, &form_type_name) {
+        (Some(ApiRequest::Json(schema)), _) => Some(schema.type_name.as_str()),
+        (_, Some(name)) => Some(name.as_str()),
         _ => None,
     };
+    let has_body = body_type_name.is_some();
 
     // Generate struct fields
     let path_param_fields = path_params::generate_path_param_fields(&path_params);
@@ -176,7 +179,11 @@ pub fn generate_request_struct_with_options(
         }
     };
 
+    let form_struct = form::generate_form_struct(endpoint);
+
     quote! {
+        #form_struct
+
         #(#[doc = #doc_lines])*
         #derives
         pub struct #struct_name {

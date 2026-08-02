@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Integration tests: structured-stream reconstruction, verbosity control, and JSONL summary behavior.
 //!
 //! Split out of the `wrap_commands.rs` god file; shared fixtures live in
@@ -46,9 +48,11 @@ printf '%s' 'Final assistant response' > "$LAST"
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
+        .current_dir(workspace.path())
         .args(["codex", "--model", "codex-mini", "summarize repo"])
         .assert()
         .success()
@@ -236,8 +240,10 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
+        .current_dir(workspace.path())
         .args(["gemini", "say hi"])
         .assert()
         .success()
@@ -254,8 +260,10 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
+        .current_dir(workspace.path())
         .args(["gemini", "--quiet", "say hi"])
         .assert()
         .success()
@@ -273,8 +281,10 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
+        .current_dir(workspace.path())
         .args(["gemini", "--silent", "say hi"])
         .assert()
         .success()
@@ -312,8 +322,10 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
+        .current_dir(workspace.path())
         .args(["gemini", "--quiet", "say hi"])
         .assert()
         .success()
@@ -349,8 +361,10 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
+        .current_dir(workspace.path())
         .args(["gemini", "--quiet", "say hi"])
         .assert()
         .success()
@@ -428,8 +442,10 @@ printf '%s\n' '{"type":"result","subtype":"success","stop_reason":"end_turn","nu
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
+        .current_dir(workspace.path())
         .args(["claude", "--quiet", "-v", "say hi"])
         .assert()
         .success()
@@ -470,8 +486,10 @@ printf '%s\n' '{"type":"result","duration_ms":4600,"total_cost_usd":0.02,"usage"
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
+        .current_dir(workspace.path())
         .args(["claude", "-v", "say hi"])
         .assert()
         .success()
@@ -521,8 +539,10 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"output_token
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
+        .current_dir(workspace.path())
         .args(["compose", "--codex", "--quiet", md_file.to_str().unwrap()])
         .assert()
         .success()
@@ -571,8 +591,10 @@ fi
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
+        .current_dir(workspace.path())
         .args(["compose", "--codex", "--quiet", md_file.to_str().unwrap()])
         .assert()
         .success()

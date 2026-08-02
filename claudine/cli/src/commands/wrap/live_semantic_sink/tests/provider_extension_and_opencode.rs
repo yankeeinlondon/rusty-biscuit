@@ -717,12 +717,14 @@ fn reasoning_then_tool_call_transitions_with_single_blank() {
 #[test]
 fn read_tool_call_renders_path_as_cwd_relative_blue_link() {
     let lines = Arc::new(StdMutex::new(Vec::new()));
-    let cwd = Path::new("/repo");
+    let repo = tempfile::tempdir().unwrap();
+    let cwd = repo.path();
+    let source = cwd.join("src/main.rs");
     let mut sink = make_sink_with_cwd(lines.clone(), cwd);
     sink.on_semantic_event(SemanticEvent::ToolCall {
         name: Some("Read".into()),
         id: Some("t1".into()),
-        input: Some(json!({"file_path": "/repo/src/main.rs"})),
+        input: Some(json!({"file_path": source.display().to_string()})),
         extra: json!({}),
     });
     let rendered = lines.lock().unwrap().join("\n");
@@ -747,8 +749,9 @@ fn read_tool_call_renders_path_as_cwd_relative_blue_link() {
     // legitimately carry the absolute `file://` URL — that is metadata,
     // not visible text — so we only forbid the absolute path from
     // appearing as the bracket label.
+    let absolute_label = format!("[{}]", biscuit_file::to_portable_string(&source));
     assert!(
-        !rendered.contains("[/repo/src/main.rs]"),
+        !rendered.contains(&absolute_label),
         "absolute path must not appear as visible label: {rendered:?}"
     );
 }

@@ -3,7 +3,7 @@
 use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
-use biscuit_test_harness::{CapturedFrame, TerminalHarness};
+use biscuit_test_harness::{CapturedFrame, TerminalHarness, strip_ansi};
 use std::fs;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
@@ -184,19 +184,50 @@ fn run_tmux_command(
     env: &[(&str, &str)],
 ) -> CapturedFrame {
     let id = TMUX_SENTINEL_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let sentinel = format!("__DM_CODE_TMUX_DONE_{id}__");
-    let wrapped = format!("{command}; printf '\\n{sentinel}\\n'");
+    let start = format!("__DM_CODE_TMUX_START_{id}__");
+    let end = format!("__DM_CODE_TMUX_DONE_{id}__");
+    let sequence = format!("printf '\\n{start}\\n'; {command}; printf '\\n{end}\\n'");
+    // Environment assignments from the harness prefix only one shell command;
+    // this child keeps them active for the whole marked sequence.
+    let wrapped = format!("sh -c {}", shell_quote(&sequence));
     harness
         .send_command_with_env(&wrapped, env)
         .expect("send_command_with_env failed");
-    match wait_for_tmux_sentinel(harness, &sentinel) {
-        Ok(frame) => frame,
+    match wait_for_tmux_sentinel(harness, &end) {
+        Ok(frame) => output_region(frame, &start, &end),
         Err(last) => panic!(
-            "timed out waiting for sentinel {sentinel} after {SENTINEL_TIMEOUT:?}. \
+            "timed out waiting for sentinel {end} after {SENTINEL_TIMEOUT:?}. \
              last plain capture:\n{}",
             last.plain
         ),
     }
+}
+
+/// Narrows a shared-pane capture to the command's output.
+///
+/// Printed start and completion markers remain unambiguous when the echoed
+/// command wraps through either marker text. The last standalone start before
+/// completion wins, excluding prompts and earlier commands from substring and
+/// color probes.
+fn output_region(frame: CapturedFrame, start: &str, end: &str) -> CapturedFrame {
+    let lines: Vec<&str> = frame.raw.split('\n').collect();
+    let stripped: Vec<String> = lines.iter().map(|line| strip_ansi(line)).collect();
+
+    let Some(end_index) = stripped.iter().rposition(|line| line.trim() == end) else {
+        return frame;
+    };
+    let Some(start_index) = stripped[..end_index]
+        .iter()
+        .rposition(|line| line.trim() == start)
+    else {
+        return frame;
+    };
+
+    CapturedFrame::from_raw(lines[start_index + 1..end_index].join("\n"))
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 /// Runs the Cargo-built `md` in a headless tmux pane.
@@ -215,7 +246,13 @@ pub fn run_md_in_tmux(
     let harness = guard.as_mut().expect("tmux harness present");
 
     run_tmux_command(harness, "clear", &[]);
-    let md_command = format!("{} {} {extra_args}", md_shim(), file_path.display());
+    // A shared pane may retain a fixture directory deleted by an earlier test.
+    // Establishing this live directory also gives FileReference a valid CWD.
+    let fixture_dir = shell_quote(&dir.path().to_string_lossy());
+    let md_command = format!(
+        "cd {fixture_dir} && {} layout.md {extra_args}",
+        shell_quote(md_shim())
+    );
     let command = shell_prefix
         .map(|prefix| format!("{prefix}; {md_command}"))
         .unwrap_or(md_command);

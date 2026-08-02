@@ -117,6 +117,16 @@ impl ShellRunner for SpawnFailShell {
     }
 }
 
+#[cfg(windows)]
+#[test]
+fn system_shell_runner_preserves_nested_quotes() {
+    let code = SystemShellRunner
+        .run(r#"cmd /D /C "exit /B 37""#)
+        .expect("nested cmd invocation should start");
+
+    assert_eq!(code, 37);
+}
+
 fn temp_engine() -> (tempfile::TempDir, EffectEngine) {
     let dir = tempfile::tempdir().unwrap();
     let engine = EffectEngine::builder()

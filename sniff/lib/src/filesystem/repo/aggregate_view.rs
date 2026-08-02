@@ -645,18 +645,18 @@ mod tests {
         #[test]
         fn uncollected_aggregate_reads_no_clock_and_records_no_stage() {
             let dir = fixture();
-            assert!(
-                !performance::is_collecting(),
-                "no collector should be active here"
-            );
-
             let events = Arc::new(AtomicUsize::new(0));
-            {
+            performance::without_any_collector(|| {
+                assert!(
+                    !performance::is_collecting(),
+                    "no collector should be active here"
+                );
+
                 let counter = InfoStageCounter(Arc::clone(&events));
                 let _guard =
                     tracing::dispatcher::set_default(&tracing::Dispatch::new(counter));
                 detect_repo_aggregate(dir.path()).expect("aggregate detection succeeds");
-            }
+            });
 
             assert_eq!(
                 events.load(Ordering::Relaxed),

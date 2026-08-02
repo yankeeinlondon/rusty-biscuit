@@ -1,10 +1,14 @@
 ---
-hash: ef46db3751d8e999-c55c346ac9173a92
-last_updated: 2026-07-22
+hash: ef46db3751d8e999-b93fde9ea706954b
+last_updated: 2026-08-01
 ---
 # Claudine Change Timeline
 
 Condensed history of significant Claudine features and refactors, newest first. Each entry names the feature/fix slug and the durable takeaway; deep references live in the linked docs. For current behavior always trust [architecture.md](architecture.md), [cli-reference.md](cli-reference.md), and the repo `docs/topics/*` — this file is historical context, not a spec.
+
+## 2026-08
+
+- **2026-08-01 — `claudine-win`**: Stabilized Claudine on native Windows MSVC: separator-neutral security matching, bounded atomic-replacement retries, portable visible paths and real file URLs without changing native identity/argv/environment state, and classified fixes for the residual process, discovery, symlink, hook, and fixture failures. Darkmatter interpolation now separates native file identity from portable body presentation, while generator drift checks reuse request-scoped repository discovery to stay below the ordinary timeout. Removed Windows-GNU exclusions so `rendezvous-daemon` and its DuckDB pipeline remain required everywhere; native live-daemon tests pass 5/5, and the GNU Cargo graph includes `rendezvous-daemon -> duckdb -> libduckdb-sys` without claiming an unavailable GNU compilation. Native CI-profile and canonical L1 runs each passed 6,191/6,191 tests; Linux, macOS, xwin, and GNU execution remain portability follow-ups.
 
 ## 2026-07
 

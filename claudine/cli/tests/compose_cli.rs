@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Integration tests for `claudine compose`.
 //!
 //! Phase 1 of the `2026-06-03-always-harness` feature. Pins current observable

@@ -41,7 +41,7 @@ pub(crate) fn run_stage(
         state,
         options.expression_resolution_context(&runtime.remote_fetch),
     );
-    let evaluator = Evaluator::new(&lookup);
+    let evaluator = Evaluator::new(&lookup).with_presentation_values(state.presentation_values());
     let result = interpolate_text(
         markdown.content(),
         &evaluator,

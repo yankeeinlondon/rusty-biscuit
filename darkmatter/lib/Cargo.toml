@@ -115,6 +115,12 @@ jsonschema = { version = "0.42", default-features = false }
 # for such schemas and to validate emitted patterns at conversion time.
 fancy-regex = "0.17"
 
+[target.'cfg(unix)'.dependencies]
+# `setsid` for the alias-lookup child in
+# `markdown/compose/shell_expansion/alias.rs`. Only the raw syscall is needed,
+# so `libc` rather than a wrapper crate; already compiled transitively.
+libc = "0.2"
+
 [dev-dependencies]
 # Re-declares the renderable path dep with the test-only `hint-access-counter`
 # feature so the structural performance gate (`render_tree::structural_gate`)

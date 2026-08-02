@@ -145,6 +145,40 @@ let config = PdfConfig::default()
     .with_remove_headers_footers(false);
 ```
 
+## Portable Path Text
+Source: `biscuit-file/lib/src/path_text.rs` (unfeatured — available with `--no-default-features`)
+
+```rust
+use std::path::Path;
+use biscuit_file::{to_portable_string, try_portable_string};
+
+// Portable text when a faithful slash-separated spelling exists;
+// otherwise the NATIVE spelling, unchanged.
+let s: String = to_portable_string(Path::new(r"docs\file.md")); // "docs/file.md"
+
+// Same policy, with the fallback exposed so a caller can branch on it.
+let maybe: Option<String> = try_portable_string(Path::new(r"\\server\share\f.md")); // None
+```
+
+Which to use:
+
+| Consumer | Function | Why |
+|----------|----------|-----|
+| Markdown link destination, generated URL-adjacent text | `try_portable_string` | CommonMark eats backslash escapes; a native spelling does not survive a parse. Error or preserve on `None`. |
+| Diagnostics, completion candidates, YAML scalars | `to_portable_string` | Native text is still correct output for these. |
+
+Declined (`None` / native fallback) on Windows: UNC, device-namespace, and any
+verbatim path `dunce::simplified` will not reduce — reserved DOS names,
+trailing dot/space, over-`MAX_PATH`, and literal `.`/`..` names under `\\?\`.
+No lexical `.`/`..` collapse happens; `dunce`'s refusal is authoritative.
+
+Lossy by design: non-Unicode data becomes U+FFFD (`Path::to_string_lossy`), and
+on Unix a literal `\` in a filename renders as `/`.
+
+Never use rendered text as a path-identity key — build a comparison
+representation instead. A short root can simplify while its long descendant
+cannot.
+
 ## File Detection
 Source: `biscuit-file/lib/src/detect.rs`
 

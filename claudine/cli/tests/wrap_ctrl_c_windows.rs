@@ -17,8 +17,8 @@
 /// to the wrapped child's process group must terminate it, mirroring the Unix
 /// `wrap_sigint.rs` proof.
 ///
-/// Builds a Windows-executable fake `opencode` provider (a `.cmd` batch on
-/// `PATH`) that emits one init line, drops a readiness marker, then loops
+/// Builds a native fake `opencode` provider on `PATH` that emits one init line,
+/// drops a readiness marker, then loops
 /// forever without trapping `CTRL_BREAK`. It spawns the real `claudine compose
 /// --opencode` wrapper in its **own** process group, polls for the marker (so
 /// the wrapped grandchild is in its run loop and the console handler is
@@ -42,6 +42,50 @@
 /// `CREATE_NEW_PROCESS_GROUP` isolates it so the event hits only the wrapper
 /// subtree. (This is also what production does — `spawn.rs` sets the same flag.)
 ///
+#[cfg(windows)]
+fn write_opencode_provider(path_dir: &std::path::Path) {
+    let source = path_dir.join("opencode-fixture.rs");
+    std::fs::write(
+        &source,
+        r##"use std::io::{self, Write};
+
+fn main() {
+    if std::env::args().nth(1).as_deref() == Some("models") {
+        println!(r#"["test-model"]"#);
+        return;
+    }
+
+    let mut stdout = io::stdout().lock();
+    writeln!(
+        stdout,
+        "{}",
+        r#"{"type":"init","session_id":"win-ctrl-c","model":"test-model"}"#
+    )
+    .unwrap();
+    stdout.flush().unwrap();
+    let marker = std::env::var_os("CLAUDINE_READY_MARKER").unwrap();
+    std::fs::write(marker, []).unwrap();
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(60));
+    }
+}
+"##,
+    )
+    .expect("write opencode fixture source");
+    let output = std::process::Command::new("rustc")
+        .arg("--edition=2024")
+        .arg(&source)
+        .arg("-o")
+        .arg(path_dir.join("opencode.exe"))
+        .output()
+        .expect("rustc must build the Windows provider fixture");
+    assert!(
+        output.status.success(),
+        "provider fixture compilation failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 #[cfg(windows)]
 #[test]
 fn ctrl_c_terminates_wrapped_child_on_windows() {
@@ -72,36 +116,12 @@ fn ctrl_c_terminates_wrapped_child_on_windows() {
 
     let ready_marker = workspace.path().join("opencode-started");
 
-    // Windows-executable fake `opencode`, mirroring the Unix shell-script fake:
-    // `models` returns the catalog (so model-validation resolves without a
-    // network call), the run path prints one init JSON line, touches the
-    // readiness marker, then loops forever. PATH resolution finds `opencode.cmd`
-    // via `PATHEXT`. The `:loop` body is interruptible — the batch interpreter
-    // receives the console event and the wrapper's escalation (CTRL_BREAK then
-    // TerminateJobObject) tears the whole Job tree down. It does NOT trap
-    // CTRL_BREAK, so the wrapper-driven termination path runs.
-    // Each batch line starts at column 0 (no Rust line-continuation leading
-    // whitespace): `cmd.exe` label resolution (`:loop` / `goto loop`) is
-    // sensitive to indentation on some interpreters, so the lines are joined
-    // explicitly rather than via `\`-continuation.
-    let opencode_cmd = path_dir.join("opencode.cmd");
-    let cmd_body = [
-        "@echo off",
-        "if \"%~1\"==\"models\" (",
-        "echo [\"test-model\"]",
-        "exit /b 0",
-        ")",
-        "echo {\"type\":\"init\",\"session_id\":\"win-ctrl-c\",\"model\":\"test-model\"}",
-        "type nul > \"%CLAUDINE_READY_MARKER%\"",
-        ":loop",
-        "timeout /t 1 >nul",
-        "goto loop",
-        "",
-    ]
-    .join("\r\n");
-    fs::write(&opencode_cmd, cmd_body).expect("write opencode.cmd");
+    // A real executable keeps this test on the process-termination seam. Batch
+    // syntax would add unrelated `cmd.exe` argument and PATH-resolution rules.
+    write_opencode_provider(&path_dir);
 
-    // PATH with the fake-provider dir first so `opencode` resolves to our `.cmd`.
+    // PATH with the fake-provider dir first so `opencode` resolves to the
+    // native fixture.
     let system_path = std::env::var_os("PATH").unwrap_or_default();
     let mut path_entries = vec![path_dir.clone()];
     path_entries.extend(std::env::split_paths(&system_path));
@@ -134,6 +154,7 @@ fn ctrl_c_terminates_wrapped_child_on_windows() {
     while !ready_marker.exists() {
         if Instant::now() >= marker_deadline {
             let _ = child.kill();
+            let _ = child.wait();
             panic!("wrapped child never reached its run loop within 30s");
         }
         std::thread::sleep(Duration::from_millis(50));
@@ -144,6 +165,10 @@ fn ctrl_c_terminates_wrapped_child_on_windows() {
     // press and escalates to terminate the Job Object tree.
     let child_pid = child.id();
     let sent = unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, child_pid) };
+    if sent.is_err() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
     assert!(
         sent.is_ok(),
         "GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, {child_pid}) failed: {sent:?}",
@@ -161,13 +186,18 @@ fn ctrl_c_terminates_wrapped_child_on_windows() {
                 break;
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(100)),
-            Err(e) => panic!("try_wait failed: {e}"),
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("try_wait failed: {e}");
+            }
         }
     }
 
     if !exited {
         let _ = child.kill();
     }
+    let _ = child.wait();
     assert!(
         exited,
         "console Ctrl+Break to the wrapped child's process group must terminate \

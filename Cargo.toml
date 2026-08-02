@@ -81,6 +81,11 @@ exclude = ["schematic/schema", "darkmatter/dmls/zed-dmls"]
 # `debug = true` if you need a step-debugger (lldb/gdb) with variable inspection.
 debug = "line-tables-only"
 
+# Dependency frames do not need source locations in workspace backtraces.
+# Workspace members retain the line tables configured above.
+[profile.dev.package."*"]
+debug = 0
+
 [profile.profiling]
 inherits = "release"
 debug = true

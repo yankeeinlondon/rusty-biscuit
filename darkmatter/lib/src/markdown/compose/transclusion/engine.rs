@@ -293,6 +293,93 @@ pub(crate) enum PreparedTransclusion {
     },
 }
 
+/// Where a failed resolution's notice belongs, and what it should say.
+///
+/// Captured before the prepared value is consumed, because a resolution error
+/// carries no span of its own. Without it the apply loop can only drop the
+/// result, and dropping a result is not the same as emitting nothing for its
+/// span: the authored `::file …` line survives into the composed document and
+/// renders as a literal paragraph of directive syntax.
+pub(crate) struct FailureAnchor {
+    pub(crate) order: usize,
+    pub(crate) target: ApplyTarget,
+    pub(crate) notice: String,
+}
+
+impl PreparedTransclusion {
+    /// The anchor and notice to substitute if resolving this item fails.
+    ///
+    /// The name goes in a code span deliberately. CommonMark processes
+    /// backslash escapes in ordinary text, and a Windows path reaches this
+    /// point often enough that an unquoted name would be silently mangled.
+    pub(crate) fn failure_anchor(&self) -> FailureAnchor {
+        let named = |path: &PathBuf| {
+            let name = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.to_string_lossy().into_owned());
+            format!("_Could not transclude `{name}`_")
+        };
+
+        let (order, target, notice) = match self {
+            Self::FixedReplace { order, span, .. } => (
+                *order,
+                ApplyTarget::Replace(span.clone()),
+                "_Could not transclude_".to_string(),
+            ),
+            Self::FixedSection { order, slot, .. } => (
+                *order,
+                ApplyTarget::Section(*slot),
+                "_Could not transclude_".to_string(),
+            ),
+            Self::Markdown {
+                order, target, path, ..
+            } => (*order, target.clone(), named(path)),
+            Self::Code {
+                order, span, path, ..
+            } => (*order, ApplyTarget::Replace(span.clone()), named(path)),
+            Self::RemoteFile {
+                order, target, url, ..
+            } => (
+                *order,
+                target.clone(),
+                format!("_Could not transclude `{url}`_"),
+            ),
+            Self::RemoteCode {
+                order, span, url, ..
+            } => (
+                *order,
+                ApplyTarget::Replace(span.clone()),
+                format!("_Could not transclude `{url}`_"),
+            ),
+            Self::Toc {
+                order,
+                span,
+                directive,
+            } => {
+                // `targets` is a fallback chain; the first entry is what the
+                // author wrote and the one the reader can act on.
+                let notice = match directive.targets.first() {
+                    Some(target) => format!("_Could not link headings from `{target}`_"),
+                    None => "_Could not link headings_".to_string(),
+                };
+                (*order, ApplyTarget::Replace(span.clone()), notice)
+            }
+            Self::FileLinks { order, span, .. } => (
+                *order,
+                ApplyTarget::Replace(span.clone()),
+                "_Could not build the file listing_".to_string(),
+            ),
+        };
+
+        FailureAnchor {
+            order,
+            target,
+            notice,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum SectionSlot {
     Prologue(usize),

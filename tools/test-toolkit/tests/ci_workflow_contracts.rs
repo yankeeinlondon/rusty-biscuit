@@ -1,10 +1,12 @@
 //! Durable CI/CD workflow contract tests.
 //!
 //! These guard the invariants established by the DevOps plan
-//! (`features/2026-07-24-devops/`): optional build acceleration is opt-in, kache
-//! has a single version authority, the primary workflow runs a bootstrap
-//! preflight that gates area fan-out, and release automation follows successful
-//! CI instead of racing it. They inspect the workflow/action source text so a
+//! (`features/2026-07-24-devops/`) and the cache strategy
+//! (`docs/kache-strategy.md`): the repository tracks no rustc wrapper and CI
+//! does not use one, while the pinned compiler cache remains a host opt-in with
+//! a single version authority; the primary workflow runs a bootstrap preflight
+//! that gates area fan-out; and release automation follows successful CI
+//! instead of racing it. They inspect the workflow/action source text so a
 //! regression fails locally without a live GitHub Actions run.
 
 use std::{fs, path::PathBuf};
@@ -20,8 +22,12 @@ fn repo_root() -> PathBuf {
 
 fn read(relative: &str) -> String {
     let path = repo_root().join(relative);
+    // Working trees on Windows check out CRLF (core.autocrlf=true) while the
+    // index holds LF; contract scanning must not depend on the host's checkout
+    // convention.
     fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()))
+        .replace("\r\n", "\n")
 }
 
 fn workflow(name: &str) -> String {
@@ -54,24 +60,31 @@ fn jobs(source: &str) -> Vec<String> {
     blocks
 }
 
-// --- D1/D2: optional acceleration is opt-in with one version authority --------
+// --- D1/D2: no tracked rustc wrapper; kache is a host opt-in -----------------
 
 #[test]
-fn repository_ships_no_global_rustc_wrapper() {
-    // A fresh checkout must run Cargo without kache. The repo must not commit a
-    // global `rustc-wrapper` that names the optional binary.
+fn repository_tracks_no_rustc_wrapper() {
+    // Inverts the previous contract deliberately. A tracked
+    // `[build] rustc-wrapper` applies to every clone on every filesystem, and
+    // kache's economics are decided by the filesystem (reflink vs hardlink vs
+    // copy), not the OS. It also hard-fails Cargo for anyone who has not
+    // installed the wrapper binary. Activation is a host decision;
+    // `docs/kache-strategy.md` records the measurement behind it.
     let config = repo_root().join(".cargo/config.toml");
     if config.exists() {
         let source = fs::read_to_string(&config).expect("read .cargo/config.toml");
         assert!(
             !source.contains("rustc-wrapper"),
-            ".cargo/config.toml must not pin a global rustc-wrapper (kache is opt-in)"
+            ".cargo/config.toml must not set rustc-wrapper — that is host policy, \
+             not repository policy (docs/kache-strategy.md)"
         );
     }
 }
 
 #[test]
 fn kache_has_a_single_version_authority() {
+    // Still a single authority, now for the developer installer only
+    // (`just install-kache`); CI does not install or use kache.
     let version = read(".github/kache-version");
     assert!(
         !version.trim().is_empty(),
@@ -91,47 +104,80 @@ fn kache_has_a_single_version_authority() {
 }
 
 #[test]
-fn area_ci_activates_kache_through_the_verified_composite_action() {
-    let shared = workflow("_area-ci.yml");
+fn installing_the_compiler_cache_is_not_a_dependency_of_init() {
+    // Installing and activating are separate decisions, and `just init` does
+    // neither. A contributor on NTFS or ext4 must not silently acquire a cache
+    // whose restore mode makes the store a second copy of every artifact.
+    let justfile = read("justfile");
+    let init_line = justfile
+        .lines()
+        .find(|line| line.starts_with("init:"))
+        .expect("root justfile must declare an `init` recipe");
     assert!(
-        shared.contains("uses: ./.github/actions/enable-kache"),
-        "area CI must enable kache through the shared verifying composite action"
+        !init_line.contains("kache"),
+        "`just init` must not depend on a kache recipe; it is an explicit opt-in \
+         (`just install-kache`)"
     );
     assert!(
-        !shared.contains("kunobi-ninja/kache-action"),
-        "area CI must not call the raw kache action directly (bypasses version verification)"
+        justfile.contains("install-kache:"),
+        "the pinned installer must remain available as an explicit recipe"
     );
-    assert!(
-        !shared.contains("version: 0.8.0"),
-        "area CI must not carry a duplicate hard-coded kache version literal"
-    );
-    // Opt-in gating flows through the composite's `enabled` input, NOT an `if:`
-    // on the `uses:` step — a step that combines `if: ${{ inputs.kache }}` with a
-    // local composite `uses:` fails to load on the runner.
-    assert!(
-        shared.contains("enabled: ${{ inputs.kache && runner.os != 'Windows' }}"),
-        "kache must be opt-in AND Linux/macOS-only (kache-action@v1 rejects win32-x64)"
-    );
+}
 
-    // The composite action is the single point that reads and verifies the pin,
-    // and gates itself on its declared `enabled` input.
-    let action = read(".github/actions/enable-kache/action.yml");
-    assert!(
-        action.contains("enabled:") && action.contains("inputs.enabled == 'true'"),
-        "enable-kache must gate on a declared `enabled` input, not a caller `if:`"
-    );
-    assert!(
-        action.contains(".github/kache-version"),
-        "enable-kache must resolve the pinned version from the single authority"
-    );
-    assert!(
-        action.contains("kache --version"),
-        "enable-kache must verify the active wrapper version before Cargo runs"
-    );
-    assert!(
-        action.contains("kache bootstrap"),
-        "a missing or mismatched kache must fail a named bootstrap step"
-    );
+#[test]
+fn ci_does_not_wire_the_kache_wrapper() {
+    // Measured at 0-6% hit rate (0.4-2.3% weighted by compile cost) because the
+    // action falls back to the GitHub Actions cache, whose entries are immutable
+    // and branch-scoped, so a store shared by every same-platform area job can
+    // never accumulate. Removed rather than left as a permanently false dead
+    // path; `Swatinem/rust-cache` still caches Cargo artifacts.
+    for stale in [".github/actions/enable-kache", ".github/actions/report-kache"] {
+        assert!(
+            !repo_root().join(stale).exists(),
+            "{stale} must not exist — CI no longer uses the kache wrapper"
+        );
+    }
+
+    let workflows = repo_root().join(".github/workflows");
+    for entry in fs::read_dir(&workflows).expect("read .github/workflows") {
+        let path = entry.expect("workflow entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("yml") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        let source = read(&format!(".github/workflows/{name}"));
+        for marker in ["enable-kache", "report-kache", "kunobi-ninja/kache-action"] {
+            assert!(
+                !source.contains(marker),
+                "{name} references `{marker}`; CI must not wire the kache wrapper"
+            );
+        }
+    }
+}
+
+#[test]
+fn every_cargo_workflow_neutralizes_a_stray_rustc_wrapper() {
+    // The repository tracks no wrapper, so this is defence against an ambient
+    // one (a self-hosted runner, or a future tracked config added by mistake)
+    // silently intercepting a build. Cheap, and it keeps the clean-checkout
+    // guarantee textual rather than assumed.
+    let workflows = repo_root().join(".github/workflows");
+    for entry in fs::read_dir(&workflows).expect("read .github/workflows") {
+        let path = entry.expect("workflow entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("yml") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        let source = read(&format!(".github/workflows/{name}"));
+        let touches_cargo = source.contains("cargo ") || source.contains("just ");
+        if !touches_cargo {
+            continue;
+        }
+        assert!(
+            source.contains("RUSTC_WRAPPER"),
+            "{name} can invoke Cargo but does not clear RUSTC_WRAPPER"
+        );
+    }
 }
 
 // --- D3: bootstrap preflight gates area fan-out ------------------------------
@@ -160,10 +206,18 @@ fn primary_ci_runs_a_bootstrap_preflight_before_fan_out() {
 #[test]
 fn expensive_tiers_stage_behind_l1_but_lint_never_gates_it() {
     let shared = workflow("_area-ci.yml");
-    // The expensive L2 and browser tiers run only after L1 (D4).
+    // The expensive L2 and browser tiers are ORDERED after L1 (D4) — but only
+    // ordered. Requiring L1 to have passed meant one red L1 deleted the whole
+    // tier's evidence and the rollup recorded MISSING, which is indistinguishable
+    // from a leg that was never scheduled.
     assert!(
         shared.matches("needs: test").count() >= 2,
-        "the L2 and browser tiers must each depend on L1 (D4)"
+        "the L2 and browser tiers must each be ordered after L1 (D4)"
+    );
+    assert!(
+        shared.matches("!cancelled() && inputs.").count() >= 3,
+        "the L2, browser, and wsl tiers must run on `!cancelled()`, not on L1 success — \
+         absence of evidence must never be a side effect of a failure elsewhere"
     );
     // L1 does NOT stage behind lint. A clippy hint in one package must not
     // delete every L1 leg's evidence for the whole area.
@@ -209,8 +263,16 @@ fn area_ci_selects_the_ci_nextest_profile_explicitly() {
     );
 }
 
+/// Canaries run first as an early signal, and must NOT gate the fan-out.
+///
+/// Reversed from the original contract, which required exactly the gate this now
+/// forbids. Gating traded visibility for runner minutes, and visibility is what
+/// this pipeline exists to provide: three consecutive runs produced zero area
+/// evidence because one canary test failed — a Windows compile-check, a WSL2
+/// binary path, and a 40ms timing assertion on macOS. None of those said anything
+/// about the other twenty areas, yet each erased them.
 #[test]
-fn global_changes_run_canaries_before_full_fan_out() {
+fn global_changes_run_canaries_first_without_gating_the_fan_out() {
     let ci = workflow("ci.yml");
     assert!(
         ci.contains("canary:") && ci.contains("fromJSON(needs.scope.outputs.canary_matrix)"),
@@ -220,10 +282,15 @@ fn global_changes_run_canaries_before_full_fan_out() {
         ci.contains("has_canaries"),
         "the canary stage must gate on a full-scope canary selection"
     );
+    // `needs:` is retained for ORDERING — the canary still runs first.
     assert!(
-        ci.contains("needs: [scope, preflight, canary]")
-            && ci.contains("needs.canary.result == 'success' || needs.canary.result == 'skipped'"),
-        "the area fan-out must not start after a canary failure (D11)"
+        ci.contains("needs: [scope, preflight, canary]"),
+        "the area fan-out must still be ordered after the canary stage (D11)"
+    );
+    assert!(
+        !ci.contains("needs.canary.result == 'success'"),
+        "no job may gate on canary success — one canary failure must not erase \
+         every other area's evidence"
     );
     let areas = read(".github/ci/areas.json");
     assert!(
@@ -651,16 +718,31 @@ fn release_automation_follows_successful_ci() {
 }
 
 #[test]
-fn lockfiles_stay_gitignored_so_release_checkout_cannot_block() {
-    // The release-plz isolation (OQ3 Option C) depends on every Cargo.lock being
-    // gitignored: a regenerated schematic/Cargo.lock is then invisible to
-    // `git status`/`git checkout` and cannot block release-plz returning to
-    // `main`. If a lockfile is ever force-tracked, that premise breaks and the
-    // original checkout-overwrite failure can recur — fail loudly here instead.
+fn lockfiles_are_tracked_and_the_release_premise_says_so() {
+    // Reversed from the original contract, which required every Cargo.lock to be
+    // gitignored so a regenerated one could not dirty tracked state. Lockfiles
+    // are now tracked deliberately: an ignored lock meant CI re-resolved every
+    // dependency on every run, and `libgit2-sys 0.18.7` broke three Windows
+    // builds on an upstream release day with nothing in the repo recording which
+    // version had been in play.
+    //
+    // KNOWN RISK, not closed here: release-plz's post-calculation
+    // `git status --porcelain --untracked-files=no` assertion will now SEE a
+    // regenerated lock and fail the release. That path only executes on `main`
+    // after a successful CI run, so it cannot be exercised from a branch. See
+    // `fixes/2026-07-30-ci-cd-stabilization/plan.md`. This test's job is to keep
+    // the workflow's stated premise matching the repository's actual policy, so
+    // the two cannot drift apart silently again.
     let gitignore = read(".gitignore");
     assert!(
-        gitignore.contains("**/Cargo.lock"),
-        ".gitignore must keep every Cargo.lock ignored (release-plz isolation premise)"
+        !gitignore.contains("\n**/Cargo.lock"),
+        ".gitignore must not re-ignore Cargo.lock; lockfiles are tracked on purpose"
+    );
+
+    let release = workflow("release-plz.yml");
+    assert!(
+        !release.contains("every `Cargo.lock` is gitignored"),
+        "release-plz's lockfile note still claims lockfiles are gitignored"
     );
 }
 
@@ -841,9 +923,9 @@ fn every_test_tier_stamps_its_result_identity() {
 #[test]
 fn wsl_is_an_environment_and_never_a_runner_label() {
     // A WSL job runs on `windows-latest` and executes through `wsl-bash`. If it
-    // shared the native matrix, every `runner.os == 'Windows'` branch — kache
-    // gating, native packages, paths, shells, cache keys, artifact names — would
-    // apply to a Linux guest. Isolation is structural, not by review.
+    // shared the native matrix, every `runner.os == 'Windows'` branch — native
+    // packages, paths, shells, cache keys, artifact names — would apply to a
+    // Linux guest. Isolation is structural, not by review.
     let area = workflow("_area-ci.yml");
     assert!(
         !area.contains("wsl2-ubuntu") || area.contains("_wsl-ci.yml"),
@@ -900,6 +982,139 @@ fn wsl_is_an_environment_and_never_a_runner_label() {
     assert!(
         !wsl.contains("sh.rustup.rs"),
         "the WSL guest must not install a Rust toolchain"
+    );
+}
+
+#[test]
+fn wsl_provisioning_retries_with_a_delay_and_the_test_step_never_does() {
+    // Measured in run 30595280027: `Vampire/setup-wsl@v4` already retries
+    // internally, and that retry could not have worked — `wsl.exe --update`
+    // returned `Forbidden (403)` and the action spent ten attempts inside 2.4
+    // seconds with no backoff, while the shards that succeeded spent 46 seconds
+    // in the same call. A retry with no delay re-asks a throttle that has not
+    // moved, so the delay is the load-bearing part of this guard, not the
+    // second attempt.
+    let wsl = workflow("_wsl-ci.yml");
+    assert_eq!(
+        wsl.matches("uses: Vampire/setup-wsl@v4").count(),
+        2,
+        "provisioning must get exactly one bounded retry — unbounded retries turn a \
+         dead runner into a long timeout instead of a fast red cell"
+    );
+    // Without `continue-on-error` on the first attempt the job dies there and the
+    // second is unreachable, which is a retry that never runs.
+    assert!(
+        wsl.contains("id: provision\n        continue-on-error: true"),
+        "the first provisioning attempt must be non-fatal, or the retry is dead code"
+    );
+    assert!(
+        wsl.contains("if: ${{ steps.provision.outcome == 'failure' }}\n        shell: bash")
+            && wsl.contains("run: sleep 90"),
+        "a delay must separate the two attempts; the action's own retry has none"
+    );
+    // The second attempt is NOT continue-on-error: a guest that cannot be
+    // provisioned twice has to turn the cell red.
+    let retry = wsl
+        .split("- name: Provision the WSL2 guest (second attempt)")
+        .nth(1)
+        .expect("_wsl-ci.yml must define a second provisioning attempt");
+    let retry = &retry[..retry.find("\n      - name:").unwrap_or(retry.len())];
+    assert!(
+        !retry.contains("continue-on-error"),
+        "a guest that fails to provision twice must still fail the job"
+    );
+
+    // The whole point of bounding the retry to provisioning: a retried TEST step
+    // turns a timeout or a killed guest into something that eventually looks
+    // healthy, which is the exact failure this pipeline exists to surface.
+    let executable: String = wsl
+        .lines()
+        .filter(|line| !line.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(
+        executable.matches("just test ").count(),
+        1,
+        "the WSL test step must be invoked exactly once — a retried test hides a real failure"
+    );
+    let l1 = executable
+        .split("id: l1")
+        .nth(1)
+        .expect("_wsl-ci.yml must define the L1 test step");
+    let l1 = &l1[..l1.find("\n      - name:").unwrap_or(l1.len())];
+    assert!(
+        !l1.contains("continue-on-error"),
+        "the L1 test step must never be made non-fatal"
+    );
+}
+
+#[test]
+fn a_failed_wsl_guest_leaves_evidence_of_which_backing_store_ran_out() {
+    // Confirmed in run 30605643702: extraction exhausts the WINDOWS RUNNER's
+    // disk. All four claudine shards died with `There is not enough space on the
+    // disk` against `C:\actions-runner\...\_diag\`, the runner's own writer —
+    // after which no step runs at all, which is why claudine published no
+    // producer status while darkmatter published four. Run 30595280027 showed
+    // the same exhaustion as SIGBUS one layer down: a page mapped from a VHDX
+    // that cannot grow is a bus error, not an `ENOSPC` return.
+    //
+    // The host census is therefore the load-bearing measurement AND has to
+    // precede extraction — a post-mortem cannot run on a dead runner.
+    let wsl = workflow("_wsl-ci.yml");
+    let host_census = wsl
+        .find("- name: Census the Windows host before extraction")
+        .expect("_wsl-ci.yml must measure host headroom before extraction");
+    let extraction = wsl
+        .find("- name: L1 tests from the archive")
+        .expect("_wsl-ci.yml must define the L1 test step");
+    assert!(
+        host_census < extraction,
+        "the host disk census must run BEFORE extraction — the runner that would \
+         have reported it afterwards is exactly the thing that dies"
+    );
+    // Comment-stripped: these comments DESCRIBE the measurements, so a prose-only
+    // match would let the commentary alone satisfy the contract.
+    let executable: String = wsl
+        .lines()
+        .filter(|line| !line.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        executable.contains("findmnt -T"),
+        "the census must name the FILESYSTEM behind /tmp — a tmpfs is the one \
+         backing store whose exhaustion surfaces as SIGBUS rather than a write error"
+    );
+    assert!(
+        executable.contains("dmesg -T"),
+        "an OOM kill and an ext4 I/O error are recorded in the kernel log and nowhere else"
+    );
+    assert!(
+        executable.contains("ext4.vhdx"),
+        "the host post-mortem must size the VHDX and the volume it grows into"
+    );
+    // A sampler on ext4 dies with the guest it is measuring. The 9p mount is the
+    // only surface that outlives the VM, which is the case being diagnosed.
+    assert!(
+        executable.contains(r#""$workspace/wsl-diag/guest-resources.log""#),
+        "the resource sampler must write across the 9p mount, not onto guest ext4"
+    );
+    // Diagnostics must never be able to change a verdict.
+    for step in ["Guest post-mortem", "Host post-mortem"] {
+        let block = wsl
+            .split(&format!("- name: {step}"))
+            .nth(1)
+            .unwrap_or_else(|| panic!("_wsl-ci.yml must define `{step}`"));
+        let block = &block[..block.find("\n      - name:").unwrap_or(block.len())];
+        assert!(
+            block.contains("continue-on-error: true"),
+            "`{step}` must not be able to overwrite the tier's real outcome — a guest \
+             too dead to inspect is the finding, not a new failure"
+        );
+    }
+    assert!(
+        !wsl.contains("name: status-${{ inputs.area }}-wsl-diag")
+            && wsl.contains("name: wsl-diag-${{ inputs.area }}-wsl2-ubuntu-"),
+        "the diagnostic artifact must use a prefix ci-rollup does not walk"
     );
 }
 
@@ -1369,5 +1584,40 @@ fn a_conflicted_pr_is_reported_rather_than_silently_unscheduled() {
         health.contains("exit 1"),
         "a conflicted PR must fail the check, not emit a warning -- a warning \
          is as invisible as the missing run it is reporting"
+    );
+}
+
+/// The guard and the workflow it guards must agree on which pull requests are in
+/// scope. While `ci.yml` filtered `pull_request` to `branches: [main]`, a stacked
+/// PR created no `ci` run at all, and `pr-health` — which checks only whether a
+/// merge ref can exist — passed it and printed that CI could be scheduled. Both
+/// statements were individually true and jointly misleading. Measured on PR #22,
+/// which targeted PR #21 and ran nothing but `pr-health` and Socket.
+#[test]
+fn pr_health_and_ci_agree_on_which_pull_requests_are_in_scope() {
+    fn pull_request_base_filter(source: &str, trigger: &str) -> Option<String> {
+        let after = source.split_once(&format!("\n  {trigger}:\n"))?.1;
+        after
+            .lines()
+            // Stop at the next top-level trigger key (two-space indent).
+            .take_while(|line| line.starts_with("    ") || line.trim().is_empty())
+            .find(|line| line.trim_start().starts_with("branches:"))
+            .map(|line| line.trim().to_string())
+    }
+
+    let ci = workflow("ci.yml");
+    let health = workflow("pr-health.yml");
+
+    assert_eq!(
+        pull_request_base_filter(&ci, "pull_request"),
+        None,
+        "ci.yml must not filter `pull_request` by base branch; a stacked PR that \
+         schedules no run reaches main unvalidated"
+    );
+    assert_eq!(
+        pull_request_base_filter(&health, "pull_request_target"),
+        None,
+        "pr-health must watch the same pull requests as ci.yml, or it will \
+         report that CI can be scheduled for a PR ci.yml filters out"
     );
 }

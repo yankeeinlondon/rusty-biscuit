@@ -136,16 +136,21 @@ impl ComposeContext {
                     ],
                 );
                 super::capture::populate_datetime(&mut values);
-                Self::from_values(values, diagnostics, Vec::new())
+                Self::from_values(
+                    values,
+                    diagnostics,
+                    Vec::new(),
+                    std::env::vars().collect(),
+                )
             }
         }
     }
 
     /// Captures the runtime context using the given base directory.
     pub fn capture_for_dir(base_dir: &std::path::Path) -> Self {
-        let (values, capture_diagnostics, timings) =
+        let (values, capture_diagnostics, timings, environment) =
             super::capture::capture_runtime_context(base_dir);
-        Self::from_values(values, capture_diagnostics, timings)
+        Self::from_values(values, capture_diagnostics, timings, environment)
     }
 
     /// Demand-driven capture: scans `content` for `ctx.*` references and
@@ -159,9 +164,9 @@ impl ComposeContext {
     /// frontmatter values containing `ctx.*` references, use
     /// [`capture_for_document`](Self::capture_for_document) instead.
     pub fn capture_for_content(base_dir: &std::path::Path, content: &str) -> Self {
-        let (values, capture_diagnostics, timings) =
+        let (values, capture_diagnostics, timings, environment) =
             super::capture::capture_runtime_context_for_content(base_dir, content);
-        Self::from_values(values, capture_diagnostics, timings)
+        Self::from_values(values, capture_diagnostics, timings, environment)
     }
 
     /// Demand-driven capture that scans both frontmatter values and body
@@ -179,14 +184,52 @@ impl ComposeContext {
         Self::capture_for_content(base_dir, &combined)
     }
 
+    /// Captures exactly `requirements` from request-owned evidence.
+    ///
+    /// Missing supplied facts produce partial-capture diagnostics. This entry
+    /// point never discovers CWD, environment, Git, repository topology, OS,
+    /// hardware, or GPU state.
+    pub fn capture_with_evidence(
+        base_dir: &std::path::Path,
+        requirements: &super::capture::ContextRequirements,
+        evidence: &super::capture::ContextCaptureEvidence,
+    ) -> Self {
+        let (values, diagnostics, timings, environment) =
+            super::capture::capture_runtime_context_with_evidence(
+                base_dir,
+                requirements,
+                evidence,
+            );
+        Self::from_values(values, diagnostics, timings, environment)
+    }
+
+    /// Demand-driven supplied capture for one content fragment.
+    pub fn capture_for_content_with_evidence(
+        base_dir: &std::path::Path,
+        content: &str,
+        evidence: &super::capture::ContextCaptureEvidence,
+    ) -> Self {
+        let requirements = super::capture::ContextRequirements::for_content(content);
+        Self::capture_with_evidence(base_dir, &requirements, evidence)
+    }
+
+    /// Demand-driven supplied capture over authored frontmatter and body.
+    pub fn capture_for_document_with_evidence(
+        base_dir: &std::path::Path,
+        document: &crate::markdown::Markdown,
+        evidence: &super::capture::ContextCaptureEvidence,
+    ) -> Self {
+        let requirements = super::capture::ContextRequirements::for_document(document);
+        Self::capture_with_evidence(base_dir, &requirements, evidence)
+    }
+
     /// Build a `ComposeContext` from pre-computed values.
     fn from_values(
         values: serde_json::Map<String, serde_json::Value>,
         capture_diagnostics: Vec<super::ContextMergeDiagnostic>,
         capture_timings: Vec<(String, Duration)>,
+        env: HashMap<String, String>,
     ) -> Self {
-        let env: HashMap<String, String> = std::env::vars().collect();
-
         let get_str = |key: &str| -> String {
             values
                 .get(key)
@@ -375,4 +418,94 @@ fn normalized_env_value(
             trimmed.to_string()
         }
     })
+}
+
+#[cfg(test)]
+mod evidence_tests {
+    use super::*;
+    use crate::markdown::compose::{ContextCaptureEvidence, ContextGroup, ContextRequirements};
+
+    #[test]
+    fn ambient_and_supplied_absence_populate_the_same_repository_values() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let content = "{{ ctx.repo_root }} {{ ctx.dirty_files }} {{ ctx.programming_language }}";
+        let ambient = ComposeContext::capture_for_content(directory.path(), content);
+        let supplied = ComposeContext::capture_for_content_with_evidence(
+            directory.path(),
+            content,
+            &ContextCaptureEvidence::new(HashMap::new())
+                .with_git(None)
+                .with_repository(None, None)
+                .with_file_changes(Vec::new())
+                .with_languages(None),
+        );
+
+        for key in ["repo_root", "dirty_files", "programming_language"] {
+            assert_eq!(ambient.get(key), supplied.get(key), "key: {key}");
+        }
+        assert!(supplied.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn missing_supplied_evidence_is_partial_and_never_falls_back() {
+        let context = ComposeContext::capture_for_content_with_evidence(
+            std::path::Path::new("does-not-need-to-exist"),
+            "{{ ctx.os }}",
+            &ContextCaptureEvidence::new(HashMap::new()),
+        );
+
+        assert_eq!(context.get("os"), Some(&serde_json::Value::Null));
+        assert!(context.capture_timings().is_empty());
+        assert!(context.diagnostics().iter().any(|diagnostic| matches!(
+            diagnostic,
+            super::super::ContextMergeDiagnostic::PartialRuntimeCapture { area: "os", .. }
+        )));
+    }
+
+    #[test]
+    fn unrequested_host_groups_need_no_host_evidence() {
+        let requirements = ContextRequirements::for_content("ordinary markdown");
+        assert!(requirements.contains(ContextGroup::DateTime));
+        assert!(!requirements.contains(ContextGroup::Os));
+        assert!(!requirements.contains(ContextGroup::Hardware));
+        assert!(!requirements.contains(ContextGroup::Gpu));
+
+        let context = ComposeContext::capture_with_evidence(
+            std::path::Path::new("."),
+            &requirements,
+            &ContextCaptureEvidence::new(HashMap::new()),
+        );
+        assert!(!context.values().contains_key("os"));
+        assert!(!context.values().contains_key("cpu_cores"));
+        assert!(!context.values().contains_key("gpu"));
+        assert!(context.diagnostics().is_empty());
+    }
+
+    #[test]
+    #[serial_test::serial(supplied_environment)]
+    fn supplied_environment_survives_process_environment_mutation() {
+        let prior = std::env::var("AGENT").ok();
+        let mut environment = HashMap::new();
+        environment.insert("AGENT".to_string(), "captured-agent".to_string());
+        let evidence = ContextCaptureEvidence::new(environment);
+
+        unsafe { std::env::set_var("AGENT", "later-agent") };
+        let context = ComposeContext::capture_for_content_with_evidence(
+            std::path::Path::new("."),
+            "{{ ctx.agent }}",
+            &evidence,
+        );
+        unsafe {
+            match prior {
+                Some(value) => std::env::set_var("AGENT", value),
+                None => std::env::remove_var("AGENT"),
+            }
+        }
+
+        assert_eq!(context.env().get("AGENT").map(String::as_str), Some("captured-agent"));
+        assert_eq!(
+            context.get("agent"),
+            Some(&serde_json::Value::String("captured-agent".to_string()))
+        );
+    }
 }

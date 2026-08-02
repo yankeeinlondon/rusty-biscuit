@@ -476,6 +476,7 @@ fn a_failing_lint_is_never_blamed_for_a_missing_l1_cell() {
         job: "lint".to_owned(),
         result: "failure".to_owned(),
         environment: None,
+        detail: None,
     }];
     let provisioned = BTreeMap::new();
     let expected_tests = BTreeMap::new();
@@ -503,6 +504,44 @@ fn a_failing_lint_is_never_blamed_for_a_missing_l1_cell() {
     );
 }
 
+/// A producer that knows WHY it has no evidence must be able to say so.
+///
+/// "Scheduled but produced no report at all" is equally true of a WSL2 guest
+/// that died mid-suite and of a tier that ran no tests, and only the producer
+/// can tell them apart. In run 30595280027 that single wording hid two
+/// different faults: claudine's guest was killed by SIGBUS after extracting 153
+/// binaries, and darkmatter's shard 3/4 never provisioned (`wsl.exe` exit
+/// 4294967295). Both rendered as the same blank cell.
+#[test]
+fn a_producer_detail_explains_why_a_cell_has_no_evidence() {
+    let statuses = vec![ProducerStatus {
+        area: "claudine".to_owned(),
+        job: "L1".to_owned(),
+        result: "failure".to_owned(),
+        environment: Some("wsl2-ubuntu".to_owned()),
+        detail: Some(
+            "the WSL2 guest became unreachable after the test step".to_owned(),
+        ),
+    }];
+    let provisioned = BTreeMap::new();
+    let expected_tests = BTreeMap::new();
+
+    let cell = only_cell(classify(&ClassifyInputs {
+        expected: &[expectation("claudine", "wsl2-ubuntu", Tier::L1)],
+        records: &[],
+        statuses: &statuses,
+        provisioned: &provisioned,
+        expected_tests: &expected_tests,
+    }));
+
+    assert_eq!(cell.state, CellState::Missing);
+    assert!(
+        cell.reasons.iter().any(|r| r.contains("guest became unreachable")),
+        "the producer's own explanation must reach the rendered cell: {:?}",
+        cell.reasons
+    );
+}
+
 /// L2 *does* declare `needs: test`, so a failing L1 is a real gating edge and
 /// must still be named — the fix narrows attribution, it does not remove it.
 #[test]
@@ -512,6 +551,7 @@ fn a_failing_l1_is_still_blamed_for_a_missing_l2_cell() {
         job: "L1".to_owned(),
         result: "failure".to_owned(),
         environment: None,
+        detail: None,
     }];
     let provisioned = BTreeMap::new();
     let expected_tests = BTreeMap::new();

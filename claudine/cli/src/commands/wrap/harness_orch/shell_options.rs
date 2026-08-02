@@ -7,14 +7,14 @@ pub(crate) fn harness_policy_root(source_path: &Path, repo_root: Option<&Path>) 
         .parent()
         .filter(|path| !path.as_os_str().is_empty())?;
 
-    if let Some(source_repo_root) = find_git_root(source_dir) {
-        return Some(source_repo_root);
-    }
-
     if let Some(repo_root) = repo_root
         && source_path.starts_with(repo_root)
     {
         return Some(repo_root.to_path_buf());
+    }
+
+    if let Some(source_repo_root) = find_git_root(source_dir) {
+        return Some(source_repo_root);
     }
 
     Some(source_dir.to_path_buf())
@@ -37,11 +37,38 @@ fn find_git_root(start: &Path) -> Option<PathBuf> {
     None
 }
 
+#[allow(dead_code)]
 pub(crate) fn build_harness_shell_options(
     source_path: &Path,
     repo_root: Option<&Path>,
 ) -> claudine::harness::ShellApprovalOptions {
     build_harness_shell_options_with_cache(source_path, repo_root, None)
+}
+
+/// Build shell approval policy from an already-derived source repository.
+///
+/// `None` is an observed non-repository source, so its directory is the policy
+/// root. This path never searches ancestors for `.git`.
+pub(crate) fn build_harness_shell_options_for_source(
+    source_path: &Path,
+    source_repo_root: Option<&Path>,
+) -> claudine::harness::ShellApprovalOptions {
+    build_harness_shell_options_for_source_with_cache(source_path, source_repo_root, None)
+}
+
+/// Build source-scoped shell policy while reusing an invocation approval cache.
+pub(crate) fn build_harness_shell_options_for_source_with_cache(
+    source_path: &Path,
+    source_repo_root: Option<&Path>,
+    shared_cache: Option<claudine::composition::SharedApprovalCache>,
+) -> claudine::harness::ShellApprovalOptions {
+    let policy_root = source_repo_root.map(Path::to_path_buf).or_else(|| {
+        source_path
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .map(Path::to_path_buf)
+    });
+    build_harness_shell_options_for_policy_root(policy_root, shared_cache)
 }
 
 /// Build shell approval options, optionally reusing a shared approval
@@ -60,6 +87,16 @@ pub(crate) fn build_harness_shell_options_with_cache(
     repo_root: Option<&Path>,
     shared_cache: Option<claudine::composition::SharedApprovalCache>,
 ) -> claudine::harness::ShellApprovalOptions {
+    build_harness_shell_options_for_policy_root(
+        harness_policy_root(source_path, repo_root),
+        shared_cache,
+    )
+}
+
+fn build_harness_shell_options_for_policy_root(
+    policy_root: Option<PathBuf>,
+    shared_cache: Option<claudine::composition::SharedApprovalCache>,
+) -> claudine::harness::ShellApprovalOptions {
     let approval_handler: Option<
         std::sync::Arc<dyn darkmatter::markdown::compose::shell_expansion::ShellApprovalHandler>,
     > = if darkmatter_cli::approval::can_prompt_interactively() {
@@ -70,7 +107,7 @@ pub(crate) fn build_harness_shell_options_with_cache(
         None
     };
     let mut opts = claudine::harness::ShellApprovalOptions {
-        policy_root: harness_policy_root(source_path, repo_root),
+        policy_root,
         approval_handler,
         ..Default::default()
     };
@@ -165,12 +202,36 @@ impl CachedHarnessLoopContext {
     /// commands hit the invocation-wide cache and new ones stay denied rather
     /// than prompting behind a live agent.
     pub(crate) fn refresh(&mut self, source_path: &Path, repo_root: Option<&Path>) {
+        let policy_root = harness_policy_root(source_path, repo_root);
+        self.refresh_with_policy_root(source_path, repo_root, policy_root);
+    }
+
+    /// Refresh from definitive source evidence without searching for `.git`.
+    pub(crate) fn refresh_for_source(
+        &mut self,
+        source_path: &Path,
+        source_repo_root: Option<&Path>,
+    ) {
+        let policy_root = source_repo_root.map(Path::to_path_buf).or_else(|| {
+            source_path
+                .parent()
+                .filter(|path| !path.as_os_str().is_empty())
+                .map(Path::to_path_buf)
+        });
+        self.refresh_with_policy_root(source_path, source_repo_root, policy_root);
+    }
+
+    fn refresh_with_policy_root(
+        &mut self,
+        source_path: &Path,
+        repo_root: Option<&Path>,
+        policy_root: Option<PathBuf>,
+    ) {
         let repo_root = repo_root.map(Path::to_path_buf);
         if self.source_path != source_path || self.repo_root != repo_root {
             self.source_path = source_path.to_path_buf();
             self.repo_root = repo_root;
-            self.shell_options.policy_root =
-                harness_policy_root(&self.source_path, self.repo_root.as_deref());
+            self.shell_options.policy_root = policy_root;
             self.shell_options.approval_handler = self.thawed_handler.clone();
         }
     }
@@ -189,5 +250,81 @@ impl CachedHarnessLoopContext {
     /// when the run hands off to a different one.
     pub(crate) fn freeze_shell_approvals(&mut self) {
         self.shell_options.approval_handler = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn initialize_repository(path: &Path) {
+        std::fs::create_dir_all(path).unwrap();
+        let status = std::process::Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(path)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    #[test]
+    fn source_policy_uses_explicit_same_repository_root() {
+        let directory = tempfile::TempDir::new().unwrap();
+        initialize_repository(directory.path());
+        let source = directory.path().join("docs/CLAUDE.md");
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        let invocation = claudine::invocation_context::InvocationContext::capture_at(
+            directory.path(),
+        );
+        let source_context = invocation.derive_source(&source).unwrap();
+
+        let options = build_harness_shell_options_for_source(
+            &source,
+            source_context.repository_root(),
+        );
+
+        assert_eq!(options.policy_root.as_deref(), Some(directory.path()));
+    }
+
+    #[test]
+    fn source_policy_uses_explicit_sibling_repository_root() {
+        let directory = tempfile::TempDir::new().unwrap();
+        let launch = directory.path().join("launch");
+        let sibling = directory.path().join("sibling");
+        initialize_repository(&launch);
+        initialize_repository(&sibling);
+        let source = sibling.join("docs/CLAUDE.md");
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        let invocation = claudine::invocation_context::InvocationContext::capture_at(&launch);
+        let source_context = invocation.derive_source(&source).unwrap();
+
+        let options = build_harness_shell_options_for_source(
+            &source,
+            source_context.repository_root(),
+        );
+
+        assert_eq!(options.policy_root.as_deref(), Some(sibling.as_path()));
+        assert_ne!(options.policy_root.as_deref(), Some(launch.as_path()));
+    }
+
+    #[test]
+    fn authoritative_non_repository_source_keeps_its_directory_as_policy_root() {
+        let directory = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir(directory.path().join(".git")).unwrap();
+        let nested = directory.path().join("outside");
+        std::fs::create_dir(&nested).unwrap();
+        let source = nested.join("target.md");
+
+        let options = build_harness_shell_options_for_source(&source, None);
+        assert_eq!(options.policy_root.as_deref(), Some(nested.as_path()));
+
+        let initial = directory.path().join("router.md");
+        let mut cached = CachedHarnessLoopContext::with_shell_options(
+            &initial,
+            Some(directory.path()),
+            build_harness_shell_options_for_source(&initial, Some(directory.path())),
+        );
+        cached.refresh_for_source(&source, None);
+        assert_eq!(cached.shell_options.policy_root.as_deref(), Some(nested.as_path()));
     }
 }

@@ -38,8 +38,8 @@ use super::env;
 use super::profile::{self, WrapperProfile};
 use super::{
     HarnessPromptMode, HarnessPromptState, apply_composition_shell_overrides,
-    build_harness_shell_options_with_cache, materialized_harness_prompt_from_prepared,
-    resolve_binary_path_direct, run_harness_loop, structured_verbosity, wrap_terminal,
+    materialized_harness_prompt_from_prepared, resolve_binary_path_direct, run_harness_loop,
+    structured_verbosity, wrap_terminal,
 };
 use super::exec::switch_process_cwd;
 use crate::log;

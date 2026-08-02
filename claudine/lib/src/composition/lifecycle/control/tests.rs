@@ -360,7 +360,7 @@ fn resolve_proxy_target_prefers_repository_root_for_implicit() {
 #[test]
 fn resolve_proxy_target_package_reference_prefers_authoring_package_area() {
     let repo = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(repo.path()).unwrap();
+    let root = dunce::canonicalize(repo.path()).unwrap();
     std::fs::create_dir_all(root.join(".git")).unwrap();
     std::fs::write(
         root.join("Cargo.toml"),

@@ -1,79 +1,36 @@
 # Rusty Biscuit Monorepo
 
-## Workspace Gotchas
-
-- 72 workspace members. Source of truth is `cargo metadata --no-deps --format-version 1` — not directory names.
-- `schematic/schema` lives in the repo but is **excluded from the workspace**. Use `--manifest-path schematic/schema/Cargo.toml` to work on it.
-- **No nested `[workspace]` over a root member.** `schematic/`, `unchained-ai/`, and
-  `tree-hugger/` each declared their own workspace listing packages the root also
-  owns, so the same package resolved into a different workspace depending on your
-  cwd — different `target/`, different lockfile (and so different dependency
-  versions than the root build shipped), different `.config/nextest.toml`. Removed
-  2026-07-27; `scripts/` is a genuine standalone workspace and stays.
-  `affected_scope.py`'s `validate_no_shadow_workspaces` fails CI if one returns.
-
 ## Language 
 
 - always prefer **US English (en-US)** over other English variants such as UK English (en-GB) when creating symbol names or writing documentation
 
 ## Package Area Conventions
 
-- Most areas follow a `{area}/lib` + `{area}/cli` split. Notable exceptions:
-    - `biscuit-visualized`, `tabby` — single crate
-    - `homelab` — lib/cli/server plus per-device integration crates
-    - `schematic` — `define` / `definitions` / `gen` / `oauth` / `schema`
-    - `unchained-ai` — includes the `model_id` proc-macro crate
-    - `claudine` — `lib` / `cli` plus `contract` (biscuit-contract adapter), `catalog-types` (leaf: shared provider vocab enums), and `gen` (the `claudine-gen` codegen binary that generates each `provider/<slug>/data.rs`)
-- `biscuit-speaks` CLI binary is named `so-you-say` (lives under `biscuit-speaks/cli`).
-- `biscuit-tui` follows the lib/cli split; CLI binary is named `question` (lives under `biscuit-tui/cli`).
+- you can run `sniff repo package-areas` for a list of all the _package areas_ in this monorepo
+    - most of the package areas consist of a library and CLI pairing though there is some variance to that pattern
+- you can run `sniff repo packages` to get the full list of packages in this monorepo
 
-## Root `just` Coverage
+## Just Runner
 
-Root `justfile` exposes `just test|lint|build|install|doctest`, iterating a **curated** area list — not every workspace member.
+- we use the `just` runner extensively throughout this monorepo. 
+- you will find a justfile at the root of this monorepo and a justfile in each of the _package areas_
+- shared recipes for just can be found in the @just/ directory
 
-- shared recipes are all located in the `/just` folder
-- each package area has it's own `justfile` but the shared recipes are leveraged as much as possible to keep as much uniformity as possible
+## Git Identity and Signing
 
-## Testing
+- all commits must use the author `Ken Snyder <ken@ken.net>` and must be
+  OpenPGP-signed
+- the current host is expected to have the correct signing keys available; a
+  signing failure is an environment or configuration problem and must not be
+  bypassed with `--no-gpg-sign`
+- commit messages must not include agent attribution, co-authorship, or
+  co-signing trailers such as `Co-authored-by`, `Generated-by`, or similar
+  agent-identifying metadata
+- repository-local Git configuration should set `user.name`, `user.email`,
+  `user.signingkey`, and `commit.gpgsign`; verify these values before committing
+- verify every new commit with `git verify-commit HEAD` before reporting success
 
-Test placement: see `claudine` skill `architecture.md` → Test Placement.
-
-Verification scope must be established before running gates:
-
-- Use GitNexus impact analysis for changed symbols and `sniff` package/package-area
-  discovery to record the affected packages, package areas, and downstream
-  consumers.
-- Run build, test, and lint gates only for that recorded scope. Prefer each
-  affected package area's `just build`, `just test`, and `just lint` recipes;
-  use exact package selectors when a narrower supported recipe is sufficient.
-- Public type or enum changes must include downstream packages identified by
-  impact analysis; do not substitute the entire workspace for dependency
-  analysis.
-- Never use `cargo build --workspace`, `cargo check --workspace`, a bare root
-  `cargo build`/`cargo check`/`cargo test`, or unscoped root `just` lifecycle
-  recipes as a routine final gate. A workspace-wide run is reserved for an
-  explicitly requested release/CI aggregation task with a documented reason.
-
-## Formatting
-
-`main` branch is the formatting authority.
-
-- Never run `cargo fmt` / `rustfmt` write-mode unless explicitly asked. Match surrounding style by hand when editing.
-- Reason: `rust-toolchain.toml` pins `channel = "stable"`, not a specific rustfmt version. Ad-hoc fmt reformats to whatever rustfmt floats in locally, which drifts from `main` and poisons branch↔`main` merges — a repo-wide reformat touches nearly every line, so git silently mis-merges reformatted-but-old code with `main`'s real changes.
-- `cargo fmt --check` (read-only) is fine for diagnosis.
-- To resolve a merge poisoned by a stray reformat: reset every file whose only branch-side change was a `style`/reformat commit back to `main` (`git checkout MERGE_HEAD -- <file>`), keeping only genuine semantic work.
-
-## Rustdoc Convention
-
-- No `# H1` inside `///` blocks — rustdoc already titles the item.
-- `## H2` sections: `Examples`, `Returns`, `Errors`, `Panics`, `Safety`, `Notes`.
-- Order: summary → `Examples` → `Returns` → `Errors` → `Panics` → `Safety` → `Notes`.
-
-## Comment Quality
-
-Structural rules above are silent on *content*. Prefer comments that carry information the code does not. See [`docs/comment-quality.md`](docs/comment-quality.md) for worked before/after examples.
-
-Anti-patterns — remove on sight:
+## Code Comment Quality
 
 1. **HOW-narration** — prose that restates the implementation step-by-step.
 2. **Tautological examples** — assertions guaranteed by the function signature.
@@ -108,12 +65,6 @@ Update alongside code changes:
 - `.claude/skills/` when architecture or workflows change
 - This file when workspace layout, commands, or repo-wide conventions change
 
-## Authoritative Docs
-
-- run `sniff repo packages` for the up to date list of package areas and packages
-- Local skill catalog under `.claude/skills/` is the authoritative skill list.
-- `.claude/skills/rust-testing/SKILL.md` — testing tier taxonomy, canonical `just` recipes, and `require_level!` usage.
-
 ## Rules
 
 - **Rule 1** — Think Before Coding.
@@ -125,11 +76,6 @@ Update alongside code changes:
 - **Rule 4** — Goal-Driven Execution.
     Define success criteria. Loop until verified. Don't tell Claude what steps to follow, tell it what success looks like and let it iterate.
 
-## Hashing
-
-- any hashing requirements should prefer using the crypto, non-crypto, and password hashing that **biscuit-hash** provides
-- in the case of hashing Markdown documents, the **Darkmatter** hasher should be used (as it uses a Markdown aware approach)
-
 ## Features and Fixes
 
 - each package area will have a `features` and `fixes` directory which contains specs
@@ -140,48 +86,3 @@ Update alongside code changes:
     - features/fixes as direct subdirectories are "active" features/fixes and should always follow the format `YYYY-MM-DD-{name}`
         - the files in a feature/fix can vary but almost always will be the `spec.md` file
     - when a feature/fix is completed it is moved to `_completed`
-
-<!-- gitnexus:start -->
-# GitNexus — Code Intelligence
-
-This project is indexed by GitNexus as **rusty-biscuit** (148664 symbols, 296872 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
-
-> Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
-
-## Always Do
-
-- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
-- **MUST run `detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows. For regression review, compare against the default branch: `detect_changes({scope: "compare", base_ref: "main"})`.
-- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
-- When exploring unfamiliar code, use `query({search_query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
-- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `context({name: "symbolName"})`.
-- For security review, `explain({target: "fileOrSymbol"})` lists taint findings (source→sink flows; needs `analyze --pdg`).
-
-## Never Do
-
-- NEVER edit a function, class, or method without first running `impact` on it.
-- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
-- NEVER rename symbols with find-and-replace — use `rename` which understands the call graph.
-- NEVER commit changes without running `detect_changes()` to check affected scope.
-
-## Resources
-
-| Resource | Use for |
-|----------|---------|
-| `gitnexus://repo/rusty-biscuit/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/rusty-biscuit/clusters` | All functional areas |
-| `gitnexus://repo/rusty-biscuit/processes` | All execution flows |
-| `gitnexus://repo/rusty-biscuit/process/{name}` | Step-by-step execution trace |
-
-## CLI
-
-| Task | Read this skill file |
-|------|---------------------|
-| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
-| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
-| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
-| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
-| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
-| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
-
-<!-- gitnexus:end -->

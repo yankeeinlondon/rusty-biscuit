@@ -300,6 +300,7 @@ impl SystemTaskShell {
     }
 
     /// A runner whose first wait attempt after captured output always fails.
+    #[cfg(unix)]
     pub(crate) fn failing_wait() -> Self {
         Self {
             fail_wait: true,
@@ -875,8 +876,13 @@ fn isolate_process_tree(command: &mut Command) {
 /// Build the platform `Command` that runs `command` through the system shell.
 #[cfg(windows)]
 fn system_shell_command(command: &str) -> Command {
+    use std::os::windows::process::CommandExt;
+
     let mut cmd = Command::new("cmd");
-    cmd.arg("/C").arg(command);
+    // `cmd.exe` parses the command tail itself rather than with the Windows
+    // argv rules `Command::arg` targets. Passing the tail as a normal argument
+    // escapes its nested quotes, changing the command before the shell sees it.
+    cmd.arg("/D").arg("/C").raw_arg(command);
     cmd
 }
 

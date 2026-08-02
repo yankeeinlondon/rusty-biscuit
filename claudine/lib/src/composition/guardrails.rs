@@ -47,14 +47,14 @@ pub fn load_or_create_guardrails(repo_root: Option<&Path>) -> String {
     {
         warn!(
             "failed to create guardrails directory {}: {e}",
-            parent.display()
+            biscuit_file::to_portable_string(parent)
         );
         return DEFAULT_GUARDRAILS.to_string();
     }
     if let Err(e) = fs::write(&guardrails_path, DEFAULT_GUARDRAILS) {
         warn!(
             "failed to write guardrails file {}: {e}",
-            guardrails_path.display()
+            biscuit_file::to_portable_string(&guardrails_path)
         );
     }
 

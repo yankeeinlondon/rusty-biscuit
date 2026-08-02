@@ -23,6 +23,13 @@ pub(crate) trait LinkableResourceDisplay {
     }
 }
 
+fn resource_name_markup(item: &impl LinkableResourceDisplay) -> String {
+    crate::cli_utils::file_url(item.path()).map_or_else(
+        || format!("<b>{}</b>", item.name()),
+        |href| format!(r#"<a href="{href}"><b>{}</b></a>"#, item.name()),
+    )
+}
+
 pub(crate) fn repo_canonical_needs_init(
     paths: &ProviderSkillPaths,
     _resource: LinkableResource,
@@ -88,10 +95,9 @@ where
         } else {
             format!(" {format_badge}")
         };
+        let name = resource_name_markup(item);
         let item = Prose::new(format!(
-            r#"<a href="{}"><b>{}</b></a> {badge}{format_badge} <dim><i>{desc}</i></dim>"#,
-            item.path().display(),
-            item.name(),
+            "{name} {badge}{format_badge} <dim><i>{desc}</i></dim>"
         ));
         list.add(item);
     }
@@ -117,13 +123,7 @@ where
 
         let names: Vec<String> = group
             .iter()
-            .map(|item| {
-                format!(
-                    r#"<a href="{}"><b>{}</b></a>"#,
-                    item.path().display(),
-                    item.name()
-                )
-            })
+            .map(|item| resource_name_markup(*item))
             .collect();
 
         let rendered = Prose::new(names.join("  "))
@@ -144,20 +144,24 @@ pub(crate) fn build_provider_header(provider_name: &str, resource: LinkableResou
     let user_display = support
         .user_path
         .as_ref()
-        .map(|p| format!("~/{}", p.display()))
+        .map(|p| format!("~/{}", biscuit_file::to_portable_string(p)))
         .unwrap_or_else(|| "-".to_string());
     let repo_display = support
         .repo_path
         .as_ref()
-        .map(|p| format!("<magenta>{}</magenta>", p.display()))
+        .map(|p| {
+            format!(
+                "<magenta>{}</magenta>",
+                biscuit_file::to_portable_string(p)
+            )
+        })
         .unwrap_or_else(|| "-".to_string());
 
     format!("<b>{provider_name} [ user:</b> {user_display}<b>, repo:</b> {repo_display} ]")
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn render_footer(
-    term: &Terminal,
+pub(crate) fn footer_messages(
     has_exceptions: bool,
     applied_fix: bool,
     is_git_repo: bool,
@@ -166,7 +170,7 @@ pub(crate) fn render_footer(
     filters: &[String],
     resource_plural: &str,
     verbose_hint: &str,
-) {
+) -> Vec<String> {
     let mut messages = Vec::new();
 
     if has_exceptions && !applied_fix {
@@ -192,6 +196,32 @@ pub(crate) fn render_footer(
             "<dim><i>using parameters in the CLI call will act as <b>filters</b> to help reduce the {resource_plural} to only those you are interested in</i></dim>"
         ));
     }
+
+    messages
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn render_footer(
+    term: &Terminal,
+    has_exceptions: bool,
+    applied_fix: bool,
+    is_git_repo: bool,
+    item_count: usize,
+    verbose: bool,
+    filters: &[String],
+    resource_plural: &str,
+    verbose_hint: &str,
+) {
+    let messages = footer_messages(
+        has_exceptions,
+        applied_fix,
+        is_git_repo,
+        item_count,
+        verbose,
+        filters,
+        resource_plural,
+        verbose_hint,
+    );
 
     if messages.is_empty() {
         return;

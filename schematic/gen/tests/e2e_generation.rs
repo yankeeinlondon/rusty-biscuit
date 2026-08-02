@@ -173,8 +173,8 @@ fn generated_files_exist_and_have_expected_structure() {
         "src/prelude.rs should exist"
     );
     assert!(
-        src_dir.join("openai.rs").exists(),
-        "src/openai.rs should exist"
+        module_exists(&src_dir, "openai"),
+        "openai module should exist"
     );
 
     // Verify Cargo.toml content
@@ -202,9 +202,8 @@ fn generated_files_exist_and_have_expected_structure() {
     assert!(shared_content.contains("pub enum SchematicError"));
     assert!(shared_content.contains("thiserror::Error"));
 
-    // Verify openai.rs content (API module)
-    let api_content =
-        std::fs::read_to_string(src_dir.join("openai.rs")).expect("Failed to read openai.rs");
+    // Verify the openai module's content (split across files once it grew large)
+    let api_content = read_module_content(&src_dir, "openai");
 
     // Should have module-level documentation
     assert!(api_content.contains("//!"));
@@ -762,7 +761,10 @@ fn multiple_apis_generate_together() {
     generate_and_write_all(&apis, &src_dir, false).expect("Failed to generate code for all APIs");
 
     // Verify both API modules exist
-    assert!(src_dir.join("openai.rs").exists(), "openai.rs should exist");
+    assert!(
+        module_exists(&src_dir, "openai"),
+        "openai module should exist"
+    );
     assert!(
         module_exists(&src_dir, "elevenlabs"),
         "elevenlabs module should exist"

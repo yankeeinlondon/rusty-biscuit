@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Integration tests: inline-compose interactive collection, capability gating, and handler/readonly recovery.
 //!
 //! Split out of the `wrap_commands.rs` god file; shared fixtures live in
@@ -78,7 +80,9 @@ exit 1
     );
 
     assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .current_dir(workspace.path())
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .args([

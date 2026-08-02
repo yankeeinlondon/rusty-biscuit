@@ -574,6 +574,88 @@ fn repo_json_stdout_is_exactly_one_json_document() {
     );
 }
 
+/// `--json` must survive a **shallow** repository, because that is the normal CI
+/// checkout: `actions/checkout@v4` fetches depth 1 by default.
+///
+/// Owns the repository it asserts against, unlike
+/// `repo_json_stdout_is_exactly_one_json_document` above, which runs in the
+/// ambient checkout. That one passed on every developer machine and failed on
+/// every runner — a shallow clone's HEAD names a parent the object database does
+/// not contain, and resolving it aborted the aggregate with "An object with id …
+/// could not be found". A test that can only fail on CI cannot drive a fix.
+#[test]
+fn repo_json_succeeds_in_a_shallow_clone() {
+    fn git(args: &[&str], cwd: &std::path::Path) {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .output()
+            .unwrap_or_else(|e| panic!("git {args:?}: {e}"));
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let root = tempfile::tempdir().unwrap();
+    let origin = root.path().join("origin");
+    std::fs::create_dir(&origin).unwrap();
+
+    // `-b main` explicitly: an ambient `init.defaultBranch` would otherwise
+    // decide the branch this fixture clones.
+    git(&["init", "-b", "main"], &origin);
+    git(&["config", "user.email", "test@example.com"], &origin);
+    git(&["config", "user.name", "Test"], &origin);
+
+    // Two commits, so a depth-1 clone genuinely has an unreachable parent. One
+    // commit would make HEAD a root and never exercise the boundary.
+    for n in 1..=2 {
+        std::fs::write(origin.join(format!("file{n}.txt")), format!("contents {n}"))
+            .expect("write fixture file");
+        git(&["add", "."], &origin);
+        git(&["commit", "-m", &format!("commit {n}")], &origin);
+    }
+
+    let shallow = root.path().join("shallow");
+    // A `file://` URL is required: git silently ignores `--depth` for a plain
+    // local path clone, which would make this test vacuous.
+    git(
+        &[
+            "clone",
+            "--depth",
+            "1",
+            "--single-branch",
+            "--branch",
+            "main",
+            &format!("file://{}", origin.display()),
+            shallow.to_str().expect("utf8 path"),
+        ],
+        root.path(),
+    );
+    assert!(
+        shallow.join(".git/shallow").exists(),
+        "fixture must actually be shallow, or this test proves nothing"
+    );
+
+    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+        .args(["repo", "--json"])
+        .current_dir(&shallow)
+        .output()
+        .expect("run sniff repo --json in a shallow clone");
+
+    assert!(
+        output.status.success(),
+        "sniff repo --json must succeed in a shallow clone: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    let value: serde_json::Value =
+        serde_json::from_str(stdout).expect("shallow-clone stdout must be valid JSON");
+    assert!(value.is_object(), "the aggregate must be a JSON object");
+}
+
 /// Bare `sniff repo` renders text and `--plain` renders plain text; neither
 /// goes through the `--json` aggregate. Pinned so the aggregate rewrite cannot
 /// leak JSON into, or diagnostics out of, the human-facing paths.

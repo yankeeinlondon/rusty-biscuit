@@ -94,3 +94,9 @@ fn wrote_line_keeps_trailing_space_marker() {
     let out = wrote(&plain(), &PathBuf::from("/x/data.rs"));
     assert!(out.contains("wrote "), "{out:?}");
 }
+
+#[test]
+fn wrote_line_renders_windows_shaped_path_portably() {
+    let out = wrote(&plain(), &PathBuf::from(r"C:\repo\generated\data.rs"));
+    assert!(out.contains("C:/repo/generated/data.rs"), "{out:?}");
+}

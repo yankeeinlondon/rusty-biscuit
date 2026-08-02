@@ -6,13 +6,22 @@
 //! projection here guarantees that consistency by construction rather than by
 //! parallel re-implementation (spec Decision #2).
 //!
+//! Selection and rendering are separate steps here: [`project_in_context`]
+//! chooses a `Path`, and the two wrappers below render that same choice under
+//! different separator policies. Rendering first and re-parsing the text as a
+//! path would decide the Windows prefix policy on a string the renderer had
+//! already rewritten.
+//!
 //! Two surfaces are exposed:
 //!
 //! - [`make_relative`] — the raw projection. Returns the OS-native string,
 //!   which may carry `\` separators on Windows.
-//! - [`make_portable_relative`] — the same projection with separators
-//!   normalized to `/`, so committed Markdown is identical across OSes (spec
-//!   Risks: "Cross-platform path text drift").
+//! - [`make_portable_relative`] — the same projection rendered through
+//!   [`biscuit_file::to_portable_string`], so committed Markdown is identical
+//!   across OSes (spec Risks: "Cross-platform path text drift"). A Windows path
+//!   with no faithful portable spelling keeps its native one, so the portable
+//!   surface can still emit literal backslashes; callers embedding the result in
+//!   Markdown must escape it.
 //!
 //! Resolution ladder (first match wins):
 //! 1. git-root-relative when `base_dir` is inside a repo;
@@ -20,7 +29,7 @@
 //! 3. `~/`-aliased home path;
 //! 4. the absolute path verbatim.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Projects an absolute path to a repo/base/home-relative string.
 ///
@@ -30,17 +39,30 @@ use std::path::Path;
 /// output is composed into document text) should prefer
 /// [`make_portable_relative`] so the stored value is portable across OSes.
 ///
-/// `relative(file)` keeps using this raw form to preserve its existing contract.
+/// This raw form remains available for diagnostics and tests that explicitly
+/// need native path text.
 #[cfg(test)]
 pub(crate) fn make_relative(abs: &Path, base_dir: &Path) -> String {
     make_relative_in_context(abs, base_dir, None)
 }
 
-pub(crate) fn make_relative_in_context(
+/// The projection's chosen value, still a path.
+///
+/// Kept separate from its text so both wrappers apply their own separator
+/// policy to the same decision; a `String`-valued ladder would force the
+/// portable wrapper to re-parse already-rendered text as a path.
+enum Projection {
+    /// Repo-relative, `base_dir`-relative, or the absolute path verbatim.
+    Bare(PathBuf),
+    /// The remainder below the user's home directory, rendered behind `~/`.
+    HomeRelative(PathBuf),
+}
+
+fn project_in_context(
     abs: &Path,
     base_dir: &Path,
     request_context: Option<&biscuit_file::FileResolutionContext>,
-) -> String {
+) -> Projection {
     let repository_root = match request_context {
         Some(context) => context.repository_root().map(Path::to_path_buf),
         None => crate::markdown::compose::find_git_root_from(base_dir),
@@ -48,10 +70,10 @@ pub(crate) fn make_relative_in_context(
     if let Some(repo) = repository_root
         && let Ok(stripped) = abs.strip_prefix(&repo)
     {
-        return stripped.to_string_lossy().to_string();
+        return Projection::Bare(stripped.to_path_buf());
     }
     if let Ok(stripped) = abs.strip_prefix(base_dir) {
-        return stripped.to_string_lossy().to_string();
+        return Projection::Bare(stripped.to_path_buf());
     }
     let home_dir = match request_context {
         Some(context) => context.home_dir().map(Path::to_path_buf),
@@ -60,29 +82,60 @@ pub(crate) fn make_relative_in_context(
     if let Some(home) = home_dir
         && let Ok(stripped) = abs.strip_prefix(&home)
     {
-        return format!("~/{}", stripped.to_string_lossy());
+        return Projection::HomeRelative(stripped.to_path_buf());
     }
-    abs.to_string_lossy().to_string()
+    Projection::Bare(abs.to_path_buf())
+}
+
+/// The native-text rendering of [`project_in_context`].
+///
+/// Test-only since the portable wrapper stopped delegating to it: every
+/// production caller persists composed Markdown and therefore needs the
+/// portable rendering. It is retained as the differential the tests assert the
+/// portable form against.
+#[cfg(test)]
+pub(crate) fn make_relative_in_context(
+    abs: &Path,
+    base_dir: &Path,
+    request_context: Option<&biscuit_file::FileResolutionContext>,
+) -> String {
+    match project_in_context(abs, base_dir, request_context) {
+        Projection::Bare(path) => path.to_string_lossy().to_string(),
+        Projection::HomeRelative(rest) => format!("~/{}", rest.to_string_lossy()),
+    }
 }
 
 /// Projects an absolute path to a repo/base/home-relative string with `/`
 /// separators, suitable for persisted Markdown.
 ///
-/// Identical to [`make_relative`] except the result is normalized so backslashes
-/// (Windows' native separator) become forward slashes. This is the function the
-/// eager-`file` rewrite pass calls so a committed value stays byte-identical
-/// regardless of the OS it was authored on.
+/// The context-free wrapper over [`make_portable_relative_in_context`]. It
+/// routes through the shared [`Projection`] rather than re-rendering
+/// [`make_relative`]'s output, so the tests exercise the same prefix policy
+/// production does instead of a parallel separator swap.
 #[cfg(test)]
 pub(crate) fn make_portable_relative(abs: &Path, base_dir: &Path) -> String {
-    make_relative(abs, base_dir).replace('\\', "/")
+    make_portable_relative_in_context(abs, base_dir, None)
 }
 
+/// Renders the projection through [`biscuit_file::to_portable_string`],
+/// preserving the `~/` anchor.
+///
+/// The prefix policy is applied to the `Path` [`project_in_context`] selects,
+/// never to already-rendered text, so a Windows spelling `dunce` refuses
+/// to reduce keeps its native form instead of being rewritten into the
+/// URL-shaped `//?/C:/…` an unconditional separator swap would produce. That
+/// native form carries literal backslashes, which a Markdown caller must escape.
 pub(crate) fn make_portable_relative_in_context(
     abs: &Path,
     base_dir: &Path,
     request_context: Option<&biscuit_file::FileResolutionContext>,
 ) -> String {
-    make_relative_in_context(abs, base_dir, request_context).replace('\\', "/")
+    match project_in_context(abs, base_dir, request_context) {
+        Projection::Bare(path) => biscuit_file::to_portable_string(&path),
+        Projection::HomeRelative(rest) => {
+            format!("~/{}", biscuit_file::to_portable_string(&rest))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -136,7 +189,12 @@ mod tests {
         let base = TempDir::new().unwrap();
         let other = TempDir::new().unwrap();
         let abs = other.path().join("file.md");
-        let rendered = make_relative(&abs, base.path());
+        let context = biscuit_file::FileResolutionContext::from_snapshot(
+            base.path(),
+            None,
+            std::collections::HashMap::new(),
+        );
+        let rendered = make_relative_in_context(&abs, base.path(), Some(&context));
         // No repo, not under base_dir, not under $HOME → absolute verbatim.
         assert_eq!(rendered, abs.to_string_lossy());
     }

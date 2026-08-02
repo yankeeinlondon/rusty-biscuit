@@ -3,7 +3,10 @@
 mod common;
 
 use common::wrap::seed_minimal_config;
-use common::{augmented_path, write, write_executable};
+use common::augmented_path;
+use common::write;
+#[cfg(unix)]
+use common::write_executable;
 use std::fs;
 use std::path::Path;
 use tempfile::tempdir;

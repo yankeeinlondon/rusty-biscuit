@@ -7,27 +7,28 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use schematic_define::{ApiRequest, Endpoint};
 
-use crate::codegen::request_structs::shared::{QueryParamInfo, param_field_name};
+use crate::codegen::request_structs::shared::{
+    QueryParamInfo, param_field_name, type_name_to_tokens,
+};
 
 /// Generates the body field if the endpoint has a request schema.
 pub fn generate_body_field(endpoint: &Endpoint) -> TokenStream {
-    match &endpoint.request {
-        Some(ApiRequest::Json(schema)) => {
-            let type_name = format_ident!("{}", schema.type_name);
-            quote! {
-                /// Request body
-                pub body: #type_name,
+    let type_name = match &endpoint.request {
+        Some(ApiRequest::Json(schema)) => type_name_to_tokens(&schema.type_name),
+        // Form bodies carry a generated `{EndpointId}Form` struct; see `form.rs`.
+        Some(ApiRequest::FormData { .. }) | Some(ApiRequest::UrlEncoded { .. }) => {
+            match super::form::form_body_type_name(endpoint) {
+                Some(name) => type_name_to_tokens(&name),
+                None => return quote! {},
             }
         }
-        // FormData, UrlEncoded, Text, Binary don't have a typed body field
-        // The generated code will handle these differently
-        Some(ApiRequest::FormData { .. })
-        | Some(ApiRequest::UrlEncoded { .. })
-        | Some(ApiRequest::Text { .. })
-        | Some(ApiRequest::Binary { .. }) => quote! {},
-        // Handle future variants (non_exhaustive)
-        Some(_) => quote! {},
-        None => quote! {},
+        // Text and Binary bodies are not yet carried by the request struct.
+        _ => return quote! {},
+    };
+
+    quote! {
+        /// Request body
+        pub body: #type_name,
     }
 }
 
@@ -64,7 +65,7 @@ pub fn generate_from_body_impl(
 ) -> TokenStream {
     // Only generate From impl for body-only structs (no path params)
     if has_body && path_params.is_empty() {
-        let body_ty = format_ident!("{}", body_type.unwrap());
+        let body_ty = type_name_to_tokens(body_type.unwrap_or("Body"));
 
         // Initialize query params to None
         let query_field_inits: Vec<_> = query_params

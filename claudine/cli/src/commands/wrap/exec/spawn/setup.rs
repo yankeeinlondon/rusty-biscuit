@@ -31,15 +31,28 @@ const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 /// Debug-assert that the child environment carries the critical variables.
 ///
 /// The child is launched with `env_clear()` followed by `envs(env)`, so any
-/// variable missing from `env` is absent from the child. A missing `PATH` or
-/// `HOME` indicates an `env::build_child_env` bug rather than a caller error.
+/// variable missing from `env` is absent from the child. Windows environment
+/// names are case-insensitive and commonly expose `Path` and `USERPROFILE`;
+/// the invariant follows those platform semantics rather than requiring Unix
+/// spellings in the map.
 pub(super) fn debug_assert_child_env(env: &HashMap<OsString, OsString>) {
+    let contains = |name: &str| {
+        #[cfg(windows)]
+        {
+            env.keys()
+                .any(|key| key.to_string_lossy().eq_ignore_ascii_case(name))
+        }
+        #[cfg(not(windows))]
+        {
+            env.contains_key(&OsString::from(name))
+        }
+    };
     debug_assert!(
-        env.contains_key(&OsString::from("PATH")),
+        contains("PATH"),
         "child env is missing PATH — env::build_child_env likely has a bug"
     );
     debug_assert!(
-        env.contains_key(&OsString::from("HOME")),
+        contains("HOME") || cfg!(windows) && contains("USERPROFILE"),
         "child env is missing HOME — env::build_child_env likely has a bug"
     );
 }

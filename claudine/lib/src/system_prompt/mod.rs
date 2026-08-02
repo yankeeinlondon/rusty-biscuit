@@ -13,6 +13,9 @@ pub mod types;
 
 pub use change_state::check_and_record;
 pub use context::LaunchContext;
-pub use prepare::{prepare_system_prompt, resolve_and_prepare, resolve_and_prepare_for_session};
+pub use prepare::{
+    prepare_system_prompt, resolve_and_prepare, resolve_and_prepare_for_session,
+    resolve_and_prepare_for_session_with_context,
+};
 pub use resolve::{resolve_non_interactive_candidates, resolve_system_prompt_source};
 pub use types::*;

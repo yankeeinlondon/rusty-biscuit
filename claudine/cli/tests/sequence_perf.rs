@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Integration tests for `claudine sequence --perf`.
 //!
 //! Validates that sequence performance reporting aggregates step-level
@@ -225,8 +227,10 @@ exit 0
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
         .args(["sequence", "--goose", "--perf", md_file.to_str().unwrap()])
         .assert()
         .success();

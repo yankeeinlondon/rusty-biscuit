@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! End-to-end tests for the prompt reporting feature (Phase 5).
 //!
 //! Verifies visual layout, token counting, markdown formatting, and
@@ -65,8 +67,10 @@ fn compose_default_shows_summary_and_short_user_prompt() {
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
         .args([
             "compose",
             "--goose",
@@ -112,8 +116,10 @@ fn compose_verbose_shows_full_prompts() {
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
         .args([
             "compose",
             "--goose",
@@ -160,8 +166,10 @@ fn compose_quiet_shows_system_summary_and_full_agent_prompt() {
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
         .args([
             "compose",
             "--goose",
@@ -209,8 +217,10 @@ fn compose_silent_suppresses_all_prompt_reporting() {
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
         .args([
             "compose",
             "--goose",
@@ -271,8 +281,10 @@ exit 0
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -312,8 +324,10 @@ fn compose_system_prompt_summary_shows_token_count() {
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
         .args([
             "compose",
             "--goose",
@@ -344,8 +358,10 @@ fn compose_env_var_verbose_shows_full_system_prompt() {
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
         .env("CLAUDINE_SYSTEM_PROMPT", "verbose")
         .args([
             "compose",
@@ -377,8 +393,10 @@ fn compose_env_var_quiet_shows_summary_only() {
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
         .env("CLAUDINE_SYSTEM_PROMPT", "quiet")
         .args([
             "compose",
@@ -414,8 +432,10 @@ fn compose_env_var_silent_suppresses_system_prompt() {
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
         .env("CLAUDINE_SYSTEM_PROMPT", "silent")
         .args([
             "compose",
@@ -462,8 +482,10 @@ exit 0
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -515,8 +537,10 @@ exit 0
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();

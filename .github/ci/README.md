@@ -54,7 +54,6 @@ order must match the root `justfile` `areas :=` list.
 | `shards` | string[] | no | `["1/1"]` | nextest `--partition count:i/N` specs; `["1/1"]` = no sharding. Sized from measured cold-run duration. |
 | `l2` | bool | no | `false` | Run the real-terminal (L2) tier on every environment with a provisioned backend. |
 | `browser` | bool | no | `false` | Run the headless-browser tier on Linux. |
-| `kache` | bool | no | `true` | Enable the kache `RUSTC_WRAPPER` (Linux/macOS only — `kache-action@v1` rejects `win32-x64`). |
 | `ai_provider_stubs` | bool | no | `false` | Install inert AI-provider CLI stubs for tests needing provider discovery. |
 | `backends` | string[] | no | `[]` | L2 terminal backends this area's tests require. One of: `tmux`, `wezterm`, `kitty`, `apple-terminal`. |
 | `native` | object | no | `{}` | Map of runner OS → system packages needed to build/test (e.g. `{"ubuntu-latest": ["libasound2-dev"]}`). |

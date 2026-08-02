@@ -15,7 +15,9 @@ mod wrappers;
 pub use code::{ensure_vertical_spacing, generate_safe_fence, infer_language, wrap_in_code_block};
 pub use conditions::evaluate_condition;
 pub use engine::{find_preceding_heading_level, relevel_with_overflow};
-pub(crate) use engine::{ApplyTarget, SectionSlot, TransclusionEngine, build_resolution_cache};
+pub(crate) use engine::{
+    ApplyTarget, ResolvedTransclusion, SectionSlot, TransclusionEngine, build_resolution_cache,
+};
 pub use parser::{parse_directives, parse_frontmatter_refs};
 pub(crate) use resolver::{
     FrontmatterReference, classify_frontmatter_reference, resolve_parsed_target, resolve_path,

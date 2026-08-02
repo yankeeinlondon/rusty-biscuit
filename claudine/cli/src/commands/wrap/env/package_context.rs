@@ -2,9 +2,9 @@
 //!
 //! Resolves the [`LaunchWorkspaceContext`] (repo root, child cwd, and the
 //! monorepo [`PackageContext`]) the wrap pipeline stamps into the child env.
-//! Two entry points exist: [`resolve_launch_workspace_context`] runs its own
-//! sniff scans, while [`launch_workspace_context_from_repo_info`] reuses a
-//! shared `SniffResult` to avoid extra filesystem walks.
+//! These entry points are compatibility helpers for callers without an
+//! invocation owner. Canonical wrapper and composition paths project
+//! `LaunchWorkspaceContext` directly from retained repository evidence.
 
 use std::path::{Path, PathBuf};
 
@@ -60,7 +60,7 @@ pub(crate) fn resolve_launch_workspace_context(
             package_context: None,
             warnings: vec![format!(
                 "failed to resolve monorepo package metadata for '{}': {}",
-                launch_cwd.display(),
+                biscuit_file::to_portable_string(launch_cwd),
                 error
             )],
         },
@@ -84,6 +84,7 @@ pub(crate) fn resolve_launch_workspace_context(
 /// resolution key off the document. The `child_cwd` (where the spawned
 /// provider process actually runs) must still follow the launch CWD's
 /// repo root so the provider does not jump into an unrelated worktree.
+#[allow(dead_code)]
 pub(crate) fn launch_workspace_context_from_repo_info(
     launch_cwd: &Path,
     git_root: Option<&Path>,
@@ -107,7 +108,7 @@ pub(crate) fn launch_workspace_context_from_repo_info(
                 None,
                 vec![format!(
                     "monorepo detected at '{}' but no packages were reported",
-                    repo.root.display()
+                    biscuit_file::to_portable_string(&repo.root)
                 )],
             ),
         },
@@ -123,6 +124,7 @@ pub(crate) fn launch_workspace_context_from_repo_info(
     }
 }
 
+#[allow(dead_code)]
 fn resolve_package_context_from_packages(
     cwd: &Path,
     repo: &RepoInfo,
@@ -148,8 +150,8 @@ fn resolve_package_context_from_packages(
         None,
         vec![format!(
             "monorepo detected at '{}' but no package area matched cwd '{}'",
-            repo.root.display(),
-            cwd.display()
+            biscuit_file::to_portable_string(&repo.root),
+            biscuit_file::to_portable_string(cwd)
         )],
     )
 }
@@ -176,7 +178,7 @@ fn resolve_monorepo_package_context(cwd: &Path) -> Result<RepoContext> {
             package_context: None,
             warnings: vec![format!(
                 "monorepo detected at '{}' but no packages were reported",
-                repo.root.display()
+                biscuit_file::to_portable_string(&repo.root)
             )],
         });
     };
@@ -204,8 +206,8 @@ fn resolve_monorepo_package_context(cwd: &Path) -> Result<RepoContext> {
         package_context: None,
         warnings: vec![format!(
             "monorepo detected at '{}' but no package area matched cwd '{}'",
-            repo.root.display(),
-            cwd.display()
+            biscuit_file::to_portable_string(&repo.root),
+            biscuit_file::to_portable_string(cwd)
         )],
     })
 }

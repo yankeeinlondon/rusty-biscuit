@@ -1,5 +1,7 @@
 use std::path::{Component, Path, PathBuf};
 
+use biscuit_file::to_portable_string;
+
 use super::canonical::{
     CanonicalPolicy, MappingFidelity, PolicyCertainty, PolicyEffect, PolicyWarning, TernaryState,
 };
@@ -947,17 +949,18 @@ impl ResolvedPathQuery {
     }
 
     fn subject(&self) -> String {
+        let normalized_path = to_portable_string(&self.normalized_path);
         if self.original_path == self.normalized_path {
             format!(
                 "`{}` ({})",
-                self.normalized_path.display(),
+                normalized_path,
                 path_classification_label(self.classification),
             )
         } else {
             format!(
                 "`{}` -> `{}` ({})",
-                self.original_path.display(),
-                self.normalized_path.display(),
+                to_portable_string(&self.original_path),
+                normalized_path,
                 path_classification_label(self.classification),
             )
         }
@@ -970,7 +973,7 @@ impl ResolvedPathQuery {
             message: format!(
                 "{prefix} {} scope at `{}`.",
                 path_classification_label(self.classification),
-                self.normalized_path.display(),
+                to_portable_string(&self.normalized_path),
             ),
             fidelity: MappingFidelity::Exact,
         }

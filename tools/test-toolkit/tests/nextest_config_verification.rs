@@ -59,9 +59,10 @@ fn ci_profile_retry_policy_is_scoped_not_blanket() {
     );
 }
 
-/// Slow fixture that sleeps past the `.config/nextest.toml` `slow-timeout`
-/// threshold (5 s default profile, 10 s ci profile). The verifier below spawns
-/// `cargo nextest` to run only this test and parses the output.
+/// Slow fixture that sleeps past the `default` profile's `slow-timeout` period
+/// (5 s). The verifier below pins that profile explicitly, so this sleep does
+/// not have to track the `ci` profile's period, which is deliberately far
+/// longer (30 s) to avoid killing correct-but-contended tests.
 #[test]
 #[ignore = "fixture for nextest slow-test highlighting verification"]
 fn slow_fixture_for_nextest_verification() {
@@ -81,10 +82,17 @@ fn cargo_nextest_flags_slow_test_in_output() {
         return;
     }
 
+    // `-P default` explicitly: without it the child inherits an ambient
+    // `NEXTEST_PROFILE`, which CI sets to `ci`. This assertion would then be
+    // measuring a 6-second sleep against the ci profile's 30-second period and
+    // fail for a reason that has nothing to do with the configuration being
+    // verified.
     let output = Command::new("cargo")
         .args([
             "nextest",
             "run",
+            "-P",
+            "default",
             "-p",
             "test-toolkit",
             "--test",

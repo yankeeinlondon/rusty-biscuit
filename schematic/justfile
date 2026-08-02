@@ -1,7 +1,9 @@
 set dotenv-load
 set positional-arguments
 # set allow-duplicate-recipes
-set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+# `env CYG_SYS_BASHRC=1` guards against Cygwin's /etc/bash.bashrc tripping `-u`;
+# see the root justfile for the full explanation.
+set shell := ["env", "CYG_SYS_BASHRC=1", "bash", "-eu", "-o", "pipefail", "-c"]
 
 import "../just/lifecycle.just"
 import "../just/plan.just"
@@ -160,6 +162,24 @@ generate-dry-run:
     @echo "-------------------------"
     @echo ""
     @cargo run -p schematic-gen -- --api openai --dry-run
+
+# re-import the OpenAI definition from its vendored OpenAPI spec
+#
+# Rewrites definitions/src/openai/{mod,types}.rs. Run `just generate` afterwards
+# to rebuild the client and the exported artifacts. The Assistants family is
+# excluded: OpenAI has superseded it with Responses + Conversations.
+import-openai:
+    @echo ""
+    @echo "Importing OpenAI Definition"
+    @echo "---------------------------"
+    @echo ""
+    @cargo run -p schematic-gen -- import \
+        --input specs/openai/openapi.yaml \
+        --api-name OpenAI \
+        --module-path openai \
+        --definitions-out definitions/src/openai \
+        --exclude-path /assistants \
+        --exclude-path /threads
 
 # generate all API clients to schematic/schema
 generate:

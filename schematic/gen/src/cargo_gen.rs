@@ -24,7 +24,7 @@ description = "Generated REST and WebSocket API client code from schematic defin
 [dependencies]
 bytes = "1"
 futures-util = "0.3"
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+reqwest = { version = "0.13", default-features = false, features = ["form", "json", "multipart", "rustls"] }
 schematic-define = { version = "0.1.0", path = "{{DEFINE_PATH}}" }
 schematic-definitions = { version = "0.1.0", path = "{{DEFINITIONS_PATH}}" }
 serde = { version = "1.0", features = ["derive"] }

@@ -55,10 +55,15 @@
     }
 
     fn find_python() -> Option<PathBuf> {
-        ["python3", "python"]
-            .into_iter()
-            .find_map(|candidate| which::which(candidate).ok())
-            .filter(|path| !path.as_os_str().is_empty())
+        ["python3", "python"].into_iter().find_map(|candidate| {
+            let path = which::which(candidate).ok()?;
+            std::process::Command::new(&path)
+                .arg("--version")
+                .output()
+                .ok()
+                .filter(|output| output.status.success())
+                .map(|_| path)
+        })
     }
 
     #[test]
@@ -282,11 +287,16 @@
     #[test]
     fn execute_pipeline_timeout_fallback_emits_warning() {
         let temp_dir = TempDir::new().unwrap();
+        // `execute_pipeline_detailed` spends one timeout budget on every `&&`
+        // segment, so `echo after` must spawn and exit inside it too. The sleep
+        // therefore has to overshoot the budget by a wide margin while the
+        // budget stays wide enough for a slow spawn under parallel-suite load.
+        // The sleeping child is killed at the timeout, so its length is free.
         let mut fm = fm_from_json(json!({
-            "val": "$(sleep 1 && echo after)"
+            "val": "$(sleep 10 && echo after)"
         }));
         let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-            timeout: Duration::from_millis(100),
+            timeout: Duration::from_secs(2),
             timeout_behavior:
                 super::super::shell_expansion::types::ShellTimeoutBehavior::EmptyString,
             policy_root: Some(temp_dir.path().to_path_buf()),

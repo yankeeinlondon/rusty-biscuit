@@ -1,5 +1,6 @@
 use predicates::prelude::*;
 use serde_json::Value;
+#[cfg(unix)]
 use tempfile::TempDir;
 
 #[test]
@@ -121,6 +122,7 @@ fn install_plan_via_brew_selects_brew_or_fails_cleanly() {
 
 /// Helper: point HOME at a tempdir so HostCapabilities doesn't touch the real
 /// cache file. Returns the tempdir (must stay alive) and a ready Command.
+#[cfg(unix)]
 fn cmd_with_tmp_home() -> (TempDir, assert_cmd::Command) {
     let tmp = tempfile::tempdir().unwrap();
     let mut cmd = assert_cmd::Command::cargo_bin("sniff").unwrap();

@@ -23,8 +23,8 @@ use chrono_tz::Tz;
 /// are not anchored on a prompt file.
 #[derive(Debug, Clone)]
 pub struct PromptTimingContext {
-    /// Absolute path to the prompt source file — used as the `href` of
-    /// every OSC8 link.
+    /// Absolute path to the prompt source file — converted to the file URL
+    /// used as the `href` of every OSC8 link.
     pub absolute_path: PathBuf,
     /// Visible text for the `{prompt}` slot in every user-facing timing
     /// message (header ticks and the two `*_warn` lines). Rendered as
@@ -112,7 +112,8 @@ fn system_timezone() -> Option<Tz> {
 /// Render the prompt-scoped periodic header in Prose markup.
 ///
 /// The `{prompt}` slot becomes an OSC8 link whose visible text is
-/// `display_path` (blue) and whose `href` is the absolute prompt path.
+/// `display_path` (blue) and whose `href` is a file URL for the absolute
+/// prompt path. If the path cannot become a file URL, the text stays unlinked.
 pub fn render_header_prose(
     kind: HeaderKind,
     elapsed: Duration,
@@ -194,9 +195,11 @@ pub fn render_step_timeout_warn_prose(
 }
 
 fn prompt_link(ctx: &PromptTimingContext) -> String {
-    let href = ctx.absolute_path.display().to_string();
     let text = escape_prose(&ctx.display_path);
-    format!("<a href=\"{href}\"><blue>{text}</blue></a>")
+    match url::Url::from_file_path(&ctx.absolute_path) {
+        Ok(href) => format!("<a href=\"{href}\"><blue>{text}</blue></a>"),
+        Err(()) => format!("<blue>{text}</blue>"),
+    }
 }
 
 fn escape_prose(input: &str) -> String {
@@ -218,7 +221,7 @@ mod tests {
 
     fn ctx() -> PromptTimingContext {
         PromptTimingContext {
-            absolute_path: PathBuf::from("/repo/prompts/run.md"),
+            absolute_path: std::env::temp_dir().join("repo/prompts/run.md"),
             display_path: "prompts/run.md".to_string(),
             timeout_warn: None,
             step_timeout_warn: None,
@@ -285,14 +288,36 @@ mod tests {
     #[test]
     fn header_renders_prompt_as_osc8_blue_link() {
         let rendered = render_header_prose(HeaderKind::Zero, Duration::ZERO, &ctx());
+        let href = url::Url::from_file_path(&ctx().absolute_path).unwrap();
         assert!(
-            rendered.contains("<a href=\"/repo/prompts/run.md\">"),
+            rendered.contains(&format!("<a href=\"{href}\">")),
             "prompt must render as OSC8 link with absolute href: {rendered}"
         );
         assert!(
             rendered.contains("<blue>prompts/run.md</blue>"),
             "visible link text must be the display_path in blue: {rendered}"
         );
+    }
+
+    #[test]
+    fn prompt_link_encodes_reserved_file_url_characters() {
+        let mut context = ctx();
+        context.absolute_path = std::env::temp_dir().join("a b#%.md");
+
+        let rendered = prompt_link(&context);
+
+        assert!(
+            rendered.contains("a%20b%23%25.md"),
+            "expected encoded URL: {rendered}"
+        );
+    }
+
+    #[test]
+    fn prompt_link_falls_back_to_plain_text_for_relative_target() {
+        let mut context = ctx();
+        context.absolute_path = PathBuf::from("relative.md");
+
+        assert_eq!(prompt_link(&context), "<blue>prompts/run.md</blue>");
     }
 
     #[test]

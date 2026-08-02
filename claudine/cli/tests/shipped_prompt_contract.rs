@@ -168,12 +168,10 @@ fn feature_review_cli_preserves_numeric_iteration_and_dependent_paths() {
 
     let repo = repository_root();
     let workspace = tempfile::tempdir().unwrap();
-    let fixture = tempfile::tempdir_in(&repo).unwrap();
     let bin_dir = workspace.path().join("bin");
-    let feature_dir = fixture.path().join("features/example");
+    let feature_dir = workspace.path().join("features/example");
     let spec = feature_dir.join("spec.md");
     let review = feature_dir.join("review-3.md");
-    let relative_spec = spec.strip_prefix(&repo).unwrap();
     let captured_prompt = workspace.path().join("stdin.txt");
     fs::create_dir_all(&bin_dir).unwrap();
     fs::create_dir_all(&feature_dir).unwrap();
@@ -187,14 +185,15 @@ fn feature_review_cli_preserves_numeric_iteration_and_dependent_paths() {
     let prompt = repo.join("prompts/_reviews/feature-review.md");
     assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", &bin_dir)
         .env("CLAUDINE_STDIN_FILE", &captured_prompt)
         .env("CLAUDINE_REVIEW_FILE", &review)
-        .current_dir(&repo)
+        .current_dir(workspace.path())
         .arg("compose")
         .arg(&prompt)
-        .arg(format!("spec={}", relative_spec.display()))
+        .arg(format!("spec={}", spec.display()))
         .args(["-y", "--codex"])
         .assert()
         .success();

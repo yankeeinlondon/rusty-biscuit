@@ -27,13 +27,13 @@ use crate::log;
 /// When at least one optional property has an invalid value, a trailing
 /// note explains that the value will be dropped from the prompt context.
 pub fn render_status_report(report: &SchemaStatusReport, term: &Terminal) {
-    let path_display = report.source_path.display().to_string();
+    let path_display = biscuit_file::to_portable_string(&report.source_path);
     let path_escaped = escape_prose(&path_display);
-    let mut body = format!(
-        "- The [{path_label}]({path_url}) prompt has the following schema:",
-        path_label = path_escaped,
-        path_url = path_escaped,
+    let path_reference = crate::cli_utils::file_url(&report.source_path).map_or_else(
+        || path_escaped.clone(),
+        |path_url| format!("[{path_escaped}]({path_url})"),
     );
+    let mut body = format!("- The {path_reference} prompt has the following schema:");
 
     if report.raw_json_schema {
         body.push_str("\n  <dim><i>(raw JSON Schema — per-property metadata unavailable)</i></dim>");

@@ -130,7 +130,12 @@ pub(super) fn run_phase_1c_with_schema(
                     }
                     .into());
                 }
-                let collected = match collect_sequence_missing_values(&contexts, silent, ctx.launch_area) {
+                let collected = match collect_sequence_missing_values(
+                    &contexts,
+                    silent,
+                    ctx.launch_area,
+                    ctx.file_resolution_context,
+                ) {
                     Ok(values) => values,
                     Err(_) => {
                         // Ctrl-C / Esc / unsupported shape — surface the
@@ -289,6 +294,7 @@ fn collect_sequence_missing_values(
     contexts: &[StepMissingContext],
     silent: bool,
     launch_area: Option<&std::path::Path>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
 ) -> std::io::Result<serde_json::Map<String, serde_json::Value>> {
     if !silent {
         let term = log::terminal();
@@ -300,8 +306,10 @@ fn collect_sequence_missing_values(
             // status report. The library helper expects a resolved source
             // so we re-resolve here; if that fails we fall through with
             // a header-only note.
-            if let Ok(source) =
-                composition::resolve_composition_source(&failure.source_path.display().to_string())
+            if let Ok(source) = composition::resolve_composition_source_in_context(
+                &failure.source_path.display().to_string(),
+                file_resolution_context,
+            )
                 && let Ok(Some(report)) = composition::build_schema_status_report(
                     &source,
                     ctx.effective_overrides.as_ref(),

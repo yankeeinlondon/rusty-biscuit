@@ -273,6 +273,15 @@ The rewrite runs at the same two surfaces as coercion (the explicit library API 
 
 Stored values use `/` path separators on every OS, so a committed eager-`file` reference is portable across macOS, Linux, and Windows.
 
+Caller-originated eager-file overrides are the exception to the document-authored
+rewrite. A `set` value resolves against the caller's captured launch-area context
+and remains an absolute, native path in effective frontmatter. Path functions,
+comparisons, lifecycle state, and other typed consumers therefore retain the
+caller-owned filesystem identity. When that value is interpolated into Markdown
+body text, Darkmatter uses a separate portable presentation value; direct
+variables and static member/index selections share this presentation behavior
+without changing effective frontmatter.
+
 ## Interaction With `--set` and `--state`
 
 Because the compose stage validates the *effective* frontmatter, overrides participate fully:
@@ -283,6 +292,9 @@ md compose doc.md --set '{spec: "design.md"}'
 
 - `--state` fills missing or null values before validation.
 - `--set` overrides values before validation.
+- An eager-file `--set` value keeps its resolved absolute native identity in
+  effective frontmatter while body interpolation renders its separate portable
+  presentation value.
 
 So `spec: ""` + `--set spec=design.md` validates, while `spec: "design.md"` + `--set spec=""` fails. The same applies to transcluded children: a parent's `::file set=` overlay is applied before the child's schema stage, so the parent can satisfy a child's required property.
 

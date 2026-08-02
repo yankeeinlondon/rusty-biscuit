@@ -204,9 +204,9 @@ fn relative_or_abs(path: &Path) -> String {
     if let Ok(cwd) = std::env::current_dir()
         && let Ok(rel) = path.strip_prefix(&cwd)
     {
-        return PathBuf::from(rel).display().to_string();
+        return biscuit_file::to_portable_string(rel);
     }
-    path.display().to_string()
+    biscuit_file::to_portable_string(path)
 }
 
 /// Render the classified `agent` resolution state into a multi-line cell.
@@ -240,9 +240,11 @@ pub(crate) fn render_metadata_table(render: &DryRunRender, term: &Terminal) -> S
             .map(|n| n.to_string())
             .unwrap_or_else(|| relative_or_abs(&render.document_path))
     });
-    let href = format!("file://{}", render.document_path.display());
-    let document_cell =
-        Prose::new(format!("<blue><a href=\"{href}\">{document_label}</a></blue>")).render(term);
+    let document_markup = crate::cli_utils::file_url(&render.document_path).map_or_else(
+        || format!("<blue>{document_label}</blue>"),
+        |href| format!("<blue><a href=\"{href}\">{document_label}</a></blue>"),
+    );
+    let document_cell = Prose::new(document_markup).render(term);
     table.add_row(vec!["Document".into(), document_cell.into()]);
 
     // Description: only when present, italic + dim.

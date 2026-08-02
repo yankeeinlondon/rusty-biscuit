@@ -23,16 +23,16 @@ impl ListNodesBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/nodes".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for ListNodesBasicRequest {
@@ -66,16 +66,16 @@ impl GetNodeBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/nodes/{}", urlencoding::encode(& self.node.to_string()));
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl From<&str> for GetNodeBasicRequest {
@@ -112,16 +112,16 @@ impl GetClusterBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/cluster".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for GetClusterBasicRequest {
@@ -148,16 +148,16 @@ impl ListListenersBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/listeners".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for ListListenersBasicRequest {
@@ -191,16 +191,16 @@ impl GetListenerBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/listeners/{}", urlencoding::encode(& self.id.to_string()));
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl From<&str> for GetListenerBasicRequest {
@@ -237,16 +237,16 @@ impl ListMetricsBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/metrics".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for ListMetricsBasicRequest {
@@ -273,16 +273,16 @@ impl ListStatsBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/stats".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for ListStatsBasicRequest {
@@ -309,16 +309,16 @@ impl GetPrometheusBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/prometheus/stats".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for GetPrometheusBasicRequest {
@@ -345,16 +345,16 @@ impl ListAlarmsBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/alarms".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for ListAlarmsBasicRequest {
@@ -381,16 +381,16 @@ impl ListClientsBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/clients".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for ListClientsBasicRequest {
@@ -424,18 +424,18 @@ impl GetClientBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/clients/{}", urlencoding::encode(& self.clientid.to_string())
         );
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl From<&str> for GetClientBasicRequest {
@@ -481,18 +481,18 @@ impl DisconnectClientBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/clients/{}", urlencoding::encode(& self.clientid.to_string())
         );
-        Ok(("DELETE", path, None, vec![]))
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl From<&str> for DisconnectClientBasicRequest {
@@ -547,13 +547,13 @@ impl SubscribeClientBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/clients/{}/subscribe", urlencoding::encode(& self.clientid.to_string())
@@ -561,7 +561,7 @@ impl SubscribeClientBasicRequest {
         Ok((
             "POST",
             path,
-            Some(
+            crate::shared::RequestBody::Json(
                 serde_json::to_string(&self.body)
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
@@ -609,13 +609,13 @@ impl UnsubscribeClientBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/clients/{}/unsubscribe", urlencoding::encode(& self.clientid.to_string())
@@ -623,7 +623,7 @@ impl UnsubscribeClientBasicRequest {
         Ok((
             "POST",
             path,
-            Some(
+            crate::shared::RequestBody::Json(
                 serde_json::to_string(&self.body)
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
@@ -655,16 +655,16 @@ impl ListSubscriptionsBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/subscriptions".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for ListSubscriptionsBasicRequest {
@@ -702,19 +702,19 @@ impl PublishBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/publish".to_string();
         Ok((
             "POST",
             path,
-            Some(
+            crate::shared::RequestBody::Json(
                 serde_json::to_string(&self.body)
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
@@ -762,19 +762,19 @@ impl PublishBulkBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/publish/bulk".to_string();
         Ok((
             "POST",
             path,
-            Some(
+            crate::shared::RequestBody::Json(
                 serde_json::to_string(&self.body)
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
@@ -811,16 +811,16 @@ impl ListTopicsBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/topics".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for ListTopicsBasicRequest {
@@ -847,16 +847,16 @@ impl ListRetainedBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/retainer/messages".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for ListRetainedBasicRequest {
@@ -890,18 +890,18 @@ impl GetRetainedBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/retainer/messages/{}", urlencoding::encode(& self.topic.to_string())
         );
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl From<&str> for GetRetainedBasicRequest {
@@ -945,18 +945,18 @@ impl DeleteRetainedBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/retainer/messages/{}", urlencoding::encode(& self.topic.to_string())
         );
-        Ok(("DELETE", path, None, vec![]))
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl From<&str> for DeleteRetainedBasicRequest {
@@ -993,16 +993,16 @@ impl ListRulesBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/rules".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for ListRulesBasicRequest {
@@ -1040,19 +1040,19 @@ impl CreateRuleBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/rules".to_string();
         Ok((
             "POST",
             path,
-            Some(
+            crate::shared::RequestBody::Json(
                 serde_json::to_string(&self.body)
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
@@ -1096,16 +1096,16 @@ impl GetRuleBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/rules/{}", urlencoding::encode(& self.id.to_string()));
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl From<&str> for GetRuleBasicRequest {
@@ -1155,19 +1155,19 @@ impl UpdateRuleBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/rules/{}", urlencoding::encode(& self.id.to_string()));
         Ok((
             "PUT",
             path,
-            Some(
+            crate::shared::RequestBody::Json(
                 serde_json::to_string(&self.body)
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
@@ -1206,16 +1206,16 @@ impl DeleteRuleBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/rules/{}", urlencoding::encode(& self.id.to_string()));
-        Ok(("DELETE", path, None, vec![]))
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl From<&str> for DeleteRuleBasicRequest {
@@ -1265,19 +1265,19 @@ impl TestRuleBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/rules/{}/test", urlencoding::encode(& self.id.to_string()));
         Ok((
             "POST",
             path,
-            Some(
+            crate::shared::RequestBody::Json(
                 serde_json::to_string(&self.body)
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
@@ -1309,16 +1309,16 @@ impl ListAuthenticatorsBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/authentication".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for ListAuthenticatorsBasicRequest {
@@ -1352,18 +1352,18 @@ impl GetAuthenticatorBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/authentication/{}", urlencoding::encode(& self.id.to_string())
         );
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl From<&str> for GetAuthenticatorBasicRequest {
@@ -1407,18 +1407,18 @@ impl ListAuthUsersBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/authentication/{}/users", urlencoding::encode(& self.id.to_string())
         );
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl From<&str> for ListAuthUsersBasicRequest {
@@ -1468,13 +1468,13 @@ impl CreateAuthUserBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/authentication/{}/users", urlencoding::encode(& self.id.to_string())
@@ -1482,7 +1482,7 @@ impl CreateAuthUserBasicRequest {
         Ok((
             "POST",
             path,
-            Some(
+            crate::shared::RequestBody::Json(
                 serde_json::to_string(&self.body)
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
@@ -1526,19 +1526,19 @@ impl DeleteAuthUserBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/authentication/{}/users/{}", urlencoding::encode(& self.id.to_string()),
             urlencoding::encode(& self.user_id.to_string())
         );
-        Ok(("DELETE", path, None, vec![]))
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for DeleteAuthUserBasicRequest {
@@ -1565,16 +1565,16 @@ impl ListAuthzSourcesBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/authorization/sources".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for ListAuthzSourcesBasicRequest {
@@ -1601,16 +1601,16 @@ impl ListBannedBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/banned".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for ListBannedBasicRequest {
@@ -1648,19 +1648,19 @@ impl CreateBanBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/banned".to_string();
         Ok((
             "POST",
             path,
-            Some(
+            crate::shared::RequestBody::Json(
                 serde_json::to_string(&self.body)
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
@@ -1709,19 +1709,19 @@ impl DeleteBanBasicRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/banned/{}/{}", urlencoding::encode(& self.ban_type.to_string()),
             urlencoding::encode(& self.who.to_string())
         );
-        Ok(("DELETE", path, None, vec![]))
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for DeleteBanBasicRequest {
@@ -1759,19 +1759,19 @@ impl LoginBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/login".to_string();
         Ok((
             "POST",
             path,
-            Some(
+            crate::shared::RequestBody::Json(
                 serde_json::to_string(&self.body)
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
@@ -1808,16 +1808,16 @@ impl LogoutBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/logout".to_string();
-        Ok(("POST", path, None, vec![]))
+        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for LogoutBearerRequest {
@@ -1844,16 +1844,16 @@ impl ListNodesBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/nodes".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for ListNodesBearerRequest {
@@ -1887,16 +1887,16 @@ impl GetNodeBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/nodes/{}", urlencoding::encode(& self.node.to_string()));
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl From<&str> for GetNodeBearerRequest {
@@ -1933,16 +1933,16 @@ impl GetClusterBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/cluster".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for GetClusterBearerRequest {
@@ -1969,16 +1969,16 @@ impl ListListenersBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/listeners".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for ListListenersBearerRequest {
@@ -2012,16 +2012,16 @@ impl GetListenerBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/listeners/{}", urlencoding::encode(& self.id.to_string()));
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl From<&str> for GetListenerBearerRequest {
@@ -2058,16 +2058,16 @@ impl ListMetricsBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/metrics".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for ListMetricsBearerRequest {
@@ -2094,16 +2094,16 @@ impl ListStatsBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/stats".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for ListStatsBearerRequest {
@@ -2130,16 +2130,16 @@ impl GetPrometheusBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/prometheus/stats".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for GetPrometheusBearerRequest {
@@ -2166,16 +2166,16 @@ impl ListAlarmsBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/alarms".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for ListAlarmsBearerRequest {
@@ -2202,16 +2202,16 @@ impl ListClientsBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/clients".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for ListClientsBearerRequest {
@@ -2245,18 +2245,18 @@ impl GetClientBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/clients/{}", urlencoding::encode(& self.clientid.to_string())
         );
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl From<&str> for GetClientBearerRequest {
@@ -2302,18 +2302,18 @@ impl DisconnectClientBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/clients/{}", urlencoding::encode(& self.clientid.to_string())
         );
-        Ok(("DELETE", path, None, vec![]))
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl From<&str> for DisconnectClientBearerRequest {
@@ -2368,13 +2368,13 @@ impl SubscribeClientBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/clients/{}/subscribe", urlencoding::encode(& self.clientid.to_string())
@@ -2382,7 +2382,7 @@ impl SubscribeClientBearerRequest {
         Ok((
             "POST",
             path,
-            Some(
+            crate::shared::RequestBody::Json(
                 serde_json::to_string(&self.body)
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
@@ -2430,13 +2430,13 @@ impl UnsubscribeClientBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/clients/{}/unsubscribe", urlencoding::encode(& self.clientid.to_string())
@@ -2444,7 +2444,7 @@ impl UnsubscribeClientBearerRequest {
         Ok((
             "POST",
             path,
-            Some(
+            crate::shared::RequestBody::Json(
                 serde_json::to_string(&self.body)
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
@@ -2476,16 +2476,16 @@ impl ListSubscriptionsBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/subscriptions".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for ListSubscriptionsBearerRequest {
@@ -2523,19 +2523,19 @@ impl PublishBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/publish".to_string();
         Ok((
             "POST",
             path,
-            Some(
+            crate::shared::RequestBody::Json(
                 serde_json::to_string(&self.body)
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
@@ -2583,19 +2583,19 @@ impl PublishBulkBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/publish/bulk".to_string();
         Ok((
             "POST",
             path,
-            Some(
+            crate::shared::RequestBody::Json(
                 serde_json::to_string(&self.body)
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
@@ -2632,16 +2632,16 @@ impl ListTopicsBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/topics".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for ListTopicsBearerRequest {
@@ -2668,16 +2668,16 @@ impl ListRetainedBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/retainer/messages".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for ListRetainedBearerRequest {
@@ -2711,18 +2711,18 @@ impl GetRetainedBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/retainer/messages/{}", urlencoding::encode(& self.topic.to_string())
         );
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl From<&str> for GetRetainedBearerRequest {
@@ -2766,18 +2766,18 @@ impl DeleteRetainedBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/retainer/messages/{}", urlencoding::encode(& self.topic.to_string())
         );
-        Ok(("DELETE", path, None, vec![]))
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl From<&str> for DeleteRetainedBearerRequest {
@@ -2814,16 +2814,16 @@ impl ListRulesBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/rules".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for ListRulesBearerRequest {
@@ -2861,19 +2861,19 @@ impl CreateRuleBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/rules".to_string();
         Ok((
             "POST",
             path,
-            Some(
+            crate::shared::RequestBody::Json(
                 serde_json::to_string(&self.body)
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
@@ -2917,16 +2917,16 @@ impl GetRuleBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/rules/{}", urlencoding::encode(& self.id.to_string()));
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl From<&str> for GetRuleBearerRequest {
@@ -2976,19 +2976,19 @@ impl UpdateRuleBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/rules/{}", urlencoding::encode(& self.id.to_string()));
         Ok((
             "PUT",
             path,
-            Some(
+            crate::shared::RequestBody::Json(
                 serde_json::to_string(&self.body)
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
@@ -3027,16 +3027,16 @@ impl DeleteRuleBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/rules/{}", urlencoding::encode(& self.id.to_string()));
-        Ok(("DELETE", path, None, vec![]))
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl From<&str> for DeleteRuleBearerRequest {
@@ -3086,19 +3086,19 @@ impl TestRuleBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/rules/{}/test", urlencoding::encode(& self.id.to_string()));
         Ok((
             "POST",
             path,
-            Some(
+            crate::shared::RequestBody::Json(
                 serde_json::to_string(&self.body)
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
@@ -3130,16 +3130,16 @@ impl ListAuthenticatorsBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/authentication".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for ListAuthenticatorsBearerRequest {
@@ -3173,18 +3173,18 @@ impl GetAuthenticatorBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/authentication/{}", urlencoding::encode(& self.id.to_string())
         );
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl From<&str> for GetAuthenticatorBearerRequest {
@@ -3228,18 +3228,18 @@ impl ListAuthUsersBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/authentication/{}/users", urlencoding::encode(& self.id.to_string())
         );
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl From<&str> for ListAuthUsersBearerRequest {
@@ -3289,13 +3289,13 @@ impl CreateAuthUserBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/authentication/{}/users", urlencoding::encode(& self.id.to_string())
@@ -3303,7 +3303,7 @@ impl CreateAuthUserBearerRequest {
         Ok((
             "POST",
             path,
-            Some(
+            crate::shared::RequestBody::Json(
                 serde_json::to_string(&self.body)
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
@@ -3347,19 +3347,19 @@ impl DeleteAuthUserBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/authentication/{}/users/{}", urlencoding::encode(& self.id.to_string()),
             urlencoding::encode(& self.user_id.to_string())
         );
-        Ok(("DELETE", path, None, vec![]))
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for DeleteAuthUserBearerRequest {
@@ -3386,16 +3386,16 @@ impl ListAuthzSourcesBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/authorization/sources".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for ListAuthzSourcesBearerRequest {
@@ -3422,16 +3422,16 @@ impl ListBannedBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/banned".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for ListBannedBearerRequest {
@@ -3469,19 +3469,19 @@ impl CreateBanBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/banned".to_string();
         Ok((
             "POST",
             path,
-            Some(
+            crate::shared::RequestBody::Json(
                 serde_json::to_string(&self.body)
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
@@ -3530,19 +3530,19 @@ impl DeleteBanBearerRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/banned/{}/{}", urlencoding::encode(& self.ban_type.to_string()),
             urlencoding::encode(& self.who.to_string())
         );
-        Ok(("DELETE", path, None, vec![]))
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for DeleteBanBearerRequest {

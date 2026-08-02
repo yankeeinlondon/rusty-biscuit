@@ -17,8 +17,9 @@ name: area-ci
 #
 # Policy this encodes: the same canonical L1 recipe on every native environment;
 # `check`, `lint`, and `test` are independent gates with `l2`/`browser` staged
-# behind `test`; kache on Linux/macOS runners (kache-action@v1 rejects
-# win32-x64); nextest sharding for heavy areas.
+# behind `test`; nextest sharding for heavy areas. Cargo artifacts are cached by
+# `Swatinem/rust-cache` only — see docs/kache-strategy.md for why the kache
+# rustc-wrapper was removed from CI.
 #
 # Every building job first runs `just _ensure-native-libs <area>` — the same
 # recipe `just init` runs on a developer host — so an area's `native` libraries
@@ -71,10 +72,6 @@ on:
         description: "Run the canonical L1 suite inside a WSL2 Ubuntu guest (environment `wsl2-ubuntu`)."
         type: boolean
         default: false
-      kache:
-        description: "Enable the kache RUSTC_WRAPPER with the GitHub Actions cache backend."
-        type: boolean
-        default: true
       ai-provider-stubs:
         description: "Install inert AI-provider CLI stubs for tests that require provider discovery."
         type: boolean
@@ -82,6 +79,9 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # The repository tracks no rustc wrapper; cleared explicitly so a stray
+  # environment value cannot silently intercept an area's builds.
+  RUSTC_WRAPPER: ""
   # Force TrueColor on headless runners so styled output matches local dev.
   COLORTERM: truecolor
   # Explicitly select the CI nextest profile (D6) — every `cargo nextest` in the
@@ -126,7 +126,21 @@ jobs:
       matrix:
         os: ${{ fromJSON(inputs.check-os) }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    # 45, not 30 — shared by `check`, `test`, and `lint` below.
+    #
+    # Measured on run 30562649123: completing cells for the heaviest areas
+    # cluster at 19-29 minutes, with several landing at 26-29. The old
+    # 30-minute ceiling sat inside the normal distribution rather than above
+    # it. It killed 11 claudine/darkmatter cells mid-suite, and GitHub reports
+    # a timed-out step as `cancelled`, so the rollup recorded MISSING evidence
+    # rather than a timeout — indistinguishable, from the rollup's side, from a
+    # leg that never ran. A baseline cannot be trusted while its heaviest areas
+    # are the ones with no verdict.
+    #
+    # This buys evidence; it does not make the build cheaper. The real fix is
+    # to stop rebuilding the same library once per invocation — see
+    # fixes/2026-07-30-ci-cd-stabilization/plan.md, Phase 4.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Install just
@@ -140,13 +154,6 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Enable and verify kache
-        uses: ./.github/actions/enable-kache
-        with:
-          # kache-action@v1 rejects win32-x64 ("Unsupported platform"), so the
-          # cache is Linux/macOS-only. Windows builds without it (D1: a missing
-          # cache must reduce performance, never make a platform's build fail).
-          enabled: ${{ inputs.kache && runner.os != 'Windows' }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -158,15 +165,6 @@ jobs:
       # lets a compile-check become a rollup cell that can be baselined and can
       # still block. `always()`, so a FAILED job still reports itself; a job that
       # reports nothing is MISSING, never a pass.
-      # Report what the wrapper actually achieved. `always()` because a
-      # failed build's cache data is exactly as interesting as a passing
-      # one's — often more so.
-      - name: Report kache effectiveness
-        if: ${{ always() }}
-        uses: ./.github/actions/report-kache
-        with:
-          enabled: ${{ inputs.kache && runner.os != 'Windows' }}
-          label: "${{ inputs.area }} check ${{ matrix.os }}"
       - name: Record producer status
         if: ${{ always() }}
         shell: bash
@@ -208,7 +206,7 @@ jobs:
         environment: ${{ fromJSON(inputs.native-environments) }}
         shard: ${{ fromJSON(inputs.shards) }}
     runs-on: ${{ matrix.environment }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       # Result identity (plan 0.2/1.3). The shared `just` recipes stamp these
       # into the per-invocation JUnit manifest so a rollup cell traces back to
@@ -237,13 +235,6 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Enable and verify kache
-        uses: ./.github/actions/enable-kache
-        with:
-          # kache-action@v1 rejects win32-x64 ("Unsupported platform"), so the
-          # cache is Linux/macOS-only. Windows builds without it (D1: a missing
-          # cache must reduce performance, never make a platform's build fail).
-          enabled: ${{ inputs.kache && runner.os != 'Windows' }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -329,15 +320,6 @@ jobs:
       # tree carries one XML per invocation plus `manifest.jsonl`, and the
       # manifest — not this artifact's name — is what gives each record its
       # {area, environment, tier, shard, package} identity.
-      # Report what the wrapper actually achieved. `always()` because a
-      # failed build's cache data is exactly as interesting as a passing
-      # one's — often more so.
-      - name: Report kache effectiveness
-        if: ${{ always() }}
-        uses: ./.github/actions/report-kache
-        with:
-          enabled: ${{ inputs.kache && runner.os != 'Windows' }}
-          label: "${{ inputs.area }} test ${{ matrix.environment }} ${{ matrix.shard }}"
       - name: Upload L1 JUnit
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
@@ -374,7 +356,7 @@ jobs:
   lint:
     name: lint (ubuntu)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       # `just/devops.just`'s `_lint` already passes `-D warnings` to clippy for
       # each package in the area; this keeps the area's workspace dependencies
@@ -394,13 +376,6 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Enable and verify kache
-        uses: ./.github/actions/enable-kache
-        with:
-          # kache-action@v1 rejects win32-x64 ("Unsupported platform"), so the
-          # cache is Linux/macOS-only. Windows builds without it (D1: a missing
-          # cache must reduce performance, never make a platform's build fail).
-          enabled: ${{ inputs.kache && runner.os != 'Windows' }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -412,15 +387,6 @@ jobs:
       # entries at all. In run 30323254931 `claudine / lint` was CANCELLED, which
       # a job-result reading records as neither pass nor fail; an explicit status
       # makes it MISSING, which blocks.
-      # Report what the wrapper actually achieved. `always()` because a
-      # failed build's cache data is exactly as interesting as a passing
-      # one's — often more so.
-      - name: Report kache effectiveness
-        if: ${{ always() }}
-        uses: ./.github/actions/report-kache
-        with:
-          enabled: ${{ inputs.kache && runner.os != 'Windows' }}
-          label: "${{ inputs.area }} lint ubuntu-latest"
       - name: Record producer status
         if: ${{ always() }}
         shell: bash
@@ -461,9 +427,13 @@ jobs:
   # POLICY GAP in `areas.json` instead of appearing as a green 0-run cell.
   l2:
     name: test-l2 (${{ matrix.environment }})
-    # Expensive optional tier runs only after L1 passes (D4).
+    # Ordering only: this tier runs AFTER L1 for resource staging, but does not
+    # require L1 to have passed. A red L1 used to suppress this leg entirely,
+    # so the rollup recorded MISSING and one L1 failure erased the whole tier's
+    # evidence. Absence of evidence must never be a side effect of a failure
+    # elsewhere.
     needs: test
-    if: ${{ inputs.l2 }}
+    if: ${{ !cancelled() && inputs.l2 }}
     strategy:
       fail-fast: false
       matrix:
@@ -537,13 +507,6 @@ jobs:
               fi
             done < <(printf '%s' "$DECLARED_BACKENDS" | jq -r '.[]?')
           } >>"$GITHUB_STEP_SUMMARY"
-      - name: Enable and verify kache
-        uses: ./.github/actions/enable-kache
-        with:
-          # kache-action@v1 rejects win32-x64 ("Unsupported platform"), so the
-          # cache is Linux/macOS-only. Windows builds without it (D1: a missing
-          # cache must reduce performance, never make a platform's build fail).
-          enabled: ${{ inputs.kache && runner.os != 'Windows' }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -554,15 +517,6 @@ jobs:
         run: cd "${{ inputs.area }}" && just test-l2
       # The staging directory, so the manifest travels with the reports. See the
       # L1 upload for why the single overwritten file is not enough.
-      # Report what the wrapper actually achieved. `always()` because a
-      # failed build's cache data is exactly as interesting as a passing
-      # one's — often more so.
-      - name: Report kache effectiveness
-        if: ${{ always() }}
-        uses: ./.github/actions/report-kache
-        with:
-          enabled: ${{ inputs.kache && runner.os != 'Windows' }}
-          label: "${{ inputs.area }} test-l2 ${{ matrix.environment }}"
       - name: Upload L2 JUnit
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
@@ -593,9 +547,13 @@ jobs:
 
   browser:
     name: test-browser (ubuntu-latest)
-    # Expensive optional tier runs only after L1 passes (D4).
+    # Ordering only: this tier runs AFTER L1 for resource staging, but does not
+    # require L1 to have passed. A red L1 used to suppress this leg entirely,
+    # so the rollup recorded MISSING and one L1 failure erased the whole tier's
+    # evidence. Absence of evidence must never be a side effect of a failure
+    # elsewhere.
     needs: test
-    if: ${{ inputs.browser }}
+    if: ${{ !cancelled() && inputs.browser }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -616,13 +574,6 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Enable and verify kache
-        uses: ./.github/actions/enable-kache
-        with:
-          # kache-action@v1 rejects win32-x64 ("Unsupported platform"), so the
-          # cache is Linux/macOS-only. Windows builds without it (D1: a missing
-          # cache must reduce performance, never make a platform's build fail).
-          enabled: ${{ inputs.kache && runner.os != 'Windows' }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -633,15 +584,6 @@ jobs:
         run: cd "${{ inputs.area }}" && just test-browser
       # The staging directory, so the manifest travels with the reports. See the
       # L1 upload for why the single overwritten file is not enough.
-      # Report what the wrapper actually achieved. `always()` because a
-      # failed build's cache data is exactly as interesting as a passing
-      # one's — often more so.
-      - name: Report kache effectiveness
-        if: ${{ always() }}
-        uses: ./.github/actions/report-kache
-        with:
-          enabled: ${{ inputs.kache && runner.os != 'Windows' }}
-          label: "${{ inputs.area }} test-browser ubuntu-latest"
       - name: Upload browser JUnit
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
@@ -673,14 +615,18 @@ jobs:
   # WSL2 is a supported Linux environment, not a runner label. Delegating to a
   # dedicated reusable workflow is the whole point: that job runs on
   # `windows-latest` and executes through `wsl-bash`, so if it shared the matrix
-  # above, every `runner.os == 'Windows'` branch — kache gating, native package
+  # above, every `runner.os == 'Windows'` branch — native package
   # installation, path handling, shell selection, cache keys, artifact names —
   # would silently apply to a Linux guest.
   wsl:
     name: wsl2
-    # Same staging as the native legs: nothing expensive before L1 is known good.
+    # Ordering only: this tier runs AFTER L1 for resource staging, but does not
+    # require L1 to have passed. A red L1 used to suppress this leg entirely,
+    # so the rollup recorded MISSING and one L1 failure erased the whole tier's
+    # evidence. Absence of evidence must never be a side effect of a failure
+    # elsewhere.
     needs: test
-    if: ${{ inputs.wsl }}
+    if: ${{ !cancelled() && inputs.wsl }}
     uses: ./.github/workflows/_wsl-ci.yml
     with:
       area: ${{ inputs.area }}

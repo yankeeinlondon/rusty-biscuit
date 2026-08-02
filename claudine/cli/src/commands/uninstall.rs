@@ -36,7 +36,10 @@ pub fn run(args: UninstallArgs) -> Result<()> {
             let config_path = home.join(".claudine").join("config.json");
             if config_path.exists() {
                 std::fs::remove_file(&config_path)?;
-                log::message(&format!("  Removed {}", config_path.display()));
+                log::message(&format!(
+                    "  Removed {}",
+                    biscuit_file::to_portable_string(&config_path)
+                ));
             }
         }
     }

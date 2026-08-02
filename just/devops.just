@@ -14,8 +14,13 @@ underline := '\033[4m'
 
 # dim := '\033[2m'
 
+# Preserve enough headroom for Cargo and the Windows linker before entering a
+# storage-heavy recipe. Other hosts return immediately.
+_storage_preflight:
+    @repo_root="$(git rev-parse --show-toplevel)"; bash "$repo_root/scripts/storage-preflight.sh"
+
 # Build the package
-_build package pkg_name *args="":
+_build package pkg_name *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
     echo -e "🏃‍♂️ Building {{ bold }}{{ pkg_name }}{{ reset }} {{ italic }}on {{ reset }}{{ os() }}"
@@ -83,7 +88,7 @@ commit yolo="true" agent="opencode" model="":
     echo
 
 # Lint a package
-_lint pkg:
+_lint pkg: _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -132,6 +137,22 @@ deps:
 
     echo
     sniff repo package-dependencies "$(sniff repo package-area)"
+
+# Refresh the GitNexus index without rewriting agent instruction files.
+gitnexus:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    status_output=""
+    status_exit=0
+    status_output="$(gitnexus status 2>&1)" || status_exit=$?
+    printf '%s\n' "${status_output}"
+
+    if (( status_exit == 0 )) && grep -Eq '^Status: .*up-to-date[[:space:]]*$' <<< "${status_output}"; then
+        exit 0
+    fi
+
+    gitnexus analyze --skip-agents-md --force
 
 # ---------------------------------------------------------------------------
 # JUnit report staging
@@ -351,6 +372,78 @@ _run_all recipe specs *args="":
         exit 1
     fi
 
+    # Give every invocation in this run the SAME `-p` set, so Cargo resolves
+    # features once for the whole area instead of once per package.
+    #
+    # Feature unification is computed over the selected packages. Running
+    # `-p claudine` and then `-p claudine-cli` therefore configures shared
+    # dependencies differently — claudine-cli's dev-dependency enables
+    # `darkmatter/effects-instrumentation`, and `claudine-catalog-types` takes
+    # `chrono` with `default-features = false` while its siblings do not — so
+    # each invocation rebuilt crates the previous one had already built under a
+    # different configuration. Measured on run 30562649123: `claudine` and
+    # `claudine-catalog-types` compiled 3x per job. It is invisible locally
+    # because Cargo caches every variant; a cold CI cache pays for each.
+    #
+    # `_test` narrows back to one package with a `package()` filter, which is
+    # exactly what the archive path already does, so per-package JUnit staging
+    # and the pass/fail summary are unchanged.
+    #
+    # A per-package `--features X` is NOT a reason to give up the shared scope:
+    # Cargo accepts package-qualified features in a multi-package invocation, so
+    # `sniff --features remote; sniff-cli --features test-fixtures` becomes
+    # `-p sniff -p sniff-cli -F sniff/remote -F sniff-cli/test-fixtures` —
+    # identical semantics, one feature resolution.
+    #
+    # `--all-features` and `--no-default-features` have no package-qualified
+    # form; in a multi-package invocation they apply to EVERY selected package,
+    # which would change what the siblings are built with rather than merely
+    # when. Those areas keep the per-package loop.
+    #
+    # Only `_test` opts in. `_lint` and `_sanity` share this engine but do not
+    # read the exported scope, so they must keep receiving their per-package
+    # flags directly.
+    build_scope=""
+    build_features=""
+    scope_translatable=1
+    for entry in "${entries[@]}"; do
+        # shellcheck disable=SC2206
+        scope_parts=(${entry})
+        scope_pkg="${scope_parts[0]}"
+        build_scope="${build_scope}${build_scope:+ }${scope_pkg}"
+        idx=1
+        while (( idx < ${#scope_parts[@]} )); do
+            scope_arg="${scope_parts[$idx]}"
+            scope_vals=""
+            case "${scope_arg}" in
+                --features|-F)
+                    (( idx++ ))
+                    scope_vals="${scope_parts[$idx]:-}"
+                    ;;
+                --features=*) scope_vals="${scope_arg#--features=}" ;;
+                *)            scope_translatable=0 ;;
+            esac
+            if [[ -n "${scope_vals}" ]]; then
+                old_ifs="$IFS"
+                IFS=','
+                read -r -a scope_feats <<< "${scope_vals}"
+                IFS="${old_ifs}"
+                for scope_feat in "${scope_feats[@]}"; do
+                    [[ -n "${scope_feat}" ]] || continue
+                    build_features="${build_features}${build_features:+ }${scope_pkg}/${scope_feat}"
+                done
+            fi
+            (( idx++ ))
+        done
+    done
+
+    shared_scope=0
+    if [[ "{{ recipe }}" == "_test" ]] && (( scope_translatable == 1 )) && (( ${#entries[@]} > 1 )); then
+        shared_scope=1
+        export BISCUIT_BUILD_SCOPE="${build_scope}"
+        export BISCUIT_BUILD_FEATURES="${build_features}"
+    fi
+
     for entry in "${entries[@]}"; do
         # Word-splitting is the point: an entry is `<package> [extra args…]`.
         # shellcheck disable=SC2206
@@ -358,7 +451,12 @@ _run_all recipe specs *args="":
         package="${parts[0]}"
         current_package="${package}"
 
-        if (( ${#parts[@]} > 1 )); then
+        if (( shared_scope == 1 )); then
+            # Per-package flags were hoisted into BISCUIT_BUILD_FEATURES above;
+            # passing them again would apply an unqualified `--features` to a
+            # multi-package selection.
+            just {{ recipe }} "${package}" {{ args }}
+        elif (( ${#parts[@]} > 1 )); then
             just {{ recipe }} "${package}" "${parts[@]:1}" {{ args }}
         else
             just {{ recipe }} "${package}" {{ args }}
@@ -566,7 +664,7 @@ _archive_drop_build_flags *args="":
 #
 # A `cargo test` fallback cannot consume an archive at all — it would recompile —
 # so a missing nextest in archive mode is a hard error, never a fallback.
-_test pkg *args="":
+_test pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -620,6 +718,21 @@ _test pkg *args="":
         filter="$(just _tier_filter L1 '{{ pkg }}')"
         selection=(-p '{{ pkg }}')
         run_args=(${forwarded[@]+"${forwarded[@]}"})
+        # Shared build scope (set by `_run_all`): select every package in the
+        # area so Cargo resolves features once, then narrow to this package with
+        # `package()`. Same shape as the archive branch below.
+        if (( archive_mode == 0 )) && [[ -n "${BISCUIT_BUILD_SCOPE:-}" ]]; then
+            selection=()
+            for scope_pkg in ${BISCUIT_BUILD_SCOPE}; do
+                selection+=(-p "${scope_pkg}")
+            done
+            # Package-qualified, so each package still gets exactly the features
+            # its own spec asked for.
+            for scope_feat in ${BISCUIT_BUILD_FEATURES:-}; do
+                selection+=(-F "${scope_feat}")
+            done
+            filter="package({{ pkg }}) & (${filter})"
+        fi
         if (( archive_mode == 1 )); then
             selection=()
             filter="package({{ pkg }}) & (${filter})"
@@ -821,7 +934,7 @@ _expected_manifest tier specs *args="":
 #
 # Package discovery comes from Cargo metadata rather than the curated package-area
 # list. Optional selectors may be package names or package-area paths.
-_test_workspace *selectors="":
+_test_workspace *selectors="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -1171,7 +1284,7 @@ _check_tier_coverage *args="":
 # `_doctest`; lint lives in `_lint`. Auto-detects which of `--lib` / `--bins`
 # applies so the recipe works for lib-only crates, bin-only crates, and the
 # common lib+CLI combo without per-package customization.
-_sanity pkg *args="":
+_sanity pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
     echo
@@ -1263,7 +1376,7 @@ _sanity pkg *args="":
 # its own. With no shared resource, nextest runs at `-j N` safely. The
 # default (`1`, or unset) preserves the shared-pane serial path verbatim
 # for every other package area.
-_test_l2 pkg *args="":
+_test_l2 pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
     echo
@@ -1399,7 +1512,7 @@ _test_l2 pkg *args="":
 # from whoever is at the keyboard. Set BISCUIT_L3_TAKE_FOCUS=1 to authorize a
 # non-interactive run (a human deciding the machine is free), or answer the
 # prompt when running from a terminal.
-_test_l3 pkg *args="":
+_test_l3 pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "${BISCUIT_L3_TAKE_FOCUS:-}" != "1" ]; then
@@ -1442,7 +1555,7 @@ _test_l3 pkg *args="":
 
 # Browser tier: headless browser tests. Skip-clean if Chrome absent unless
 # BISCUIT_BROWSER_REQUIRED=1 is set in the environment.
-_test_browser pkg *args="":
+_test_browser pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
     echo
@@ -1462,7 +1575,7 @@ _test_browser pkg *args="":
 
 # Real-resource tier: external services/devices. Selecting the set is harmless;
 # tests themselves are responsible for skipping when the resource is absent.
-_test_real pkg *args="":
+_test_real pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
     echo
@@ -1479,7 +1592,7 @@ _test_real pkg *args="":
 # Doctests. Nextest does not run doctests, so this recipe shells out to
 # `cargo test --doc`. Skips packages that have no lib target (bin-only
 # crates have no doctests).
-_doctest pkg *args="":
+_doctest pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
     echo
@@ -1616,7 +1729,7 @@ _bench_preflight:
 #
 # For the canonical before/after workflow use `_bench_save` and
 # `_bench_compare` instead.
-_bench pkg *args="":
+_bench pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
     just _bench_preflight
@@ -1655,7 +1768,7 @@ _bench_compare pkg *args="":
 
 # Per-package LCOV coverage. Writes a `lcov-<pkg>.info` artifact next to the
 # package's own working directory.
-_coverage pkg *args="":
+_coverage pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
     echo
@@ -1667,7 +1780,7 @@ _coverage pkg *args="":
 # package's `fuzz/rust-toolchain.toml`.
 #
 # Usage: `just _fuzz <pkg-fuzz-dir> <target> [-- libfuzzer-args]`
-_fuzz fuzz_dir target *args="":
+_fuzz fuzz_dir target *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
     echo

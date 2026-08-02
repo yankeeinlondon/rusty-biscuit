@@ -568,35 +568,343 @@ Per repo policy, run gates only for the recorded scope — never
   as a separate piece of work.
 - Changing `ci-verdict` as the required status check.
 
+## Execution log — 2026-07-30
+
+| Phase | State | Evidence |
+|---|---|---|
+| 1 — land PR 19 | **done** | merge commit `53cfeec00`; admin override inside a restored-on-exit ruleset window; `enforcement=active`, `bypass_actors=0` after |
+| 2 — replay PR 21 | **done** | `git rebase --onto main 2d6a606d5`; 11 of 12 clean, one conflict; head `f2f600a9f` |
+| 3 — stacked CI + PR 22 | **done** | `ci.yml`/`pr-health.yml` base filters removed; PR 22 head `c3f8ae798`; first-ever `ci` run **30562649123** (112 jobs) |
+| 4 — Windows burn-down | **handed to Ken** | targets identified below; owned on a separate branch |
+| 5 — remove the blinders | **done** | run **30595280027**: 238 jobs, 151 pass, 55 fail, **0 without a verdict**, 2.4h |
+| 6 — close the WSL2 blind spots | **retry done; SIGBUS cause CONFIRMED** | provisioning 403 from job 91060753989; disk exhaustion confirmed in run 30605643702, all 4 claudine shards |
+
+Recovery tags pushed to the remote: `recovery/pr19-pre-merge` (`b09b1f50e`),
+`recovery/pr21-pre-rebase` (`02a89f149`), `recovery/pr22-pre-rebase`
+(`f83c69da5`).
+
+### Phase 5 — the goal restated, and met
+
+Ken reframed the objective mid-execution, and it was the right correction: the
+aim is **a CI/CD process that reports the true state of the software**, not one
+where tests pass. Remove what blinds us; fix bugs afterwards. Work had drifted
+into fixing individual tests to get past a gate, when the gate was the problem.
+
+Two structural blinders were removed (`161402b6e`), both "fail fast to save
+runner minutes" trades that cost exactly the visibility the pipeline exists to
+provide:
+
+- **The canary gated the whole area fan-out.** Three consecutive runs produced
+  ZERO area evidence because one canary test failed — a Windows compile-check, a
+  WSL2 binary path, and a 40 ms timing assertion on macOS. None said anything
+  about the other twenty areas, yet each erased them: 31 jobs instead of 168.
+  Seven further jobs carried the same clause.
+- **L1 gated L2/browser/wsl within each area.** One red L1 deleted the whole
+  tier's evidence and the rollup logged MISSING — indistinguishable from a leg
+  that was never scheduled.
+
+Both now keep `needs:` for ordering and run on `!cancelled()`. Removing the gate
+also made the run *faster* — 2.4 h for 238 jobs versus 4.0 h for 172 — because
+areas start immediately instead of queuing behind the canary stage. Wall clock
+here is bounded by runner concurrency, not job duration.
+
+Supporting fixes in the same phase:
+
+| Commit | Blinder removed |
+|---|---|
+| `64837bd21` | `sniff repo --json` aborted on CI's shallow clone (`try_find_object`); added a test owning its own depth-1 fixture |
+| `ba2f46229` | 30 min job ceiling killed cells into MISSING → 45 min |
+| `3a274b2fa` | 30 s per-test kill failed correct tests → 90 s; claudine's shard had 11 timeouts and **zero** assertion failures |
+| `268ab36bf`, `be7e4f613` | per-package invocation resolved features per package, rebuilding crates 3× and hiding feature-gated tests; one resolution per area |
+| `7f2bbf7ce` | `progress_resets_stall_clock` had never run in CI; 40 ms budget widened |
+| `e5ee7c7f8` | a dead WSL2 guest rendered identically to a tier with no tests; producer now records *why* |
+
+### Phase 6 — the two remaining WSL2 blind spots
+
+Both were diagnosed from run 30595280027's raw job logs before anything was
+changed, and both diagnoses overturned the working assumption recorded below.
+
+**The provisioning failure is not a flake — it is a throttle, and the action's
+own retry could never have cleared it.**
+
+`Vampire/setup-wsl@v4` already retries internally. In darkmatter's shard 3/4 it
+retried **ten times inside 2.4 seconds with no backoff**, every attempt failing
+identically. The failing call and its reason are explicit in the log:
+
+```text
+[command] C:\Windows\system32\wsl.exe --update
+Checking for updates.
+Forbidden (403).
+Error code: Wsl/UpdatePackage/0x80190193
+```
+
+`0x80190193` is HTTP 403. The contrast with a shard that succeeded is decisive:
+shard 1/4 spent **46 seconds** in that same `--update` call and came back with
+WSL 2.7.11, while shard 3/4 was refused in 0.2 s. All four shards started
+`--update` within 13 seconds of each other, so four runners were racing one
+Microsoft endpoint and one was throttled off it.
+
+The missing ingredient is therefore **delay, not more attempts** — which is
+exactly what a naive "wrap it in a retry" would have added, and why that guard
+would have been vacuous. The implemented guard is one further attempt separated
+by a 90 s sleep, chosen to outlast the 46 s the successful shards spent
+downloading. The first attempt is `continue-on-error` (otherwise the second is
+unreachable); the second is deliberately **not**, so a guest that cannot be
+provisioned twice still turns the cell red. The test step is not retried and a
+contract test now forbids it: a retried timeout looks healthy.
+
+**The claudine SIGBUS is a capacity failure — CONFIRMED, and it is the Windows
+runner's disk, not the guest's.**
+
+Run 30605643702 named it outright. All four claudine shards, ~3 minutes after
+`Extracting 153 binaries`:
+
+```text
+##[error]There is not enough space on the disk. :
+  'C:\actions-runner\cached\2.336.0\_diag\blocks\...'
+```
+
+That path is the **runner's own diagnostic writer**. The guest was never the
+constraint: extracting the archive grows the VHDX until the Windows volume
+underneath it is exhausted, and the first casualty is the runner process itself.
+
+This supersedes the SIGBUS framing without contradicting it. A page mapped from a
+VHDX that can no longer grow cannot be backed, and an unbacked mapped page is
+delivered as a bus error rather than an `ENOSPC` return — so run 30595280027's
+signal 7 and run 30605643702's disk error are the same exhaustion surfacing at
+whichever write hit the wall first.
+
+It is a capacity threshold, not a claudine-code question:
+
+| Area | Archive (zstd) | WSL2 outcome |
+|---|---:|---|
+| `claudine` | **6.4 GiB** | runner disk exhausted during extraction, all 4 shards |
+| `darkmatter` | 3.9 GiB | extraction survived; 4 shards reported real test failures |
+| `biscuit-terminal` | 870 MiB | reported normally |
+| every other area | ≤ 451 MiB | reported normally |
+
+**A dead runner is a reporting gap Phase 5 did not close.** Phase 5 taught a dead
+*guest* to explain itself, and that works: darkmatter published all four
+`status-darkmatter-L1-wsl2-ubuntu-*` artifacts. claudine published **none** — not
+a blank detail, no artifact at all. `Record producer status` carries
+`if: always()`, but `always()` cannot help when the runner has no disk to write
+with; every remaining step is simply abandoned.
+
+So `claudine/wsl2-ubuntu/L1` still renders without an explanation, for a third
+reason distinct from both Phase 5 causes. Two consequences:
+
+- The measurement that matters had to move **before** extraction. A host-disk
+  census now runs ahead of the L1 step, where it is guaranteed to reach the log;
+  the post-mortems remain for the cases where the runner survives. A contract
+  test enforces the ordering, since a post-mortem on a dead runner is exactly the
+  guard that looks present and never fires.
+- `ci-rollup` cannot currently distinguish "producer left no artifact because its
+  runner died" from "producer was never scheduled". Closing that needs the rollup
+  to compare expected cells against received statuses — **not done here**, and
+  recorded below as open.
+
+The fix for the capacity failure itself is deliberately **not** attempted: the
+options (drop claudine from the WSL2 leg, free host disk before provisioning,
+extract to a host path, shard the archive rather than only the test list) trade
+coverage against cost differently and that is Ken's call, on the bug-fix branch.
+
+Superseded working notes, kept because they were the reasoning that got here.
+Before run 30605643702 named the disk directly, the SIGBUS in run 30595280027
+(`Extracting 153 binaries ... to /tmp/nextest-archive-nEyymO`, then `recipe
+_test was terminated by signal 7`, then a staging step that failed with exit 11
+because the guest was no longer usable) admitted three candidate stores:
+
+| Candidate | Why it would give SIGBUS | Verdict |
+|---|---|---|
+| `/tmp` is a tmpfs sized from guest RAM | a tmpfs page that cannot be allocated on fault is delivered as SIGBUS, with no write to fail | ruled out |
+| guest ext4 inside the VHDX filled | writeback failure on a mapped region | ruled out |
+| the Windows volume the VHDX grows into filled | the VHDX cannot extend, so the guest sees I/O errors while its own `df` still shows free blocks | **confirmed** |
+
+The measurements that would have discriminated them were built before the answer
+arrived, and are retained: they are what will show the fix working, and what will
+catch the next area to cross the threshold.
+
+Instrumentation in `_wsl-ci.yml`, all of it diagnostic and none of it able to
+change a verdict:
+
+- a host-disk census **before** extraction — the confirmed cause, measured where
+  a dying runner cannot swallow it;
+
+- a pre-extraction census (`findmnt -T`, `df`, `free`, `swapon`) — runs for every
+  area, so the failing case has a baseline to be read against;
+- a 10 s sampler started **inside** the L1 step, so it is unambiguously alive
+  across extraction rather than depending on surviving an earlier `wsl-bash`
+  invocation. It writes across the 9p mount on purpose: a log on ext4 is
+  unreachable once the VM is gone, and a VM that is gone is the case being
+  diagnosed;
+- a guest post-mortem (`df`, `free`, `dmesg -T`) — an OOM kill and an ext4 I/O
+  error are recorded in the kernel log and nowhere else. It is
+  `continue-on-error`, because a guest too dead to inspect is itself the
+  finding and must not overwrite the tier's real outcome;
+- a host post-mortem sizing the volumes and the backing `ext4.vhdx`. The VHDX
+  only grows, so a volume that is full here was full when the guest died — this
+  is the one measurement that separates "the guest filled its own filesystem"
+  from "its disk could not grow because the host had nothing left to give it";
+- a `wsl-diag-` artifact, on a prefix `ci-rollup` does not walk, so this is
+  evidence for a human and never an input to a cell's verdict.
+
+Both guards were proven non-vacuous by neutering: removing the sleep, removing
+`continue-on-error` from the first attempt, adding it to the second, retrying the
+test step, replacing `findmnt`, dropping `dmesg`, dropping the VHDX sizing, and
+pointing the sampler at guest ext4 each turn the new contract tests red. One of
+those runs also caught a weakness in the tests themselves — `findmnt -T` appears
+in a comment as well as in code, so a prose-only match satisfied the first
+version of the assertion. The assertions now bind comment-stripped YAML, matching
+the convention the rest of the file already uses.
+
+### Remaining blind spots — two, both WSL2 guest instability
+
+Confirmed not to be reporting bugs. Control case: darkmatter shards 1/2/4 had
+real test failures, their guests stayed healthy, staging succeeded, and reports
+came through. Only a dead guest loses evidence.
+
+Both were taken up in Phase 6 above, which supersedes the leads recorded here.
+
+1. **claudine wsl2, all four shards** — nextest killed by SIGBUS (signal 7, exit
+   135) ~3m45s in, right after `Extracting 153 binaries`. claudine has the
+   largest archive (153 binaries, vs darkmatter 130, biscuit-terminal 55).
+   Signal 7 is what the kernel delivers when a memory-mapped file cannot be
+   backed, so VHDX disk or memory exhaustion is the lead. **Diagnose before
+   fixing.** *Phase 6 kept this lead and narrowed it: archive BYTES separate the
+   areas far more sharply than binary counts (6.4 GiB vs 3.9 GiB vs ≤ 870 MiB),
+   and a tmpfs `/tmp` joined the candidate list because it is the store whose
+   exhaustion surfaces as SIGBUS with no write to fail.*
+2. **darkmatter wsl2 shard 3/4** — `Provision the WSL2 guest` failed with
+   `wsl.exe` exit 4294967295. A flake; the other three provisioned. Wants a
+   bounded retry on that step only — never on the test step, where a retried
+   timeout would look healthy. *Phase 6 disproved "a flake": the logs name a 403
+   throttle on `wsl.exe --update`, and the action was already retrying ten times
+   in 2.4 s. The retry only helps with a delay in front of it.*
+
+`claudine/windows-latest/L1` also renders MISSING, but honestly: the crate fails
+to BUILD, so the test set is genuinely unknown. That is the rollup working.
+
+### Phase 4 targets — 917 failing tests, two causes explain ~800
+
+macOS and ubuntu are healthy: 14 failures between them. This is Windows (550)
+and WSL2 (353).
+
+| Area | macOS | ubuntu | Windows | WSL2 |
+|---|---:|---:|---:|---:|
+| `darkmatter` | · | 1 | **480** | MISSING |
+| `tree-hugger` | · | · | 6 | **150** |
+| `biscuit-terminal` | 3 | 2 | 36 | 48 |
+| `biscuit-file` | · | · | 4 | 43 |
+| `biscuit-speaks` | · | · | · | 34 |
+| `schematic` | · | · | 8 | 24 |
+| `research` | · | · | 2 | 28 |
+| `sniff` | 3 | 1 | 5 | 19 |
+| `unchained-ai` | · | · | 5 | 6 |
+| others | 1 | 3 | 4 | 1 |
+
+**Target 1 — `md.exe` stack-overflows on Windows (~451 tests, 49% of all
+failures).** `code=-1073741571` = `0xC00000FD` = `STATUS_STACK_OVERFLOW`, on
+*every* subcommand (`compose`, `clean`, `schema`, `code-block`, `get`, `set`,
+`hash`, `graph`, `rm`) — so it is at startup, not in one code path. Windows gives
+the main thread 1 MB against 8 MB on Linux/macOS. Candidates: a Windows-scoped
+`-C link-arg=/STACK:8388608`, or moving the work onto a thread with an explicit
+stack size. Note `.cargo/config.toml` does not exist on any branch — it was
+deleted with the kache wrapper — so that file would be created fresh and must be
+scoped to `[target.x86_64-pc-windows-msvc]`.
+
+**Target 2 — archived tests resolve fixture paths to the build host (~250–350
+tests, 9 areas).** `Io { path: "/home/runner/work/rusty-biscuit/…", NotFound }`
+is the *Windows host's* checkout; the guest has the repo at
+`/home/runner/rusty-biscuit`. `--workspace-remap` fixes nextest's bookkeeping but
+not paths baked into the binary at compile time via `CARGO_MANIFEST_DIR`. Same
+class as the `cargo_bin!` bug already fixed in `43056c8bc`; one helper likely
+closes all nine areas.
+
+**Both PR 21 canary failures are resolved**, in run 30562547696:
+`canary / playa / check (windows-latest)` and
+`canary / biscuit-hash / wsl2 / test (wsl2-ubuntu)` both pass, so the area
+fan-out is no longer gated.
+
+Conflicts resolved, both predicted by this plan:
+
+- `sniff/{lib,cli}/Cargo.toml` — kept PR 21's `default-features = false` with
+  PR 19's fuller comment and range ceiling, dropping PR 19's now-false remark
+  that `Cargo.lock` is gitignored.
+- `research/lib/src/{link/creation.rs,link/mod.rs,pull.rs}` — the duplicate
+  symlink fix. `creation.rs` was functionally identical; `pull.rs` was not.
+  PR 22's made any symlink failure fatal, PR 19's treats
+  `ERROR_PRIVILEGE_NOT_HELD` as a warning and continues. Kept PR 19's, because a
+  default Windows host without Developer Mode cannot create symlinks and the
+  framework aliases are non-essential. PR 22's commit dropped as empty.
+
+### Found during execution, not planned for
+
+`lockfiles_stay_gitignored_so_release_checkout_cannot_block` had been failing on
+`main` since PR 19 committed the lockfiles — that commit reversed the premise the
+test asserts without updating it. Replaced with the current policy.
+
+It exposed a live risk that is **not closed**: release-plz asserts a clean
+tracked worktree after release calculation, and a regenerated lock is now
+tracked, so that assertion will see it and fail the release. The path runs only
+on `main` after a green CI run and cannot be exercised from a branch. Recorded in
+`release-plz.yml`. When it fires, choose between committing the regenerated lock
+as part of the release commit or scoping the assertion to exclude lockfiles — do
+not simply re-ignore lockfiles, which would undo the reproducibility this branch
+bought.
+
 ## Acceptance criteria
 
-- [ ] PR 19 is merged by an authorized admin override; its failure set, source
+- [x] PR 19 is merged by an authorized admin override; its failure set, source
       run, and head SHA are recorded in the PR body, and no baseline entries were
       added merely to achieve the merge.
-- [ ] `Cargo.lock` is tracked on `main`.
-- [ ] PR 21 is replayed from the 12-commit range (`2d6a606d5..02a89f149`) onto
+- [x] `Cargo.lock` is tracked on `main`.
+- [x] PR 21 is replayed from the 12-commit range (`2d6a606d5..02a89f149`) onto
       post-PR-19 `main` and every item in the Phase 2 verification list holds.
-- [ ] `canary / playa / check (windows-latest)` passes.
-- [ ] `canary / biscuit-hash / wsl2 / test` passes.
-- [ ] The area fan-out runs on PR 21 — `matrix.area` is no longer `skipped`.
-- [ ] `sniff` has Windows L1 and compile-check cells reporting real results.
-- [ ] `ci.yml` schedules stacked pull requests and `pr-health.yml` has the same
+- [x] `canary / playa / check (windows-latest)` passes.
+- [x] `canary / biscuit-hash / wsl2 / test` passes.
+- [x] The area fan-out runs on PR 21 — `matrix.area` is no longer `skipped`.
+- [x] `sniff` has Windows L1 and compile-check cells reporting real results.
+- [x] `ci.yml` schedules stacked pull requests and `pr-health.yml` has the same
       applicability contract, enforced by a workflow-contract test.
-- [ ] PR 22 runs CI while stacked, then targets `main` with only its intended
-      six-commit delta; the duplicate `research` symlink implementation is
-      resolved to one.
-- [ ] The Windows failure table is re-derived from a post-replay run,
+- [~] PR 22 runs CI while stacked (**done**) and the duplicate `research`
+      symlink implementation is resolved to one (**done**); retargeting to
+      `main` waits on PR 21 landing.
+- [x] The Windows failure table is re-derived from a post-replay run,
       with failures, timeouts, cancellations, missing evidence, and policy gaps
       distinguished.
-- [ ] No tracked Cargo configuration imposes a rustc wrapper on every host, and
+- [x] No tracked Cargo configuration imposes a rustc wrapper on every host, and
       `just init` does not silently activate a host-wide wrapper.
-- [ ] The pinned `cargo binstall`-backed root recipe is documented as the
+- [x] The pinned `cargo binstall`-backed root recipe is documented as the
       developer install path on every OS, in the kache skill's
       `installation.md` and wherever developer setup is described.
-- [ ] kache action calls, reports, reusable-workflow inputs, and per-area policy
+- [x] kache action calls, reports, reusable-workflow inputs, and per-area policy
       are removed from CI; `Swatinem/rust-cache@v2` remains.
-- [ ] `.github/kache-version` is `0.12.0` on `main`, and the developer installer
-      verifies the installed executable against it.
+- [~] `.github/kache-version` is `0.12.0` and the developer installer verifies
+      the installed executable against it — true on the branch; reaches `main`
+      when PR 21 lands.
 - [ ] Any future kache CI experiment is separately scoped, uses a reviewed
       commit-SHA-pinned action or explicit backend, and reports weighted hit rate
       plus wall-clock comparison against a no-kache control.
+
+### Phase 5 — reporting the true state
+
+- [x] No cell in a completed run lacks a verdict — run 30595280027: 238 jobs,
+      zero cancelled, zero timed out.
+- [x] A canary failure no longer suppresses the area fan-out, and no job gates on
+      canary success. Guarded by a contract test, proven non-vacuous.
+- [x] A red L1 no longer suppresses its area's L2, browser, or WSL2 tiers.
+- [x] A dead WSL2 guest is distinguishable from a tier that ran no tests.
+- [x] The WSL2 provisioning failure is retried after a delay — and was found not
+      to be a flake but a 403 throttle on `wsl.exe --update`, which the action's
+      own backoff-free retry could never have cleared.
+- [x] The claudine WSL2 SIGBUS has a confirmed cause: extraction exhausts the
+      **Windows runner's** disk, not the guest's (run 30605643702, all four
+      shards, `There is not enough space on the disk` against
+      `C:\actions-runner\...\_diag\`). Fixing it is Ken's call — the options
+      trade coverage against cost differently.
+- [ ] `ci-rollup` can distinguish "the producer's runner died before it could
+      write a status" from "the producer was never scheduled". Found by this
+      phase: claudine published no status artifact at all, because `always()`
+      cannot run on a runner with no disk. Phase 5 closed the dead-*guest* case
+      only.
+- [ ] Phase 4 burn-down proceeds against a run in which every cell reported.

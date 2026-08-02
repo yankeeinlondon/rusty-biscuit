@@ -24,6 +24,35 @@ implicit network probe.
 
 ## Filesystem observation
 
+`FilesystemObservation` is the request-scoped owner of Git discovery. Its
+clones share one serialized repository handle and retain all three acquisition
+outcomes: repository present, explicit absence, or the original typed failure.
+`repository_identity()` exposes the worktree root, worktree-specific Git
+directory, shared common directory, and bare-repository flag without exposing
+the underlying `GitRepo`.
+
+Two additive seeded entry points consume this owner:
+
+- `detect_filesystem_with_observation` executes one filesystem request with an
+  observation acquired for the same root.
+- `detect_with_plan_and_filesystem_observation` executes a detection plan and
+  returns `ObservedSniffResult`, preserving the same observation for later Git
+  or file-change queries.
+
+The ordinary `detect_with_plan` and `detect_filesystem_with_request` APIs stay
+ambient compatibility paths and acquire an observation when Git is requested.
+Seeded execution performs no upward Git discovery; Git identity, shared-walk
+root selection, and later `detect_git` / `detect_file_changes` projections all
+reuse the retained handle. A retained absence or failure is projected without
+retrying discovery.
+
+`FilesystemObservation::for_root` rebases a present observation to another
+directory in the same worktree without Git discovery. It uses canonical,
+platform-aware containment and rejects an intervening nested `.git` boundary.
+Bare repositories, absent observations, and failed observations are exact-root
+only. Linked worktrees remain distinct because their worktree-specific Git
+directories differ even when they share a common Git directory.
+
 Full repository detection builds one request-scoped
 `FilesystemSystemView`. It retains selected evidence rather than `DirEntry`
 objects or file bodies. `RepoEvidence::from_view` is the bridge into repository

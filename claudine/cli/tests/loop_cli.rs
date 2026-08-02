@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Integration tests for `claudine compose` and `claudine inline-compose` with
 //! looping frontmatter.
 //!
@@ -1258,4 +1260,3 @@ exit 1
         "honest exit_reason must not be mislabeled as invalid loop definition; got: {plain}"
     );
 }
-

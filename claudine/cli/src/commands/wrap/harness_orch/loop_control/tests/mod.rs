@@ -133,6 +133,7 @@ fn materialized(frontmatter: serde_json::Value) -> MaterializedHarnessPrompt {
         selection_hints: claudine::composition::EffectiveSelectionHints::default(),
         inline_closure_plan: None,
         file_resolution_context: None,
+        compose_context: None,
         live_frontmatter,
         runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
         lifecycle: None,
@@ -236,6 +237,8 @@ fn prompt_state(source: &Path) -> HarnessPromptState {
         last_final_output: None,
         input_layers: Default::default(),
         entry: claudine::composition::DocumentEntryReason::Direct,
+        invocation_context: None,
+        source_context: None,
     }
 }
 

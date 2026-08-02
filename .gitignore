@@ -101,3 +101,7 @@ trace/*
 
 /.claude/settings.local.json
 .codex/config.toml
+
+# Python bytecode from scripts/ci test runs
+__pycache__/
+*.pyc

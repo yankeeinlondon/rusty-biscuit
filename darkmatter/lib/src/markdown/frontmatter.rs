@@ -277,7 +277,7 @@ pub(super) fn parse_frontmatter(
     if lines.is_empty() || lines[0].trim() != "---" {
         if let Some(fence) = detect_near_miss_frontmatter_fence(&lines) {
             return Err(MarkdownError::FrontmatterFenceMismatch {
-                ctx: ctx.clone(),
+                ctx: Box::new(ctx.clone()),
                 found: fence,
                 line: 1,
             });
@@ -414,7 +414,7 @@ pub fn extract_frontmatter_block(
                 source,
             );
             return Err(MarkdownError::FrontmatterFenceMismatch {
-                ctx,
+                ctx: Box::new(ctx),
                 found: fence,
                 line: 1,
             });

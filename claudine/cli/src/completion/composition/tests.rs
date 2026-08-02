@@ -204,6 +204,37 @@ fn compose_magic_keeps_sigil_and_renders_filename_only() {
 }
 
 #[test]
+fn compose_user_global_scope_uses_injected_home() {
+    let tmp = TempDir::new().unwrap();
+    seed_cargo_workspace(tmp.path(), &["a/lib"]);
+    let home = tmp.path().join("fixture-home");
+    write(
+        &home.join(".claudine").join("prompts").join("plan.md"),
+        "# user plan\n",
+    );
+
+    let mut ctx = ScopeContext::discover_from(tmp.path());
+    ctx.home = Some(home);
+
+    let empty = run(ComposeMode::Compose, &ctx, "");
+    assert!(
+        empty
+            .iter()
+            .any(|candidate| candidate == "~/.claudine/prompts/plan.md")
+    );
+
+    let plain = run(ComposeMode::Compose, &ctx, "plan");
+    assert!(
+        plain
+            .iter()
+            .any(|candidate| candidate == "~/.claudine/prompts/plan.md")
+    );
+
+    let magic = run(ComposeMode::Compose, &ctx, "@plan");
+    assert_eq!(magic, vec!["@plan.md".to_string()]);
+}
+
+#[test]
 fn compose_magic_matches_while_typing_extension() {
     // Regression: `@plan.` (and `@plan.md`) must keep matching `plan.md`,
     // not just the bare-stem `@plan`.
@@ -649,4 +680,22 @@ fn finalize_dedups_and_sorts_by_rank() {
     ];
     let got = finalize(cs);
     assert_eq!(got, vec!["prompts/a.md", "prompts/b.md"]);
+}
+
+#[test]
+fn committed_directory_output_is_portable_without_test_normalization() {
+    let tmp = TempDir::new().unwrap();
+    seed_cargo_workspace(tmp.path(), &["a/lib"]);
+    write(
+        &tmp.path().join("prompts").join(r"nested\plan.md"),
+        "---\ntitle: P\n---\n",
+    );
+
+    let ctx = ScopeContext::discover_from(tmp.path());
+    let got = run(ComposeMode::Compose, &ctx, "prompts/");
+    assert!(
+        got.iter()
+            .any(|candidate| candidate == "prompts/nested/plan.md"),
+        "completion must emit slash-separated paths directly: {got:?}"
+    );
 }

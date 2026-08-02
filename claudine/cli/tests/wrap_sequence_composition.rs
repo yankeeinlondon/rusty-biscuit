@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Integration tests: sequence composition dry-run/live agent-state rendering.
 //!
 //! Split out of the `wrap_commands.rs` god file; shared fixtures live in

@@ -57,11 +57,77 @@ fn err_for(path: &str) -> CompositionError {
 mod loading {
     use super::*;
 
+    fn init_git_repo(path: &Path) {
+        let status = std::process::Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(path)
+            .status()
+            .expect("git must be available for repository-context tests");
+        assert!(status.success(), "git init failed for {}", path.display());
+    }
+
+    #[test]
+    fn cross_repo_task_nested_reference_uses_its_own_repository_context() {
+        let fixture = TempDir::new().unwrap();
+        let launch_repo = fixture.path().join("launch");
+        let task_repo = fixture.path().join("tasks");
+        let nested = task_repo.join("nested");
+        fs::create_dir_all(&launch_repo).unwrap();
+        fs::create_dir_all(&nested).unwrap();
+        init_git_repo(&launch_repo);
+        init_git_repo(&task_repo);
+
+        write_source(&task_repo, "repo-prompt.md", &[], "Repository prompt.\n");
+        write_yaml(
+            &nested,
+            "task.yaml",
+            &json!({ "kind": "task", "prompt": "repo-prompt.md" }),
+        );
+        let task_ref = nested.join("task.yaml").display().to_string();
+        let source_path = write_source(
+            &launch_repo,
+            "sequence.md",
+            &[("sequence", json!([{ "name": "external", "task": task_ref }]))],
+            "Sequence body.\n",
+        );
+        let source = crate::composition::resolve_composition_source(&source_path).unwrap();
+        let plan = resolve_sequence_plan(&source)
+            .unwrap()
+            .expect("fixture declares a sequence");
+        let invocation = crate::invocation_context::InvocationContext::capture_at(&launch_repo);
+        let source_context = invocation.derive_source(&source.resolved_path).unwrap();
+        let requirements =
+            darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
+        let evidence = invocation.runtime_evidence(&source_context, &requirements);
+        let context = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
+            source_context.base_dir(),
+            &requirements,
+            &evidence,
+        );
+
+        let graph = build_preflight_graph_with_invocation(
+            &plan,
+            &source,
+            context,
+            &invocation,
+            &source_context,
+        )
+        .unwrap();
+
+        assert_eq!(graph.prompt_documents.len(), 1);
+        assert_eq!(
+            graph.prompt_documents[0].path,
+            fs::canonicalize(task_repo.join("repo-prompt.md")).unwrap(),
+            "the nested bare reference must search the task document's repository root",
+        );
+        assert_eq!(invocation.work_snapshot().topology_probes, 2);
+    }
+
     #[test]
     #[serial_test::serial(file_resolution_snapshot)]
     fn nested_references_reuse_all_request_resolution_inputs() {
         let request = TempDir::new().unwrap();
-        let request_root = fs::canonicalize(request.path()).unwrap();
+        let request_root = dunce::canonicalize(request.path()).unwrap();
         let source_dir = request_root.join("sequences");
         let home = request_root.join("home");
         let env_root = request_root.join("env");

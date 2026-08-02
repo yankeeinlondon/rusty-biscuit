@@ -95,11 +95,14 @@ fn normalize_topics_table(output: &str) -> String {
 
 fn normalized_os_summary(output: &str) -> Value {
     let json: Value = serde_json::from_str(&normalize_text(output)).expect("valid JSON");
-    let manager_count = json
-        .get("system_package_managers")
-        .and_then(|v| v.get("managers"))
-        .and_then(Value::as_array)
-        .map_or(0, Vec::len);
+    // The manager count is host-dependent (how many package managers happen to
+    // be installed), so the golden asserts presence of the array, not the count.
+    assert!(
+        json.get("system_package_managers")
+            .and_then(|v| v.get("managers"))
+            .is_some_and(Value::is_array),
+        "system_package_managers.managers should be an array"
+    );
 
     for field in ["kernel", "long_version", "version"] {
         assert!(
@@ -135,7 +138,7 @@ fn normalized_os_summary(output: &str) -> Value {
             .get("version")
             .and_then(Value::as_str)
             .map(|_| "<normalized>"),
-        "manager_count": manager_count
+        "manager_count": "<normalized>"
     })
 }
 
@@ -651,6 +654,25 @@ fn stable_aggregate_json(json: &Value) -> Value {
         })
         .unwrap_or_default();
 
+    // The detected standard binary resolves through the host's PATH, so its
+    // path asserts the host, not the projection.
+    let monorepo_standards = match json["structure"]["monorepo_standards"].as_array() {
+        Some(entries) => entries
+            .iter()
+            .map(|s| {
+                let mut entry = s.clone();
+                if let Some(binary) = entry.get_mut("binary") {
+                    if binary.get("path").is_some_and(Value::is_string) {
+                        binary["path"] = json!("<normalized>");
+                    }
+                }
+                entry
+            })
+            .collect::<Vec<_>>()
+            .into(),
+        None => json["structure"]["monorepo_standards"].clone(),
+    };
+
     json!({
         "name": json["name"],
         "version": json["version"],
@@ -665,7 +687,7 @@ fn stable_aggregate_json(json: &Value) -> Value {
         "dependencies": json["dependencies"],
         "structure": {
             "is_monorepo": json["structure"]["is_monorepo"],
-            "monorepo_standards": json["structure"]["monorepo_standards"],
+            "monorepo_standards": monorepo_standards,
             "monorepo_layers": json["structure"]["monorepo_layers"],
         },
         "git_status": {

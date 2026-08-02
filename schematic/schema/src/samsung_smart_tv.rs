@@ -69,16 +69,16 @@ impl GetDeviceInfoRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/api/v2/".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for GetDeviceInfoRequest {
@@ -105,16 +105,16 @@ impl GetServerLogsRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/logs/".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for GetServerLogsRequest {
@@ -148,18 +148,18 @@ impl LaunchApplicationByIdRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/api/v2/applications/{}", urlencoding::encode(& self.app_id.to_string())
         );
-        Ok(("POST", path, None, vec![]))
+        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl From<&str> for LaunchApplicationByIdRequest {
@@ -203,18 +203,18 @@ impl LaunchApplicationByNameRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/ws/apps/{}", urlencoding::encode(& self.app_name.to_string())
         );
-        Ok(("POST", path, None, vec![]))
+        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl From<&str> for LaunchApplicationByNameRequest {
@@ -260,18 +260,18 @@ impl GetAppStatusRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/api/v2/applications/{}", urlencoding::encode(& self.app_id.to_string())
         );
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl From<&str> for GetAppStatusRequest {
@@ -315,18 +315,18 @@ impl CloseAppRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/api/v2/applications/{}", urlencoding::encode(& self.app_id.to_string())
         );
-        Ok(("DELETE", path, None, vec![]))
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl From<&str> for CloseAppRequest {
@@ -370,18 +370,18 @@ impl InstallAppRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/api/v2/applications/{}", urlencoding::encode(& self.app_id.to_string())
         );
-        Ok(("PUT", path, None, vec![]))
+        Ok(("PUT", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl From<&str> for InstallAppRequest {
@@ -1237,11 +1237,47 @@ impl SamsungSmartTv {
         for (key, value) in merged_headers {
             req_builder = req_builder.header(key.as_str(), value.as_str());
         }
-        if let Some(body) = body {
-            req_builder = req_builder
-                .header("Content-Type", "application/json")
-                .body(body);
-        }
+        req_builder = match body {
+            crate::shared::RequestBody::Empty => req_builder,
+            crate::shared::RequestBody::Json(json) => {
+                req_builder.header("Content-Type", "application/json").body(json)
+            }
+            crate::shared::RequestBody::Multipart(parts) => {
+                let mut form = reqwest::multipart::Form::new();
+                for part in parts {
+                    form = match part {
+                        crate::shared::FormPart::Text { name, value } => {
+                            form.text(name, value)
+                        }
+                        crate::shared::FormPart::Json { name, value } => {
+                            let field = reqwest::multipart::Part::text(value)
+                                .mime_str("application/json")
+                                .map_err(|e| {
+                                    SchematicError::SerializationError(e.to_string())
+                                })?;
+                            form.part(name, field)
+                        }
+                        crate::shared::FormPart::File { name, file } => {
+                            let mut field = reqwest::multipart::Part::bytes(file.bytes)
+                                .file_name(file.file_name);
+                            if let Some(mime) = file.mime {
+                                field = field
+                                    .mime_str(&mime)
+                                    .map_err(|e| {
+                                        SchematicError::SerializationError(e.to_string())
+                                    })?;
+                            }
+                            form.part(name, field)
+                        }
+                    };
+                }
+                req_builder.multipart(form)
+            }
+            crate::shared::RequestBody::UrlEncoded(pairs) => req_builder.form(&pairs),
+            crate::shared::RequestBody::Raw { content_type, bytes } => {
+                req_builder.header("Content-Type", content_type).body(bytes)
+            }
+        };
         let response = req_builder.send().await?;
         if !response.status().is_success() {
             let status = response.status().as_u16();

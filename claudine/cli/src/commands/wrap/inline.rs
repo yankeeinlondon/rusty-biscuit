@@ -43,10 +43,9 @@ pub(crate) fn report_inline_agent_status(
     term: &Terminal,
 ) {
     let provider_name = crate::output::capitalize_provider(provider);
-    let display_path = source_path
-        .strip_prefix(child_cwd)
-        .unwrap_or(source_path)
-        .display();
+    let display_path = biscuit_file::to_portable_string(
+        source_path.strip_prefix(child_cwd).unwrap_or(source_path),
+    );
     let was_interrupted = matches!(
         termination,
         claudine::harness::ProcessTermination::Interrupted
@@ -109,10 +108,9 @@ pub(crate) fn try_inline_closure(
     show_checks: bool,
     term: &Terminal,
 ) -> Result<(), Vec<String>> {
-    let display_path = source_path
-        .strip_prefix(child_cwd)
-        .unwrap_or(source_path)
-        .display();
+    let display_path = biscuit_file::to_portable_string(
+        source_path.strip_prefix(child_cwd).unwrap_or(source_path),
+    );
 
     let replacement_body = match claudine::composition::closure::extract_replacement_body(
         final_response,

@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Integration tests for `claudine sequence` external-file and
 //! magic-reference resolution.
 //!

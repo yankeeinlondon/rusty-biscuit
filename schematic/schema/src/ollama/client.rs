@@ -219,11 +219,47 @@ impl OllamaNative {
         for (key, value) in merged_headers {
             req_builder = req_builder.header(key.as_str(), value.as_str());
         }
-        if let Some(body) = body {
-            req_builder = req_builder
-                .header("Content-Type", "application/json")
-                .body(body);
-        }
+        req_builder = match body {
+            crate::shared::RequestBody::Empty => req_builder,
+            crate::shared::RequestBody::Json(json) => {
+                req_builder.header("Content-Type", "application/json").body(json)
+            }
+            crate::shared::RequestBody::Multipart(parts) => {
+                let mut form = reqwest::multipart::Form::new();
+                for part in parts {
+                    form = match part {
+                        crate::shared::FormPart::Text { name, value } => {
+                            form.text(name, value)
+                        }
+                        crate::shared::FormPart::Json { name, value } => {
+                            let field = reqwest::multipart::Part::text(value)
+                                .mime_str("application/json")
+                                .map_err(|e| {
+                                    SchematicError::SerializationError(e.to_string())
+                                })?;
+                            form.part(name, field)
+                        }
+                        crate::shared::FormPart::File { name, file } => {
+                            let mut field = reqwest::multipart::Part::bytes(file.bytes)
+                                .file_name(file.file_name);
+                            if let Some(mime) = file.mime {
+                                field = field
+                                    .mime_str(&mime)
+                                    .map_err(|e| {
+                                        SchematicError::SerializationError(e.to_string())
+                                    })?;
+                            }
+                            form.part(name, field)
+                        }
+                    };
+                }
+                req_builder.multipart(form)
+            }
+            crate::shared::RequestBody::UrlEncoded(pairs) => req_builder.form(&pairs),
+            crate::shared::RequestBody::Raw { content_type, bytes } => {
+                req_builder.header("Content-Type", content_type).body(bytes)
+            }
+        };
         let response = req_builder.send().await?;
         if !response.status().is_success() {
             let status = response.status().as_u16();
@@ -670,11 +706,47 @@ impl OllamaOpenAI {
         for (key, value) in merged_headers {
             req_builder = req_builder.header(key.as_str(), value.as_str());
         }
-        if let Some(body) = body {
-            req_builder = req_builder
-                .header("Content-Type", "application/json")
-                .body(body);
-        }
+        req_builder = match body {
+            crate::shared::RequestBody::Empty => req_builder,
+            crate::shared::RequestBody::Json(json) => {
+                req_builder.header("Content-Type", "application/json").body(json)
+            }
+            crate::shared::RequestBody::Multipart(parts) => {
+                let mut form = reqwest::multipart::Form::new();
+                for part in parts {
+                    form = match part {
+                        crate::shared::FormPart::Text { name, value } => {
+                            form.text(name, value)
+                        }
+                        crate::shared::FormPart::Json { name, value } => {
+                            let field = reqwest::multipart::Part::text(value)
+                                .mime_str("application/json")
+                                .map_err(|e| {
+                                    SchematicError::SerializationError(e.to_string())
+                                })?;
+                            form.part(name, field)
+                        }
+                        crate::shared::FormPart::File { name, file } => {
+                            let mut field = reqwest::multipart::Part::bytes(file.bytes)
+                                .file_name(file.file_name);
+                            if let Some(mime) = file.mime {
+                                field = field
+                                    .mime_str(&mime)
+                                    .map_err(|e| {
+                                        SchematicError::SerializationError(e.to_string())
+                                    })?;
+                            }
+                            form.part(name, field)
+                        }
+                    };
+                }
+                req_builder.multipart(form)
+            }
+            crate::shared::RequestBody::UrlEncoded(pairs) => req_builder.form(&pairs),
+            crate::shared::RequestBody::Raw { content_type, bytes } => {
+                req_builder.header("Content-Type", content_type).body(bytes)
+            }
+        };
         let response = req_builder.send().await?;
         if !response.status().is_success() {
             let status = response.status().as_u16();

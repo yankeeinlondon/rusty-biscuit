@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Integration test: the wrapper-path exit-signal seam.
 //!
 //! `claudine antigravity <prompt>` routes through the non-wire branch

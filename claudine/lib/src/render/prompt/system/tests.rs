@@ -3,6 +3,7 @@ use crate::system_prompt::PreparedSystemPrompt;
 use biscuit_terminal::discovery::detection::ColorDepth;
 use biscuit_terminal::terminal::Terminal;
 use std::path::PathBuf;
+use url::Url;
 
 fn test_terminal() -> Terminal {
     Terminal::new()
@@ -224,6 +225,23 @@ fn display_label_nerd_font_no_base_uses_absolute() {
 }
 
 #[test]
+fn display_label_drive_path_uses_portable_separators() {
+    let term = plain_terminal();
+    let path = PathBuf::from(r"C:\repo\prompts\system-prompt.md");
+    let label = resolve_display_label(&path, None, &term);
+    assert_eq!(label, "C:/repo/prompts/system-prompt.md");
+}
+
+#[cfg(windows)]
+#[test]
+fn display_label_declined_portable_spelling_keeps_native_text() {
+    let term = plain_terminal();
+    let path = PathBuf::from(r"\\server\share\system-prompt.md");
+    let label = resolve_display_label(&path, None, &term);
+    assert_eq!(label, path.to_string_lossy());
+}
+
+#[test]
 fn summary_visible_label_is_blue() {
     // The visible label (post-OSC-strip) should carry an ANSI sequence
     // for Tailwind Blue 400 (RGB 96, 165, 250) in 24-bit color mode.
@@ -264,9 +282,46 @@ fn summary_emits_osc8_for_file_link() {
         render_system_prompt_summary(&source, SystemPromptMode::Append, 10, Some(&base), &term);
     // OSC8 opener: ESC ]8;;
     assert!(summary.contains("\x1b]8;;file://"));
-    // The absolute path must appear inside the OSC8 href.
     let abs = sp.canonicalize().unwrap();
-    assert!(summary.contains(&abs.display().to_string()));
+    let href = Url::from_file_path(&abs).unwrap();
+    assert!(summary.contains(href.as_str()));
+}
+
+#[test]
+fn summary_file_uri_percent_encodes_reserved_characters() {
+    let term = Terminal::builder().osc_link_support(true).build();
+    let tmp = tempfile::tempdir().unwrap();
+    let sp = tmp.path().join("prompt #100%.md");
+    std::fs::write(&sp, "x").unwrap();
+    let source = SystemPromptSource::StandardDiscovered {
+        path: sp.clone(),
+        scope: crate::system_prompt::StandardPromptScope::Repo,
+    };
+    let summary = render_system_prompt_summary(
+        &source,
+        SystemPromptMode::Append,
+        10,
+        Some(tmp.path()),
+        &term,
+    );
+    let href = Url::from_file_path(sp.canonicalize().unwrap()).unwrap();
+
+    assert!(summary.contains(href.as_str()));
+    assert!(href.as_str().contains("prompt%20%23100%25.md"));
+}
+
+#[test]
+fn summary_declined_file_uri_falls_back_to_plain_text() {
+    let term = Terminal::builder().osc_link_support(true).build();
+    let path = PathBuf::from("missing prompt #100%.md");
+    let source = SystemPromptSource::StandardDiscovered {
+        path: path.clone(),
+        scope: crate::system_prompt::StandardPromptScope::Repo,
+    };
+    let summary = render_system_prompt_summary(&source, SystemPromptMode::Append, 10, None, &term);
+
+    assert!(!summary.contains("\x1b]8;;"));
+    assert!(strip_ansi_codes(&summary).contains(&to_portable_string(&path)));
 }
 
 // --- Body tests ---

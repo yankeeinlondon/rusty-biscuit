@@ -128,15 +128,21 @@ fn find_invalid_sound_effects(config: &ClaudineConfig) -> Vec<InvalidEffect> {
 }
 
 pub(super) fn validate_sound_effects(config: &ClaudineConfig) {
+    for line in render_invalid_sound_effects(config) {
+        log::data(&line);
+    }
+}
+
+fn render_invalid_sound_effects(config: &ClaudineConfig) -> Vec<String> {
     let invalid_effects = find_invalid_sound_effects(config);
 
     if invalid_effects.is_empty() {
-        return;
+        return Vec::new();
     }
 
-    log::data("");
+    let mut lines = vec![String::new()];
     let header = Prose::new("<yellow><bold>⚠ Invalid sound effects:</bold></yellow>");
-    log::data(&format!(
+    lines.push(format!(
         " {}",
         header.render(&crate::log::optimistic_terminal(Some(100)))
     ));
@@ -157,28 +163,29 @@ pub(super) fn validate_sound_effects(config: &ClaudineConfig) {
                 Prose::escape_text(&effect.invalid_name)
             ),
         };
-        log::data(&format!(
+        lines.push(format!(
             " {}",
             Prose::new(msg).render(&crate::log::optimistic_terminal(Some(100)))
         ));
     }
 
-    log::data("");
+    lines.push(String::new());
     if has_fixable {
         let hint = Prose::new(
             "<dim>Edit <blue>~/.claudine/config.json</blue> to apply suggested fixes</dim>",
         );
-        log::data(&format!(
+        lines.push(format!(
             " {}",
             hint.render(&crate::log::optimistic_terminal(Some(100)))
         ));
     }
     let hint =
         Prose::new("<dim>Run <blue>playa list-effects</blue> to see available effects</dim>");
-    log::data(&format!(
+    lines.push(format!(
         " {}",
         hint.render(&crate::log::optimistic_terminal(Some(100)))
     ));
+    lines
 }
 
 fn find_similar_effect(invalid: &str) -> Option<&'static str> {
@@ -740,4 +747,30 @@ pub(super) fn run_verbose(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalid_sound_effect_warning_renders_escaped_name() {
+        let config: ClaudineConfig = serde_json::from_str(
+            r#"{
+  "actions": {
+    "human_in_the_loop": [
+      { "type": "sound_effect", "effect": "bell<x>" }
+    ]
+  }
+}"#,
+        )
+        .unwrap();
+
+        let rendered = render_invalid_sound_effects(&config).join("\n");
+        assert!(rendered.contains("Invalid sound effects:"));
+        assert!(rendered.contains("bell<x>"));
+        assert!(!rendered.contains(r"bell\<x\>"));
+        assert!(!rendered.contains("{{"));
+        assert!(rendered.contains("playa list-effects"));
+    }
 }

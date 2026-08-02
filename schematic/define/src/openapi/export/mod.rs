@@ -19,6 +19,7 @@
 mod components;
 mod info;
 mod paths;
+mod parameters;
 mod request_body;
 mod responses;
 mod security;
@@ -501,5 +502,101 @@ mod tests {
             result.is_ok(),
             "export should succeed when all refs are resolved"
         );
+    }
+
+    /// Guards the wiring, not just the mapping: `map_parameters` had complete
+    /// unit coverage while `map_operation` still hardcoded `parameters: vec![]`,
+    /// so every exported spec shipped without query parameters.
+    #[test]
+    fn exported_operations_carry_declared_query_parameters() {
+        use crate::params::{EndpointParams, ParamDef, ParamStyle, QueryParamType};
+        use openapiv3::ReferenceOr;
+
+        let mut api = create_test_api();
+        api.endpoints = vec![Endpoint {
+            id: "ListItems".to_string(),
+            method: RestMethod::Get,
+            path: "/items".to_string(),
+            description: "List items".to_string(),
+            request: None,
+            response: ApiResponse::Empty,
+            headers: vec![],
+            params: Some(EndpointParams {
+                query: vec![ParamDef {
+                    name: "limit".to_string(),
+                    required: false,
+                    description: Some("Page size".to_string()),
+                    param_type: QueryParamType::Integer,
+                    explode: false,
+                    style: ParamStyle::Form,
+                }],
+                ..Default::default()
+            }),
+            oauth_scopes: None,
+        }];
+
+        let doc = export(&api, &TestRegistry::new(), &ExportOptions::new())
+            .expect("export should succeed");
+
+        let ReferenceOr::Item(path_item) = &doc.paths.paths["/items"] else {
+            panic!("expected an inline path item");
+        };
+        let operation = path_item.get.as_ref().expect("GET operation");
+
+        assert_eq!(
+            operation.parameters.len(),
+            1,
+            "declared query parameters must reach the exported operation"
+        );
+
+        let ReferenceOr::Item(openapiv3::Parameter::Query { parameter_data, .. }) =
+            &operation.parameters[0]
+        else {
+            panic!("expected an inline query parameter");
+        };
+        assert_eq!(parameter_data.name, "limit");
+        assert_eq!(parameter_data.description.as_deref(), Some("Page size"));
+    }
+
+    /// OpenAPI forbids duplicate entries in a parameter list; two methods on one
+    /// path each contribute the same path parameters.
+    #[test]
+    fn path_parameters_are_declared_once_per_path() {
+        use openapiv3::ReferenceOr;
+
+        let mut api = create_test_api();
+        api.endpoints = vec![
+            Endpoint {
+                id: "GetItem".to_string(),
+                method: RestMethod::Get,
+                path: "/items/{item_id}".to_string(),
+                description: "Get".to_string(),
+                request: None,
+                response: ApiResponse::Empty,
+                headers: vec![],
+                params: None,
+                oauth_scopes: None,
+            },
+            Endpoint {
+                id: "DeleteItem".to_string(),
+                method: RestMethod::Delete,
+                path: "/items/{item_id}".to_string(),
+                description: "Delete".to_string(),
+                request: None,
+                response: ApiResponse::Empty,
+                headers: vec![],
+                params: None,
+                oauth_scopes: None,
+            },
+        ];
+
+        let doc = export(&api, &TestRegistry::new(), &ExportOptions::new())
+            .expect("export should succeed");
+
+        let ReferenceOr::Item(path_item) = &doc.paths.paths["/items/{item_id}"] else {
+            panic!("expected an inline path item");
+        };
+
+        assert_eq!(path_item.parameters.len(), 1, "item_id declared twice");
     }
 }

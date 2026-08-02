@@ -11,9 +11,7 @@ pub(super) fn map_request_body(request: &ApiRequest) -> RequestBody {
             content.insert(
                 "application/json".to_string(),
                 MediaType {
-                    schema: Some(ReferenceOr::Reference {
-                        reference: format!("#/components/schemas/{}", schema.type_name),
-                    }),
+                    schema: Some(super::responses::schema_reference(&schema.type_name)),
                     ..Default::default()
                 },
             );
@@ -150,9 +148,7 @@ pub(super) fn map_form_fields_to_schema(fields: &[FormField]) -> openapiv3::Sche
                     ..Default::default()
                 },
                 schema_kind: openapiv3::SchemaKind::AllOf {
-                    all_of: vec![ReferenceOr::Reference {
-                        reference: format!("#/components/schemas/{}", schema.type_name),
-                    }],
+                    all_of: vec![super::responses::schema_reference(&schema.type_name)],
                 },
             },
         };

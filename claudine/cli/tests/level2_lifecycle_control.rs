@@ -135,6 +135,21 @@ fn write_succeeding_goose(bin_dir: &Path, events_log: &Path) {
     );
 }
 
+/// A fake `pi` that always exits 0 and records each invocation.
+///
+/// Pi is staged only so a refreshed `agent: pi` *resolves*; the AC15 rows that
+/// switch to it refuse before any second spawn, so a run that records
+/// `provider-ran` here is the failure those rows exist to catch.
+fn write_succeeding_pi(bin_dir: &Path, events_log: &Path) {
+    write_executable(
+        &bin_dir.join("pi"),
+        &format!(
+            "#!/bin/sh\ncat > /dev/null\nprintf 'provider-ran\\n' >> {log}\nexit 0\n",
+            log = events_log.display(),
+        ),
+    );
+}
+
 /// A fake `claude` that fails once after reporting a session id, then succeeds
 /// only when re-invoked through the provider's resume argv with the lifecycle
 /// follow-up prompt on stdin.
@@ -2916,8 +2931,16 @@ Original body
 // asserted by name where it moves — a row that moved one in isolation would be a
 // fiction.
 
-/// Stage a document plus the resumable fake `claude` and a fake `goose`, so a
-/// frontmatter `agent:` switch has real binaries on both sides of the change.
+/// Stage a document plus the resumable fake `claude` and fake `goose` and `pi`,
+/// so a frontmatter `agent:` switch has real binaries on both sides of the
+/// change.
+///
+/// Every provider an AC15 row can move *to* must be staged here. The child
+/// `PATH` appends the developer's own, so an unstaged target makes the row
+/// machine-dependent: the refreshed read aborts at agent resolution — before the
+/// resumed attempt's `start`, and so before the compatibility comparison ever
+/// runs — on a host that lacks the real CLI, and reaches the refusal on a host
+/// that has it.
 fn stage_resumable(doc: &str, session_id: &str, follow_up: &str) -> Staged {
     let workspace = tempdir().unwrap();
     let bin_dir = workspace.path().join("bin");
@@ -2928,6 +2951,7 @@ fn stage_resumable(doc: &str, session_id: &str, follow_up: &str) -> Staged {
     let events_log = workspace.path().join("events.log");
     write_resumable_claude(&bin_dir, &events_log, session_id, follow_up);
     write_succeeding_goose(&bin_dir, &events_log);
+    write_succeeding_pi(&bin_dir, &events_log);
 
     let md_file = workspace.path().join("doc.md");
     fs::write(&md_file, doc).unwrap();

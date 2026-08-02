@@ -55,7 +55,13 @@ fn test_home_dir_interpolation() {
     let target = home.join("integration_test_home.txt");
     fs::write(&target, "home content").unwrap();
     let abs_target = std::fs::canonicalize(&target).unwrap();
-    let content = format!("[home]({})", abs_target.display());
+    let content = format!(
+        "[home]({})",
+        abs_target
+            .to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .replace('\\', "/")
+    );
     let md = Markdown::new(&content);
     let options = ComposeOptions::new().only(&[
         ComposeOperation::LinkResolve,
@@ -79,16 +85,25 @@ fn test_env_var_interpolation() {
     fs::write(&target, "{}").unwrap();
     let abs_target = std::fs::canonicalize(&target).unwrap();
     let abs_root = std::fs::canonicalize(&project_root).unwrap();
-    unsafe {
-        std::env::set_var(
-            "PROJECT_ROOT_INTEGRATION",
-            abs_root.to_string_lossy().to_string(),
-        )
-    };
-    let content = format!("[config]({})", abs_target.display());
+    let mut env = std::collections::HashMap::new();
+    env.insert(
+        "PROJECT_ROOT_INTEGRATION".to_string(),
+        abs_root.to_string_lossy().into_owned(),
+    );
+    let snapshot = biscuit_file::FileResolutionContext::new(&project_root)
+        .without_home_dir()
+        .with_env(env);
+    let content = format!(
+        "[config]({})",
+        abs_target
+            .to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .replace('\\', "/")
+    );
     let md = Markdown::new(&content);
     let options = ComposeOptions::new()
         .with_env_path_whitelist(vec!["PROJECT_ROOT_INTEGRATION".to_string()])
+        .with_file_resolution_context(snapshot)
         .only(&[
             ComposeOperation::LinkResolve,
             ComposeOperation::LinkNormalization,
@@ -127,6 +142,13 @@ fn test_child_no_normalization() {
 
     let abs_path = std::fs::canonicalize(&target_file).unwrap();
     let abs_path_str = abs_path.to_string_lossy();
+    #[cfg(windows)]
+    let abs_path_str = abs_path_str
+        .strip_prefix(r"\\?\")
+        .unwrap_or(&abs_path_str)
+        .replace('\\', "/");
+    #[cfg(not(windows))]
+    let abs_path_str = abs_path_str.into_owned();
     let abs_path_clean = if abs_path_str.starts_with("/private/") {
         &abs_path_str[8..]
     } else {

@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Integration tests for `claudine sequence` schema validation.
 //!
 //! Split out of `sequence_cli.rs`: covers cross-step required-property
@@ -246,9 +248,8 @@ Step about {{config}}.
 /// - Step 1 has no `step_timeout`, so the effective deadline is `30s`. The
 ///   fake provider completes quickly and the step succeeds.
 /// - Step 2 declares `step_timeout: 1s` at the step level. The fake
-///   provider emits a single start event and then stalls, so the
-///   step-silence deadline fires at ~1s and the step is killed with a
-///   `step_timeout` error well before the 30s document fallback would.
+///   provider emits a start event and then stalls, so the step is killed with
+///   a `step_timeout` error well before the 30s document fallback would.
 #[cfg(unix)]
 #[test]
 fn sequence_per_step_step_timeout_override() {
@@ -319,21 +320,22 @@ exit 0
     let run_start = std::time::Instant::now();
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
+        .env("CLAUDINE_WATCHDOG_INTERVAL", "0.1s")
         .env("HOME", &fake_home)
         .env("PATH", augmented_path(&path_dir))
         .env("OPENCODE_MODEL", "test-model")
         .env("CLAUDINE_COUNT_FILE", &count_path)
         .current_dir(workspace.path())
-        .timeout(std::time::Duration::from_secs(25))
+        .timeout(std::time::Duration::from_secs(10))
         .args(["sequence", "--opencode", md_file.to_str().unwrap()])
         .assert()
         .failure();
     let elapsed = run_start.elapsed();
 
-    // The step-level 1s budget (plus the 5s SIGTERM grace) must win well
-    // before the 30s document fallback. Allow generous slack for slow CI.
+    // The step-level 1s budget must win well before the 30s document fallback.
     assert!(
-        elapsed < std::time::Duration::from_secs(20),
+        elapsed < std::time::Duration::from_secs(5),
         "per-step step_timeout override should fire quickly; run took {elapsed:?}"
     );
 

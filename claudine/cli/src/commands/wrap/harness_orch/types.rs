@@ -66,6 +66,32 @@ pub(crate) struct HarnessPromptState {
     /// control dispatch that decided the re-entry, so preparation reads the
     /// stage row rather than re-deriving it from loop-local state.
     pub(crate) entry: claudine::composition::DocumentEntryReason,
+    /// Request owner reused when this document is refreshed or proxies.
+    pub(crate) invocation_context: Option<claudine::invocation_context::InvocationContext>,
+    /// Definitive repository and file-resolution evidence for the active source.
+    ///
+    /// `Some` with no repository is authoritative: callers must not replace it
+    /// with the launch repository merely because the source is outside Git.
+    pub(crate) source_context: Option<claudine::invocation_context::SourceContext>,
+}
+
+impl HarnessPromptState {
+    pub(crate) fn file_resolution_context(&self) -> Option<&biscuit_file::FileResolutionContext> {
+        self.source_context
+            .as_ref()
+            .map(claudine::invocation_context::SourceContext::file_resolution_context)
+            .or(self.input_layers.file_resolution_context.as_ref())
+    }
+
+    pub(crate) fn repository_root_or<'a>(
+        &'a self,
+        compatibility_fallback: Option<&'a std::path::Path>,
+    ) -> Option<&'a std::path::Path> {
+        match self.source_context.as_ref() {
+            Some(source_context) => source_context.repository_root(),
+            None => compatibility_fallback,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -83,6 +109,8 @@ pub(crate) struct MaterializedHarnessPrompt {
     pub(crate) selection_hints: claudine::composition::EffectiveSelectionHints,
     pub(crate) inline_closure_plan: Option<claudine::composition::InlineClosurePlan>,
     pub(crate) file_resolution_context: Option<biscuit_file::FileResolutionContext>,
+    /// Exact early-binding context used for this materialization.
+    pub(crate) compose_context: Option<darkmatter::markdown::compose::ComposeContext>,
     /// The lifecycle config canonical preparation parsed for this document,
     /// with its shell commands already C3-resolved.
     ///

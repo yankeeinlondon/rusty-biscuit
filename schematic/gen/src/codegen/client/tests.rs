@@ -118,8 +118,12 @@ fn generate_request_method_no_auth() {
     assert!(code.contains("SchematicError::UnsupportedMethod"));
     assert!(code.contains("SchematicError::ApiError"));
 
-    // Check body handling
-    assert!(code.contains("if let Some(body) = body"));
+    // Check body handling: every RequestBody variant is dispatched
+    assert!(code.contains("crate::shared::RequestBody::Empty => req_builder"));
+    assert!(code.contains("crate::shared::RequestBody::Json(json)"));
+    assert!(code.contains("crate::shared::RequestBody::Multipart(parts)"));
+    assert!(code.contains("crate::shared::RequestBody::UrlEncoded(pairs)"));
+    assert!(code.contains("reqwest::multipart::Form::new()"));
     assert!(code.contains(r#"header("Content-Type", "application/json")"#));
 
     // Check response handling with hook support

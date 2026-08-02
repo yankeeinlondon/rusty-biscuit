@@ -30,14 +30,44 @@ use super::super::super::stream_io::StreamOutput;
 use super::breach::{format_duration, render_watchdog_error_to_stream};
 use super::evaluate::{WatchdogTickResult, evaluate_timeout_tick};
 
+/// The built-in idle-flush cadence, which is also the silence window a held
+/// block must clear before a tick releases it.
+///
+/// The tuning preserved from the previous heartbeat thread.
+const IDLE_FLUSH_DEFAULT: Duration = Duration::from_secs(30);
+
+/// Overrides [`IDLE_FLUSH_DEFAULT`] for both the cadence and the silence
+/// window. Sibling of `CLAUDINE_WATCHDOG_INTERVAL`, the other ticker period in
+/// the wrapper; a render knob, not a timeout rule — see
+/// `docs/topics/timeouts.md`.
+const IDLE_FLUSH_INTERVAL_ENV: &str = "CLAUDINE_IDLE_FLUSH_INTERVAL";
+
+/// Read [`IDLE_FLUSH_INTERVAL_ENV`], falling back to [`IDLE_FLUSH_DEFAULT`].
+///
+/// A render cadence has no honest failure mode, so an unset, malformed, or
+/// non-positive value takes the default rather than erroring the run — the
+/// same posture `CLAUDINE_WATCHDOG_INTERVAL` takes. `parse_timeout` rejects
+/// zero and negatives, which is what keeps a `0s` out of the tick arithmetic,
+/// where it would spin.
+fn resolve_idle_flush_interval() -> Duration {
+    super::super::timeouts::parse_env_duration(IDLE_FLUSH_INTERVAL_ENV)
+        .unwrap_or(IDLE_FLUSH_DEFAULT)
+}
+
 /// Spawn a dedicated ticker that runs `AssistantStream`'s idle flush
-/// (`StreamRenderable::flush_idle`) every 30 seconds.
+/// (`StreamRenderable::flush_idle`) on the [`IDLE_FLUSH_INTERVAL_ENV`] cadence
+/// (default 30 s), resolved once here at spawn.
 ///
 /// Independent from the prompt-scoped timing monitor so buffered markdown
 /// reaches stdout even on runs that have no prompt context (wrapper
 /// passthrough) and regardless of whether any periodic header is being
-/// emitted. The 30-second cadence and 30-second silence window are the
-/// tuning preserved from the previous heartbeat thread.
+/// emitted.
+///
+/// Cadence and silence window are deliberately the same value: the window
+/// means "held for at least one full tick", which releases a block on the
+/// first or second tick after it was stamped and never later. A window longer
+/// than the cadence would only spend ticks that cannot flush; a shorter one
+/// buys no granularity, since nothing between ticks can observe it.
 ///
 /// When `watchdog_state` is provided and the unified `step_timeout` rule
 /// is enabled, the ticker also emits at most one diagnostic line per
@@ -55,15 +85,15 @@ pub(crate) fn spawn_flush_if_idle_ticker(
     timeout_config: TimeoutConfig,
     framed_writer: Option<Arc<std::sync::Mutex<claudine::render::TaskFrameWriter>>>,
 ) -> (TickerCancel, thread::JoinHandle<()>) {
-    const SILENCE_WINDOW: Duration = Duration::from_secs(30);
-    const CADENCE: Duration = Duration::from_secs(30);
+    let cadence = resolve_idle_flush_interval();
+    let silence_window = cadence;
 
     let cancel = TickerCancel::new();
     let cancel_flag = cancel.clone();
     let handle = thread::spawn(move || {
         let section_stream = section_tracker
             .map(|tracker| SectionStream::with_tracker(stream_output.clone(), tracker));
-        let mut next_tick = Instant::now() + CADENCE;
+        let mut next_tick = Instant::now() + cadence;
         while !cancel_flag.is_cancelled() {
             let now = Instant::now();
             if now >= next_tick {
@@ -71,7 +101,7 @@ pub(crate) fn spawn_flush_if_idle_ticker(
                     &text_renderer,
                     &framed_writer,
                     &stream_output,
-                    SILENCE_WINDOW,
+                    silence_window,
                 );
 
                 // Emit subagent idle diagnostics only when the unified
@@ -81,7 +111,7 @@ pub(crate) fn spawn_flush_if_idle_ticker(
                     && let Some(ref state) = watchdog_state
                     && let Ok(mut guard) = state.lock()
                 {
-                    let lines = guard.diagnostic_lines(now, SILENCE_WINDOW);
+                    let lines = guard.diagnostic_lines(now, silence_window);
                     drop(guard);
                     for line in lines {
                         let elapsed_text = format_duration(line.elapsed_since_start);
@@ -97,7 +127,7 @@ pub(crate) fn spawn_flush_if_idle_ticker(
                     }
                 }
 
-                next_tick += CADENCE;
+                next_tick += cadence;
                 continue;
             }
             let sleep_for = next_tick
@@ -288,7 +318,7 @@ pub(crate) fn spawn_prompt_timing_monitor(
 ) -> (TickerCancel, thread::JoinHandle<()>) {
     let cancel = TickerCancel::new();
     let cancel_flag = cancel.clone();
-    let prompt_path_display = prompt_timing.absolute_path.display().to_string();
+    let prompt_path_display = biscuit_file::to_portable_string(&prompt_timing.absolute_path);
 
     let handle = thread::spawn(move || {
         let term = crate::log::terminal();
@@ -514,6 +544,40 @@ mod tests {
     use super::*;
     use crate::commands::wrap::exec::new_assistant_stream_inset;
     use crate::commands::wrap::exec::task_frame_fixtures::colored_writer;
+    use test_toolkit::EnvGuard;
+
+    /// The seam must be invisible in production: with nothing in the
+    /// environment the ticker keeps the 30s tuning it has always had.
+    #[test]
+    #[serial_test::serial(claudine_idle_flush_interval)]
+    fn absent_override_keeps_the_thirty_second_default() {
+        let _guard = EnvGuard::remove_safe(IDLE_FLUSH_INTERVAL_ENV);
+
+        assert_eq!(resolve_idle_flush_interval(), Duration::from_secs(30));
+    }
+
+    #[test]
+    #[serial_test::serial(claudine_idle_flush_interval)]
+    fn valid_override_is_honored() {
+        let _guard = EnvGuard::set_safe(IDLE_FLUSH_INTERVAL_ENV, "3s");
+
+        assert_eq!(resolve_idle_flush_interval(), Duration::from_secs(3));
+    }
+
+    /// Garbage must not error the run, and `0s` must not become a spin loop —
+    /// both take the default.
+    #[test]
+    #[serial_test::serial(claudine_idle_flush_interval)]
+    fn unusable_override_falls_back_to_the_default() {
+        for raw in ["", "   ", "soon", "30", "500ms", "0s", "-5s"] {
+            let _guard = EnvGuard::set_safe(IDLE_FLUSH_INTERVAL_ENV, raw);
+            assert_eq!(
+                resolve_idle_flush_interval(),
+                Duration::from_secs(30),
+                "`{raw}` must fall back to the built-in cadence"
+            );
+        }
+    }
 
     /// A long-running task holds a partial Markdown block past the idle window.
     /// Before the framed arm existed the flush went straight out through

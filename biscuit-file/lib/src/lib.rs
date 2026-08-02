@@ -97,6 +97,7 @@ mod detect;
 mod error;
 mod format;
 mod list_format;
+mod path_text;
 mod span;
 
 // `span_serde` is re-exported alongside the type it adapts: `Range` has no
@@ -132,6 +133,9 @@ pub use format::DataFormat;
 
 // Re-export list-shape classification and conversion
 pub use list_format::{ListFormat, classify_list};
+
+// Re-export the path→text rendering boundary
+pub use path_text::{to_portable_string, try_portable_string};
 
 // Re-export format-specific types
 #[cfg(feature = "toml")]

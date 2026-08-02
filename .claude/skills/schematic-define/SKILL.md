@@ -34,6 +34,20 @@ Pick the right `ApiResponse`, because generated method shape depends on it:
 
 If an endpoint returns bytes/text but is modeled as JSON, generated clients call the wrong response parser.
 
+There is no streaming variant. SSE and NDJSON endpoints are modeled as `Binary`
+and framed by the caller — see `definitions/src/ollama/mod.rs:316`.
+
+### 1a) Request Bodies Reach the Client (all variants)
+
+`Json`, `FormData`, and `UrlEncoded` all generate a real body. A form endpoint
+gets a synthesized `{EndpointId}Form` struct — file parts typed
+`shared::FormFile`, text parts `String`, optional fields `Option<T>` — reached
+through the usual `pub body:` field.
+
+`into_parts` returns `shared::RequestBody` (`Empty` / `Json` / `Multipart` /
+`UrlEncoded` / `Raw`), **not** `Option<String>`. `Text` and `Binary` bodies are
+still not carried on the request struct.
+
 ### 2) Auth Strategies Include Query/Cookie API Keys
 
 `AuthStrategy` is broader than bearer/header-only patterns:
@@ -127,6 +141,10 @@ x-schematic:
 
 Keep these aligned when docs/examples mention built-in APIs:
 
+- OpenAI: 265 endpoints, 1394 types, bearer auth via `OPENAI_API_KEY`. **Generated**
+  from `schematic/specs/openai/openapi.yaml` — never hand-edit
+  `definitions/src/openai/`; re-run `just -f schematic/justfile import-openai`.
+  Excludes the deprecated Assistants family (`/assistants`, `/threads`).
 - LM Studio: 6 endpoints, bearer auth via `LM_API_TOKEN`
 - EMQX Basic: 36 endpoints, basic auth via `EMQX_API_KEY` + `EMQX_API_SECRET`
 - EMQX Bearer: 38 endpoints, bearer auth via `EMQX_TOKEN`
@@ -172,6 +190,31 @@ cargo test -p schematic-gen
 just -f schematic/justfile generate
 cargo check -p schematic-schema
 ```
+
+## Importing an API From a Published Spec
+
+`schematic-gen import` turns an OpenAPI document into either a standalone client
+(`--output`) or a definitions-crate module (`--definitions-out`). The second form
+writes `mod.rs` (a `define_{api}_api()` plus `openapi_registry()`) and `types.rs`,
+so the imported API flows through the normal `generate` pipeline.
+
+- `--exclude-path <PREFIX>` drops endpoints by path prefix (repeatable).
+- Out-of-`i64` schema bounds are clamped with a warning rather than failing the
+  parse (`import/normalize.rs`) — OpenAI's `seed` bounds need this.
+- Bodies and responses with no named schema become the type path
+  `serde_json::Value`. That is a path, not an identifier: render it with
+  `syn` parsing, never `format_ident!`.
+
+## Known Gaps
+
+- `Endpoint.params` is still dropped by the OpenAPI exporter (`export/paths.rs`),
+  so exported specs carry no query parameters.
+- `oneOf`/`anyOf` over *inline* (unnamed) schemas produce untagged enums whose
+  variants are all `serde_json::Value` (e.g. `MessageStreamEvent`); only named
+  members get real types.
+
+See `schematic/reviews/2026-07-31-macro-review/spec.md` §10 for the full defect
+ledger before touching schematic codegen.
 
 ## Remaining Testing Gap
 

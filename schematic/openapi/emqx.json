@@ -374,24 +374,6 @@
             "type": "string"
           },
           "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "clientid",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "clientid",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
         }
       ]
     },
@@ -697,24 +679,6 @@
             "type": "string"
           },
           "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "topic",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "topic",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
         }
       ]
     },
@@ -867,42 +831,6 @@
         }
       },
       "parameters": [
-        {
-          "in": "path",
-          "name": "id",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "id",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "id",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "id",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
         {
           "in": "path",
           "name": "id",
@@ -1128,24 +1056,6 @@
         }
       },
       "parameters": [
-        {
-          "in": "path",
-          "name": "id",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "id",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
         {
           "in": "path",
           "name": "id",

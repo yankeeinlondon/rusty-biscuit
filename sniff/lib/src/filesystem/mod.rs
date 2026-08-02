@@ -3,7 +3,7 @@ use crate::performance;
 use crate::request::{FilesystemRequest, GitRequest, RepoRequest};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tracing::Level;
 use tracing::instrument;
@@ -30,9 +30,10 @@ pub use file_types::{
 pub use formatting::{EditorConfigSection, FormattingConfig, detect_formatting};
 pub use git::{
     BehindStatus, CommitDesc, CommitDescSet, CommitInfo, DEFAULT_PATH_HISTORY_SCAN_LIMIT, DeltaKind,
-    GitHostingProvider, GitInfo, GitRepo, LocalBranchInfo, PathHistoryOptions, PathHistoryResult,
-    PeriodSpecifier, RemoteInfo, RepoStatus, commit_browser_url, commit_by_sha_at, commit_files_at,
-    commits_for_branch_at, commits_for_path_at, detect_git, detect_git_with_request,
+    FileChange, GitHostingProvider, GitInfo, GitRepo, LocalBranchInfo, PathHistoryOptions,
+    PathHistoryResult, PeriodSpecifier, RemoteInfo, RepoStatus, commit_browser_url,
+    commit_by_sha_at, commit_files_at, commits_for_branch_at, commits_for_path_at, detect_git,
+    detect_git_with_request,
     detect_merge_conflicts, get_commit_by_sha, get_commit_files, get_commits_for_branch,
     get_commits_for_path, get_recent_commits_by_count, get_recent_commits_by_date,
     get_recent_commits_by_duration, get_recent_commits_by_hash, get_recent_commits_in_range,
@@ -67,6 +68,218 @@ pub struct FilesystemInfo {
     /// Markdown documents in the repository
     #[serde(skip_serializing_if = "Option::is_none")]
     pub docs: Option<Vec<MarkdownMeta>>,
+}
+
+/// Immutable path identity for a discovered Git repository.
+///
+/// `git_dir` is worktree-specific, while `common_dir` may be shared by linked
+/// worktrees. Consumers that key observations must therefore include
+/// `git_dir` rather than collapsing repositories by `common_dir` alone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitRepositoryIdentity {
+    repo_root: PathBuf,
+    git_dir: PathBuf,
+    common_dir: PathBuf,
+    is_bare: bool,
+}
+
+impl GitRepositoryIdentity {
+    /// Working-tree root, or the Git directory for a bare repository.
+    pub fn repo_root(&self) -> &Path {
+        &self.repo_root
+    }
+
+    /// Worktree-specific Git directory.
+    pub fn git_dir(&self) -> &Path {
+        &self.git_dir
+    }
+
+    /// Git directory shared by all linked worktrees.
+    pub fn common_dir(&self) -> &Path {
+        &self.common_dir
+    }
+
+    /// Whether the repository has no working tree.
+    pub fn is_bare(&self) -> bool {
+        self.is_bare
+    }
+}
+
+#[derive(Debug)]
+struct ObservedGitRepository {
+    identity: GitRepositoryIdentity,
+    handle: Mutex<GitRepo>,
+}
+
+#[derive(Debug, Clone)]
+enum GitObservation {
+    Present(Arc<ObservedGitRepository>),
+    Absent,
+    Failed(Arc<crate::SniffError>),
+}
+
+/// A reusable, request-scoped Git filesystem observation.
+///
+/// Clones share one discovered repository handle. Git queries are serialized
+/// because the underlying gix handle has request-local mutable caches and is
+/// intentionally not `Sync`. Absence and discovery failures are retained too,
+/// so later consumers do not repeat an upward repository search.
+#[derive(Debug, Clone)]
+pub struct FilesystemObservation {
+    observed_root: PathBuf,
+    git: GitObservation,
+}
+
+impl FilesystemObservation {
+    /// Discover and retain the Git repository containing `root`.
+    ///
+    /// Discovery failures are stored in the returned observation. Consumers
+    /// surface the retained typed failure through [`Self::discovery_error`] or
+    /// a [`crate::SniffError::RetainedObservation`] without retrying discovery.
+    pub fn discover(root: &Path) -> Self {
+        let git = match GitRepo::discover(root) {
+            Ok(Some(handle)) => {
+                let identity = GitRepositoryIdentity {
+                    repo_root: handle.repo_root().to_path_buf(),
+                    git_dir: handle.git_dir().to_path_buf(),
+                    common_dir: handle.common_dir().to_path_buf(),
+                    is_bare: handle.is_bare(),
+                };
+                GitObservation::Present(Arc::new(ObservedGitRepository {
+                    identity,
+                    handle: Mutex::new(handle),
+                }))
+            }
+            Ok(None) => GitObservation::Absent,
+            Err(error) => GitObservation::Failed(Arc::new(error)),
+        };
+        Self {
+            observed_root: root.to_path_buf(),
+            git,
+        }
+    }
+
+    /// Path from which this observation was acquired.
+    pub fn observed_root(&self) -> &Path {
+        &self.observed_root
+    }
+
+    /// Rebase this observation to another directory in the same worktree.
+    ///
+    /// Present repositories permit descendants of their working-tree root as
+    /// long as no nested `.git` boundary intervenes. Bare repositories,
+    /// explicit absence, and failed discovery remain exact-root observations.
+    /// This operation performs bounded path validation but no Git discovery.
+    pub fn for_root(&self, root: &Path) -> Result<Self> {
+        if root == self.observed_root {
+            return Ok(self.clone());
+        }
+        let GitObservation::Present(repository) = &self.git else {
+            return Err(observation_rebase_error(&self.observed_root, root));
+        };
+        if repository.identity.is_bare() {
+            return Err(observation_rebase_error(&self.observed_root, root));
+        }
+
+        let root_canonical = canonicalize_observation_path(root)?;
+        let repo_canonical = canonicalize_observation_path(repository.identity.repo_root())?;
+        if !root_canonical.starts_with(&repo_canonical)
+            || has_nested_git_boundary(&root_canonical, &repo_canonical)?
+        {
+            return Err(observation_rebase_error(&self.observed_root, root));
+        }
+
+        Ok(Self {
+            observed_root: root.to_path_buf(),
+            git: self.git.clone(),
+        })
+    }
+
+    /// Repository identity, explicit absence, or the retained discovery error.
+    pub fn repository_identity(&self) -> Result<Option<&GitRepositoryIdentity>> {
+        match &self.git {
+            GitObservation::Present(repository) => Ok(Some(&repository.identity)),
+            GitObservation::Absent => Ok(None),
+            GitObservation::Failed(error) => Err(retained_observation_error(error)),
+        }
+    }
+
+    /// Original typed discovery failure, if acquisition failed.
+    pub fn discovery_error(&self) -> Option<&crate::SniffError> {
+        match &self.git {
+            GitObservation::Failed(error) => Some(error.as_ref()),
+            GitObservation::Present(_) | GitObservation::Absent => None,
+        }
+    }
+
+    /// Detect Git facts with the retained repository handle.
+    ///
+    /// Returns `Ok(None)` for a retained non-repository observation.
+    pub fn detect_git(&self, request: &GitRequest) -> Result<Option<GitInfo>> {
+        self.with_repository(|repo| repo.detect_with_request(request))
+    }
+
+    /// Capture per-file working-tree changes with the retained repository handle.
+    ///
+    /// The projection includes staged, unstaged, and untracked paths plus line
+    /// statistics, but not unified diff payloads. Returns `Ok(None)` for a
+    /// retained non-repository observation.
+    pub fn detect_file_changes(&self) -> Result<Option<Vec<FileChange>>> {
+        self.with_repository(GitRepo::file_changes)
+    }
+
+    fn with_repository<T>(&self, f: impl FnOnce(&GitRepo) -> Result<T>) -> Result<Option<T>> {
+        match &self.git {
+            GitObservation::Present(repository) => {
+                let handle = repository
+                    .handle
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                f(&handle).map(Some)
+            }
+            GitObservation::Absent => Ok(None),
+            GitObservation::Failed(error) => Err(retained_observation_error(error)),
+        }
+    }
+}
+
+fn retained_observation_error(error: &Arc<crate::SniffError>) -> crate::SniffError {
+    crate::SniffError::RetainedObservation {
+        source: error.clone(),
+    }
+}
+
+fn canonicalize_observation_path(path: &Path) -> Result<PathBuf> {
+    performance::increment_counter(performance::counters::FS_CANONICALIZATIONS, 1);
+    std::fs::canonicalize(path).map_err(crate::SniffError::Io)
+}
+
+fn has_nested_git_boundary(root: &Path, repository_root: &Path) -> Result<bool> {
+    let mut current = root;
+    while current != repository_root {
+        performance::increment_counter(performance::counters::FS_METADATA_PROBES, 1);
+        match std::fs::symlink_metadata(current.join(".git")) {
+            Ok(_) => return Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(crate::SniffError::Io(error)),
+        }
+        let Some(parent) = current.parent() else {
+            return Ok(true);
+        };
+        current = parent;
+    }
+    Ok(false)
+}
+
+fn observation_rebase_error(observed_root: &Path, requested_root: &Path) -> crate::SniffError {
+    crate::SniffError::SystemInfo {
+        domain: "filesystem",
+        message: format!(
+            "filesystem observation for '{}' cannot be reused at '{}'",
+            observed_root.display(),
+            requested_root.display()
+        ),
+    }
 }
 
 /// Which consumers of a request need evidence from a descendant walk.
@@ -184,7 +397,24 @@ pub fn detect_filesystem_with_request(
     root: &Path,
     request: &FilesystemRequest,
 ) -> Result<FilesystemInfo> {
-    Ok(detect_filesystem_with_request_inner(root, request, false)?.filesystem)
+    Ok(detect_filesystem_with_request_inner(root, request, false, None)?.filesystem)
+}
+
+/// Detect filesystem information using an already acquired Git observation.
+///
+/// The observation must have been acquired for `root`. Supplying it prevents
+/// any additional upward Git discovery and leaves the shared handle available
+/// to the caller for later request-scoped Git facts.
+pub fn detect_filesystem_with_observation(
+    root: &Path,
+    request: &FilesystemRequest,
+    observation: &FilesystemObservation,
+) -> Result<FilesystemInfo> {
+    validate_observation_root(root, observation)?;
+    Ok(
+        detect_filesystem_with_request_inner(root, request, false, Some(observation))?
+            .filesystem,
+    )
 }
 
 pub(crate) struct AggregateFilesystemDetection {
@@ -201,56 +431,67 @@ pub(crate) fn detect_filesystem_for_aggregate(
     root: &Path,
     request: &FilesystemRequest,
 ) -> Result<AggregateFilesystemDetection> {
-    detect_filesystem_with_request_inner(root, request, true)
+    detect_filesystem_with_request_inner(root, request, true, None)
 }
 
 fn detect_filesystem_with_request_inner(
     root: &Path,
     request: &FilesystemRequest,
     collect_aggregate: bool,
+    observation: Option<&FilesystemObservation>,
 ) -> Result<AggregateFilesystemDetection> {
     let collector = performance::current_collector();
     let need_repo_context = request.repo.is_some() || request.include_docs;
     let consumers = WalkConsumers::of(request);
     let walk_scope = WalkScope::of(&consumers);
 
-    // Discover the repository once up front when git detection is requested,
-    // then thread that single handle into the git stage and reuse its work
-    // directory as the shared-walk root. This removes the redundant second
-    // discovery (parent walk + repo open) the git stage used to perform on
-    // every invocation that renders git alongside repo/docs/inventory. When git
-    // detection is not requested, the provided root is always the walk root.
-    let discovered_git = match request.git.as_ref() {
-        Some(_) => GitRepo::discover(root)?,
-        None => None,
+    // Ambient requests acquire one observation here. Seeded requests reuse the
+    // caller's retained observation, including repository absence or failure.
+    // Both paths use that same handle for Git facts and shared-walk root
+    // selection. Requests without Git keep the provided root as their walk root.
+    let acquired_observation;
+    let git_observation = match (request.git.as_ref(), observation) {
+        (Some(_), Some(observation)) => Some(observation),
+        (Some(_), None) => {
+            acquired_observation = FilesystemObservation::discover(root);
+            Some(&acquired_observation)
+        }
+        (None, _) => None,
     };
-    let shared_root = match &discovered_git {
+    let shared_root = match git_observation
+        .map(FilesystemObservation::repository_identity)
+        .transpose()?
+        .flatten()
+    {
         // A bare repository's `repo_root` is its git directory. Walking that as
         // a source tree would inventory git internals, so keep the caller's root.
-        Some(handle) if !handle.is_bare() => handle.repo_root().to_path_buf(),
+        Some(identity) if !identity.is_bare() => identity.repo_root().to_path_buf(),
         _ => root.to_path_buf(),
     };
 
     std::thread::scope(|scope| {
         let git_handle = request.git.as_ref().map(|git_request| {
             let collector = collector.clone();
-            let discovered = discovered_git;
+            let observation = git_observation.cloned();
             scope.spawn(move || {
                 performance::with_current_collector(collector, || {
                     let git_started = Instant::now();
                     let detected: Result<(
                         Option<GitInfo>,
                         Option<git::types::GitAggregateEvidence>,
-                    )> = match discovered {
-                        Some(repo) => {
+                    )> = observation
+                        .expect("Git request always has an observation")
+                        .with_repository(|repo| {
                             let info = repo.detect_with_request(git_request)?;
                             let aggregate = collect_aggregate
                                 .then(|| repo.observe_aggregate_evidence())
                                 .transpose()?;
-                            Ok((Some(info), aggregate))
-                        }
-                        None => Ok((None, None)),
-                    };
+                            Ok((info, aggregate))
+                        })
+                        .map(|detected| match detected {
+                            Some((info, aggregate)) => (Some(info), aggregate),
+                            None => (None, None),
+                        });
                     performance::record_logged_stage(
                         "filesystem.git",
                         git_started.elapsed(),
@@ -451,6 +692,20 @@ fn detect_filesystem_with_request_inner(
     })
 }
 
+fn validate_observation_root(root: &Path, observation: &FilesystemObservation) -> Result<()> {
+    if root == observation.observed_root() {
+        return Ok(());
+    }
+    Err(crate::SniffError::SystemInfo {
+        domain: "filesystem",
+        message: format!(
+            "filesystem observation for '{}' cannot seed request rooted at '{}'",
+            observation.observed_root().display(),
+            root.display()
+        ),
+    })
+}
+
 /// Detect all filesystem information for a directory.
 ///
 /// ## Arguments
@@ -540,6 +795,7 @@ fn filter_inventory(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::performance::{counters, testing};
     use crate::request::{DetectionPlan, GitRequest, RepoRequest};
 
     /// Creates a temporary git repo with a committed file and an uncommitted
@@ -570,6 +826,250 @@ mod tests {
 
         let path = dir.path().to_path_buf();
         (dir, path)
+    }
+
+    fn seeded_fixture_request() -> FilesystemRequest {
+        FilesystemRequest::new()
+            .git(GitRequest::identity())
+            .repo(RepoRequest::structure())
+            .without_docs()
+            .without_formatting()
+            .without_file_inventory()
+    }
+
+    fn assert_seeded_git_semantics(root: &Path, expected_root: &Path, expected_bare: bool) {
+        let observation = FilesystemObservation::discover(root);
+        let identity = observation
+            .repository_identity()
+            .expect("discovery should not fail")
+            .expect("fixture should be a repository");
+        assert_eq!(
+            identity.repo_root().canonicalize().unwrap(),
+            expected_root.canonicalize().unwrap()
+        );
+        assert_eq!(identity.is_bare(), expected_bare);
+
+        let (result, counts) = testing::measure(|| {
+            detect_filesystem_with_observation(root, &seeded_fixture_request(), &observation)
+        });
+        let filesystem = result.expect("seeded detection should succeed");
+        assert!(filesystem.git.is_some());
+        assert_eq!(
+            counts.get(counters::GIT_DISCOVERIES),
+            0,
+            "seeded execution must not rediscover the repository; counters were {:?}",
+            counts.all()
+        );
+    }
+
+    #[test]
+    fn seeded_and_ordinary_detection_are_equivalent() {
+        let (_dir, path) = create_dirty_git_repo();
+        std::fs::write(
+            path.join("Cargo.toml"),
+            "[package]\nname = \"seed-equivalence\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let request = seeded_fixture_request();
+
+        let ordinary = detect_filesystem_with_request(&path, &request).unwrap();
+        let observation = FilesystemObservation::discover(&path);
+        let (seeded, counts) = testing::measure(|| {
+            detect_filesystem_with_observation(&path, &request, &observation)
+        });
+        let seeded = seeded.unwrap();
+
+        assert_eq!(
+            serde_json::to_value(&seeded.git).unwrap(),
+            serde_json::to_value(&ordinary.git).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_value(&seeded.repo).unwrap(),
+            serde_json::to_value(&ordinary.repo).unwrap()
+        );
+        assert_eq!(
+            seeded.git.as_ref().map(|git| &git.repo_root),
+            ordinary.git.as_ref().map(|git| &git.repo_root)
+        );
+        assert_eq!(counts.get(counters::GIT_DISCOVERIES), 0);
+    }
+
+    #[test]
+    fn seeded_and_ordinary_non_repository_detection_are_equivalent() {
+        let dir = tempfile::tempdir().unwrap();
+        let request = seeded_fixture_request();
+        let ordinary = detect_filesystem_with_request(dir.path(), &request).unwrap();
+        let observation = FilesystemObservation::discover(dir.path());
+        assert!(observation.repository_identity().unwrap().is_none());
+
+        let (seeded, counts) = testing::measure(|| {
+            detect_filesystem_with_observation(dir.path(), &request, &observation)
+        });
+        let seeded = seeded.unwrap();
+        assert!(ordinary.git.is_none());
+        assert!(ordinary.repo.is_none());
+        assert!(seeded.git.is_none());
+        assert!(seeded.repo.is_none());
+        assert_eq!(counts.get(counters::GIT_DISCOVERIES), 0);
+    }
+
+    #[test]
+    fn seeded_observation_preserves_normal_linked_bare_and_nested_identity() {
+        let (normal_dir, normal_path) = create_dirty_git_repo();
+        assert_seeded_git_semantics(&normal_path, &normal_path, false);
+
+        let linked_path = normal_path.join("linked-worktree");
+        let repo = git2::Repository::open(&normal_path).unwrap();
+        repo.worktree("linked-worktree", &linked_path, None)
+            .unwrap();
+        assert!(linked_path.join(".git").is_file());
+        let linked = FilesystemObservation::discover(&linked_path);
+        let linked_identity = linked.repository_identity().unwrap().unwrap();
+        assert_ne!(linked_identity.git_dir(), linked_identity.common_dir());
+        assert_seeded_git_semantics(&linked_path, &linked_path, false);
+
+        let bare_parent = tempfile::tempdir().unwrap();
+        let bare_path = bare_parent.path().join("bare.git");
+        git2::Repository::init_bare(&bare_path).unwrap();
+        assert_seeded_git_semantics(&bare_path, &bare_path, true);
+
+        let nested_path = normal_path.join("nested");
+        std::fs::create_dir_all(&nested_path).unwrap();
+        git2::Repository::init(&nested_path).unwrap();
+        let nested = FilesystemObservation::discover(&nested_path);
+        let nested_identity = nested.repository_identity().unwrap().unwrap();
+        assert_eq!(
+            nested_identity.repo_root().canonicalize().unwrap(),
+            nested_path.canonicalize().unwrap()
+        );
+        assert_ne!(
+            nested_identity.git_dir().canonicalize().unwrap(),
+            normal_path.join(".git").canonicalize().unwrap()
+        );
+        assert_seeded_git_semantics(&nested_path, &nested_path, false);
+
+        drop(normal_dir);
+    }
+
+    #[test]
+    fn failed_observation_is_reused_without_retry() {
+        let dir = tempfile::tempdir().unwrap();
+        git2::Repository::init(dir.path()).unwrap();
+        std::fs::write(dir.path().join(".git").join("config"), "[core\n").unwrap();
+
+        let ((observation, first, second), counts) = testing::measure(|| {
+            let observation = FilesystemObservation::discover(dir.path());
+            let first = detect_filesystem_with_observation(
+                dir.path(),
+                &seeded_fixture_request(),
+                &observation,
+            );
+            let second = observation.detect_git(&GitRequest::identity());
+            (observation, first, second)
+        });
+
+        assert!(observation.discovery_error().is_some());
+        assert!(first.is_err());
+        assert!(second.is_err());
+        assert_eq!(
+            counts.get(counters::GIT_DISCOVERIES),
+            1,
+            "captured failure must be reused rather than retried; counters were {:?}",
+            counts.all()
+        );
+    }
+
+    #[test]
+    fn seeded_filesystem_worker_propagates_status_counters() {
+        let (_dir, path) = create_dirty_git_repo();
+        let observation = FilesystemObservation::discover(&path);
+        let request = FilesystemRequest::new()
+            .git(GitRequest::full())
+            .without_repo()
+            .without_docs()
+            .without_formatting()
+            .without_file_inventory();
+
+        let (result, counts) = testing::measure(|| {
+            detect_filesystem_with_observation(&path, &request, &observation)
+        });
+        assert!(
+            result
+                .unwrap()
+                .git
+                .and_then(|git| git.status)
+                .is_some_and(|status| status.is_dirty)
+        );
+        assert_eq!(counts.get(counters::GIT_DISCOVERIES), 0);
+        assert_eq!(
+            counts.get(counters::GIT_STATUS_WALKS),
+            1,
+            "filesystem worker work must reach its parent's collector; counters were {:?}",
+            counts.all()
+        );
+    }
+
+    #[test]
+    fn seeded_file_changes_reuse_the_observed_handle() {
+        let (_dir, path) = create_dirty_git_repo();
+        let observation = FilesystemObservation::discover(&path);
+
+        let (changes, counts) = testing::measure(|| observation.detect_file_changes());
+        let changes = changes
+            .unwrap()
+            .expect("fixture should have a repository observation");
+        assert!(
+            changes.iter().any(|change| change.path == Path::new("hello.txt")),
+            "modified tracked file should be projected: {changes:?}"
+        );
+        assert!(
+            changes
+                .iter()
+                .any(|change| change.path == Path::new("untracked.txt")),
+            "untracked file should be projected: {changes:?}"
+        );
+        assert_eq!(counts.get(counters::GIT_DISCOVERIES), 0);
+        assert_eq!(counts.get(counters::GIT_STATUS_WALKS), 1);
+    }
+
+    #[test]
+    fn rebased_observation_reuses_same_worktree_without_discovery() {
+        let (_dir, path) = create_dirty_git_repo();
+        let source_root = path.join("packages").join("example");
+        std::fs::create_dir_all(&source_root).unwrap();
+        let observation = FilesystemObservation::discover(&path);
+
+        let (result, counts) = testing::measure(|| {
+            let source_observation = observation.for_root(&source_root)?;
+            detect_filesystem_with_observation(
+                &source_root,
+                &FilesystemRequest::new()
+                    .git(GitRequest::identity())
+                    .without_repo()
+                    .without_docs()
+                    .without_formatting()
+                    .without_file_inventory(),
+                &source_observation,
+            )
+        });
+
+        let git = result
+            .unwrap()
+            .git
+            .expect("rebased same-worktree observation should retain Git");
+        assert_eq!(
+            git.repo_root.canonicalize().unwrap(),
+            path.canonicalize().unwrap()
+        );
+        assert_eq!(counts.get(counters::GIT_DISCOVERIES), 0);
+
+        let outside = tempfile::tempdir().unwrap();
+        assert!(observation.for_root(outside.path()).is_err());
+
+        let nested = path.join("nested-repository");
+        std::fs::create_dir_all(&nested).unwrap();
+        git2::Repository::init(&nested).unwrap();
+        assert!(observation.for_root(&nested).is_err());
     }
 
     #[test]

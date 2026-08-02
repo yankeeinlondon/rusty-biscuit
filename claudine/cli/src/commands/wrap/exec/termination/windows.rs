@@ -452,6 +452,8 @@ fn windows_wait_loop(
     // because we assign immediately after `Command::spawn`.
     if child_in_own_pgroup {
         unsafe { AssignProcessToJobObject(as_handle(job.raw()), child_handle)?; }
+        #[cfg(test)]
+        tests::signal_job_assignment(child_pid);
     }
 
     // Declared after `job` so it drops *first*: the console handler may
@@ -598,6 +600,7 @@ fn windows_wait_loop(
 mod tests {
     use super::*;
     use std::fs;
+    use std::os::windows::fs::OpenOptionsExt;
     use std::os::windows::process::CommandExt;
     use std::path::{Path, PathBuf};
     use std::process::{Command, Stdio};
@@ -606,42 +609,151 @@ mod tests {
     /// production, and the precondition for `child_in_own_pgroup == true`.
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 
-    /// Long enough that the descendant's own lifetime can never be mistaken for
-    /// a Job kill within the assertion budget below.
-    const DESCENDANT_PINGS: u32 = 300;
+    static JOB_ASSIGNMENT_SIGNAL: std::sync::Mutex<Option<(u32, PathBuf)>> =
+        std::sync::Mutex::new(None);
 
-    fn unique_marker(label: &str) -> PathBuf {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static SEQ: AtomicU64 = AtomicU64::new(0);
-        std::env::temp_dir().join(format!(
-            "claudine-job-{label}-{}-{}.txt",
-            std::process::id(),
-            SEQ.fetch_add(1, Ordering::SeqCst)
-        ))
+    struct JobAssignmentSignalGuard {
+        pid: u32,
     }
 
-    /// Spawn a parent that launches a detached descendant and then exits.
+    impl JobAssignmentSignalGuard {
+        fn register(pid: u32, path: PathBuf) -> Self {
+            let mut signal = JOB_ASSIGNMENT_SIGNAL.lock().unwrap();
+            assert!(signal.is_none(), "a Job assignment signal is already registered");
+            *signal = Some((pid, path));
+            Self { pid }
+        }
+    }
+
+    impl Drop for JobAssignmentSignalGuard {
+        fn drop(&mut self) {
+            let mut signal = JOB_ASSIGNMENT_SIGNAL.lock().unwrap();
+            if signal.as_ref().is_some_and(|(pid, _)| *pid == self.pid) {
+                *signal = None;
+            }
+        }
+    }
+
+    pub(super) fn signal_job_assignment(pid: u32) {
+        let path = {
+            let mut signal = JOB_ASSIGNMENT_SIGNAL.lock().unwrap();
+            match signal.as_ref() {
+                Some((registered_pid, _)) if *registered_pid == pid => {
+                    signal.take().map(|(_, path)| path)
+                }
+                _ => None,
+            }
+        };
+        if let Some(path) = path {
+            fs::write(path, []).expect("signal successful Job assignment");
+        }
+    }
+
+    fn compile_job_fixture(dir: &Path) -> PathBuf {
+        let source = dir.join("job-fixture.rs");
+        let executable = dir.join(format!("job-fixture{}", std::env::consts::EXE_SUFFIX));
+        fs::write(
+            &source,
+            r#"use std::io::Write;
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+
+fn wait_for_signal(path: &PathBuf) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !path.exists() {
+        if Instant::now() >= deadline {
+            std::process::exit(2);
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+fn main() {
+    let mut args = std::env::args_os().skip(1);
+    let mode = args.next().expect("fixture mode");
+
+    if mode == "descendant" {
+        let ready = PathBuf::from(args.next().expect("ready path"));
+        println!("descendant-ready");
+        std::io::stdout().flush().unwrap();
+        std::fs::write(&ready, []).unwrap();
+        loop {
+            std::thread::sleep(Duration::from_secs(60));
+        }
+    }
+
+    let go = PathBuf::from(args.next().expect("go path"));
+    let ready = PathBuf::from(args.next().expect("ready path"));
+    wait_for_signal(&go);
+    let mut descendant = Command::new(std::env::current_exe().unwrap())
+        .arg("descendant")
+        .arg(&ready)
+        .stdin(Stdio::null())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !ready.exists() {
+        if descendant.try_wait().unwrap().is_some() || Instant::now() >= deadline {
+            std::process::exit(3);
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+"#,
+        )
+        .expect("write native Job fixture");
+        let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+        let output = Command::new(compiler)
+            .arg("--edition=2024")
+            .arg(&source)
+            .arg("-o")
+            .arg(&executable)
+            .output()
+            .expect("compile native Job fixture");
+        assert!(
+            output.status.success(),
+            "native Job fixture compilation failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        executable
+    }
+
+    /// Spawn a parent that waits for the test's assignment signal before
+    /// launching a descendant.
     ///
-    /// `start /B` makes the descendant outlive the parent while inheriting the
-    /// stdout handle, so the marker file stays open — and therefore
-    /// undeletable — for exactly as long as the descendant lives. That turns
-    /// "is the descendant gone?" into a filesystem question, which needs no pid
-    /// bookkeeping and cannot be answered by a stale process-table entry.
-    fn spawn_parent_with_detached_descendant(marker: &Path) -> std::process::Child {
-        let stdout = fs::File::create(marker).expect("create marker file");
-        let command_line = format!("start /B ping -n {DESCENDANT_PINGS} 127.0.0.1");
-        Command::new("cmd.exe")
-            .arg("/C")
-            .arg(&command_line)
+    /// The descendant inherits stdout, flushes a marker, and signals readiness
+    /// before the parent exits. The marker denies delete sharing, so successful
+    /// deletion proves every inherited handle has closed.
+    fn spawn_parent_with_detached_descendant(
+        fixture: &Path,
+        marker: &Path,
+        go: &Path,
+        ready: &Path,
+    ) -> std::process::Child {
+        let stdout = fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .share_mode(0)
+            .open(marker)
+            .expect("create exclusively shared marker file");
+        Command::new(fixture)
+            .arg("parent")
+            .arg(go)
+            .arg(ready)
             .stdout(Stdio::from(stdout))
             .stderr(Stdio::null())
             .stdin(Stdio::null())
             .creation_flags(CREATE_NEW_PROCESS_GROUP)
             .spawn()
-            .expect("spawn parent cmd.exe")
+            .expect("spawn native Job fixture parent")
     }
 
-    /// Poll until the marker can be deleted, tracking the largest size seen.
+    /// Poll until the exclusively shared marker can be deleted, tracking the
+    /// largest size seen.
     ///
     /// ## Returns
     ///
@@ -683,8 +795,13 @@ mod tests {
     /// by the owned handle closing.
     #[test]
     fn job_close_terminates_a_descendant_when_the_wait_scope_ends() {
-        let marker = unique_marker("descendant");
-        let mut child = spawn_parent_with_detached_descendant(&marker);
+        let dir = tempfile::tempdir().expect("create Job fixture directory");
+        let fixture = compile_job_fixture(dir.path());
+        let marker = dir.path().join("descendant.txt");
+        let go = dir.path().join("job-assigned");
+        let ready = dir.path().join("descendant-ready");
+        let mut child = spawn_parent_with_detached_descendant(&fixture, &marker, &go, &ready);
+        let _assignment_signal = JobAssignmentSignalGuard::register(child.id(), go);
 
         let (_code, _termination) =
             wait_with_signal_handling(&mut child, true).expect("wait for parent");

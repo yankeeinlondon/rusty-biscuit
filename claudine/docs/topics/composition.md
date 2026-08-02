@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-40dd9eaf7e578f83
-last_updated: 2026-07-23
+hash: ef46db3751d8e999-0cc73e5d25e0f525
+last_updated: 2026-08-02
 ---
 # Claudine Composition
 
@@ -671,6 +671,8 @@ The target's stabilized frontmatter is the basis for the target's decisions. Wha
 
 The **direct provider wrappers** (`claudine claude`, `claudine goose`, …) take their prompt from argv or stdin and run a provider *memory file* as the harness document. They prepare no active document and carry no run ledger, so there is no coordinator to surface a handoff to and nothing that could re-enter the selection/MCP/argv pipeline for a target.
 
+Wrapper harness detection has two distinct costs and behaviors. **Eligibility** parses only the candidate memory file's authored frontmatter with Darkmatter and checks `has_harness_properties`; a valid ordinary memory file returns “no harness” without composing its body. **Materialization** runs only for an enabled harness and uses the request-owned source context: its source-derived `FileResolutionContext`, demand-driven runtime evidence, explicit source-repository shell policy, and launch-root shell CWD. A malformed frontmatter document still fails with its typed parse error. No prompt means no memory-file lookup, and no candidate means neither parse nor materialization.
+
 **A handoff raised there is refused, not adopted.** `surface_or_adopt_terminal_proxy` produces `CompositionError::LifecycleProxyWithoutOwningCoordinator`, naming the target, the wrapper that cannot host it, and `claudine compose` as a command that can. Nothing is committed and nothing is resolved: the request is refused while it is still an evaluated proxy request, so the source stays active and the refusal routes through the source's own `blocked`/`finalize` exactly as any other refused hop does.
 
 Refusing is what keeps the equivalence contract total. Adopting the target in place would have run it under the *invocation's* profile, binary, argv entrypoint, and MCP injection — a reduced launch path the target's own frontmatter never chose, and one the contract forbids existing at all. There is no such path today; `rebuild_target_launch` runs only for a target the command coordinator already re-prepared, where it supplies the remainder (the lifecycle early-binding context and the `AGENT`/`MODEL`/`YOLO` env for the staged bootstrap).
@@ -891,6 +893,18 @@ Resolve → Initialize → Pre-Flight → Prepare → Start → Select Provider 
 
 The original six-stage summary (`Resolve → Pre-Flight → Prepare → Select Provider → Launch → Closure`) describes the functional pipeline; lifecycle events are the hooks that run at the boundaries between those stages.
 
+### Request-Owned Context
+
+Canonical wrappers and composition commands create one `InvocationContext` before resolving the first source. It freezes the launch CWD, HOME, environment, launch repository evidence, and launch `FileResolutionContext`, then projects the existing launch, workspace, and event context types from those facts. Once a file reference resolves, a `SourceContext` carries that document's base directory, repository/package roots, repository observation, and source-derived `FileResolutionContext` through preparation, preflight, lifecycle evaluation, sequences, system prompts, and harness materialization.
+
+Darkmatter scans each document for its required `ctx.*` groups and receives the matching evidence from the invocation owner. Canonical paths therefore reuse the same environment and repository facts instead of recapturing ambient CWD, HOME, Git, or topology downstream. Content is still reread at retry, resume, and sequence JIT boundaries; only immutable request and repository evidence is reused.
+
+Repository observations are cached per worktree identity, with topology initialized once per distinct repository even when parallel sequence tasks enter it together. Same-repository sources reuse launch topology; multiple sources in one sibling worktree share one additional observation and topology probe; exact non-repository directories cache explicit absence. File resolution remains source-aware because every compose receives the selected source's retained `FileResolutionContext`.
+
+Shell execution follows workspace intent rather than source location. Composition documents and system prompts run `::shell` from the launch repository root; for a launch outside a repository, the explicit launch CWD is used. A prompt or harness stored in another directory or repository does not move the agent's shell working directory.
+
+A sequence step's explicit task stack is the one exception to "the document a step composes and runs owns its `SourceContext`": `setup`, `teardown`, and the primary `side_effect` action derive their `SourceContext` from the document that authored the task, not the document the step composes and runs. `set_frontmatter` and other file-touching effects in that stack therefore target files next to the task's origin document, including when an externalized `task:`/`group:` file lives in a different repository from the step's `prompt:` document.
+
 ## Performance Reporting
 
 Composition commands (and the provider wrappers) support an opt-in `--perf` flag that prints a performance breakdown to stderr after execution completes. The report is a single **reconciling tree** rooted at the `Performance` headline:
@@ -907,19 +921,33 @@ Performance                         384.0ms  100%
 │  ├─ shell approval                  12.3ms    3%
 │  ├─ composition                      4.0ms    1%
 │  │  └─ shell expansion                33µs   <1%  ×2
-│  └─ unattributed                   148.4ms   39%
+│  └─ unattributed                   150.2ms   39%
 ├─ environment setup                  85.7ms   22%
-│  ├─ system prompt                   81.6ms   21%  ▇ HOT
-│  └─ unattributed                     1.2ms   <1%
+│  ├─ launch discovery                 8.0ms    2%
+│  ├─ system prompt                   30.0ms    8%
+│  │  ├─ lookup                         2.0ms   <1%
+│  │  ├─ runtime capture                8.0ms    2%
+│  │  ├─ primary compose               10.0ms    3%
+│  │  ├─ appendix compose               5.0ms    1%
+│  │  └─ delivery                       5.0ms    1%
+│  ├─ child env build                 15.0ms    4%
+│  │  ├─ env sanitize                   1.0ms   <1%
+│  │  └─ shadow home sync              13.0ms    3%
+│  │     └─ repo root detect            1.0ms   <1%
+│  ├─ mcp composition                  5.0ms    1%
+│  ├─ harness eligibility              3.0ms   <1%
+│  ├─ harness materialization         20.0ms    5%
+│  └─ unattributed                     4.7ms    1%
 ├─ agent execution                        —       —  (dry run)
-└─ unattributed                       65.0ms   17%
+└─ unattributed                       64.9ms   17%
 ```
 
 The model and its invariants:
 
 - **Headline is true wall-clock.** The `Performance` total is sampled once at report-build from a single process-start baseline, so it can never disagree with the body the way a mid-flight timer could.
 - **Structural buckets reconcile.** Every `Structural` node's children (plus a synthetic `unattributed` remainder) sum back to the node's own total. The top-level buckets (`pre-dispatch`, `prep phase`, `environment setup`, `agent execution`) therefore sum back to the headline. A debug assertion enforces this at runtime; a unit test (TR-4) enforces it for every command shape.
-- **Breakdown rows itemize without double-counting.** Darkmatter composition stages and the `pre-dispatch`/agent sub-rows are `Breakdown` children — shown and percentaged, but excluded from the reconciliation sum so no cost appears twice. Single-shot `compose`/`inline-compose` nest the `composition` subtree under `prep phase`; `sequence` attaches the merged composition under `environment setup`.
+- **Breakdown rows itemize without double-counting.** Darkmatter composition stages, system-prompt internals, child-environment internals, and the `pre-dispatch`/agent sub-rows are `Breakdown` children — shown and percentaged, but excluded from the reconciliation sum so no cost appears twice. Single-shot `compose`/`inline-compose` nest the `composition` subtree under `prep phase`; sequence composition appears under the step where it ran.
+- **Direct-wrapper setup is attributed.** `environment setup` structurally separates launch discovery, system prompt, child environment, MCP composition, harness eligibility, and enabled-harness materialization. System prompt expands into `lookup`, `runtime capture`, `primary compose`, `appendix compose`, and provider `delivery`; child environment may expand into `env sanitize` and `shadow home sync → repo root detect`. Harness materialization is omitted when eligibility finds no enabled harness.
 - **Percent column** shows each row's share of wall-clock (`100%` at the root, `<1%` for sub-one-percent slivers).
 - **`HOT` marker** flags the single dominant leaf when it clears the materiality floor (≥20% of wall-clock).
 - **Run counts** (`×N`) appear on a composition stage that ran more than once.

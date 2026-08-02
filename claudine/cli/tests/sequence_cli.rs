@@ -758,6 +758,7 @@ COLOR={{state}} STEP={{state.index}}/{{state.count}}
     )
     .unwrap();
 
+    #[cfg(unix)]
     write_executable(
         &path_dir.join("goose"),
         r#"#!/bin/sh
@@ -771,6 +772,36 @@ done
 exit 0
 "#,
     );
+    #[cfg(windows)]
+    {
+        let source = path_dir.join("goose.rs");
+        fs::write(
+            &source,
+            r#"use std::{env, fs::OpenOptions, io::Write};
+
+fn main() {
+    let path = env::var_os("CLAUDINE_PROMPTS_FILE").unwrap();
+    let mut output = OpenOptions::new().create(true).append(true).open(path).unwrap();
+    let mut previous = None;
+    for argument in env::args().skip(1) {
+        if previous.as_deref() == Some("-t") {
+            writeln!(output, "{argument}").unwrap();
+        }
+        previous = Some(argument);
+    }
+}
+"#,
+        )
+        .unwrap();
+        let status = std::process::Command::new("rustc")
+            .args(["--edition=2024"])
+            .arg(&source)
+            .arg("-o")
+            .arg(path_dir.join("goose.exe"))
+            .status()
+            .unwrap();
+        assert!(status.success(), "failed to compile the Goose test fixture");
+    }
 
     assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")

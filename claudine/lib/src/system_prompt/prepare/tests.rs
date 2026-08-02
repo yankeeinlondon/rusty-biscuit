@@ -15,40 +15,104 @@ fn write_temp_file(dir: &std::path::Path, name: &str, content: &str) -> PathBuf 
     path
 }
 
+/// Build an executable in `dir` that prints its working directory, and return
+/// its portable path text for use as both a `::shell` command and a whitelist
+/// `prefix` rule.
+///
+/// The probe reports the portable spelling because its output lands in a
+/// Markdown document: a native Windows path would lose the separator of any
+/// segment beginning with punctuation to CommonMark backslash escaping.
+fn compile_cwd_probe(dir: &std::path::Path) -> String {
+    std::fs::create_dir_all(dir).unwrap();
+    let source = write_temp_file(
+        dir,
+        "cwd_probe.rs",
+        "fn main() {\n    let cwd = std::env::current_dir().unwrap();\n    \
+         println!(\"{}\", cwd.display().to_string().replace('\\\\', \"/\"));\n}\n",
+    );
+    let executable = dir.join(format!("cwd-probe{}", std::env::consts::EXE_SUFFIX));
+    let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+    let compilation = std::process::Command::new(compiler)
+        .arg(&source)
+        .arg("-o")
+        .arg(&executable)
+        .output()
+        .unwrap();
+    assert!(
+        compilation.status.success(),
+        "failed to compile cwd probe: {}",
+        String::from_utf8_lossy(&compilation.stderr)
+    );
+    biscuit_file::to_portable_string(&executable)
+}
+
+struct ScopedHome {
+    original: Option<std::ffi::OsString>,
+}
+
+impl ScopedHome {
+    fn set(path: &std::path::Path) -> Self {
+        let original = std::env::var_os("HOME");
+        // SAFETY: Callers use `#[serial]`, and the guard restores the exact
+        // prior value even if the test unwinds.
+        unsafe { std::env::set_var("HOME", path) };
+        Self { original }
+    }
+}
+
+impl Drop for ScopedHome {
+    fn drop(&mut self) {
+        // SAFETY: The owning test is serialized for this process-global value.
+        unsafe {
+            match self.original.as_ref() {
+                Some(value) => std::env::set_var("HOME", value),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+    }
+}
+
 #[test]
-fn shared_context_reuses_known_root_area_without_repo_capture() {
+fn shared_context_uses_request_owned_repo_and_os_evidence() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().to_path_buf();
+    let status = std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&root)
+        .status()
+        .unwrap();
+    assert!(status.success());
     let source = SystemPromptSource::ExplicitFile {
         path: write_temp_file(tmp.path(), "prompt.md", "{{ ctx.area }} / {{ ctx.os }}"),
         mode: SystemPromptMode::Append,
     };
-    let context = LaunchContext {
-        cwd: root.clone(),
-        repo_root: Some(root.clone()),
-        package_area_root: Some(root),
-        package_root: None,
-        agent: None,
-    };
-
-    let shared = build_shared_compose_context(
-        Some((&source, "{{ ctx.area }} / {{ ctx.os }}")),
-        None,
-        &context,
-    );
-    assert!(shared.runtime.get("repo").is_none());
-    assert!(shared.runtime.get("os").is_none());
-
-    let result = prepare_system_prompt_with_ctx(
-        source,
-        "{{ ctx.area }} / {{ ctx.os }}",
-        Some(&shared),
-        None,
+    let invocation = crate::invocation_context::InvocationContext::capture_at(&root);
+    let context = invocation.launch_context();
+    let input = ResolvedPromptInput::capture(
+        (source, "{{ ctx.area }} / {{ ctx.os }}".to_string()),
+        &invocation,
     )
     .unwrap();
+
+    let shared = build_shared_compose_context_with_invocation(
+        Some(&input),
+        None,
+        &context,
+        &invocation,
+    )
+    .unwrap();
+    assert!(shared.runtime.get("repo").is_some());
+    assert!(shared.runtime.get("os").is_some());
+
+    let result = prepare_system_prompt_with_ctx(input, Some(&shared), None).unwrap();
     match result {
         ResolvedSystemPrompt::Ready(prepared) => {
-            assert!(prepared.composed_markdown.starts_with("root / "));
+            assert!(
+                prepared.composed_markdown.starts_with("/ "),
+                "got {:?}",
+                prepared.composed_markdown
+            );
+            assert!(!prepared.composed_markdown.contains("{{ ctx."));
         }
         other => panic!("Expected Ready, got {other:?}"),
     }
@@ -548,42 +612,169 @@ fn non_interactive_session_preserves_discovered_replace_mode() {
     std::fs::create_dir_all(&home).unwrap();
     std::fs::write(
         repo.join("system-prompt.md"),
-        "---\nmode: replace\n---\n\nReplacement base.",
+        "---\nmode: replace\n---\n\nReplacement base.\n\n::file ./primary-one.md\n\n::file ./primary-two.md",
+    )
+    .unwrap();
+    std::fs::write(repo.join("primary-one.md"), "Primary one.").unwrap();
+    std::fs::write(repo.join("primary-two.md"), "Primary two.").unwrap();
+    std::fs::write(
+        repo.join(".claudine").join("non-interactive.md"),
+        "Repo appendix.\n\n::file ./appendix-fragment.md",
     )
     .unwrap();
     std::fs::write(
-        repo.join(".claudine").join("non-interactive.md"),
-        "Repo appendix.",
+        repo.join(".claudine").join("appendix-fragment.md"),
+        "Appendix fragment.",
     )
     .unwrap();
+    let status = std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&repo)
+        .status()
+        .unwrap();
+    assert!(status.success());
 
-    unsafe {
-        std::env::set_var("HOME", &home);
-    }
+    let _home = ScopedHome::set(&home);
 
     let args = SystemPromptArgs::default();
-    let context = LaunchContext {
-        agent: None,
-        cwd: repo.clone(),
-        repo_root: Some(repo.clone()),
-        package_area_root: None,
-        package_root: None,
-    };
+    let invocation = crate::invocation_context::InvocationContext::capture_at(&repo);
+    let context = invocation.launch_context();
 
-    let result = resolve_and_prepare_for_session(&args, &context, true).unwrap();
-
-    unsafe {
-        std::env::remove_var("HOME");
+    let result = resolve_and_prepare_for_session_with_context(
+        &args,
+        &context,
+        true,
+        &invocation,
+    )
+    .unwrap();
+    let work = invocation.work_snapshot();
+    assert_eq!(work.git_root_discoveries, 1);
+    assert_eq!(work.topology_probes, 1);
+    assert_eq!(work.topology_reuses, 2);
+    assert_eq!(work.system_prompt_lookups, 1);
+    assert_eq!(work.compose_operations, 2);
+    assert_eq!(work.ambient_fallbacks, 0);
+    for stage in [
+        "lookup",
+        "runtime capture",
+        "primary compose",
+        "appendix compose",
+    ] {
+        assert!(work.system_prompt_timings.contains_key(stage));
     }
 
     match result {
         ResolvedSystemPrompt::Ready(prepared) => {
             assert_eq!(prepared.mode, SystemPromptMode::Replace);
             assert!(prepared.composed_markdown.contains("Replacement base."));
+            assert!(prepared.composed_markdown.contains("Primary one."));
+            assert!(prepared.composed_markdown.contains("Primary two."));
             assert!(prepared.composed_markdown.contains("Repo appendix."));
+            assert!(prepared.composed_markdown.contains("Appendix fragment."));
         }
         other => panic!("Expected Ready, got {other:?}"),
     }
+}
+
+#[test]
+fn session_reuses_resolved_external_source_context() {
+    let tmp = TempDir::new().unwrap();
+    let launch = tmp.path().join("launch");
+    let source_repo = tmp.path().join("source-repo");
+    std::fs::create_dir_all(&launch).unwrap();
+    std::fs::create_dir_all(&source_repo).unwrap();
+    let status = std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&source_repo)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let prompt = write_temp_file(&source_repo, "prompt.md", "External prompt.");
+
+    let invocation = crate::invocation_context::InvocationContext::capture_at(&launch);
+    let context = invocation.launch_context();
+    let args = SystemPromptArgs {
+        append_file: Some(prompt.display().to_string()),
+        ..Default::default()
+    };
+
+    let result = resolve_and_prepare_for_session_with_context(
+        &args,
+        &context,
+        false,
+        &invocation,
+    )
+    .unwrap();
+    assert!(matches!(result, ResolvedSystemPrompt::Ready(_)));
+
+    let work = invocation.work_snapshot();
+    assert_eq!(work.git_root_discoveries, 2);
+    assert_eq!(work.topology_probes, 1);
+    assert_eq!(work.topology_reuses, 0);
+    assert_eq!(work.compose_operations, 1);
+    assert_eq!(work.ambient_fallbacks, 0);
+}
+
+#[test]
+fn non_repository_session_runs_shell_in_launch_cwd() {
+    let tmp = TempDir::new().unwrap();
+    let launch = tmp.path().join("launch");
+    let source_repo = tmp.path().join("source");
+    std::fs::create_dir_all(&launch).unwrap();
+    std::fs::create_dir_all(&source_repo).unwrap();
+    let status = std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&source_repo)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    // A compiled probe rather than `pwd`: the built-in shell blacklist rejects
+    // every Windows shell that could report a working directory, and no
+    // whitelist can override it.
+    let probe = compile_cwd_probe(&tmp.path().join("probe"));
+    write_temp_file(
+        &source_repo,
+        ".darkmatter-shell-whitelist",
+        &format!("prefix {probe}\n"),
+    );
+    let prompt = write_temp_file(
+        &source_repo,
+        "prompt.md",
+        &format!("Before.\n\n::shell \"{probe}\"\n\nAfter."),
+    );
+
+    let invocation = crate::invocation_context::InvocationContext::capture_at(&launch);
+    let context = invocation.launch_context();
+    assert!(context.repo_root.is_none());
+    let args = SystemPromptArgs {
+        append_file: Some(prompt.display().to_string()),
+        ..Default::default()
+    };
+
+    let result = resolve_and_prepare_for_session_with_context(
+        &args,
+        &context,
+        false,
+        &invocation,
+    )
+    .unwrap();
+    let ResolvedSystemPrompt::Ready(prepared) = result else {
+        panic!("expected a prepared system prompt");
+    };
+    assert!(
+        prepared
+            .composed_markdown
+            .contains(biscuit_file::to_portable_string(&launch).as_str()),
+        "shell did not run in launch cwd: {}",
+        prepared.composed_markdown
+    );
+    assert!(
+        !prepared
+            .composed_markdown
+            .contains(biscuit_file::to_portable_string(&source_repo).as_str()),
+        "shell ran beside the prompt source: {}",
+        prepared.composed_markdown
+    );
 }
 
 #[test]

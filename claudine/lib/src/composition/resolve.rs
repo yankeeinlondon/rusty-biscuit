@@ -32,7 +32,10 @@ fn map_load_error(path: &Path, err: MarkdownError) -> CompositionError {
 /// Uses `biscuit-file::FileReference` for all path resolution. Validates
 /// that the resolved file has a `.md` or `.markdown` extension.
 ///
-/// When invoked from inside a Cargo workspace package area (common for
+/// This is the ambient compatibility entry point. Canonical Claudine command
+/// paths resolve with an invocation-owned [`FileResolutionContext`] via
+/// [`resolve_composition_source_in_context`]. When invoked from inside a Cargo
+/// workspace package area (common for
 /// monorepo prompts like `@prompts/commit.md`), the package area and the
 /// convention prompt directories are added as prepended magic search roots
 /// so a bare `@<file>` resolves to the closest matching prompt.
@@ -43,20 +46,15 @@ pub fn resolve_composition_source(
     resolve_composition_source_in_context(file_ref, &context)
 }
 
-/// Captures the immutable file-resolution inputs for one Claudine request.
-///
-/// Discovery occurs exactly once here. Every document-backed surface derives
-/// its authoring base from this value without rereading CWD, HOME, environment,
-/// repository metadata, package metadata, or configured roots.
+/// Captures file-resolution inputs for compatibility callers.
 ///
 /// ## Notes
 ///
-/// This is the **provisional** snapshot used to resolve the top-level CLI
-/// argument. Once that argument resolves to an absolute source path, callers
-/// MUST re-anchor via [`derive_request_context_for_source`] so a top-level
-/// document selected from a different repository keeps that repository's
-/// nested references (D2/D10, AC12) rather than being hijacked by wherever
-/// the binary was launched from.
+/// This helper performs ambient CWD, HOME, environment, Git, and topology
+/// reads. Canonical command paths instead create one
+/// [`InvocationContext`](crate::invocation_context::InvocationContext), use
+/// its launch projection for top-level resolution, and retain the definitive
+/// source bundle returned after resolution.
 pub fn capture_file_resolution_context() -> Result<FileResolutionContext, CompositionError> {
     let cwd = std::env::current_dir().map_err(|source| CompositionError::InvalidReference {
         reference: "<request working directory>".to_string(),
@@ -101,13 +99,11 @@ pub fn capture_file_resolution_context() -> Result<FileResolutionContext, Compos
     Ok(context)
 }
 
-/// Build the definitive request snapshot by anchoring repository discovery
-/// at the resolved top-level source's location rather than the launch CWD.
+/// Build a source-anchored snapshot for compatibility callers.
 ///
-/// Used after the top-level CLI argument has been resolved via the provisional
-/// [`capture_file_resolution_context`]. The returned context is what every
-/// downstream document-backed surface (composition, sequence, transclusion,
-/// lifecycle proxy, schema) should derive from.
+/// This helper performs a fresh Git/topology observation. Canonical command
+/// paths call `InvocationContext::derive_source` and propagate the resulting
+/// source context without re-deriving it.
 ///
 /// ## Notes
 ///
@@ -120,7 +116,8 @@ pub fn capture_file_resolution_context() -> Result<FileResolutionContext, Compos
 ///   `repository_root` and `@` magic search falls back to the home directory
 ///   — matching the legacy trusted-external behavior.
 /// - Environment and home directory are retained from the provisional
-///   snapshot. Re-anchoring performs no later ambient process-state reads.
+///   snapshot, but Git root and repository topology are rediscovered
+///   ambiently by this compatibility helper.
 ///
 /// ## Errors
 ///
@@ -136,10 +133,10 @@ pub fn derive_request_context_for_source(
     // `InvalidReference` propagation keeps the API honest if a future caller
     // violates that invariant.
     let base_dir = source_path.parent().ok_or_else(|| CompositionError::InvalidReference {
-        reference: source_path.display().to_string(),
+        reference: biscuit_file::to_portable_string(source_path),
         source: biscuit_file::FileReferenceError::InvalidSyntax(format!(
             "resolved source path has no parent directory: {}",
-            source_path.display()
+            biscuit_file::to_portable_string(source_path)
         )),
     })?;
 
@@ -219,7 +216,7 @@ pub fn resolve_composition_source_in_context(
         .unwrap_or("");
     if !matches!(ext.to_ascii_lowercase().as_str(), "md" | "markdown") {
         return Err(CompositionError::NotMarkdown(
-            resolved_path.display().to_string(),
+            biscuit_file::to_portable_string(&resolved_path),
         ));
     }
 

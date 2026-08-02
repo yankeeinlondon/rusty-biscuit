@@ -533,7 +533,8 @@ mod tests {
         let config = tmp.path().join("config.toml");
         let wrapper = tmp.path().join("codex-notify-wrapper.sh");
         // Config points to wrapper path, but wrapper file doesn't exist
-        fs::write(&config, format!("notify = [\"{}\"]\n", wrapper.display())).unwrap();
+        let wrapper = toml::Value::String(wrapper.to_string_lossy().into_owned());
+        fs::write(&config, format!("notify = [{wrapper}]\n")).unwrap();
 
         let configurator = CodexConfigurator;
         let plan = test_plan();
