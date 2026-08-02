@@ -535,7 +535,9 @@ impl InvocationContext {
         let entry = self.repository_for_base(&base_dir);
         self.ensure_topology(&entry);
 
-        let repository_root = entry.repo_root().map(Path::to_path_buf);
+        let repository_root = entry
+            .repo_root()
+            .map(|root| repo_root_in_base_spelling(&base_dir, root));
         let (package_area_root, package_root) = package_roots(&base_dir, entry.repo_info());
         let file_resolution = build_file_resolution_context(
             &base_dir,
@@ -1085,6 +1087,27 @@ fn contains_nested_repository_boundary(base_dir: &Path, enclosing_root: &Path) -
 
 fn paths_equivalent(left: &Path, right: &Path) -> bool {
     canonical_key(left) == canonical_key(right)
+}
+
+/// Project a repository root into the spelling family of `base_dir`.
+///
+/// A cached [`RepositoryEntry`] keeps the root as authored by whichever call
+/// first observed the repository. A later source can reach the same entry
+/// through a different spelling of the tree (macOS `/var` → `/private/var`,
+/// a symlinked launch directory), and `FileResolutionContext` containment is
+/// lexical — pairing that base with a foreign-spelled root would reject a
+/// valid source. The ancestor of `base_dir` that names the root carries the
+/// caller's spelling; the authored root is kept when the spellings already
+/// agree, or when no ancestor matches (a foreign base cannot be made valid).
+fn repo_root_in_base_spelling(base_dir: &Path, authored_root: &Path) -> PathBuf {
+    if base_dir.starts_with(authored_root) {
+        return authored_root.to_path_buf();
+    }
+    let root_key = canonical_key(authored_root);
+    base_dir
+        .ancestors()
+        .find(|ancestor| canonical_key(ancestor) == root_key)
+        .map_or_else(|| authored_root.to_path_buf(), Path::to_path_buf)
 }
 
 /// Cache-key form of a path, canonicalized when the filesystem allows.
