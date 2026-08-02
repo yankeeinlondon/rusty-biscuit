@@ -27,8 +27,10 @@
 //! completion order (spec → *Concurrency*):
 //!
 //! - **Snapshot isolation.** State and `outputs` are captured once at group start
-//!   and shared by every member; each member's own writes go to a private buffer.
-//!   No live file is re-read between siblings.
+//!   and shared by every member; each member's own writes go to private cells —
+//!   both the runtime buffer a `set` accumulates in and the live document view a
+//!   lifecycle stack resolves against, because a write reaches both. No live file
+//!   is re-read between siblings.
 //! - **All siblings finish.** A failure never cancels in-flight work — discarding
 //!   a half-finished agent run costs more than letting it land — and every member
 //!   keeps an `outputs` slot holding whatever stdout it produced.
@@ -235,6 +237,17 @@ impl TaskExecution<'_> {
             .collect();
         let slots: Vec<Mutex<Option<MemberRun>>> =
             group.tasks.iter().map(|_| Mutex::new(None)).collect();
+        // The live document cell is per-*attempt* and therefore shared by
+        // construction; a member needs its own, seeded from the group-start
+        // view, for the same reason it needs its own runtime buffer. The copies
+        // are dropped with the group: a member's `set_frontmatter` already
+        // reached disk, and the next *step* re-reads the file — a sibling never
+        // does (spec → *Concurrency*).
+        let live_cells: Vec<Mutex<Map<String, Value>>> = scope_stack
+            .live_frontmatter_snapshot()
+            .into_iter()
+            .flat_map(|seed| group.tasks.iter().map(move |_| Mutex::new(seed.clone())))
+            .collect();
 
         // Absent cap means "launch all"; declaration-order admission falls out of
         // a single shared cursor, so a freed slot always takes the next task.
@@ -260,10 +273,11 @@ impl TaskExecution<'_> {
                         if let Some(stream) = &stream {
                             stream.open();
                         }
-                        // The stack's cell must be the member's buffer too: a
-                        // lifecycle `set` inside the task accumulates through the
-                        // stack, not through `TaskExecution::runtime`.
-                        let member_stack = scope_stack.with_runtime_state(&buffers[index]);
+                        // The stack's cells must be the member's too: a lifecycle
+                        // `set` inside the task accumulates through the stack,
+                        // not through `TaskExecution::runtime`.
+                        let member_stack = scope_stack
+                            .with_private_cells(&buffers[index], live_cells.get(index));
                         let member = TaskExecution {
                             task,
                             state: &member_state,

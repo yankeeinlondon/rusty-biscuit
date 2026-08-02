@@ -655,20 +655,38 @@ impl StackExecutionContext<'_> {
         }
     }
 
-    /// Redirect this context's runtime accumulation to a different cell.
+    /// Redirect this context's two mutable cells to private ones.
     ///
-    /// A parallel group member runs against a private buffer, so its lifecycle
-    /// `set` must land there rather than in the sequence's cell — otherwise the
-    /// write is visible to a sibling mid-group and the deterministic
-    /// declaration-order merge has nothing left to merge.
-    pub fn with_runtime_state<'a>(
+    /// A parallel group member runs against a private runtime buffer, so its
+    /// lifecycle `set` must land there rather than in the sequence's cell —
+    /// otherwise the write is visible to a sibling mid-group and the
+    /// deterministic declaration-order merge has nothing left to merge.
+    ///
+    /// The live document cell has to be redirected in the same breath: `set`
+    /// mirrors its write onto the working map that [`Self::execute_stack`]
+    /// seeds from and writes back to that cell, so a shared cell leaks the
+    /// value to a sibling through the second channel no matter how private the
+    /// runtime buffer is. `None` keeps the snapshot-less shape, where the
+    /// immutable `frontmatter` is the only base state and nothing can leak.
+    pub fn with_private_cells<'a>(
         &'a self,
         runtime_state: &'a super::super::runtime_state::RuntimeState,
+        live_frontmatter: Option<&'a std::sync::Mutex<Map<String, Value>>>,
     ) -> StackExecutionContext<'a> {
         StackExecutionContext {
             runtime_state: Some(runtime_state),
+            live_frontmatter,
             ..self.with_signal(self.signal)
         }
+    }
+
+    /// Copy the live document cell's current contents, when one is wired.
+    ///
+    /// The seed for a private cell handed back through
+    /// [`Self::with_private_cells`].
+    pub fn live_frontmatter_snapshot(&self) -> Option<Map<String, Value>> {
+        self.live_frontmatter
+            .map(|cell| cell.lock().expect(LIVE_POISONED).clone())
     }
 
     /// Build the event-time injected-globals layer (`err`/`timing`/`current`,
