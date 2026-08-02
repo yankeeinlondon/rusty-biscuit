@@ -208,16 +208,6 @@ filter = 'package(claudine-cli) & test(/level2_/)'
 leak-timeout = { period = "1s", result = "fail" }
 slow-timeout = { period = "30s", terminate-after = 3 }
 
-# The sequence idle-flush pane test is slow by construction, not by contention.
-# `spawn_flush_if_idle_ticker`'s silence window and cadence are both a
-# hardcoded 30s with no env override, and the stall must clear the ticker's
-# second tick to be reliable (the first only fires if the block was stamped as
-# the ticker started), so the run costs ~80s plus pane setup. The default 30s
-# termination window would kill it mid-stall.
-[[profile.default.overrides]]
-filter = 'test(=level2_prompt_idle_flush_keeps_the_task_bar_in_tmux)'
-slow-timeout = { period = "30s", terminate-after = 6 }
-
 # The error-propagation D10 characterization baseline
 # (`claudine/features/2026-07-13-error-propogation/`) spawns the real claudine
 # binary once per route, which in turn forks short-lived children (git
@@ -357,12 +347,6 @@ leak-timeout = { period = "1s", result = "fail" }
 [[profile.ci.overrides]]
 filter = 'package(claudine-cli) & test(/level2_/)'
 leak-timeout = { period = "1s", result = "fail" }
-
-# See the default-profile note: the idle-flush pane test stalls ~80s by
-# construction, well past CI's 30s termination ceiling.
-[[profile.ci.overrides]]
-filter = 'test(=level2_prompt_idle_flush_keeps_the_task_bar_in_tmux)'
-slow-timeout = { period = "30s", terminate-after = 6 }
 
 # See the default-profile note: the error-propagation characterization baseline
 # spawns the real claudine binary per route and draws spurious LEAK-FAILs from
