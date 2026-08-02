@@ -468,8 +468,20 @@ impl TaskExecutor {
     /// The process runs independently and continues even after the executor
     /// is dropped. Output is discarded.
     async fn execute_background(command: &str) -> Result<(), String> {
-        Command::new("/bin/sh")
-            .args(["-c", command])
+        #[cfg(windows)]
+        let mut child = {
+            let mut child = Command::new("cmd.exe");
+            child.args(["/D", "/C", command]);
+            child
+        };
+        #[cfg(not(windows))]
+        let mut child = {
+            let mut child = Command::new("/bin/sh");
+            child.args(["-c", command]);
+            child
+        };
+
+        child
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())

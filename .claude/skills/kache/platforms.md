@@ -5,14 +5,14 @@ a cache hit can be restored by cloning blocks or has to duplicate them.
 
 ## The restore-mode ladder
 
-From the docs: hits restore *"zero-copy — a reflink (copy-on-write clone) where the filesystem
-supports it (APFS, btrfs, XFS-with-reflink), and a hardlink or copy otherwise."*
+kache tries a reflink/block clone first, then a platform-specific hardlink or copy fallback.
+Reflinks and hardlinks avoid copying restored bytes; plain copies do not.
 
 | Mode | Filesystems | Restore cost | Store cost | Independent copies? |
 | --- | --- | --- | --- | --- |
-| **Reflink** (best) | APFS, btrfs, XFS with `reflink=1`, ZFS 2.2+ with `block_cloning` (verify) | Zero-copy clone | Cloned, not copied | Yes — store GC frees store bytes |
-| **Hardlink** | ext4, NTFS, most others | Zero-copy link | **A real second copy** | No — same inode |
-| **Copy** | Cross-filesystem store/target, or where links are unavailable | Full copy | Full copy | Yes |
+| **Reflink / block clone** (best) | APFS, btrfs, XFS with `reflink=1`, ReFS, ZFS 2.2+ with `block_cloning` (verify) | Zero-copy clone | Cloned, not copied | Yes — store GC frees store bytes |
+| **Hardlink** | Linux ext4 and other supported non-CoW layouts; Windows NTFS only by explicit unsafe opt-in | Zero-copy link | Store ingestion is a real copy | No — same file record |
+| **Copy** | Windows NTFS default, cross-filesystem store/target, or unavailable link/clone | Full copy | Full copy | Yes |
 
 Two consequences that catch people out:
 
@@ -26,10 +26,15 @@ space when every link is gone — a live `target/` holding a link keeps the byte
 reflink the copies are independent, so `gc` genuinely frees store bytes. Budget accordingly:
 on hardlink hosts, `local_max_size` bounds *unique* store bytes, not total footprint.
 
-**Never infer the mode from the OS.** "Linux" tells you nothing — ext4 and btrfs behave oppositely.
-`kache doctor` reports the store's filesystem from 0.12.0 (`Cache FS  apfs (local)`) but not older
-versions, and it names the filesystem rather than proving a clone succeeds. To be certain, test the
-syscall directly between the store and a target directory:
+**Copy mode duplicates cache hits too.** On Windows NTFS, a cached blob and its restored output are
+independent allocations. This can make the store larger than the live target tree while reporting
+zero deduplication savings.
+
+**Never infer the mode from the OS alone.** "Linux" tells you nothing — ext4 and btrfs behave
+oppositely. `kache doctor` reports the store filesystem in 0.12.0, but it does not prove that a clone
+succeeds for a particular target path. Inspect the affected output from the warning and verify that
+the store and target are on the intended filesystem. On Unix, test the clone syscall directly when
+the answer matters:
 
 ```bash
 cp -c  <store-file> <target-dir>/probe      # macOS: fails if clonefile isn't possible
@@ -65,22 +70,27 @@ Note that APFS `clonefile` **does** succeed between separate volumes in the same
 ## Windows
 
 - **ReFS**, including a **Dev Drive** → **zero-copy restores via block cloning**, added in kache
-  0.8.0. This makes a Dev Drive the recommended location for both the store and build trees on
-  Windows.
-- **NTFS** → hardlink mode. As of 0.8.0 kache *warns* on NTFS that it can't do zero-copy; a
-  hardlink option is available.
-- Store location follows the platform cache dir (under `%LOCALAPPDATA%`); confirm via `kache doctor`,
-  which prints the resolved path.
-- `kache daemon install` is documented in terms of launchd/systemd; on Windows verify the daemon is
-  actually running as a service with `kache daemon status` after `init`, and fall back to
-  `kache daemon start` if not.
+  0.8.0. Put both the store and `CARGO_TARGET_DIR` on the same ReFS volume; source can remain
+  elsewhere.
+- **NTFS** → safe default is **copy restore**, not hardlink. The cache and restored target do not
+  share blocks, so disk usage can approach store bytes plus target bytes.
+- `[cache] windows_hardlink = true` is an explicit correctness tradeoff. NTFS hardlinks share the
+  read-only attribute in the same file record; consumers that delete or rewrite outputs can fail,
+  and in-place modification can corrupt the cached blob. Do not enable it from a storage warning
+  alone.
+- `[cache] storage_layout_advice = false` only silences the layout warning. It does not change
+  restore mode or disk usage.
+- Config defaults under `%APPDATA%\kache\config.toml`; the store defaults under
+  `%LOCALAPPDATA%\kache`. Confirm the resolved store with `kache doctor`.
+- `kache daemon` with no subcommand reports daemon status in 0.12.0. The service is optional for a
+  local-only cache.
 
 ## WSL specifically
 
 WSL is a Linux install, not a Windows one — install the Linux build inside the distro.
 
-The distro's root filesystem is **ext4 inside a VHDX**, so kache runs in **hardlink mode**, and the
-store is a second copy of every unique artifact. Two implications:
+The distro's root filesystem is normally **ext4 inside a VHDX**, so kache uses hardlinks for
+restores while store ingestion remains a second copy of every unique artifact. Two implications:
 
 - Size `local_max_size` against the *ext4 filesystem's* capacity, remembering that the VHDX is
   usually thin-provisioned with a virtual size far larger than the volume backing it. A store cap
@@ -90,10 +100,11 @@ store is a second copy of every unique artifact. Two implications:
   build artifacts from the distro's root filesystem, so a runaway build fills a disposable volume
   instead of killing the distro.
 
-## Cross-platform behaviour that does *not* vary
+## Cross-platform behavior that does *not* vary
 
 - Incremental compilation is disabled (`CARGO_INCREMENTAL=0`) on every platform.
 - Cache keys are portable — the blake3 key excludes absolute paths and machine identity, which is
   what makes S3 sharing across machines work.
-- The exclusion list (binary crates, dylibs, proc-macros, link steps) is the same everywhere.
+- The default exclusion of user-facing binaries and test harnesses, plus unsupported compiler
+  shapes, is the same everywhere. Dylibs, cdylibs, and proc-macros remain cacheable.
 - C/C++ object caching is **local-only** on all platforms; only Rust artifacts sync to a remote.

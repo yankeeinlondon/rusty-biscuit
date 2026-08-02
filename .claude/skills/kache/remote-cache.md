@@ -94,7 +94,7 @@ Inputs and defaults:
 | `s3-access-key-id` / `s3-secret-access-key` | — | Use repo/org secrets |
 | `github-cache` | `true` | Used when S3 is not configured |
 | `cache-key-prefix` | `kache` | GitHub cache key prefix |
-| `cache-executables` | `false` | Also cache bin/dylib/proc-macro outputs |
+| `cache-executables` | `false` | Also cache user-facing binaries and test harnesses |
 | `sync` | `false` | Pull the entire remote on setup — **S3 only** |
 | `warm` | `true` | Selective prefetch of expensive artifacts — **S3 only** |
 | `manifest-key` | — | Scope builds; defaults to target triple — **S3 only** |
