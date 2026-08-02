@@ -12,13 +12,18 @@ mod common;
 use common::augmented_path;
 use common::wrap::seed_minimal_config;
 
-/// Locate the `md` binary in the workspace target directory.
+/// Locate the `md` binary.
 ///
 /// `assert_cmd::cargo::cargo_bin` works for binaries of the crate under test;
 /// `md` lives in `darkmatter-cli`, so use `CARGO_BIN_EXE_md` when Cargo provides
 /// it and otherwise resolve the sibling binary next to this test's profile
 /// directory. Deriving that directory from `current_exe` respects custom
 /// target directories and the platform executable suffix.
+///
+/// A workspace build is preferred over `PATH` so the test exercises the current
+/// tree, but `PATH` is a valid last resort: `just init` installs `md` through
+/// `darkmatter`'s `install` recipe, which is a `cargo install` into the Cargo
+/// bin directory and never populates the workspace target directory.
 fn md_bin() -> std::path::PathBuf {
     if let Ok(path) = std::env::var("CARGO_BIN_EXE_md") {
         return path.into();
@@ -28,12 +33,23 @@ fn md_bin() -> std::path::PathBuf {
         .parent()
         .and_then(std::path::Path::parent)
         .expect("integration test executable under <profile>/deps");
-    let path = profile_dir.join(format!("md{}", std::env::consts::EXE_SUFFIX));
-    assert!(
-        path.exists(),
-        "md binary not found at {path:?}; run `cargo build -p darkmatter-cli --bin md`"
+    let file_name = format!("md{}", std::env::consts::EXE_SUFFIX);
+    let built = profile_dir.join(&file_name);
+    if built.exists() {
+        return built;
+    }
+    let installed = std::env::var_os("PATH").and_then(|path| {
+        std::env::split_paths(&path)
+            .map(|dir| dir.join(&file_name))
+            .find(|candidate| candidate.is_file())
+    });
+    if let Some(installed) = installed {
+        return installed;
+    }
+    panic!(
+        "md binary not found at {built:?} and not on PATH; \
+         run `cargo build -p darkmatter-cli --bin md` or `just init`"
     );
-    path
 }
 
 /// Write a fake `goose` provider that prints a fixed, deterministic replacement

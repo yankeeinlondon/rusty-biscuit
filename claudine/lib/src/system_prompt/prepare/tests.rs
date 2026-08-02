@@ -15,6 +15,37 @@ fn write_temp_file(dir: &std::path::Path, name: &str, content: &str) -> PathBuf 
     path
 }
 
+/// Build an executable in `dir` that prints its working directory, and return
+/// its portable path text for use as both a `::shell` command and a whitelist
+/// `prefix` rule.
+///
+/// The probe reports the portable spelling because its output lands in a
+/// Markdown document: a native Windows path would lose the separator of any
+/// segment beginning with punctuation to CommonMark backslash escaping.
+fn compile_cwd_probe(dir: &std::path::Path) -> String {
+    std::fs::create_dir_all(dir).unwrap();
+    let source = write_temp_file(
+        dir,
+        "cwd_probe.rs",
+        "fn main() {\n    let cwd = std::env::current_dir().unwrap();\n    \
+         println!(\"{}\", cwd.display().to_string().replace('\\\\', \"/\"));\n}\n",
+    );
+    let executable = dir.join(format!("cwd-probe{}", std::env::consts::EXE_SUFFIX));
+    let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+    let compilation = std::process::Command::new(compiler)
+        .arg(&source)
+        .arg("-o")
+        .arg(&executable)
+        .output()
+        .unwrap();
+    assert!(
+        compilation.status.success(),
+        "failed to compile cwd probe: {}",
+        String::from_utf8_lossy(&compilation.stderr)
+    );
+    biscuit_file::to_portable_string(&executable)
+}
+
 struct ScopedHome {
     original: Option<std::ffi::OsString>,
 }
@@ -697,16 +728,19 @@ fn non_repository_session_runs_shell_in_launch_cwd() {
         .status()
         .unwrap();
     assert!(status.success());
-    let (command, whitelist) = if cfg!(windows) {
-        ("cmd /C cd", "prefix cmd\n")
-    } else {
-        ("pwd", "prefix pwd\n")
-    };
-    write_temp_file(&source_repo, ".darkmatter-shell-whitelist", whitelist);
+    // A compiled probe rather than `pwd`: the built-in shell blacklist rejects
+    // every Windows shell that could report a working directory, and no
+    // whitelist can override it.
+    let probe = compile_cwd_probe(&tmp.path().join("probe"));
+    write_temp_file(
+        &source_repo,
+        ".darkmatter-shell-whitelist",
+        &format!("prefix {probe}\n"),
+    );
     let prompt = write_temp_file(
         &source_repo,
         "prompt.md",
-        &format!("Before.\n\n::shell {command}\n\nAfter."),
+        &format!("Before.\n\n::shell \"{probe}\"\n\nAfter."),
     );
 
     let invocation = crate::invocation_context::InvocationContext::capture_at(&launch);
@@ -730,14 +764,14 @@ fn non_repository_session_runs_shell_in_launch_cwd() {
     assert!(
         prepared
             .composed_markdown
-            .contains(launch.display().to_string().as_str()),
+            .contains(biscuit_file::to_portable_string(&launch).as_str()),
         "shell did not run in launch cwd: {}",
         prepared.composed_markdown
     );
     assert!(
         !prepared
             .composed_markdown
-            .contains(source_repo.display().to_string().as_str()),
+            .contains(biscuit_file::to_portable_string(&source_repo).as_str()),
         "shell ran beside the prompt source: {}",
         prepared.composed_markdown
     );
