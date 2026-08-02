@@ -97,7 +97,9 @@ fn inline_compose_writes_hash_that_passes_md_diff() {
     write_goose_provider(&path_dir);
 
     assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .current_dir(workspace.path())
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         // `dirs::home_dir()` reads `HOME` on Unix and `USERPROFILE` on Windows;
         // set both so the wrapper's config home resolves to the temp workspace
         // on every platform.

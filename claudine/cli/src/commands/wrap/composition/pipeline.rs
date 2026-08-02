@@ -1,16 +1,18 @@
 //! Ordered setup pipeline for one composition attempt.
 
 use color_eyre::eyre::WrapErr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use super::*;
-use super::preflight::{PreflightBlockedOutcome, emit_preflight_blocked_and_finalize};
+use super::preflight::{
+    PreflightBlockedOutcome, emit_preflight_blocked_and_finalize_in_context,
+};
 use claudine::composition::{
     DocumentTransition, EvaluatedProxyRequest, LifecycleCatchProtocol, LifecycleCatchResult,
     LifecycleCatchState, LifecycleErrorInfo, LifecycleTransitionAbort, LifecycleTransitionDecision,
     LifecycleTransitionError, LifecycleTransitionInput, ProxyProvenance, SurfacedHandoff,
-    commit_proxy, decide_lifecycle_transition,
+    commit_proxy, commit_proxy_in_context, decide_lifecycle_transition,
 };
 
 enum CompositionPhaseResult<T> {
@@ -18,6 +20,20 @@ enum CompositionPhaseResult<T> {
     Completed(Box<SingleCompositionOutcome>),
     Blocked(color_eyre::Report),
     Failed(color_eyre::Report),
+}
+
+fn effective_source_repo_root<'a>(
+    request: &'a CompositionExecutionRequest,
+    compatibility_fallback: Option<&'a Path>,
+) -> Option<&'a Path> {
+    match request.source_context.as_ref() {
+        Some(source_context) => source_context.repository_root(),
+        None => request
+            .prepared
+            .source_repo_root
+            .as_deref()
+            .or(compatibility_fallback),
+    }
 }
 
 impl<T> CompositionPhaseResult<T> {
@@ -57,7 +73,7 @@ impl<'guard, 'runtime> CompositionAttempt<'guard, 'runtime> {
         external_guard: Option<&'guard mut LifecycleRunGuard<'runtime>>,
         skip_preflight: bool,
     ) -> Self {
-        let perf_collector = if perf_enabled {
+        let mut perf_collector = if perf_enabled {
             startup_timings.map(|timings| {
                 crate::perf::CommandPerfCollector::new_with_composition(
                     "Composition",
@@ -68,6 +84,11 @@ impl<'guard, 'runtime> CompositionAttempt<'guard, 'runtime> {
         } else {
             None
         };
+        if let (Some(collector), Some(invocation)) =
+            (perf_collector.as_mut(), request.invocation_context.as_ref())
+        {
+            collector.set_invocation_work(&invocation.work_snapshot());
+        }
         let document_start = Instant::now();
         Self {
             request,
@@ -282,6 +303,9 @@ fn emit_dry_run_outcome(
 
     if let Some(collector) = attempt.perf_collector.as_mut() {
         collector.set_dry_run();
+        if let Some(invocation) = attempt.request.invocation_context.as_ref() {
+            collector.set_invocation_work(&invocation.work_snapshot());
+        }
     }
     // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
     if let Some(collector) = attempt.perf_collector.take() {
@@ -309,11 +333,14 @@ fn resolve_selection_and_launch(
         let verbose = attempt.verbose;
         let perf_collector = &mut attempt.perf_collector;
         let last_checkpoint = &mut attempt.last_checkpoint;
-        let launch_cwd = std::env::current_dir()?;
+        let launch_cwd = match request.invocation_context.as_ref() {
+            Some(invocation) => invocation.launch_cwd().to_path_buf(),
+            None => std::env::current_dir()?,
+        };
         let detail_requested = verbose > 0;
         let silent = request.silent;
 
-        let source_repo_root = request.prepared.source_repo_root.as_deref();
+        let source_repo_root = effective_source_repo_root(request, None);
         let launch_workspace = select_launch_workspace(
             request.prep_launch_workspace.as_ref(),
             &launch_cwd,
@@ -430,7 +457,6 @@ fn prepare_environment_and_mcp(
         let profile = *profile;
         let effective_non_interactive = *effective_non_interactive;
         let silent = request.silent;
-        let source_repo_root = request.prepared.source_repo_root.as_deref();
         let needs_mcp_shadow_home = (request.mcp || !request.mcp_use.is_empty())
             && matches!(provider, Provider::Codex | Provider::Gemini);
         let needs_repo_shadow_home = request.repo;
@@ -540,7 +566,8 @@ fn prepare_environment_and_mcp(
             use claudine::mcp::inject::injector_for_provider;
             use claudine::mcp::session::{compute_session_set, lex_tags};
 
-            let repo_root_ref = source_repo_root.or(env_plan.repo_root.as_deref());
+            let repo_root_ref =
+                effective_source_repo_root(request, env_plan.repo_root.as_deref());
             let _ = super::super::bootstrap_mcp_state(repo_root_ref)?;
             let catalog =
                 McpCatalogStore::load().wrap_err("failed to load MCP catalog")?;
@@ -853,9 +880,7 @@ fn construct_argv_and_system_prompt(
             request.prep_launch_detection_error.as_ref(),
         )?;
         let mut launch_context = if let Some(prep) = request.prep_launch_context.as_ref() {
-            // Phase fix (2026-05-09-slow-prep): reuse the launch_context computed
-            // by the shared sniff scan in `CompositionPrepContext` instead of
-            // re-running `sniff::detect_with_plan` here.
+            // Reuse the launch projection supplied by the invocation owner.
             prep.clone()
         } else {
             match claudine::system_prompt::LaunchContext::from_cwd(launch_cwd) {
@@ -885,11 +910,21 @@ fn construct_argv_and_system_prompt(
         // templates that reference {{env.AGENT}} resolve correctly without
         // mutating the parent process env.
         launch_context.agent = Some(target.provider.as_slug().to_string());
-        let effective_sp = claudine::system_prompt::resolve_and_prepare_for_session(
-            &request.system_prompt_args,
-            &launch_context,
-            effective_non_interactive,
-        )?;
+        let effective_sp = match request.invocation_context.as_ref() {
+            Some(invocation) => {
+                claudine::system_prompt::resolve_and_prepare_for_session_with_context(
+                    &request.system_prompt_args,
+                    &launch_context,
+                    effective_non_interactive,
+                    invocation,
+                )?
+            }
+            None => claudine::system_prompt::resolve_and_prepare_for_session(
+                &request.system_prompt_args,
+                &launch_context,
+                effective_non_interactive,
+            )?,
+        };
 
         let scoped_tmp = super::super::system_prompt::scoped_tmp_dir(launch_workspace);
 
@@ -1188,8 +1223,8 @@ fn construct_lifecycle_runtime(
             effective_non_interactive: _,
         } = selection;
         let env_plan = &environment.env_plan;
-        let source_repo_root = request.prepared.source_repo_root.as_deref();
-        let effective_repo_root = source_repo_root.or(env_plan.repo_root.as_deref());
+        let effective_repo_root =
+            effective_source_repo_root(request, env_plan.repo_root.as_deref());
         // -- Harness plan preflight -------------------------------------------
         // Every non-dry-run document is parsed into a harness plan. Documents
         // lacking harness frontmatter yield the bare (all-empty) plan; the loop
@@ -1198,7 +1233,7 @@ fn construct_lifecycle_runtime(
         // checks and handler recovery DSL are no longer evaluated.
 
         let shell_options = apply_composition_shell_overrides(
-            build_harness_shell_options_with_cache(
+            super::super::build_harness_shell_options_for_source_with_cache(
                 &request.prepared.resolved_path,
                 effective_repo_root,
                 request.shared_approval_cache.clone(),
@@ -1264,10 +1299,25 @@ fn construct_lifecycle_runtime(
             let fm_json =
                 serde_json::to_string(&request.prepared.effective_frontmatter).unwrap_or_default();
             let scan = format!("{fm_json}\n{}", request.prepared.prompt);
-            let mut ctx = darkmatter::markdown::compose::ComposeContext::capture_for_content(
-                launch_workspace.launch_cwd.as_path(),
-                &scan,
-            );
+            let mut ctx = match (
+                request.invocation_context.as_ref(),
+                request.source_context.as_ref(),
+            ) {
+                (Some(invocation), Some(source_context)) => {
+                    let requirements =
+                        darkmatter::markdown::compose::ContextRequirements::for_content(&scan);
+                    let evidence = invocation.runtime_evidence(source_context, &requirements);
+                    darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
+                        source_context.base_dir(),
+                        &requirements,
+                        &evidence,
+                    )
+                }
+                _ => darkmatter::markdown::compose::ComposeContext::capture_for_content(
+                    launch_workspace.launch_cwd.as_path(),
+                    &scan,
+                ),
+            };
             for (key, value) in &request.env_overrides {
                 ctx.env_mut().insert(key.clone(), value.clone());
             }
@@ -1502,8 +1552,7 @@ fn provider_run_handoff(
     let profile = *profile;
     let effective_non_interactive = *effective_non_interactive;
     let env_plan = &environment.env_plan;
-    let source_repo_root = request.prepared.source_repo_root.as_deref();
-    let effective_repo_root = source_repo_root.or(env_plan.repo_root.as_deref());
+    let effective_repo_root = effective_source_repo_root(request, env_plan.repo_root.as_deref());
     let child_cwd = env_plan.child_cwd.as_path();
     let CommandPhase {
         effective_sp,
@@ -1710,11 +1759,29 @@ fn provider_run_handoff(
                 .handoff_ledger
                 .as_ref()
                 .expect("handoff_ledger.is_some() checked in the match guard");
-            match commit_proxy(
-                &mut ledger.lock().expect("run ledger mutex poisoned"),
-                handoff,
-                effective_repo_root,
-            ) {
+            let commit = match request
+                .prepared
+                .input_layers
+                .file_resolution_context
+                .as_ref()
+            {
+                Some(context) => commit_proxy_in_context(
+                    &mut ledger.lock().expect("run ledger mutex poisoned"),
+                    handoff,
+                    context,
+                ),
+                None => {
+                    if let Some(invocation) = request.invocation_context.as_ref() {
+                        invocation.record_ambient_fallback();
+                    }
+                    commit_proxy(
+                        &mut ledger.lock().expect("run ledger mutex poisoned"),
+                        handoff,
+                        effective_repo_root,
+                    )
+                }
+            };
+            match commit {
                 Ok(committed) => Ok(SingleCompositionOutcome {
                     exit_code: 0,
                     provider,
@@ -1730,7 +1797,7 @@ fn provider_run_handoff(
                 // `route_handoff_failure` does.
                 Err(commit_error) => {
                     let info = LifecycleErrorInfo::from_proxy_commit_error(&commit_error);
-                    let outcome = emit_preflight_blocked_and_finalize(
+                    let outcome = emit_preflight_blocked_and_finalize_in_context(
                         &mut guard,
                         lifecycle_effect_engine,
                         emitter,
@@ -1742,6 +1809,11 @@ fn provider_run_handoff(
                         base_dir,
                         Some(launch_workspace.launch_cwd.as_path()),
                         Some(lifecycle_context),
+                        request
+                            .prepared
+                            .input_layers
+                            .file_resolution_context
+                            .as_ref(),
                         fm_map.unwrap_or(&empty_frontmatter),
                         document_start,
                         info,

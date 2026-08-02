@@ -233,7 +233,8 @@ fn run_sequence_inner(
     let stderr_is_tty = std::io::stderr().is_terminal()
         || std::env::var_os("FORCE_COLOR").is_some();
 
-    let file_resolution_context = composition::capture_file_resolution_context()?;
+    let invocation = claudine::invocation_context::InvocationContext::capture()?;
+    let file_resolution_context = invocation.launch_file_resolution_context().clone();
     let source = match resolve_sequence_source(&file, &file_resolution_context) {
         Ok(source) => source,
         Err(CompositionError::FileNotFound(_)) => {
@@ -262,16 +263,12 @@ fn run_sequence_inner(
         }
     };
 
-    // Re-anchor the request snapshot at the resolved source's location so a
+    // Derive the definitive source bundle from the same owner so a
     // top-level document selected from a different repository keeps that
-    // repository's nested references (D2/D10, AC12). The provisional context
-    // captured above is the right anchor only for resolving the top-level
-    // CLI argument; downstream surfaces (sequence plan resolution, per-step
-    // composition, lifecycle) must derive from this source-anchored snapshot.
-    let file_resolution_context = composition::derive_request_context_for_source(
-        &file_resolution_context,
-        &source.resolved_path,
-    )?;
+    // repository's nested references (D2/D10, AC12). Downstream sequence
+    // surfaces receive the source-derived file-resolution projection.
+    let source_context = invocation.derive_source(&source.resolved_path)?;
+    let file_resolution_context = source_context.file_resolution_context().clone();
 
     reject_sequence_interactive(&source)?;
     // A `kind: group`/`group-catalog`/`task` document is never directly
@@ -287,7 +284,10 @@ fn run_sequence_inner(
     .entered();
 
     let shell_options = super::wrap::apply_composition_shell_overrides(
-        super::wrap::build_harness_shell_options(&source.resolved_path, None),
+        super::wrap::build_harness_shell_options_for_source(
+            &source.resolved_path,
+            source_context.repository_root(),
+        ),
         false,
         shared.yolo,
     );
@@ -335,7 +335,7 @@ fn run_sequence_inner(
     // directory before `chdir` as stable `file_ref_fallback_dir` diagnostic
     // metadata; document-authored values resolve repository-first, then
     // source-relative, never through launch as another candidate.
-    let launch_area_fallback = std::env::current_dir().ok();
+    let launch_area_fallback = Some(invocation.launch_cwd().to_path_buf());
     let (source, set_overrides, dropped_optionals) =
         composition::drop_invalid_optionals(source, set_overrides, launch_area_fallback.as_deref());
     emit_dropped_optional_warnings(&dropped_optionals);
@@ -353,6 +353,8 @@ fn run_sequence_inner(
         verbose,
         shared.perf,
         startup_timings,
+        invocation,
+        source_context,
         file_resolution_context,
     )
 }

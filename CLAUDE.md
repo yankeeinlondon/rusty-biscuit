@@ -16,6 +16,20 @@
 - you will find a justfile at the root of this monorepo and a justfile in each of the _package areas_
 - shared recipes for just can be found in the @just/ directory
 
+## Git Identity and Signing
+
+- all commits must use the author `Ken Snyder <ken@ken.net>` and must be
+  OpenPGP-signed
+- the current host is expected to have the correct signing keys available; a
+  signing failure is an environment or configuration problem and must not be
+  bypassed with `--no-gpg-sign`
+- commit messages must not include agent attribution, co-authorship, or
+  co-signing trailers such as `Co-authored-by`, `Generated-by`, or similar
+  agent-identifying metadata
+- repository-local Git configuration should set `user.name`, `user.email`,
+  `user.signingkey`, and `commit.gpgsign`; verify these values before committing
+- verify every new commit with `git verify-commit HEAD` before reporting success
+
 ## Code Comment Quality
 
 1. **HOW-narration** — prose that restates the implementation step-by-step.
@@ -72,4 +86,3 @@ Update alongside code changes:
     - features/fixes as direct subdirectories are "active" features/fixes and should always follow the format `YYYY-MM-DD-{name}`
         - the files in a feature/fix can vary but almost always will be the `spec.md` file
     - when a feature/fix is completed it is moved to `_completed`
-

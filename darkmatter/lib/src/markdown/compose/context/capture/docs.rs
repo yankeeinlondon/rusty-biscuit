@@ -104,23 +104,15 @@ pub(super) fn populate_docs(cap: &ContextCapture, values: &mut Map<String, Value
 // ── Skill context ─────────────────────────────────────────────────
 
 pub(super) fn populate_skills(cap: &ContextCapture, values: &mut Map<String, Value>) {
-    let repo_root = cap.repo_root.as_ref();
-
-    let skill = repo_root.and_then(|root| {
-        find_best_skill(
-            root,
-            cap.current_package.as_ref(),
-            cap.current_package_area.as_deref(),
-        )
-    });
-
     values.insert(
         "docs_skill".into(),
-        skill.map_or(Value::Null, Value::String),
+        cap.best_skill
+            .clone()
+            .map_or(Value::Null, Value::String),
     );
 }
 
-fn find_best_skill(
+pub(super) fn find_best_skill(
     repo_root: &Path,
     current_package: Option<&Package>,
     current_area: Option<&str>,

@@ -25,6 +25,7 @@ pub(crate) struct SequencePerfAccumulator {
     steps: Vec<SequenceStepPerf>,
     dry_run: bool,
     partial: bool,
+    invocation_work: Option<InvocationWorkCounts>,
 }
 
 impl SequencePerfAccumulator {
@@ -40,7 +41,16 @@ impl SequencePerfAccumulator {
             steps: Vec::new(),
             dry_run: false,
             partial: false,
+            invocation_work: None,
         }
+    }
+
+    /// Retain the latest request-owned discovery counts for the rendered report.
+    pub fn set_invocation_work(
+        &mut self,
+        work: &claudine::invocation_context::InvocationWorkSnapshot,
+    ) {
+        self.invocation_work = Some(InvocationWorkCounts::from(work));
     }
 
     /// Capture the elapsed time since construction as environment setup.
@@ -162,6 +172,9 @@ impl SequencePerfAccumulator {
         if self.dry_run {
             notes.push("Agent execution skipped (dry run)".into());
         }
+        if let Some(work) = self.invocation_work {
+            notes.push(work.note());
+        }
 
         CommandPerfReport {
             title: "Sequence",
@@ -199,6 +212,7 @@ pub(crate) struct CommandPerfCollector {
     agent_perf: Option<AgentExecutionPerf>,
     composition_perf: Option<darkmatter::markdown::compose::ComposePerfReport>,
     dry_run: bool,
+    invocation_work: Option<InvocationWorkCounts>,
 }
 
 impl CommandPerfCollector {
@@ -215,6 +229,7 @@ impl CommandPerfCollector {
             agent_perf: None,
             composition_perf: None,
             dry_run: false,
+            invocation_work: None,
         }
     }
 
@@ -233,7 +248,16 @@ impl CommandPerfCollector {
             agent_perf: None,
             composition_perf,
             dry_run: false,
+            invocation_work: None,
         }
+    }
+
+    /// Retain the latest request-owned discovery counts for the rendered report.
+    pub fn set_invocation_work(
+        &mut self,
+        work: &claudine::invocation_context::InvocationWorkSnapshot,
+    ) {
+        self.invocation_work = Some(InvocationWorkCounts::from(work));
     }
 
     /// Capture the elapsed time since construction as environment setup.
@@ -298,6 +322,14 @@ impl CommandPerfCollector {
     /// Production goes through [`into_report`](Self::into_report); this seam
     /// exists so tests can assert against a deterministic headline.
     pub(super) fn into_report_with_elapsed(self, total_elapsed: Duration) -> CommandPerfReport {
+        let mut notes = if self.dry_run {
+            vec!["Agent execution skipped (dry run)".into()]
+        } else {
+            vec![]
+        };
+        if let Some(work) = self.invocation_work {
+            notes.push(work.note());
+        }
         CommandPerfReport {
             title: self.title,
             total_elapsed,
@@ -313,14 +345,36 @@ impl CommandPerfCollector {
             },
             composition: self.composition_perf,
             agent: if self.dry_run { None } else { self.agent_perf },
-            notes: if self.dry_run {
-                vec!["Agent execution skipped (dry run)".into()]
-            } else {
-                vec![]
-            },
+            notes,
             placement: CompositionPlacement::UnderPrep,
             sequence_steps: Vec::new(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct InvocationWorkCounts {
+    git_root_discoveries: usize,
+    topology_probes: usize,
+    topology_reuses: usize,
+}
+
+impl From<&claudine::invocation_context::InvocationWorkSnapshot> for InvocationWorkCounts {
+    fn from(work: &claudine::invocation_context::InvocationWorkSnapshot) -> Self {
+        Self {
+            git_root_discoveries: work.git_root_discoveries,
+            topology_probes: work.topology_probes,
+            topology_reuses: work.topology_reuses,
+        }
+    }
+}
+
+impl InvocationWorkCounts {
+    fn note(self) -> String {
+        format!(
+            "source context work: Git discoveries {}, topology probes {}, topology reuses {}",
+            self.git_root_discoveries, self.topology_probes, self.topology_reuses,
+        )
     }
 }
 

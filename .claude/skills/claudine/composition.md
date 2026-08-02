@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-3adbf695ca12f169
-last_updated: 2026-07-23
+hash: ef46db3751d8e999-064eb2d7d6f425fe
+last_updated: 2026-08-02
 ---
 # Claudine Composition
 
@@ -8,6 +8,7 @@ last_updated: 2026-07-23
 
 - Direct Composition
 - Inline Composition
+- Invocation and Source Context
 - Whole-Value Frontmatter Expansion Is Executable State
 - Frontmatter YAML blocks in errors
 - Prepare-time warnings
@@ -44,6 +45,62 @@ Because composition flows through the same execution path as `claudine claude` /
 - **Prompt-scoped timing header** — every 10 minutes the stderr surface emits `⏱️ {HH:MM} {TZ} running the <prompt> prompt for <duration>` anchored on the prompt's start time (and a `t=0` header without the duration at run start). See [Timing Surface](#timing-surface) below.
 - **Typed error rendering** — `SemanticEvent::Error` is rendered as a colored `BlockQuote` whose label and border come from `SemanticErrorKind` (`Configuration`, `AgentNative`, `ApiRemote`, `Interrupted`, `Unknown`).
 - **Reasoning / thinking** — provider reasoning (Claude, Codex, OpenCode, Gemini, Qwen) renders into `Section::Thinking` as a `BlockQuote` with the wider `▌ ` border that matches the System Prompt and Agent Prompt sections.
+
+## Invocation and Source Context
+
+Every canonical composition command creates one `InvocationContext` before it
+resolves the first document. The owner freezes the launch CWD, HOME,
+environment, launch repository observation, and request-local work accounting.
+It also retains repository observations for the life of the command; it is not
+a process-global cache.
+
+Resolution and source derivation are separate operations that share that
+owner:
+
+1. Resolve the authored CLI reference with the launch
+   `FileResolutionContext`.
+2. Derive one definitive `SourceContext` from the resolved path and pass it
+   directly into preparation.
+
+`SourceContext` carries the resolved source path and authoring directory, its
+repository observation and optional repository/package-area/package roots,
+and the source-derived `FileResolutionContext`. Schema references,
+expressions, transclusions, links, lifecycle re-entry, and sequence JIT
+composition all use that same provenance. The first document is not
+immediately re-derived after resolution.
+
+Repository topology is single-flight per observed worktree. Sources in an
+already observed worktree reuse its Git handle and `RepoInfo`; a source in a
+different or nested repository creates one additional request-local
+observation. Linked worktrees remain distinct because identity includes both
+the worktree root and worktree-specific Git directory. Explicit repository
+absence and typed discovery failure are retained rather than retried through a
+different projection. Retry, resume, and JIT boundaries still reread document
+content; only immutable launch and repository evidence is reused.
+
+Before composing, Claudine scans the authored frontmatter and body with
+Darkmatter's `ContextRequirements`, asks the invocation owner only for the
+required runtime groups, and supplies the resulting evidence to
+`ComposeContext`. The environment comes from the frozen invocation snapshot.
+Missing supplied evidence remains a partial-capture diagnostic; canonical
+paths do not recover it from ambient CWD, HOME, environment, Git, or host
+discovery.
+
+File provenance does not choose the provider child's working directory.
+Canonical `::shell` composition remains pinned to
+`LaunchWorkspaceContext::child_cwd`: the launch repository root when the
+invocation began in a repository, otherwise the launch CWD. A prompt from a
+sibling repository therefore resolves its authored file references from that
+source while its shell commands continue to run at the launch root.
+
+A sequence step's explicit task stack is the one exception to "the document a
+step composes and runs owns its `SourceContext`": `setup`, `teardown`, and the
+primary `side_effect` action derive their `SourceContext` from the document
+that authored the task, not the document the step composes and runs.
+`set_frontmatter` and other file-touching effects in that stack therefore
+target files next to the task's origin document, including when an
+externalized `task:`/`group:` file lives in a different repository from the
+step's `prompt:` document.
 
 ### Positional Arguments
 
@@ -901,10 +958,13 @@ Both commands follow the same six-stage pipeline, with lifecycle events woven ar
 Resolve → Initialize → Pre-Flight → Prepare → Start → Select Provider → Launch → (Success | Blocked | Failure) → Finalize → Loop
 ```
 
-- **Resolve**: `composition::resolve_composition_source()` loads the Markdown file
+- **Resolve**: canonical commands use
+  `composition::resolve_composition_source_in_context()` with the invocation's
+  launch `FileResolutionContext`, then derive one `SourceContext` from the
+  resolved path
 - **Initialize**: `LifecycleRunGuard::emit_initialize_once()` fires the `initialize` lifecycle event; a `skip` control action here exits cleanly before any later stage
 - **Pre-Flight**: `composition::resolve_shell_approvals()` discovers every shell command in the document graph — template `::shell` directives, top-level frontmatter `$(...)` expressions, and lifecycle `shell` stack actions — checks whitelists, and prompts the user to approve any unapproved commands before proceeding (see Pre-Flight Shell Approval)
-- **Prepare**: `composition::prepare::service::prepare_document()` — the canonical preparation service every entry reason routes through (direct, proxy target, retry, resume, loop iteration) — composes through Darkmatter via `prepare_direct()` / `prepare_inline()` with the pre-approved command set and produces a `PreparedComposition` with `effective_frontmatter`. There is exactly one composer per mode; see [Document Handoffs](#document-handoffs-and-the-equivalence-contract)
+- **Prepare**: `composition::prepare::service::prepare_document()` — the canonical preparation service every entry reason routes through (direct, proxy target, retry, resume, loop iteration) — composes through Darkmatter via `prepare_direct()` / `prepare_inline()` with the pre-approved command set, source `FileResolutionContext`, and supplied runtime evidence, and produces a `PreparedComposition` with `effective_frontmatter`. There is exactly one composer per mode; see [Document Handoffs](#document-handoffs-and-the-equivalence-contract)
 - **Start**: `LifecycleRunGuard::emit_start_once()` fires the `start` lifecycle event after schema validation and shell audit pass
 - **Select**: `composition::select_provider()` applies the precedence chain
 - **Launch**: `wrap::composition::execute_composition_request()` runs the provider through the full wrapper pipeline (env, MCP, harness, streaming)

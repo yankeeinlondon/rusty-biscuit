@@ -6,6 +6,7 @@ use biscuit_terminal::terminal::Terminal;
 use darkmatter::markdown::MarkdownError;
 use serde_json::{Value, json};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::diagnostics::{Category, Diagnostic, Disposition, Origin, code_spec, null_detail_for};
 use crate::provider::Provider;
@@ -339,7 +340,7 @@ pub enum ClaudineError {
     /// Carries the typed `sniff` failure as its `#[source]` rather than a
     /// flattened message, so a caller can recover which probe failed.
     #[error("launch context detection failed: {0}")]
-    LaunchContextDetection(#[source] Box<sniff::SniffError>),
+    LaunchContextDetection(#[source] Arc<sniff::SniffError>),
 
     /// System prompt file not found.
     #[error("system prompt file not found: {0}")]

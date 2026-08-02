@@ -702,7 +702,7 @@ fn configure_streams(
 }
 
 /// Why a [`wait_with_timeout`] call stopped waiting.
-enum WaitOutcome {
+pub(super) enum WaitOutcome {
     Exited(ExitStatus),
     TimedOut,
 }
@@ -767,7 +767,7 @@ fn recv_wait(
 /// Callers must already be draining stdout/stderr concurrently. Blocking here
 /// while a child fills an undrained pipe would deadlock: the child blocks on
 /// write, we block on exit, and only the timeout breaks the tie.
-fn wait_with_timeout(
+pub(super) fn wait_with_timeout(
     child: &Arc<SharedChild>,
     timeout: Duration,
 ) -> Result<WaitOutcome, std::io::Error> {

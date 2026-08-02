@@ -58,6 +58,12 @@ pub use service::{DocumentPreparation, PromptSource, SchemaStage, prepare_docume
 /// Options for composition preparation.
 #[derive(Debug, Default, Clone)]
 pub struct PrepareOptions {
+    /// Request owner used for invocation-local composition work accounting.
+    ///
+    /// Canonical command paths supply this alongside `prepared_context`.
+    /// Compatibility callers may omit it without changing composition
+    /// behavior.
+    pub invocation_context: Option<crate::invocation_context::InvocationContext>,
     /// Frontmatter `--set` overrides (JSON object).
     pub set_overrides: Option<serde_json::Value>,
     /// Commands pre-approved during pre-flight shell discovery.
@@ -144,6 +150,9 @@ pub struct PrepareOptions {
 /// Returns the caller's snapshot when it supplied one; otherwise captures a
 /// fresh one anchored on the caller's launch area, falling back to the
 /// document's own directory.
+///
+/// Canonical command paths always supply the invocation-owned snapshot. The
+/// capture branch preserves compatibility for library callers.
 ///
 /// The anchor is never the process CWD. The wrapper changes the parent CWD to
 /// the repo root before dispatch by design, so an ambient capture on a prepared
@@ -338,6 +347,9 @@ pub(super) fn prepare_direct_with_prompt(
     // Retain the caller's inputs so a later canonical preparation of this or a
     // proxied document re-applies exactly them.
     let input_layers = super::CallerInputLayers::from_options(&options);
+    if let Some(invocation) = options.invocation_context.as_ref() {
+        invocation.record_compose_operation();
+    }
     let (composed, report) = source
         .markdown
         .compose_with(compose_opts)
@@ -492,6 +504,9 @@ pub fn prepare_inline(
     // an early-binding lookup over the same `ctx.*`/`env.*` state main compose saw.
     let compose_opts = canonical_compose_options(&source.resolved_path, &ctx, &options);
     let input_layers = super::CallerInputLayers::from_options(&options);
+    if let Some(invocation) = options.invocation_context.as_ref() {
+        invocation.record_compose_operation();
+    }
     let (composed, report) = temp_md
         .compose_with(compose_opts)
         .map_err(|e| map_compose_error(&source.resolved_path, e))?;

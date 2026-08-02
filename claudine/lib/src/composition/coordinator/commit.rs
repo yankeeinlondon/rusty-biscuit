@@ -6,8 +6,8 @@
 
 //! The one place a proxy request becomes a committed handoff.
 //!
-//! [`commit_proxy`] is the sole *committing* caller of
-//! [`resolve_proxy_target`][crate::composition::resolve_proxy_target] and the
+//! [`commit_proxy`] and [`commit_proxy_in_context`] are the sole *committing*
+//! callers of the proxy resolvers and the
 //! sole route to a [`HopApproval`], so resolution and hop/cycle validation
 //! happen exactly once per hop, in one order, for every proxy producer. A
 //! downstream layer receives a [`ProxyHandoff`] whose target is already
@@ -20,7 +20,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::composition::error::CompositionError;
-use crate::composition::resolve_proxy_target;
+use crate::composition::{resolve_proxy_target, resolve_proxy_target_in_context};
 use super::handoff::{EvaluatedProxyRequest, ProxyHandoff, ResolvedProxyTarget};
 use super::invocation::RunLedger;
 
@@ -99,21 +99,61 @@ pub fn commit_proxy(
     let event = request.provenance().signal().property_name();
     let target = request.target().to_string();
     let resolved = resolve_proxy_target(&target, &source_path, repo_root).map_err(|source| {
-        ProxyCommitError::Resolution {
-            target: target.clone(),
-            source_path: source_path.clone(),
-            error: CompositionError::InvalidFileReference {
-                context: Box::new(crate::composition::FileReferenceContext {
-                    source_path: source_path.clone(),
-                    event: Some(event.to_string()),
-                    property: format!("{event}.stack[*].proxy"),
-                    reference: target.clone(),
-                    hint: PROXY_TARGET_HINT.to_string(),
-                }),
-                source,
-            },
-        }
+        proxy_resolution_error(&target, &source_path, event, source)
     })?;
+    commit_resolved_proxy(ledger, request, source_path, resolved)
+}
+
+/// Resolve and commit a proxy using the invocation's immutable file context.
+///
+/// Canonical Claudine orchestration uses this entry point so proxy resolution
+/// cannot re-read process CWD, HOME, environment, or repository topology.
+/// [`commit_proxy`] remains the ambient compatibility API.
+pub fn commit_proxy_in_context(
+    ledger: &mut RunLedger,
+    request: EvaluatedProxyRequest,
+    request_context: &biscuit_file::FileResolutionContext,
+) -> Result<ProxyHandoff, ProxyCommitError> {
+    let source_path = request.provenance().source_path().to_path_buf();
+    let event = request.provenance().signal().property_name();
+    let target = request.target().to_string();
+    let resolved = resolve_proxy_target_in_context(
+        &target,
+        &source_path,
+        request_context,
+    )
+    .map_err(|source| proxy_resolution_error(&target, &source_path, event, source))?;
+    commit_resolved_proxy(ledger, request, source_path, resolved)
+}
+
+fn proxy_resolution_error(
+    target: &str,
+    source_path: &Path,
+    event: &str,
+    source: crate::harness::HarnessError,
+) -> ProxyCommitError {
+    ProxyCommitError::Resolution {
+        target: target.to_string(),
+        source_path: source_path.to_path_buf(),
+        error: CompositionError::InvalidFileReference {
+            context: Box::new(crate::composition::FileReferenceContext {
+                source_path: source_path.to_path_buf(),
+                event: Some(event.to_string()),
+                property: format!("{event}.stack[*].proxy"),
+                reference: target.to_string(),
+                hint: PROXY_TARGET_HINT.to_string(),
+            }),
+            source,
+        },
+    }
+}
+
+fn commit_resolved_proxy(
+    ledger: &mut RunLedger,
+    request: EvaluatedProxyRequest,
+    source_path: PathBuf,
+    resolved: PathBuf,
+) -> Result<ProxyHandoff, ProxyCommitError> {
     // Bind before matching so the `LedgerMut` temporary is dropped here: the
     // rejection arm below needs to read the chain back off the ledger.
     let decision = ledger

@@ -10,7 +10,9 @@ use std::fs;
 use tempfile::tempdir;
 mod common;
 use common::wrap::*;
-use common::{augmented_path, init_git_repo, strip_ansi, write_executable};
+use common::{
+    CliProcessFixture, augmented_path, init_git_repo, strip_ansi, write_executable,
+};
 
 /// Non-TTY dry-run gate: an unapproved `::shell` command (no approval
 /// handler, no whitelist) makes `compose --dry-run` exit non-zero with the
@@ -223,8 +225,10 @@ fn compose_interactive_preflight_with_whitelisted_command() {
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", &full_path)
+        .current_dir(workspace.path())
         .args([
             "compose",
             "--interactive",
@@ -246,16 +250,14 @@ fn compose_interactive_preflight_with_whitelisted_command() {
 #[cfg(unix)]
 #[test]
 fn compose_preflight_discovers_shell_inside_false_block() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-preflight-false-block");
+    seed_minimal_config(fixture.home());
 
     // Preflight discovery is condition-blind: a ::shell inside a
     // ::block when="false" is still discovered and must be whitelisted, even
     // though composition would exclude it from the output. An un-whitelisted
     // command therefore fails preflight rather than being silently skipped.
-    let md_file = workspace.path().join("template.md");
+    let md_file = fixture.cwd().join("template.md");
     fs::write(
         &md_file,
         "---\ntitle: false block test\n---\n\
@@ -268,17 +270,14 @@ fn compose_preflight_discovers_shell_inside_false_block() {
 
     // Provider binary (should never be reached — preflight aborts first).
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         "#!/bin/sh\necho 'provider-launched' >&2\nexit 0\n",
     );
 
     // No whitelist for curl and no --interactive approval handler, so the
     // discovered command fails preflight.
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["compose", "--codex", md_file.to_str().unwrap()])
         .assert()
         .failure();

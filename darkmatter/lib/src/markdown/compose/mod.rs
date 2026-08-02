@@ -105,7 +105,9 @@ pub mod transclusion;
 
 pub use biscuit_file::PathPosition;
 pub use cache::{CacheAccessMode, CacheFreshnessMode, CacheStats};
-pub use context::ContextMergeDiagnostic;
+pub use context::{
+    ContextCaptureEvidence, ContextGroup, ContextMergeDiagnostic, ContextRequirements,
+};
 pub use file_links::FileLinksError;
 pub use remote::{
     DEFAULT_REMOTE_CONCURRENCY, DiscoveredRemoteUrl, REMOTE_CONCURRENCY_ENV, RemoteFreshnessMode,

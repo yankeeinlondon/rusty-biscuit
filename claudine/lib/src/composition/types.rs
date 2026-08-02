@@ -772,28 +772,22 @@ pub struct CompositionExecutionRequest {
     /// and uses this snapshot for both provider selection and binary path
     /// resolution.
     pub installed_snapshot: Option<InstalledProviderSnapshot>,
-    /// Pre-computed launch-CWD `LaunchWorkspaceContext`, supplied by callers
-    /// that already ran a shared `sniff::detect_with_plan` scan during prep
-    /// (e.g. `CompositionPrepContext`). When `Some`, the executor reuses it
+    /// Request owner retained across preparation, execution, and re-entry.
+    pub invocation_context: Option<crate::invocation_context::InvocationContext>,
+    /// Definitive repository and file-resolution context for this source.
+    pub source_context: Option<crate::invocation_context::SourceContext>,
+    /// Launch-CWD `LaunchWorkspaceContext` projected from request-owned
+    /// repository evidence. When `Some`, the executor reuses it
     /// instead of calling `resolve_launch_workspace_context` again for both
     /// the header env plan and the child env build.
     pub prep_launch_workspace: Option<LaunchWorkspaceContext>,
-    /// Pre-computed launch-CWD `LaunchContext`, supplied by callers that
-    /// already ran a shared `sniff::detect_with_plan` scan during prep
-    /// (e.g. `CompositionPrepContext`). When `Some`, the executor reuses
+    /// Launch-CWD `LaunchContext` projected from the request owner. When
+    /// `Some`, the executor reuses
     /// it instead of calling `LaunchContext::from_cwd` again.
     pub prep_launch_context: Option<crate::system_prompt::LaunchContext>,
-    /// Pre-computed launch-CWD `EnvironmentContext` derived from the
-    /// same shared sniff scan. When `Some` and the effective env-detect
-    /// root matches the launch CWD, the executor reuses it instead of
-    /// calling `detect_environment_fast` again.
+    /// Launch-CWD `EnvironmentContext` projected from captured evidence.
     pub prep_env_context: Option<crate::events::EnvironmentContext>,
-    /// Diagnostic snapshot of the shared prep-time sniff scan failure, if
-    /// it failed. The shared scan defaults to an empty
-    /// [`crate::system_prompt::LaunchContext`] on failure to keep
-    /// best-effort callers happy, so the executor reads this field to
-    /// preserve the legacy hard-fail contract for `--repo`. `None` (or
-    /// no prep context at all) means no failure happened during prep.
+    /// Diagnostic snapshot of the request owner's retained launch failure.
     ///
     /// A [`DiagnosticSnapshot`](crate::diagnostics::DiagnosticSnapshot)
     /// rather than a `String` so the typed `sniff::SniffError` retained

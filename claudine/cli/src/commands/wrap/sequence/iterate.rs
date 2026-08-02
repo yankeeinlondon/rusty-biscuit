@@ -28,7 +28,7 @@ use claudine::composition::{
     self, CompositionError, CompositionExecutionRequest, CompositionMode, PreflightGraph,
     ProxyHandoff, ResolvedCompositionSource, RunLedger, RuntimeState, SequencePlan,
     SequenceRunSummary, SequenceStepResult, SequenceTaskResult, SharedRunLedger, SurfacedHandoff,
-    commit_proxy,
+    commit_proxy_in_context,
 };
 use claudine::diagnostics::DiagnosticSnapshot;
 use claudine::system_prompt::SystemPromptArgs;
@@ -374,6 +374,7 @@ fn run_one_step(
                     run.user_set_overrides.clone(),
                     &launch_area_fallback,
                     &run.compose.approval_cache,
+                    &run.prep_context.invocation,
                     run.compose.file_resolution_context,
                     run.verbose,
                 )?;
@@ -530,6 +531,8 @@ fn build_body_request(
         env_overrides,
         shared_approval_cache: Some(Arc::clone(&run.compose.approval_cache)),
         installed_snapshot: Some(run.prep_context.installed_snapshot.clone()),
+        invocation_context: Some(run.prep_context.invocation.clone()),
+        source_context: Some(run.prep_context.source_context.clone()),
         prep_launch_workspace: Some(run.prep_context.launch_workspace.clone()),
         prep_launch_context: Some(run.prep_context.launch_context.clone()),
         prep_env_context: Some(run.prep_context.env_context.clone()),
@@ -647,15 +650,21 @@ fn run_step_proxy_loop(
     user_set_overrides: Option<serde_json::Value>,
     launch_area_fallback: &Option<PathBuf>,
     shared_approval_cache: &composition::SharedApprovalCache,
+    invocation: &claudine::invocation_context::InvocationContext,
     file_resolution_context: &biscuit_file::FileResolutionContext,
     verbose: u8,
 ) -> Result<i32> {
     let mut surfaced = initial;
-    let mut commit_repo_root = step_repo_root.map(Path::to_path_buf);
+    let _ = step_repo_root;
+    let mut active_file_resolution_context = file_resolution_context.clone();
     loop {
         let handoff: ProxyHandoff = match surfaced {
             SurfacedHandoff::Request(request) => {
-                commit_proxy(&mut ledger.lock().unwrap(), request, commit_repo_root.as_deref())
+                commit_proxy_in_context(
+                    &mut ledger.lock().unwrap(),
+                    request,
+                    &active_file_resolution_context,
+                )
                     .map_err(color_eyre::eyre::Report::from)?
             }
             SurfacedHandoff::Committed(handoff) => *handoff,
@@ -675,6 +684,8 @@ fn run_step_proxy_loop(
         let target_file = handoff.authored_target().to_string();
         let mut inline_state = None;
         let adopted_handoff = Some(Box::new(handoff));
+        let source_context = invocation.derive_source(&target_source.resolved_path)?;
+        active_file_resolution_context = source_context.file_resolution_context().clone();
 
         let (outcome, next_repo_root) = prepare_and_run_active_document(
             shared,
@@ -694,14 +705,15 @@ fn run_step_proxy_loop(
             None,
             Vec::new(),
             std::time::Instant::now(),
-            file_resolution_context.clone(),
+            invocation.clone(),
+            source_context,
         )?;
 
         match outcome {
             ActiveDocumentOutcome::Done(code) => return Ok(code),
             ActiveDocumentOutcome::Handoff(next) => {
                 surfaced = next;
-                commit_repo_root = next_repo_root;
+                let _ = next_repo_root;
             }
         }
     }

@@ -18,10 +18,11 @@ use it. Rationale and measurements: `fixes/2026-07-30-ci-cd-stabilization/plan.m
 - **Store cap:** `just install-kache` seeds `local_max_size = "100GiB"` when a host has no kache
   config (never overwrites). Config path: `~/.config/kache/config.toml` on macOS/Linux,
   `%APPDATA%\kache\config.toml` on Windows.
-- **Sweep:** version-controlled at `scripts/sweep.sh` (three passes + census below), run via
-  `just sweep [roots...]`. Schedule per host: launchd on macOS,
-  `just install-windows-sweep` on Windows, and cron/systemd timer on Linux.
-  Target hygiene matters with or without a cache.
+- **Sweep:** version-controlled at `scripts/sweep.sh` (four passes + census below), run via
+  `just sweep [roots...]`. Schedule per host: launchd on macOS (done — see below),
+  `just install-windows-sweep` on Windows, and cron on Linux (done — see below;
+  systemd is unavailable on build-linux because `~/.config` is a read-only CIFS
+  mount). Target hygiene matters with or without a cache.
 - **CI: kache removed.** `Swatinem/rust-cache@v2` remains on every native leg. The measured legs
   returned 0–6% hit rates (0.4–2.3% weighted by compile cost, ~2–15s saved) because
   `kache-action@v1` fell back to the GitHub Actions cache, whose entries are immutable and
@@ -111,9 +112,10 @@ garbage-collects. Logs to `~/Library/Logs/rusty-biscuit-sweep.log`.
 - `~/.claudine/worktrees/rusty-biscuit`
 - `/Volumes/coding/personal/rusty-biscuit`
 
-**Strategy — three escalating passes, most-targeted first:**
+**Strategy — four escalating passes, most-targeted first:**
 
 ```bash
+rm -rf <target>/*/incremental             # over SWEEP_INCREMENTAL_MAX_GIB (default 15)
 cargo sweep -r --installed      "$root"   # drop artifacts from uninstalled toolchains
 cargo sweep -r --time 14        "$root"   # drop artifacts untouched >14 days
 cargo sweep -r --maxsize 120GB  "$root"   # BACKSTOP: cap a target/, oldest-first
@@ -122,7 +124,16 @@ cargo sweep -r --maxsize 120GB  "$root"   # BACKSTOP: cap a target/, oldest-firs
 Plus a `[census]` line logging the 10 largest `target/` dirs before sweeping, and
 `tmutil thinlocalsnapshots` afterwards so freed blocks actually return to the volume.
 
-Passes 1–2 do the real work (50–100+ GiB per run historically). Pass 3 only fires on runaways.
+Passes 2–3 do the real work (50–100+ GiB per run historically). Pass 4 only fires on runaways.
+
+**Why incremental needs its own size-triggered pass (added 2026-08-01).** Cargo never
+garbage-collects incremental state, and the `--time` pass structurally *cannot* reach it: every
+build re-touches the incremental directory of each crate it compiles, so those artifacts are
+perpetually fresh no matter how stale the work behind them is. On build-linux this grew to **53 GiB
+— 40% of a 134 GiB target** — while a `--time 14` scan found *zero* files older than 14 days across
+the whole tree. Size is the only trigger that works, and `cargo-sweep` does not cover this at all.
+Removing the directory costs one non-incremental rebuild of the workspace crates; `deps/` is
+untouched.
 
 ### Native Windows policy
 
@@ -159,7 +170,11 @@ to 150–200GB. If nothing ever approaches 120GB, it can come down.
 - `[profile.dev.package."*"] debug = 0` — enabled after dependency PDBs reached
   34 GiB on the constrained Windows host. Cargo excludes workspace members
   from this wildcard, so their backtraces retain line tables; dependency
-  frames lose source locations.
+  frames lose source locations. Independently measured on build-linux
+  (2026-08-01, 93% full) at ~45 G reclaimable against its `deps/`: DWARF
+  compresses 1.97x versus 2.79x for code, so debug info is 58% of logical
+  bytes but 67% of on-disk bytes, and third-party crates are 82% of `deps/`
+  (141.9 G of 173 G logical).
 - `cargo-sweep` **stays** alongside kache. Not redundant: kache's per-crate keying degrades ~100×
   on a huge tree (~18 s/crate on a 957k-file `target/deps` vs ~30–170 ms clean).
 
@@ -192,8 +207,17 @@ Swept artifacts come back as link-restores, not recompiles.
 
 ## Other hosts
 
-- **build-linux** (ZFS, `block_cloning active`, reflink-capable) — **install next**; it's at 6.2 GB
-  free with a 79 G target. Confirm `doctor` reports reflink inside the LXC.
+- **build-linux** (ZFS, `block_cloning active`, reflink-capable) — kache **installed at the pinned
+  0.12.0 but deliberately not activated**: the host's `~/.cargo/config.toml` records that activating
+  it disables incremental compilation at ~670 ms per edit-rebuild, and the host chose the faster
+  edit loop. Sweep is scheduled here by **cron, daily 04:00** (`crontab -l`), logging to
+  `~/.local/state/rusty-biscuit-sweep.log`. Two host constraints to know:
+  - `~/.config` is a **read-only CIFS mount** (`//192.168.100.97/config`, `uid=0,gid=0`), so
+    `just install-kache` fails at its config-seeding step and `~/.config/systemd/user` is
+    unavailable — hence cron rather than a systemd user timer. The kache store is consequently
+    uncapped, which is currently harmless only because kache is inactive here.
+  - The volume is **160 G**, so the 120GB `--maxsize` backstop is not a guard rail on this host:
+    120GB of target plus the rest of the system is ~84% full before pass 4 even fires.
 - **build-win** (ext4 in WSL2) — deferred. Hardlink mode means the store is a real second copy, and
   there's one worktree so nothing to dedup against. If adopted: `local_max_size` ~30GiB against its
   196 G filesystem, or give it a btrfs/XFS-reflink second VHDX.
@@ -205,9 +229,11 @@ Swept artifacts come back as link-restores, not recompiles.
 
 ```
 scripts/sweep.sh                                              (version-controlled; `just sweep`)
-~/.local/bin/rusty-biscuit-sweep.sh                      (+ .bak)
-~/Library/LaunchAgents/com.ken.rusty-biscuit-sweep.plist  (+ .bak)
-~/.config/kache/config.toml
+~/.local/bin/rusty-biscuit-sweep.sh                      (+ .bak)   [Mac]
+~/Library/LaunchAgents/com.ken.rusty-biscuit-sweep.plist  (+ .bak)  [Mac]
+~/.config/kache/config.toml                                         [Mac; unwritable on build-linux]
+crontab -l                                                          [build-linux schedule]
+~/.local/state/rusty-biscuit-sweep.log                              [build-linux log]
 ```
 
 The Mac launchd wrapper and plist predate `scripts/sweep.sh` and remain unversioned — only the

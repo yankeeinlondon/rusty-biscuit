@@ -39,6 +39,13 @@ same scheme validation and deny-all-by-default host policy.
   host application's signal disposition. The ungated `wait`/`kill` core we use
   is `waitid`/`WaitForSingleObject`-based and installs nothing, so Darkmatter
   carries no platform split of its own.
+- `libc` (Unix only) supplies `setsid` for the alias-lookup child in
+  `markdown/compose/shell_expansion/alias.rs`. That lookup must run the shell
+  interactively to see rc-file aliases, and an interactive shell left on the
+  caller's controlling terminal stops itself with `SIGTTIN` whenever it is not
+  the terminal's foreground process group — a hang, not an error. A new session
+  is the only thing that detaches the controlling terminal; a new process group
+  alone does not. One syscall, so the raw binding rather than a wrapper crate.
 
 ## DMLS (`darkmatter/dmls`)
 

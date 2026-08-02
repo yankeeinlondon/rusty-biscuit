@@ -96,7 +96,7 @@ fn agent_hint_resolved_early_in_non_tty() {
 
     // Install both claude and codex; "c" resolves to Claude (first prefix match)
     write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
-    write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 0\n");
+    write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 99\n");
 
     // Write empty stdin via a file to prevent TTY detection
     let stdin_file = workspace.path().join("empty-stdin.txt");
@@ -104,8 +104,10 @@ fn agent_hint_resolved_early_in_non_tty() {
 
     assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
+        .current_dir(workspace.path())
         .pipe_stdin(&stdin_file)
         .unwrap()
         .args(["compose", md_file.to_str().unwrap()])

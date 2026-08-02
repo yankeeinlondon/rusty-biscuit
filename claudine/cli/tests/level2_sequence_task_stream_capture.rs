@@ -63,7 +63,7 @@
 #[allow(deprecated)]
 use assert_cmd::cargo::cargo_bin;
 use biscuit_test_harness::tmux::TmuxHarness;
-use biscuit_test_harness::{CapturedFrame, TerminalHarness};
+use biscuit_test_harness::{CapturedFrame, TerminalHarness, strip_ansi};
 use serial_test::serial;
 use std::fs;
 use std::path::PathBuf;
@@ -282,18 +282,40 @@ exit 0
 /// ahead of that marker, `close()` puts it behind.
 ///
 /// The stall spans the ticker's *second* tick on purpose. Cadence and silence
-/// window are both 30s, so the first tick only flushes if the block was stamped
-/// within a hair of the ticker starting; under pane setup and load it usually
-/// is not, and the block then waits for t=60s. A 45s stall made that a coin
-/// flip — the run ended first and `close()` drained the block.
-const CLAUDE_IDLE_STUB: &str = r#"#!/bin/sh
-printf '%s\n' '{"type":"system","subtype":"init","session_id":"stub-idle","model":"stub-model"}'
-printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"held-idle-block\n"}]}}'
-sleep 75
-printf '%s\n' '{"type":"tool_use","name":"Bash","input":{"command":"post-stall-marker"}}'
-printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"done"}'
+/// window are one value, so the first tick only flushes if the block was
+/// stamped within a hair of the ticker starting; under pane setup and load it
+/// usually is not, and the block then waits for the tick after. A stall of only
+/// 1.5 cadences made that a coin flip — the run ended first and `close()`
+/// drained the block.
+fn claude_idle_stub() -> String {
+    format!(
+        r#"#!/bin/sh
+printf '%s\n' '{{"type":"system","subtype":"init","session_id":"stub-idle","model":"stub-model"}}'
+printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"held-idle-block\n"}}]}}}}'
+sleep {IDLE_STALL_SECS}
+printf '%s\n' '{{"type":"tool_use","name":"Bash","input":{{"command":"post-stall-marker"}}}}'
+printf '%s\n' '{{"type":"result","subtype":"success","is_error":false,"result":"done"}}'
 exit 0
-"#;
+"#
+    )
+}
+
+/// The idle-flush cadence this fixture drives the real binary at.
+///
+/// Small enough to be cheap, but not so small that a loaded pane can starve the
+/// ticker thread between ticks.
+const IDLE_FLUSH_INTERVAL_SECS: u64 = 3;
+
+/// How long [`claude_idle_stub`] stalls: **four** cadences, where two is the
+/// bare minimum.
+///
+/// The flush lands on the second tick — at most `2 × cadence` after the block is
+/// stamped, whatever the provider's startup lag, since both the stamp and the
+/// stall are measured from that same moment. The surplus two cadences are the
+/// margin the discriminating assertion spends. Derived from the cadence rather
+/// than written as its own wall-clock number so shortening one cannot silently
+/// eat the other.
+const IDLE_STALL_SECS: u64 = IDLE_FLUSH_INTERVAL_SECS * 4;
 
 struct Staged {
     workspace: TestWorkspace,
@@ -500,6 +522,40 @@ fn framed_region_raw<'a>(raw: &'a str, plain_marker: &str) -> Vec<&'a str> {
         .skip_while(|line| !line.contains(plain_marker))
         .take_while(|line| !line.contains(EXIT_MARKER))
         .collect()
+}
+
+/// The capture's rows with tmux's *soft* wraps undone, escapes intact.
+///
+/// `capture-pane` emits one row per **pane** row, so a logical line wider than
+/// the pane arrives as several rows split at column `cols` — tmux folds by
+/// column, not by word, so the break lands mid-word and can fall inside a
+/// needle. Any `raw.lines()`/`plain.contains()` search over the rows as
+/// captured is therefore a function of where the fold happened to land, which
+/// is why such an assertion presents as flaky rather than as broken: the
+/// zero-step notice embeds the staged document's absolute path, whose length
+/// moves per run (pid, nanosecond stamp, counter), so each run splits the
+/// sentence in a different place. Rejoining first makes the search depend on
+/// the *text*, not on the geometry.
+///
+/// A row continues its predecessor exactly when the predecessor filled the
+/// pane; tmux trims trailing blanks, so a short row is a real line ending.
+///
+/// Rows are joined **raw**, keeping their escapes: a `plain`-only dewrap would
+/// answer "did the text arrive" and silently lose "was it styled", which is
+/// half of what the caller is asserting. Widen with care — a hard-terminated
+/// line that happens to be exactly `cols` wide is indistinguishable from a
+/// wrapped one and will be joined to its successor.
+fn dewrap_rows(raw: &str, cols: usize) -> Vec<String> {
+    let mut logical: Vec<String> = Vec::new();
+    let mut continues = false;
+    for row in raw.lines() {
+        match logical.last_mut() {
+            Some(previous) if continues => previous.push_str(row),
+            _ => logical.push(row.to_string()),
+        }
+        continues = strip_ansi(row).chars().count() >= cols;
+    }
+    logical
 }
 
 /// The four markers `INTERLEAVED_DOC` emits, in the order they are *produced*.
@@ -925,10 +981,14 @@ fn level2_mega_merge_s10_parallel_proxy_failure_task_integrity() {
 /// what makes the assertion honest: the marker appears while the provider is
 /// still running, so it cannot have come from the end-of-stream drain.
 ///
-/// Slow by construction — `SILENCE_WINDOW` and the ticker cadence are both a
-/// hardcoded 30s with no env override, and the stall has to clear the second
-/// tick to be reliable, so ~80s is the cheapest honest version of this test.
-/// `.config/nextest.toml` carries the matching slow-timeout grant.
+/// `CLAUDINE_IDLE_FLUSH_INTERVAL` is what makes that honesty cheap. The ticker's
+/// cadence and silence window are one knob defaulting to 30s, so proving the
+/// flush beat the drain used to cost a 75s stall — two 30s ticks plus margin.
+/// The override moves the *clock*, not the mechanism: the flush still has to
+/// arrive ahead of an event the stub emits only after its stall, and the stall
+/// still spans two full ticks, so what the assertions below rule out is
+/// unchanged. Only a real binary in a real pane can be observed here, which is
+/// why the seam has to be an env var rather than a constructor argument.
 #[test]
 #[serial(level2_terminal)]
 fn level2_prompt_idle_flush_keeps_the_task_bar_in_tmux() {
@@ -938,15 +998,16 @@ fn level2_prompt_idle_flush_keeps_the_task_bar_in_tmux() {
     let staged = stage_prompt(
         "claudine-l2-prompt-idleflush",
         IDLE_FLUSH_DOC,
-        CLAUDE_IDLE_STUB,
+        &claude_idle_stub(),
     );
+    let cadence = format!("{IDLE_FLUSH_INTERVAL_SECS}s");
     let capture = run_in_pane_within(
         &mut harness,
         &staged,
         110,
         130,
-        &[],
-        Duration::from_secs(150),
+        &[("CLAUDINE_IDLE_FLUSH_INTERVAL", cadence.as_str())],
+        Duration::from_secs(60),
     );
 
     assert_eq!(
@@ -1206,32 +1267,39 @@ fn level2_non_utf8_locale_uses_the_ascii_header_glyph_in_tmux() {
 /// The notice is a terminal-rendered `Prose`, so "styled" is a claim about what
 /// a terminal emits. Asserted semantically — that the line carries *some* SGR —
 /// rather than by byte, because tmux re-emits escapes in its own form.
+///
+/// The notice embeds the staged document's absolute path and so overruns the
+/// pane; both assertions run against [`dewrap_rows`] rather than the captured
+/// rows, because tmux's fold otherwise lands somewhere inside `0 steps` on
+/// whichever runs the temp path is long enough to push it there.
 #[test]
 #[serial(level2_terminal)]
 fn level2_zero_step_sequence_renders_a_styled_notice_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
+    /// Shared by the run and the reflow — they describe the same pane.
+    const COLS: u32 = 100;
+
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let staged = stage("claudine-l2-taskstream-zerostep", ZERO_STEP_DOC);
-    let capture = run_in_pane(&mut harness, &staged, 100, 50, &[]);
+    let capture = run_in_pane(&mut harness, &staged, COLS, 50, &[]);
 
     assert_eq!(
         capture.exit_code, 0,
         "an empty dynamic source is a graceful no-op.\nplain:\n{}",
         capture.frame.plain
     );
-    assert!(
-        capture.frame.plain.contains("0 steps"),
-        "the zero-step notice never reached the pane.\nplain:\n{}",
-        capture.frame.plain
-    );
 
-    let notice = capture
-        .frame
-        .raw
-        .lines()
-        .find(|line| line.contains("0 steps"))
-        .expect("the notice is present in the raw capture");
+    let rows = dewrap_rows(&capture.frame.raw, COLS as usize);
+    let notice = rows
+        .iter()
+        .find(|row| strip_ansi(row).contains("0 steps"))
+        .unwrap_or_else(|| {
+            panic!(
+                "the zero-step notice never reached the pane.\nplain:\n{}",
+                capture.frame.plain
+            )
+        });
     assert!(
         notice.contains('\u{1b}'),
         "the zero-step notice rendered unstyled: {notice:?}"

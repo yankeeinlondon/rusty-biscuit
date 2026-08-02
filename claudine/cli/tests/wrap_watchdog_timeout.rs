@@ -56,9 +56,11 @@ printf '%s\n' '{"type":"step_finish","sessionID":"hang-test","part":{"reason":"t
     write_executable(&path_dir.join("opencode"), &script);
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .current_dir(workspace.path())
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("OPENCODE_MODEL", "test-model")
         .env("CLAUDINE_STEP_TIMEOUT", "2s")
         .env("CLAUDINE_WATCHDOG_INTERVAL", "1s")
@@ -137,9 +139,11 @@ while :; do /bin/sleep 1; done
     );
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .current_dir(workspace.path())
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("OPENCODE_MODEL", "test-model")
         .env("CLAUDINE_STEP_TIMEOUT", "2s")
         .env("CLAUDINE_WATCHDOG_INTERVAL", "1s")
@@ -196,9 +200,11 @@ done
     );
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .current_dir(workspace.path())
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("OPENCODE_MODEL", "test-model")
         .env("CLAUDINE_TIMEOUT", "2s")
         // Disable step_timeout so only the wall-clock rule can fire.
@@ -314,9 +320,11 @@ exit 0
     );
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .current_dir(workspace.path())
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("OPENCODE_MODEL", "test-model")
         // step_timeout must be longer than the post-text silence above (1s)
         // so the grace can apply and the child exits cleanly before the
@@ -407,9 +415,11 @@ done
     );
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .current_dir(workspace.path())
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("OPENCODE_MODEL", "test-model")
         .env("CLAUDINE_STEP_TIMEOUT", "0s")
         .env("CLAUDINE_WATCHDOG_INTERVAL", "1s")
@@ -477,9 +487,11 @@ while :; do /bin/sleep 1; done
     );
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .current_dir(workspace.path())
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("OPENCODE_MODEL", "test-model")
         .env("CLAUDINE_TIMEOUT", "0s")
         .env("CLAUDINE_STEP_TIMEOUT", "2s")

@@ -30,7 +30,8 @@ use darkmatter::markdown::compose::ComposeContext;
 
 use super::env::LaunchWorkspaceContext;
 use super::preflight::{
-    PreflightBlockedOutcome, emit_preflight_blocked_and_finalize, preflight_blocked_control_error,
+    PreflightBlockedOutcome, emit_preflight_blocked_and_finalize_in_context,
+    preflight_blocked_control_error,
 };
 use super::target::composition_dispatch_context;
 use super::SingleCompositionOutcome;
@@ -189,7 +190,7 @@ pub(super) fn run_composition_body(
                 // Route through the stack-aware runner so `blocked.stack` and
                 // `finalize.stack` fire (spec.md:436/650/652), not just the
                 // legacy top-level surface.
-                let preflight_outcome = emit_preflight_blocked_and_finalize(
+                let preflight_outcome = emit_preflight_blocked_and_finalize_in_context(
                     guard,
                     lifecycle_effect_engine,
                     emitter,
@@ -201,6 +202,7 @@ pub(super) fn run_composition_body(
                     base_dir,
                     Some(launch_workspace.launch_cwd.as_path()),
                     Some(lifecycle_context),
+                    request.prepared.input_layers.file_resolution_context.as_ref(),
                     frontmatter,
                     document_start,
                     claudine::composition::LifecycleErrorInfo::from_error_or_action(
@@ -246,7 +248,7 @@ pub(super) fn run_composition_body(
             // is a composition-preflight blocked path: route through
             // the stack-aware runner so `blocked.stack` and
             // `finalize.stack` fire.
-            let preflight_outcome = emit_preflight_blocked_and_finalize(
+            let preflight_outcome = emit_preflight_blocked_and_finalize_in_context(
                 guard,
                 lifecycle_effect_engine,
                 emitter,
@@ -258,6 +260,7 @@ pub(super) fn run_composition_body(
                 base_dir,
                 Some(launch_workspace.launch_cwd.as_path()),
                 Some(lifecycle_context),
+                request.prepared.input_layers.file_resolution_context.as_ref(),
                 frontmatter,
                 document_start,
                 claudine::composition::LifecycleErrorInfo::from_error_or_action(
@@ -312,60 +315,24 @@ pub(super) fn run_composition_body(
     // inline-compose, or above for callers that did not pre-render). Now
     // emit the env details and prompt block with the full env_plan.
 
-    // Detect the environment from the source repo root when available so
-    // that git/repo metadata reflects the composition source, not the
-    // caller's CWD (which may be in a different repo entirely).
-    //
-    // Phase 4 (2026-05-09-slow-prep): `detect_environment_fast` is still on
-    // the critical path after Phases 1–2, but its direct cost is minimal
-    // (~8 ms for git summary + repo structure). The `compose_prep.environment`
-    // span added in Phase 3 makes this cost visible in traces. Making the
-    // context truly lazy would require invasive changes to LiveSemanticSink,
-    // DispatchRuntimeContext, and the wire-session path because the context is
-    // consumed synchronously before the child spawns. Per the spec, when lazy
-    // creation is too invasive we instrument and defer deeper work.
     let env_detect_root = effective_repo_root.unwrap_or(launch_cwd);
     let env_context = {
         let _span = tracing::info_span!("compose_prep.environment").entered();
-        // Phase fix (2026-05-09-slow-prep): reuse the cached
-        // `EnvironmentContext` when the prep-time sniff already covers the
-        // requested env_detect_root. The cached scan was rooted at the
-        // launch CWD, but sniff walks up to find the enclosing git/repo
-        // root, so the resulting env_context is equivalent to one rooted
-        // at `env_detect_root` whenever:
-        //   1. env_detect_root == launch_cwd (trivial), OR
-        //   2. launch_cwd is a subdirectory of env_detect_root AND the
-        //      cached env_context's git repo_root or repo root matches
-        //      env_detect_root (the common monorepo-subdir case).
-        // When neither holds (e.g. `--repo` pins a different root or the
-        // source lives in an unrelated repo), fall back to a fresh scan.
-        let cached_matches = request.prep_env_context.as_ref().is_some_and(|prep| {
-            if env_detect_root == launch_cwd.as_path() {
-                return true;
+        match (
+            request.invocation_context.as_ref(),
+            request.source_context.as_ref(),
+        ) {
+            (Some(invocation), Some(source)) => {
+                invocation.environment_context_for_source(source)
             }
-            if !launch_cwd.starts_with(env_detect_root) {
-                return false;
+            _ => {
+                if let Some(invocation) = request.invocation_context.as_ref() {
+                    invocation.record_ambient_fallback();
+                }
+                request.prep_env_context.clone().unwrap_or_else(|| {
+                    claudine::events::detect_environment_fast(env_detect_root)
+                })
             }
-            let git_root_match = prep
-                .git
-                .as_ref()
-                .map(|g| g.repo_root.as_path() == env_detect_root)
-                .unwrap_or(false);
-            let repo_root_match = prep
-                .repo
-                .as_ref()
-                .map(|r| r.root.as_path() == env_detect_root)
-                .unwrap_or(false);
-            git_root_match || repo_root_match
-        });
-        if cached_matches {
-            request
-                .prep_env_context
-                .as_ref()
-                .expect("cached_matches implies Some")
-                .clone()
-        } else {
-            claudine::events::detect_environment_fast(env_detect_root)
         }
     };
 
@@ -468,6 +435,8 @@ pub(super) fn run_composition_body(
         last_final_output: None,
         input_layers: request.prepared.input_layers.clone(),
         entry: request.prepared.entry,
+        invocation_context: request.invocation_context.clone(),
+        source_context: request.source_context.clone(),
     };
 
     let mut harness_base_args = args_before_prompt.clone();
@@ -558,6 +527,12 @@ pub(super) fn run_composition_body(
     };
     // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
     // The perf report is always emitted to stderr when requested.
+    if let (Some(collector), Some(invocation)) = (
+        perf_collector.as_mut(),
+        request.invocation_context.as_ref(),
+    ) {
+        collector.set_invocation_work(&invocation.work_snapshot());
+    }
     if let Some(collector) = perf_collector.take() {
         crate::perf::emit_report(&collector.into_report());
     }

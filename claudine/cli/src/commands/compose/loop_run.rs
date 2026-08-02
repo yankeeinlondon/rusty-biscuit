@@ -161,15 +161,18 @@ where
 {
     let prompt_path = source.resolved_path.clone();
 
-    // Capture the launch CWD before any iteration runs so we can restore it
-    // between iterations. The wrap layer's `switch_process_cwd` mutates the
+    // Restore the invocation's captured launch CWD between iterations. The
+    // wrap layer's `switch_process_cwd` mutates the
     // process-global CWD to the detected repo/git root inside each iteration;
     // without restoration, iteration 2's prepare resolves any CLI-supplied
     // `file(required)` setter against the post-switch root rather than the
     // user's original launch directory. `PWD` is injected onto the child
     // `Command` env map in `build_child_env_with_launch`, so we do not need
     // to mutate the process-global `PWD` here.
-    let launch_cwd = std::env::current_dir().ok();
+    let launch_cwd = lifecycle_ctx
+        .launch_area
+        .map(std::path::Path::to_path_buf)
+        .or_else(|| std::env::current_dir().ok());
 
     // The Ctrl+C SIGINT handler is installed at the top of the compose
     // subcommand (see `install_user_interrupt_guard`) so it covers the

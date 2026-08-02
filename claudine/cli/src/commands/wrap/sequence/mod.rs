@@ -60,19 +60,20 @@ pub(super) fn run_was_interrupted(exit_code: i32, interrupted: &AtomicBool) -> b
 fn approve_preflight_graph(
     graph: &composition::PreflightGraph,
     source: &ResolvedCompositionSource,
-    source_repo_root: Option<&std::path::Path>,
+    source_context: &claudine::invocation_context::SourceContext,
     approval_cache: composition::SharedApprovalCache,
     shared: &SharedComposeArgs,
     launch_area: Option<&std::path::Path>,
+    invocation: &claudine::invocation_context::InvocationContext,
 ) -> Result<HashSet<String>> {
     if graph.shell_commands.is_empty() && graph.prompt_documents.is_empty() {
         return Ok(HashSet::new());
     }
 
     let approval_options = super::apply_composition_shell_overrides(
-        super::build_harness_shell_options_with_cache(
+        super::build_harness_shell_options_for_source_with_cache(
             &source.resolved_path,
-            source_repo_root,
+            source_context.repository_root(),
             Some(approval_cache),
         ),
         shared.dry_run,
@@ -80,8 +81,23 @@ fn approve_preflight_graph(
     );
 
     let compose_options = |path: &std::path::Path| {
-        let mut opts = darkmatter::markdown::compose::ComposeOptions::new()
+        let source_context = invocation
+            .derive_source(path)
+            .expect("resolved prompt document always has a parent directory");
+        let document = darkmatter::markdown::Markdown::try_from(path)
+            .expect("preflight graph already loaded the prompt document");
+        let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(
+            &document,
+        );
+        let evidence = invocation.runtime_evidence(&source_context, &requirements);
+        let context = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
+            source_context.base_dir(),
+            &requirements,
+            &evidence,
+        );
+        let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(context)
             .with_source_file(path)
+            .with_file_resolution_context(source_context.file_resolution_context().clone())
             // Defer the lifecycle subtree exactly as the per-step template
             // preflight does: this pass exists to discover `::shell`
             // directives, and resolving a deferred `success:`/`failure:` read
@@ -111,6 +127,8 @@ pub(crate) fn execute_sequence(
     verbose: u8,
     perf_enabled: bool,
     startup_timings: Option<crate::perf::StartupTimings>,
+    invocation: claudine::invocation_context::InvocationContext,
+    source_context: claudine::invocation_context::SourceContext,
     file_resolution_context: biscuit_file::FileResolutionContext,
 ) -> Result<i32> {
     let silent = shared.silent;
@@ -209,9 +227,9 @@ pub(crate) fn execute_sequence(
     // once. Later phases (per-step compose, harness preflight, execution
     // request) reuse the same source-repo-root, selection config, and
     // installed-provider snapshot instead of rediscovering them.
-    let prep_context = super::composition::CompositionPrepContext::new(
-        &source.original_ref,
-        &source.resolved_path,
+    let prep_context = super::composition::CompositionPrepContext::from_invocation(
+        invocation,
+        source_context,
         &shared.excluded(),
     )?;
     let snapshot = &prep_context.installed_snapshot;
@@ -226,22 +244,32 @@ pub(crate) fn execute_sequence(
     // ones behind `when:` guards that read false today — is resolved to bytes
     // and approved. A failure at this point is abort-all regardless of
     // `fail_fast`, and `--dry-run` performs this identical walk.
-    let graph = composition::build_preflight_graph_with_context_and_resolution(
+    let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(
+        &source.markdown,
+    );
+    let evidence = prep_context
+        .invocation
+        .runtime_evidence(&prep_context.source_context, &requirements);
+    let graph_context = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
+        prep_context.source_context.base_dir(),
+        &requirements,
+        &evidence,
+    );
+    let graph = composition::build_preflight_graph_with_invocation(
         &plan,
         source,
-        darkmatter::markdown::compose::ComposeContext::capture_for_document(
-            prep_context.launch_workspace.launch_cwd.as_path(),
-            &source.markdown,
-        ),
-        Some(&file_resolution_context),
+        graph_context,
+        &prep_context.invocation,
+        &prep_context.source_context,
     )?;
     let preflight_approved = approve_preflight_graph(
         &graph,
         source,
-        source_repo_root.as_deref(),
+        &prep_context.source_context,
         Arc::clone(&shared_approval_cache),
         shared,
         Some(prep_context.launch_workspace.launch_cwd.as_path()),
+        &prep_context.invocation,
     )?;
     let catalog = match prep_context.selection_config.as_ref() {
         Some(cfg) => claudine::model_catalog::ModelCatalogService::with_overrides(
@@ -519,6 +547,7 @@ pub(crate) fn execute_sequence(
         approval_cache: Arc::clone(&shared_approval_cache),
         inline_mode,
         file_resolution_context: &file_resolution_context,
+        invocation: &prep_context.invocation,
     };
 
     let Some(validated) = run_phase_1c_with_schema(
@@ -536,6 +565,7 @@ pub(crate) fn execute_sequence(
         if let Some(mut acc) = perf_accumulator {
             acc.mark_env_setup_complete();
             acc.set_partial();
+            acc.set_invocation_work(&prep_context.invocation.work_snapshot());
             crate::perf::emit_report(&acc.into_report());
         }
         return Ok(SEQUENCE_INTERRUPT_EXIT_CODE);
@@ -578,6 +608,10 @@ pub(crate) fn execute_sequence(
     };
     let (summary, interrupt_observed) =
         iterate::run_sequence_steps(&run_context, &mut perf_accumulator)?;
+
+    if let Some(acc) = perf_accumulator.as_mut() {
+        acc.set_invocation_work(&prep_context.invocation.work_snapshot());
+    }
 
     report::emit_sequence_summary(
         &summary,

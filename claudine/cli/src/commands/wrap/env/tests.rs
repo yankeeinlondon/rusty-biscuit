@@ -671,6 +671,12 @@ edition = "2024"
     let interactive = detect_wrap_startup(repo.path(), false).unwrap();
     let prompted = detect_wrap_startup(repo.path(), true).unwrap();
 
+    let interactive_work = interactive.invocation.work_snapshot();
+    let prompted_work = prompted.invocation.work_snapshot();
+    assert_eq!(interactive_work.git_root_discoveries, 1);
+    assert_eq!(interactive_work.topology_probes, 0);
+    assert_eq!(prompted_work.git_root_discoveries, 1);
+    assert_eq!(prompted_work.topology_probes, 1);
     assert!(!interactive.env_context.git.unwrap().is_dirty);
     assert_eq!(
         interactive.launch_workspace.package_context.unwrap().package_area,

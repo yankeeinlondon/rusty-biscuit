@@ -721,9 +721,23 @@ fn perf_tree_env_setup_substages_carve_parent() {
         Duration::ZERO,
         Duration::from_millis(100),
         vec![
-            SubstageTiming::new("target resolution", Duration::from_millis(30)),
+            SubstageTiming::new("launch discovery", Duration::from_millis(5)),
+            SubstageTiming::new("target resolution", Duration::from_millis(10)),
             SubstageTiming::new("mcp composition", Duration::ZERO),
-            SubstageTiming::new("system prompt", Duration::from_millis(60)),
+            SubstageTiming {
+                name: "system prompt",
+                elapsed: Duration::from_millis(30),
+                children: vec![
+                    SubstageTiming::new("lookup", Duration::from_millis(5)),
+                    SubstageTiming::new("runtime capture", Duration::from_millis(5)),
+                    SubstageTiming::new("primary compose", Duration::from_millis(8)),
+                    SubstageTiming::new("appendix compose", Duration::from_millis(7)),
+                    SubstageTiming::new("delivery", Duration::from_millis(5)),
+                ],
+            },
+            SubstageTiming::new("child env build", Duration::from_millis(20)),
+            SubstageTiming::new("harness eligibility", Duration::from_millis(5)),
+            SubstageTiming::new("harness materialization", Duration::from_millis(25)),
         ],
         None,
         None,
@@ -732,7 +746,15 @@ fn perf_tree_env_setup_substages_carve_parent() {
     assert!(tree_reconciles(&tree, Duration::from_millis(1)));
 
     let env = child(&tree, "environment setup").unwrap();
-    for label in ["target resolution", "mcp composition", "system prompt"] {
+    for label in [
+        "launch discovery",
+        "target resolution",
+        "mcp composition",
+        "system prompt",
+        "child env build",
+        "harness eligibility",
+        "harness materialization",
+    ] {
         assert_eq!(
             child(env, label).unwrap().role,
             NodeRole::Structural,
@@ -741,9 +763,19 @@ fn perf_tree_env_setup_substages_carve_parent() {
     }
     // The zero-duration substage stays representable as a Structural leaf.
     assert_eq!(child(env, "mcp composition").unwrap().total, Duration::ZERO);
+    let system_prompt = child(env, "system prompt").unwrap();
+    for label in [
+        "lookup",
+        "runtime capture",
+        "primary compose",
+        "appendix compose",
+        "delivery",
+    ] {
+        assert_eq!(child(system_prompt, label).unwrap().role, NodeRole::Breakdown);
+    }
     assert_eq!(
         child(env, "unattributed").unwrap().total,
-        Duration::from_millis(10)
+        Duration::from_millis(5)
     );
 }
 

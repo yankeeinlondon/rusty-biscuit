@@ -341,6 +341,7 @@ fn gemini_and_opencode_wrapper_mcp_dry_run_show_provider_specific_injection() {
     seed_defaults(&home, &[]);
 
     let gemini = assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .current_dir(workspace.path())
         .env("HOME", &home)
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
@@ -361,6 +362,7 @@ fn gemini_and_opencode_wrapper_mcp_dry_run_show_provider_specific_injection() {
     assert!(gemini_stderr.contains(".gemini/settings.json"));
 
     let opencode = assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .current_dir(workspace.path())
         .env("HOME", &home)
         .env("NO_COLOR", "1")
         .env("OPENCODE_MODEL", "test-model")

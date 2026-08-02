@@ -14,8 +14,16 @@ use claudine::composition::{
 /// A request for `target`, authored by `source`'s `failure` stack, carrying
 /// the chain the ledger would have stamped on it.
 fn request_for(source: &Path, target: &Path, chain: Vec<PathBuf>) -> EvaluatedProxyRequest {
+    request_for_authored(source, target.display().to_string(), chain)
+}
+
+fn request_for_authored(
+    source: &Path,
+    target: String,
+    chain: Vec<PathBuf>,
+) -> EvaluatedProxyRequest {
     EvaluatedProxyRequest::new(
-        target.display().to_string(),
+        target,
         indexmap::IndexMap::new(),
         ProxyProvenance::new(
             source.to_path_buf(),
@@ -23,6 +31,85 @@ fn request_for(source: &Path, target: &Path, chain: Vec<PathBuf>) -> EvaluatedPr
             chain,
         ),
     )
+}
+
+#[test]
+fn adoption_persists_non_repository_target_context_for_the_next_hop() {
+    let fx = fixture(serde_json::json!({}));
+    assert!(
+        std::process::Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(fx._dir.path())
+            .status()
+            .unwrap()
+            .success()
+    );
+    std::fs::write(&fx.source_path, "---\n---\nrouter\n").unwrap();
+    let outside = tempfile::TempDir::new().unwrap();
+    let target = outside.path().join("target.md");
+    let next = outside.path().join("next.md");
+    std::fs::write(&target, "---\n---\ntarget\n").unwrap();
+    std::fs::write(&next, "---\n---\nnext\n").unwrap();
+    let launch_decoy = fx._dir.path().join("next.md");
+    std::fs::write(&launch_decoy, "---\n---\nwrong next\n").unwrap();
+
+    let invocation = claudine::invocation_context::InvocationContext::capture_at(fx._dir.path());
+    let router_context = invocation.derive_source(&fx.source_path).unwrap();
+    assert_eq!(router_context.repository_root(), Some(fx._dir.path()));
+    let mut state = prompt_state(&fx.source_path);
+    state.input_layers.file_resolution_context =
+        Some(router_context.file_resolution_context().clone());
+    state.invocation_context = Some(invocation);
+    state.source_context = Some(router_context);
+
+    let emitter = RecordingEmitter::default();
+    let lifecycle_context = LifecycleRuntimeContext {
+        settings: &fx.settings,
+        messaging: &fx.messaging,
+        term: &fx.term,
+        source_path: &fx.source_path,
+        repo_root: Some(fx._dir.path()),
+        launch_area: None,
+        context: None,
+    };
+    let mut guard = dispatch_guard(&fx.config, &lifecycle_context, &emitter);
+    let mut active = ActiveDocumentState::initial();
+    let mut coordinator = coordinator(&fx.source_path);
+
+    coordinator
+        .adopt(
+            request_for(&fx.source_path, &target, vec![fx.source_path.clone()]),
+            Some(fx._dir.path()),
+            &mut state,
+            &mut guard,
+            &mut active,
+        )
+        .unwrap();
+    let target_context = state.source_context.as_ref().unwrap();
+    assert_eq!(target_context.repository_root(), None);
+    assert_eq!(
+        state.file_resolution_context().unwrap().base_dir(),
+        outside.path()
+    );
+
+    let _ = coordinator.take_bootstrap_pending();
+    coordinator
+        .adopt(
+            request_for_authored(
+                &target,
+                "next.md".to_string(),
+                vec![fx.source_path.clone(), target.clone()],
+            ),
+            Some(fx._dir.path()),
+            &mut state,
+            &mut guard,
+            &mut active,
+        )
+        .unwrap();
+
+    assert_eq!(state.source_path, next);
+    assert_ne!(state.source_path, launch_decoy);
+    assert_eq!(state.source_context.as_ref().unwrap().repository_root(), None);
 }
 
 struct AdoptFixture {

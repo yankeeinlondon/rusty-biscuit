@@ -377,6 +377,39 @@ fn command_perf_collector_full_report() {
 }
 
 #[test]
+fn command_perf_collector_renders_request_owned_discovery_counts() {
+    let startup = StartupTimings {
+        arg_parsing: Duration::ZERO,
+        tracing_init: Duration::ZERO,
+        config_loading: Duration::ZERO,
+        pre_dispatch: Duration::ZERO,
+        prep_phase: Duration::ZERO,
+        process_start: std::time::Instant::now(),
+        prep_substages: Vec::new(),
+    };
+    let work = claudine::invocation_context::InvocationWorkSnapshot {
+        git_root_discoveries: 1,
+        topology_probes: 2,
+        topology_reuses: 3,
+        ..Default::default()
+    };
+    let mut collector = CommandPerfCollector::new("Test", startup);
+    collector.set_invocation_work(&work);
+    collector.mark_env_setup_complete();
+
+    let report = collector.into_report_with_elapsed(Duration::from_secs(1));
+    let note = report.notes.join("\n");
+    assert!(note.contains("Git discoveries 1"), "{note}");
+    assert!(note.contains("topology probes 2"), "{note}");
+    assert!(note.contains("topology reuses 3"), "{note}");
+
+    let rendered = strip_ansi(&render_perf_report(&report));
+    assert!(rendered.contains("source context work"), "{rendered}");
+    assert!(rendered.contains("topology probes 2"), "{rendered}");
+    assert!(rendered.contains("topology reuses 3"), "{rendered}");
+}
+
+#[test]
 fn command_perf_collector_dry_run() {
     let startup = StartupTimings {
         arg_parsing: Duration::ZERO,

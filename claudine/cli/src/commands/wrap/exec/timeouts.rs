@@ -199,7 +199,7 @@ impl TimeoutConfig {
 /// Parse a duration env var using the harness `parse_timeout` grammar.
 ///
 /// Returns `None` when the variable is unset, empty, or unparseable.
-fn parse_env_duration(name: &str) -> Option<Duration> {
+pub(crate) fn parse_env_duration(name: &str) -> Option<Duration> {
     let raw = std::env::var(name).ok()?;
     let trimmed = raw.trim();
     if trimmed.is_empty() {
