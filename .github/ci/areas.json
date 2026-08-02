@@ -10,7 +10,10 @@
   },
   {
     "area": "biscuit-speaks",
-    "check_args": "-p biscuit-speaks -p biscuit-speaks-cli"
+    "check_args": "-p biscuit-speaks -p biscuit-speaks-cli",
+    "native": {
+      "ubuntu-latest": ["espeak-ng"]
+    }
   },
   {
     "area": "biscuit-terminal",

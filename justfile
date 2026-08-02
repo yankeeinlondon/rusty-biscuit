@@ -723,6 +723,10 @@ _ensure-native-libs area="":
     # macOS). Each row adds the pkg-config module that proves the library is
     # installed — the same check the failing `-sys` build scripts perform — plus
     # the equivalent package name on the other Linux package managers.
+    # A row may leave the pkg-config module empty. That is the runtime-binary
+    # case: espeak-ng is not linked against, it is executed, so no `.pc` file
+    # proves what matters and `is_installed` falls through to the package
+    # database and finally to `command -v`.
     #   ci-name|pkg-config module|dnf|pacman|apk
     native_map="
     libasound2-dev|alsa|alsa-lib-devel|alsa-lib|alsa-lib-dev
@@ -730,6 +734,7 @@ _ensure-native-libs area="":
     libgtk-3-dev|gtk+-3.0|gtk3-devel|gtk3|gtk+3.0-dev
     libwebkit2gtk-4.1-dev|webkit2gtk-4.1|webkit2gtk4.1-devel|webkit2gtk-4.1|webkit2gtk-4.1-dev
     libdbus-1-dev|dbus-1|dbus-devel|dbus|dbus-dev
+    espeak-ng||espeak-ng|espeak-ng|espeak-ng
     "
 
     row_for() {
@@ -750,7 +755,10 @@ _ensure-native-libs area="":
             brew list --versions "$pkg" &> /dev/null
             return
         fi
-        return 1
+        # Last resort for a package that ships an executable of the same name.
+        # Without this a dnf/pacman/apk host reinstalls it on every `just init`,
+        # because nothing above can see it.
+        command -v "$pkg" &> /dev/null
     }
 
     missing=()
