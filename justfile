@@ -985,7 +985,8 @@ _ensure-cargo-sweep:
 
 # prune Cargo target/ dirs, which cargo never garbage-collects. Passes:
 # uninstalled toolchains, untouched >14d, then a 120GB default backstop cap per
-# root (docs/kache-strategy.md). Constrained Windows hosts use the native 80GB
+# root, then out-of-tree target dirs under ~/.cache left behind by --target-dir
+# builds (docs/kache-strategy.md). Constrained Windows hosts use the native 80GB
 # policy below. Roots default to this repo; override with paths.
 sweep *args="": _ensure-cargo-sweep
     @scripts/sweep.sh {{ args }}
@@ -1004,6 +1005,21 @@ install-windows-sweep:
 # show the native Windows sweep task's state and next run
 windows-sweep-status:
     @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows-cargo-sweep.ps1 -Operation status
+
+# Separate from the Windows task above even on WSL2: that one sweeps C:\ and
+# cannot see the guest's ext4 filesystem, where target/ actually lives.
+#
+# install the daily 04:00 Linux sweep schedule (systemd user timer, else cron)
+install-linux-sweep *roots="":
+    @scripts/linux-cargo-sweep.sh install {{ roots }}
+
+# show the Linux sweep schedule's next run and last log lines
+linux-sweep-status:
+    @scripts/linux-cargo-sweep.sh status
+
+# remove the Linux sweep schedule
+uninstall-linux-sweep:
+    @scripts/linux-cargo-sweep.sh uninstall
 
 # ensure the test runner every tier above L1 depends on is available
 #

@@ -18,11 +18,13 @@ use it. Rationale and measurements: `fixes/2026-07-30-ci-cd-stabilization/plan.m
 - **Store cap:** `just install-kache` seeds `local_max_size = "100GiB"` when a host has no kache
   config (never overwrites). Config path: `~/.config/kache/config.toml` on macOS/Linux,
   `%APPDATA%\kache\config.toml` on Windows.
-- **Sweep:** version-controlled at `scripts/sweep.sh` (four passes + census below), run via
+- **Sweep:** version-controlled at `scripts/sweep.sh` (four per-root passes + an orphan pass +
+  census below), run via
   `just sweep [roots...]`. Schedule per host: launchd on macOS (done — see below),
-  `just install-windows-sweep` on Windows, and cron on Linux (done — see below;
-  systemd is unavailable on build-linux because `~/.config` is a read-only CIFS
-  mount). Target hygiene matters with or without a cache.
+  `just install-windows-sweep` on Windows, and `just install-linux-sweep` on Linux
+  (systemd user timer, falling back to cron where no systemd user instance exists —
+  build-linux, whose `~/.config` is a read-only CIFS mount). Target hygiene matters
+  with or without a cache.
 - **CI: kache removed.** `Swatinem/rust-cache@v2` remains on every native leg. The measured legs
   returned 0–6% hit rates (0.4–2.3% weighted by compile cost, ~2–15s saved) because
   `kache-action@v1` fell back to the GitHub Actions cache, whose entries are immutable and
@@ -126,6 +128,26 @@ Plus a `[census]` line logging the 10 largest `target/` dirs before sweeping, an
 
 Passes 2–3 do the real work (50–100+ GiB per run historically). Pass 4 only fires on runaways.
 
+**Pass 5 — out-of-tree orphans (added 2026-08-02).** Runs once for the host, not per root:
+
+```bash
+rm -rf <dir>   # cargo CACHEDIR.TAG + untouched > SWEEP_ORPHAN_DAYS (default: SWEEP_TIME_DAYS)
+               # scanned under SWEEP_ORPHAN_DIRS (default: ${XDG_CACHE_HOME:-~/.cache})
+```
+
+Passes 1–4 can only reach target dirs *inside* a root, and only ones literally named `target`.
+A build invoked with an explicit `--target-dir` elsewhere — what agent sessions and one-off
+benchmark runs do routinely — lands outside every root under an arbitrary name, so no pass ever
+sees it. On the WSL host three such directories (`~/.cache/rb-wsl-target`,
+`~/.cache/rusty-biscuit-claudine-linux-target`, `~/.cache/rusty-biscuit-claudine-linux-native-target`)
+reached **119 GiB** and took `/` to 92% full while `just sweep` reported success on every run.
+
+Such a directory is an orphan by construction — no Cargo project points at it, so a stale one is
+never reused and there is nothing worth sweeping incrementally; the whole directory goes. Candidates
+are identified by the `CACHEDIR.TAG` Cargo writes into every target dir (matched on its
+`created by cargo` line, so another tool's cache tag is not a candidate). Anything under a sweep root
+or under `$CARGO_TARGET_DIR` is excluded and left to passes 1–4.
+
 **Why incremental needs its own size-triggered pass (added 2026-08-01).** Cargo never
 garbage-collects incremental state, and the `--time` pass structurally *cannot* reach it: every
 build re-touches the incremental directory of each crate it compiles, so those artifacts are
@@ -218,9 +240,20 @@ Swept artifacts come back as link-restores, not recompiles.
     uncapped, which is currently harmless only because kache is inactive here.
   - The volume is **160 G**, so the 120GB `--maxsize` backstop is not a guard rail on this host:
     120GB of target plus the rest of the system is ~84% full before pass 4 even fires.
-- **build-win** (ext4 in WSL2) — deferred. Hardlink mode means the store is a real second copy, and
-  there's one worktree so nothing to dedup against. If adopted: `local_max_size` ~30GiB against its
-  196 G filesystem, or give it a btrfs/XFS-reflink second VHDX.
+- **build-win** (ext4 in WSL2) — kache deferred. Hardlink mode means the store is a real second copy,
+  and there's one worktree so nothing to dedup against. If adopted: `local_max_size` ~30GiB against
+  its 196 G filesystem, or give it a btrfs/XFS-reflink second VHDX.
+  Sweep is scheduled **inside the WSL guest** by a systemd user timer, **daily 04:00** with
+  `Persistent=true`, logging to `~/.local/state/rusty-biscuit-sweep.log`. Three things to know:
+  - The Windows Task Scheduler policy on the same machine does **not** cover this. It sweeps `C:\`
+    and cannot see the guest's ext4 filesystem, which is where `target/` actually lives. Until
+    2026-08-02 the guest had no schedule at all and reached 92% full.
+  - `Persistent=true` is the point of choosing a timer over cron here: a dev box is routinely
+    powered off at 04:00, and cron silently skips those days rather than catching up at next boot.
+  - `systemctl --user enable` **fails** on this host — it writes its `.wants` symlink under
+    `~/.config`, a CIFS mount with no symlink support. The units therefore live in
+    `~/.local/share/systemd/user` (local disk) and `linux-cargo-sweep.sh` links them into
+    `timers.target.wants/` there by hand, which systemd honours identically.
 - Install **0.12.0+** on both, not a package-repo default. Verify with the two-directory test:
   build a small crate in dir A, copy to B, `rm B/target`, rebuild — B should hit every entry and
   the store should not grow.
@@ -229,11 +262,14 @@ Swept artifacts come back as link-restores, not recompiles.
 
 ```
 scripts/sweep.sh                                              (version-controlled; `just sweep`)
+scripts/linux-cargo-sweep.sh                        (version-controlled; `just install-linux-sweep`)
+scripts/windows-cargo-sweep.ps1                   (version-controlled; `just install-windows-sweep`)
 ~/.local/bin/rusty-biscuit-sweep.sh                      (+ .bak)   [Mac]
 ~/Library/LaunchAgents/com.ken.rusty-biscuit-sweep.plist  (+ .bak)  [Mac]
 ~/.config/kache/config.toml                                         [Mac; unwritable on build-linux]
 crontab -l                                                          [build-linux schedule]
-~/.local/state/rusty-biscuit-sweep.log                              [build-linux log]
+~/.local/share/systemd/user/rusty-biscuit-sweep.{service,timer}     [build-win WSL schedule]
+~/.local/state/rusty-biscuit-sweep.log                              [Linux log, both hosts]
 ```
 
 The Mac launchd wrapper and plist predate `scripts/sweep.sh` and remain unversioned — only the
