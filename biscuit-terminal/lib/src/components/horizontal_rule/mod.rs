@@ -12,6 +12,7 @@ pub mod style;
 
 pub use style::{RuleAlignment, RuleStyle, RuleWeight};
 
+use std::borrow::Cow;
 #[cfg(feature = "image")]
 use std::io::Cursor;
 
@@ -21,7 +22,7 @@ use crate::components::terminal_image::TerminalImage;
 use crate::discovery::detection::{ColorDepth, ColorMode, ImageSupport};
 use crate::terminal::Terminal;
 use crate::utils::color::TermColor;
-use crate::utils::layout::Layout;
+use crate::utils::layout::{Layout, LayoutTerminalExt};
 
 use self::browser::{parse_basic_color, parse_hex_color};
 use renderable::tree::{
@@ -182,13 +183,29 @@ impl Default for HorizontalRule {
 
 impl TerminalRenderable for HorizontalRule {
     fn render(&self, term: &Terminal) -> String {
+        // Mirror the render-tree block contract (`render_with_layout`): the
+        // horizontal margins and `max_width` narrow the box the rule is drawn
+        // into, then the drawn block is placed within the remaining slack.
+        // The tree path applies its own layout around `render_*_tier`, so this
+        // wrapper lives on `render` alone and never double-applies.
+        let term_width = term.width();
+        let inner_width = self.layout.content_width(term_width);
+        let inner = if inner_width == term_width {
+            Cow::Borrowed(term)
+        } else {
+            let mut narrowed = term.clone();
+            narrowed.fixed_width = Some(inner_width);
+            Cow::Owned(narrowed)
+        };
+
         // Tier 1: SVG -> PNG -> Kitty graphics protocol. Any capability or
         // rasterization failure falls through to the text tiers below.
-        if let Some(image) = self.render_image_tier(term) {
-            return image;
-        }
+        let content = match self.render_image_tier(&inner) {
+            Some(image) => image,
+            None => self.render_text_tier(&inner),
+        };
 
-        self.render_text_tier(term)
+        self.layout.apply_block_layout(&content, term_width)
     }
 
     fn layout(&self) -> &Layout {
