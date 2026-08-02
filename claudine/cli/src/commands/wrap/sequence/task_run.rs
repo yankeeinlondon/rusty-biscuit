@@ -38,7 +38,7 @@ use claudine::composition::{
     self, CompositionError, CompositionExecutionRequest, CompositionMode, DefaultLifecycleEmitter,
     PreparedComposition, ResolvedExecutionTarget, RuntimeState, SequenceTaskResult,
 };
-use claudine::composition::sequence::preflight::PreflightTask;
+use claudine::composition::sequence::preflight::{PreflightAction, PreflightGroup, PreflightTask};
 use claudine::composition::sequence::task::{
     PromptRunOutcome, PromptTaskRequest, PromptTaskRunner, SystemTaskShell, TaskExecution,
     TaskOutcome, TaskStatus,
@@ -204,19 +204,8 @@ fn prepare_task_context(
     let task_source_context = invocation
         .derive_source(&task.origin_path)
         .expect("resolved task document always has a parent directory");
-    let task_context_scan = format!(
-        "{action:?}\n{values}",
-        action = task.action,
-        values = serde_json::to_string(&(
-            &task.params,
-            &task.timeout,
-            &task.setup,
-            &task.teardown,
-        ))
-        .unwrap_or_default(),
-    );
-    let requirements =
-        darkmatter::markdown::compose::ContextRequirements::for_content(&task_context_scan);
+    let scan = task_context_scan(task);
+    let requirements = darkmatter::markdown::compose::ContextRequirements::for_content(&scan);
     let evidence = invocation.runtime_evidence(&task_source_context, &requirements);
     let mut task_context = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
         task_source_context.base_dir(),
@@ -228,6 +217,85 @@ fn prepare_task_context(
     }
 
     (task_source_context, task_context)
+}
+
+/// Every authored surface of `task` that can carry a `{{ … }}` expression,
+/// projected into one text [`ContextRequirements::for_content`] can scan.
+///
+/// The struct patterns below carry no `..` and the action match no `_` arm, so a
+/// new authored field or action variant is a compile error here rather than a
+/// silent narrowing of the captured runtime context. Under-capturing is a
+/// correctness bug — the group is missing from `prepared_context`, so the
+/// expression falls through to Darkmatter's lazy ambient `CtxLookup`, the late
+/// discovery `fixes/_completed/2026-08-01-propagated-context` (D6) exists to
+/// eliminate. Over-capturing only costs a group the invocation cache absorbs.
+fn task_context_scan(task: &PreflightTask) -> String {
+    let mut scan = String::new();
+    push_task_scan(task, &mut scan);
+    scan
+}
+
+fn push_task_scan(task: &PreflightTask, scan: &mut String) {
+    let PreflightTask {
+        name,
+        label,
+        action,
+        params,
+        timeout,
+        operation,
+        flow,
+        setup,
+        teardown,
+        // Resolved by preflight to real directories; a path holds no expression.
+        origin_dir: _,
+        origin_path: _,
+    } = task;
+    push_json_scan(
+        &(name, label, params, timeout, operation, flow, setup, teardown),
+        scan,
+    );
+    push_action_scan(action, scan);
+}
+
+fn push_action_scan(action: &PreflightAction, scan: &mut String) {
+    match action {
+        PreflightAction::Prompt { path, reference } => {
+            push_scan(&path.display().to_string(), scan);
+            push_scan(reference, scan);
+        }
+        PreflightAction::Shell { commands } => {
+            for command in commands {
+                push_scan(command, scan);
+            }
+        }
+        PreflightAction::SideEffect { action } => push_json_scan(action, scan),
+        PreflightAction::Group(group) => {
+            let PreflightGroup {
+                name,
+                execution: _,
+                max_parallel: _,
+                variables,
+                tasks,
+                origin_path: _,
+            } = group;
+            push_scan(name, scan);
+            push_json_scan(variables, scan);
+            for task in tasks {
+                push_task_scan(task, scan);
+            }
+        }
+    }
+}
+
+fn push_json_scan<T: serde::Serialize>(value: &T, scan: &mut String) {
+    push_scan(&serde_json::to_string(value).unwrap_or_default(), scan);
+}
+
+fn push_scan(text: &str, scan: &mut String) {
+    if !scan.is_empty() {
+        scan.push('\n');
+    }
+    scan.push_str(text);
 }
 
 /// Project a group's member outcomes into the step summary shape.
@@ -438,13 +506,17 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::process::Command;
 
-    use claudine::composition::sequence::preflight::PreflightAction;
+    use claudine::composition::sequence::preflight::{GroupExecution, PreflightAction};
     use serde_json::{Map, json};
 
     use super::*;
+
+    /// A `ctx.*` reference whose group (`Repo`) is never captured by default, so
+    /// its presence in the composed context proves the field was scanned.
+    const CTX_REF: &str = "{{ ctx.repo_root }}";
 
     fn init_git_repo(path: &Path) {
         let status = Command::new("git")
@@ -455,52 +527,213 @@ mod tests {
         assert!(status.success());
     }
 
+    /// A sequence launched in one repository authoring its task in another.
+    struct Fixture {
+        _root: tempfile::TempDir,
+        launch_repo: PathBuf,
+        task_repo: PathBuf,
+        task_dir: PathBuf,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let root = tempfile::tempdir().unwrap();
+            let launch_repo = root.path().join("launch");
+            let task_repo = root.path().join("tasks");
+            let task_dir = task_repo.join("nested");
+            std::fs::create_dir_all(&launch_repo).unwrap();
+            std::fs::create_dir_all(&task_dir).unwrap();
+            init_git_repo(&launch_repo);
+            init_git_repo(&task_repo);
+            Self {
+                _root: root,
+                launch_repo,
+                task_repo,
+                task_dir,
+            }
+        }
+
+        fn origin_path(&self) -> PathBuf {
+            self.task_dir.join("task.yaml")
+        }
+
+        /// A task carrying no expression at all, for a caller to plant one in.
+        fn task(&self) -> PreflightTask {
+            PreflightTask {
+                name: Some("external".to_string()),
+                label: "external".to_string(),
+                action: PreflightAction::Shell {
+                    commands: vec!["true".to_string()],
+                },
+                params: Map::new(),
+                timeout: None,
+                operation: None,
+                flow: None,
+                setup: None,
+                teardown: None,
+                origin_dir: self.task_dir.clone(),
+                origin_path: self.origin_path(),
+            }
+        }
+    }
+
     #[test]
     fn task_stack_context_belongs_to_the_authoring_repository() {
-        let root = tempfile::tempdir().unwrap();
-        let launch_repo = root.path().join("launch");
-        let task_repo = root.path().join("tasks");
-        let task_dir = task_repo.join("nested");
-        std::fs::create_dir_all(&launch_repo).unwrap();
-        std::fs::create_dir_all(&task_dir).unwrap();
-        init_git_repo(&launch_repo);
-        init_git_repo(&task_repo);
-
-        let origin_path = task_dir.join("task.yaml");
-        let task = PreflightTask {
-            name: Some("external".to_string()),
-            label: "external".to_string(),
-            action: PreflightAction::SideEffect {
-                action: json!({"stderr": "{{ ctx.repo_root }}"}),
-            },
-            params: Map::new(),
-            timeout: None,
-            operation: None,
-            flow: None,
-            setup: None,
-            teardown: None,
-            origin_dir: task_dir.clone(),
-            origin_path: origin_path.clone(),
+        let fixture = Fixture::new();
+        let origin_path = fixture.origin_path();
+        let mut task = fixture.task();
+        task.action = PreflightAction::SideEffect {
+            action: json!({"stderr": CTX_REF}),
         };
-        let invocation = InvocationContext::capture_at(&launch_repo);
+        let invocation = InvocationContext::capture_at(&fixture.launch_repo);
         let env = BTreeMap::from([("TASK_MARKER".to_string(), "owned".to_string())]);
 
         let (source, context) = prepare_task_context(&invocation, &task, &env);
 
-        assert_eq!(source.base_dir(), task_dir);
-        assert_eq!(source.repository_root(), Some(task_repo.as_path()));
+        assert_eq!(source.base_dir(), fixture.task_dir);
+        assert_eq!(source.repository_root(), Some(fixture.task_repo.as_path()));
         assert_eq!(
             source.file_resolution_context().source_path(),
             Some(origin_path.as_path())
         );
         assert_eq!(
             source.file_resolution_context().repository_root(),
-            Some(task_repo.as_path())
+            Some(fixture.task_repo.as_path())
         );
         assert_eq!(
             context.get("repo_root").and_then(Value::as_str),
-            Some(task_repo.to_string_lossy().as_ref())
+            Some(fixture.task_repo.to_string_lossy().as_ref())
         );
         assert_eq!(context.env().get("TASK_MARKER").map(String::as_str), Some("owned"));
+    }
+
+    /// The control the per-field cases are read against: without a reference the
+    /// group is genuinely absent, so `repo_root` being present below can only
+    /// have come from the planted expression.
+    #[test]
+    fn a_task_with_no_ctx_reference_captures_no_repository_group() {
+        let fixture = Fixture::new();
+        let invocation = InvocationContext::capture_at(&fixture.launch_repo);
+
+        let (_, context) = prepare_task_context(&invocation, &fixture.task(), &BTreeMap::new());
+
+        assert_eq!(context.get("repo_root"), None);
+    }
+
+    #[test]
+    fn every_expression_bearing_field_is_scanned_for_ctx_references() {
+        let fixture = Fixture::new();
+        let invocation = InvocationContext::capture_at(&fixture.launch_repo);
+
+        #[allow(clippy::type_complexity)]
+        let cases: Vec<(&str, Box<dyn Fn(&mut PreflightTask)>)> = vec![
+            (
+                "action (side_effect)",
+                Box::new(|task| {
+                    task.action = PreflightAction::SideEffect {
+                        action: json!({"stderr": CTX_REF}),
+                    };
+                }),
+            ),
+            (
+                "action (shell)",
+                Box::new(|task| {
+                    task.action = PreflightAction::Shell {
+                        commands: vec![format!("echo {CTX_REF}")],
+                    };
+                }),
+            ),
+            (
+                "action (prompt reference)",
+                Box::new(|task| {
+                    task.action = PreflightAction::Prompt {
+                        path: PathBuf::from("/resolved/prompt.md"),
+                        reference: format!("{CTX_REF}/prompt.md"),
+                    };
+                }),
+            ),
+            (
+                "params",
+                Box::new(|task| {
+                    task.params.insert("target".to_string(), json!(CTX_REF));
+                }),
+            ),
+            ("timeout", Box::new(|task| task.timeout = Some(json!(CTX_REF)))),
+            (
+                "operation",
+                Box::new(|task| task.operation = Some(CTX_REF.to_string())),
+            ),
+            ("flow", Box::new(|task| task.flow = Some(CTX_REF.to_string()))),
+            (
+                "setup",
+                Box::new(|task| task.setup = Some(json!([{"shell": format!("echo {CTX_REF}")}]))),
+            ),
+            (
+                "teardown",
+                Box::new(|task| {
+                    task.teardown = Some(json!([{"shell": format!("echo {CTX_REF}")}]));
+                }),
+            ),
+            (
+                "name",
+                Box::new(|task| task.name = Some(CTX_REF.to_string())),
+            ),
+            ("label", Box::new(|task| task.label = CTX_REF.to_string())),
+        ];
+
+        for (field, plant) in cases {
+            let mut task = fixture.task();
+            plant(&mut task);
+
+            let (_, context) = prepare_task_context(&invocation, &task, &BTreeMap::new());
+
+            assert_eq!(
+                context.get("repo_root").and_then(Value::as_str),
+                Some(fixture.task_repo.to_string_lossy().as_ref()),
+                "`{field}` was not scanned for runtime-context references"
+            );
+        }
+    }
+
+    #[test]
+    fn group_variables_and_member_tasks_are_scanned_for_ctx_references() {
+        let fixture = Fixture::new();
+        let invocation = InvocationContext::capture_at(&fixture.launch_repo);
+
+        let group_of = |variables: Map<String, Value>, member: PreflightTask| PreflightAction::Group(
+            PreflightGroup {
+                name: "batch".to_string(),
+                execution: GroupExecution::Serial,
+                max_parallel: None,
+                variables,
+                tasks: vec![member],
+                origin_path: fixture.origin_path(),
+            },
+        );
+
+        let mut member = fixture.task();
+        member.teardown = Some(json!([{"shell": format!("echo {CTX_REF}")}]));
+
+        for (label, action) in [
+            (
+                "group variables",
+                group_of(
+                    Map::from_iter([("target".to_string(), json!(CTX_REF))]),
+                    fixture.task(),
+                ),
+            ),
+            ("group member task", group_of(Map::new(), member)),
+        ] {
+            let mut task = fixture.task();
+            task.action = action;
+
+            let (_, context) = prepare_task_context(&invocation, &task, &BTreeMap::new());
+
+            assert_eq!(
+                context.get("repo_root").and_then(Value::as_str),
+                Some(fixture.task_repo.to_string_lossy().as_ref()),
+                "`{label}` was not scanned for runtime-context references"
+            );
+        }
     }
 }

@@ -81,30 +81,6 @@ pub(crate) fn detect_wrap_startup(
     })
 }
 
-#[allow(dead_code)]
-pub(crate) fn fallback_wrap_startup(cwd: &Path) -> WrapStartupDetection {
-    let invocation =
-        claudine::invocation_context::InvocationContext::capture_for_wrapper(cwd, false);
-    WrapStartupDetection {
-        invocation,
-        env_context: claudine::events::EnvironmentContext::default(),
-        launch_context: claudine::system_prompt::LaunchContext {
-            cwd: cwd.to_path_buf(),
-            repo_root: None,
-            package_area_root: None,
-            package_root: None,
-            agent: None,
-        },
-        launch_workspace: LaunchWorkspaceContext {
-            launch_cwd: cwd.to_path_buf(),
-            repo_root: None,
-            child_cwd: cwd.to_path_buf(),
-            package_context: None,
-            warnings: Vec::new(),
-        },
-    }
-}
-
 /// Run startup detection and fall back to a minimal context on failure.
 ///
 /// When `repo_requested` is true, detection failure is propagated as an

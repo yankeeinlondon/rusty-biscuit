@@ -228,7 +228,6 @@ pub(crate) fn execute_sequence(
     // request) reuse the same source-repo-root, selection config, and
     // installed-provider snapshot instead of rediscovering them.
     let prep_context = super::composition::CompositionPrepContext::from_invocation(
-        &source.original_ref,
         invocation,
         source_context,
         &shared.excluded(),

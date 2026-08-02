@@ -43,16 +43,6 @@ pub(crate) struct CompositionPrepContext {
     pub invocation: InvocationContext,
     /// Definitive context for the first resolved composition source.
     pub source_context: SourceContext,
-    /// Original CLI file argument (relative or absolute, as the user typed).
-    #[allow(dead_code)]
-    pub original_ref: String,
-    /// Resolved absolute source path (output of `biscuit-file` resolution).
-    #[allow(dead_code)]
-    pub resolved_path: PathBuf,
-    /// Parent directory of the resolved source path; canonical constructors
-    /// always populate it.
-    #[allow(dead_code)]
-    pub source_parent: Option<PathBuf>,
     /// Source repo root, when the source lives inside a git workspace.
     pub source_repo_root: Option<PathBuf>,
     /// Working directory frozen by the invocation owner at launch.
@@ -80,40 +70,18 @@ pub(crate) struct CompositionPrepContext {
 }
 
 impl CompositionPrepContext {
-    /// Build a fresh context for one compose / inline-compose / sequence
-    /// invocation.
-    ///
-    /// `original_ref` is the raw CLI file argument; `resolved_path` is the
-    /// absolute path produced by `composition::resolve_composition_source`.
-    /// `excluded` is the caller's `--exclude` set, applied to the installed
-    /// provider list.
-    ///
-    /// The compatibility constructor establishes one invocation owner and one
-    /// definitive source bundle. Canonical command paths pass those objects to
-    /// [`Self::from_invocation`] directly.
-    #[allow(dead_code)]
-    pub fn new(
-        original_ref: &str,
-        resolved_path: &Path,
-        excluded: &BTreeSet<Provider>,
-    ) -> Result<Self> {
-        let invocation = InvocationContext::capture()?;
-        let source_context = invocation.derive_source(resolved_path)?;
-        Self::from_invocation(original_ref, invocation, source_context, excluded)
-    }
-
     /// Build provider-selection state from the invocation's existing source
     /// observation without performing filesystem discovery.
+    ///
+    /// `excluded` is the caller's `--exclude` set, applied to the installed
+    /// provider list.
     pub fn from_invocation(
-        original_ref: &str,
         invocation: InvocationContext,
         source_context: SourceContext,
         excluded: &BTreeSet<Provider>,
     ) -> Result<Self> {
         let _ctx_span = tracing::info_span!("compose_prep.prep_context").entered();
         let cwd = invocation.launch_cwd().to_path_buf();
-        let resolved_path = source_context.source_path().to_path_buf();
-        let source_parent = Some(source_context.base_dir().to_path_buf());
         let source_repo_root = source_context.repository_root().map(Path::to_path_buf);
         let launch_context = invocation.launch_context();
         let env_context = invocation.environment_context();
@@ -138,9 +106,6 @@ impl CompositionPrepContext {
         Ok(Self {
             invocation,
             source_context,
-            original_ref: original_ref.to_string(),
-            resolved_path,
-            source_parent,
             source_repo_root,
             cwd,
             selection_config,
@@ -187,6 +152,17 @@ mod tests {
         }
     }
 
+    /// Build a context the way production does: one invocation owner
+    /// captured at the ambient CWD, then a source derived from it.
+    fn build_prep_context(
+        resolved_path: &Path,
+        excluded: &BTreeSet<Provider>,
+    ) -> Result<CompositionPrepContext> {
+        let invocation = InvocationContext::capture()?;
+        let source_context = invocation.derive_source(resolved_path)?;
+        CompositionPrepContext::from_invocation(invocation, source_context, excluded)
+    }
+
     /// Site C: the captured launch-detection failure is now a
     /// `DiagnosticSnapshot` projected from the typed `sniff::SniffError`
     /// (retained through `ClaudineError::LaunchContextDetection`), so the
@@ -227,7 +203,7 @@ mod tests {
     /// that the `launch_workspace` matches the cheap, no-walk
     /// `launch_workspace_context_from_repo_info` output computed from the
     /// same inputs we passed in. If a future change reintroduces the
-    /// scanning fallback inside `CompositionPrepContext::new`, the
+    /// scanning fallback inside `CompositionPrepContext::from_invocation`, the
     /// computed values would diverge (e.g., `child_cwd` would point at a
     /// freshly detected ancestor rather than the launch CWD).
     #[test]
@@ -241,7 +217,7 @@ mod tests {
         std::fs::write(&source_file, "# Test\n").unwrap();
 
         let excluded = BTreeSet::new();
-        let ctx = CompositionPrepContext::new("prompt.md", &source_file, &excluded).unwrap();
+        let ctx = build_prep_context(&source_file, &excluded).unwrap();
 
         // The launch_workspace must mirror the data the precomputed
         // helper would have produced from the launch CWD's sniff result.
@@ -300,7 +276,7 @@ mod tests {
 
         let _cwd = ScopedCwd::enter(&repo_root);
         let excluded = BTreeSet::new();
-        let ctx = CompositionPrepContext::new("prompt.md", &source_file, &excluded).unwrap();
+        let ctx = build_prep_context(&source_file, &excluded).unwrap();
 
         assert!(
             ctx.source_repo_root.is_none(),
@@ -379,7 +355,7 @@ mod tests {
         std::env::set_current_dir(&launch_canon).unwrap();
 
         let excluded = BTreeSet::new();
-        let result = CompositionPrepContext::new("prompt.md", &source_file, &excluded);
+        let result = build_prep_context(&source_file, &excluded);
 
         // Restore the process CWD before asserting so a failed assert cannot
         // leave the shared test process pointed at a deleted tempdir.
