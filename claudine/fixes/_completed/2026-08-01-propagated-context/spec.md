@@ -26,12 +26,21 @@ invocation actually enters. Downstream consumers derive document-relative
 views from the captured snapshot without repeating repository walks or reading
 ambient process state.
 
-The change preserves all intended user-visible behavior. It deliberately
-removes only the incidental Claudine composition of a provider-owned memory
-file that does not opt into Claudine's harness:
+The change preserves all intended user-visible behavior aside from two
+deliberate departures: it removes the incidental Claudine composition of a
+provider-owned memory file that does not opt into Claudine's harness, and it
+re-anchors a sequence step's explicit task stack to the document that
+authored the task:
 
 - system-prompt discovery remains anchored to the launch CWD;
 - document references remain anchored to the document that authored them;
+- a task's `side_effect` action and its `setup`/`teardown` stacks now use the
+  task's own origin document (`task.origin_dir`/`task.origin_path`) as their
+  mutation root, `base_dir`, `source_path`, and `repo_root` instead of the
+  document a step composes and runs, so `set_frontmatter` and other
+  file-touching effects target files next to the task's origin document —
+  including when that document lives in a different repository from the
+  step's prompt;
 - a source in another repository receives that repository's context;
 - proxy, retry, and resume continue to reread mutable documents at their
   existing lifecycle boundaries;

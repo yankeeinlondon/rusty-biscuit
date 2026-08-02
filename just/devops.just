@@ -14,8 +14,13 @@ underline := '\033[4m'
 
 # dim := '\033[2m'
 
+# Preserve enough headroom for Cargo and the Windows linker before entering a
+# storage-heavy recipe. Other hosts return immediately.
+_storage_preflight:
+    @repo_root="$(git rev-parse --show-toplevel)"; bash "$repo_root/scripts/storage-preflight.sh"
+
 # Build the package
-_build package pkg_name *args="":
+_build package pkg_name *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
     echo -e "🏃‍♂️ Building {{ bold }}{{ pkg_name }}{{ reset }} {{ italic }}on {{ reset }}{{ os() }}"
@@ -83,7 +88,7 @@ commit yolo="true" agent="opencode" model="":
     echo
 
 # Lint a package
-_lint pkg:
+_lint pkg: _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -659,7 +664,7 @@ _archive_drop_build_flags *args="":
 #
 # A `cargo test` fallback cannot consume an archive at all — it would recompile —
 # so a missing nextest in archive mode is a hard error, never a fallback.
-_test pkg *args="":
+_test pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -929,7 +934,7 @@ _expected_manifest tier specs *args="":
 #
 # Package discovery comes from Cargo metadata rather than the curated package-area
 # list. Optional selectors may be package names or package-area paths.
-_test_workspace *selectors="":
+_test_workspace *selectors="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -1279,7 +1284,7 @@ _check_tier_coverage *args="":
 # `_doctest`; lint lives in `_lint`. Auto-detects which of `--lib` / `--bins`
 # applies so the recipe works for lib-only crates, bin-only crates, and the
 # common lib+CLI combo without per-package customization.
-_sanity pkg *args="":
+_sanity pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
     echo
@@ -1371,7 +1376,7 @@ _sanity pkg *args="":
 # its own. With no shared resource, nextest runs at `-j N` safely. The
 # default (`1`, or unset) preserves the shared-pane serial path verbatim
 # for every other package area.
-_test_l2 pkg *args="":
+_test_l2 pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
     echo
@@ -1507,7 +1512,7 @@ _test_l2 pkg *args="":
 # from whoever is at the keyboard. Set BISCUIT_L3_TAKE_FOCUS=1 to authorize a
 # non-interactive run (a human deciding the machine is free), or answer the
 # prompt when running from a terminal.
-_test_l3 pkg *args="":
+_test_l3 pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "${BISCUIT_L3_TAKE_FOCUS:-}" != "1" ]; then
@@ -1550,7 +1555,7 @@ _test_l3 pkg *args="":
 
 # Browser tier: headless browser tests. Skip-clean if Chrome absent unless
 # BISCUIT_BROWSER_REQUIRED=1 is set in the environment.
-_test_browser pkg *args="":
+_test_browser pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
     echo
@@ -1570,7 +1575,7 @@ _test_browser pkg *args="":
 
 # Real-resource tier: external services/devices. Selecting the set is harmless;
 # tests themselves are responsible for skipping when the resource is absent.
-_test_real pkg *args="":
+_test_real pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
     echo
@@ -1587,7 +1592,7 @@ _test_real pkg *args="":
 # Doctests. Nextest does not run doctests, so this recipe shells out to
 # `cargo test --doc`. Skips packages that have no lib target (bin-only
 # crates have no doctests).
-_doctest pkg *args="":
+_doctest pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
     echo
@@ -1724,7 +1729,7 @@ _bench_preflight:
 #
 # For the canonical before/after workflow use `_bench_save` and
 # `_bench_compare` instead.
-_bench pkg *args="":
+_bench pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
     just _bench_preflight
@@ -1763,7 +1768,7 @@ _bench_compare pkg *args="":
 
 # Per-package LCOV coverage. Writes a `lcov-<pkg>.info` artifact next to the
 # package's own working directory.
-_coverage pkg *args="":
+_coverage pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
     echo
@@ -1775,7 +1780,7 @@ _coverage pkg *args="":
 # package's `fuzz/rust-toolchain.toml`.
 #
 # Usage: `just _fuzz <pkg-fuzz-dir> <target> [-- libfuzzer-args]`
-_fuzz fuzz_dir target *args="":
+_fuzz fuzz_dir target *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
     echo

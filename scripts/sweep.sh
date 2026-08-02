@@ -7,10 +7,11 @@
 #   3. artifacts untouched for more than SWEEP_TIME_DAYS (default 14)
 #   4. BACKSTOP: cap each target/ at SWEEP_MAX_SIZE (default 120GB), oldest first
 #
-# On a host that has opted into kache as the rustc wrapper, swept artifacts come
-# back as link-restores rather than recompiles, and a lean target/ keeps kache's
-# per-crate keying fast (~100x slower on huge trees). Activation is a per-host
-# decision and nothing here assumes it.
+# Swept artifacts come back as link-restores rather than recompiles when a host
+# has opted into kache as the rustc wrapper; activation is a per-host decision
+# and nothing here assumes it. Sweep remains required either way because Cargo
+# does not garbage-collect target directories, and a lean target/ keeps kache's
+# per-crate keying fast (~100x slower on huge trees).
 # Decisions and sizing evidence: docs/kache-strategy.md.
 #
 # Usage: sweep.sh [ROOT ...]   (default: the enclosing git worktree root)

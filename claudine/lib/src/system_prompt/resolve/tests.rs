@@ -372,6 +372,44 @@ fn standard_discovery_user_home_fallback() {
     // If None, that's also valid - it means no user-home file exists
 }
 
+/// The user-home leg of standard discovery, pinned through the explicit-home
+/// seam so it asserts on every platform.
+///
+/// [`standard_discovery_user_home_fallback`] can only observe whatever the
+/// real profile happens to hold, and the CLI subprocess fixture that covered
+/// this end to end is Unix-only because `HOME` does not redirect Windows
+/// profile discovery.
+#[test]
+fn standard_discovery_user_home_is_injectable() {
+    let tmp = TempDir::new().unwrap();
+    let repo = tmp.path().join("repo");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&repo).unwrap();
+    std::fs::create_dir_all(home.join(".claudine")).unwrap();
+    std::fs::write(home.join(".claudine/system-prompt.md"), "# User\n").unwrap();
+
+    let args = SystemPromptArgs::default();
+    let context = LaunchContext {
+        agent: None,
+        cwd: repo.clone(),
+        repo_root: Some(repo),
+        package_area_root: None,
+        package_root: None,
+    };
+
+    let (source, text) = resolve_system_prompt_source_with_home(&args, &context, Some(&home))
+        .unwrap()
+        .expect("the injected home supplies the user-global prompt");
+    match source {
+        SystemPromptSource::StandardDiscovered { path, scope } => {
+            assert!(matches!(scope, StandardPromptScope::User));
+            assert_eq!(path, home.join(".claudine/system-prompt.md"));
+        }
+        _ => panic!("Expected StandardDiscovered source with User scope, got {source:?}"),
+    }
+    assert_eq!(text, "# User\n");
+}
+
 #[test]
 fn standard_discovery_none() {
     let tmp = TempDir::new().unwrap();

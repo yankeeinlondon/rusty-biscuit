@@ -8,11 +8,12 @@ settings for unrelated repositories.
 
 Initialization runs these stages in order:
 
-1. Ensures Rust, Cargo, and the platform C build tools are available.
-2. Ensures GitNexus and its native Tree-sitter dependency are usable.
-3. Builds and installs `sniff`, then reports whether the runtime is native,
-   WSL 1, or WSL 2.
-4. Builds and installs the core Rusty Biscuit developer CLIs.
+1. Ensures Rust, Cargo, platform C build tools, native libraries, and the
+   repository's portable shell-utility baseline are available.
+2. Ensures the CI/CD command-line tools applicable to the host are available.
+3. Ensures Cargo artifact maintenance and GitNexus are usable.
+4. Builds and installs `sniff`, reports whether the runtime is native, WSL 1,
+   or WSL 2, and installs the core Rusty Biscuit developer CLIs.
 
 The recipe is idempotent. Running it again repairs missing tools.
 
@@ -34,7 +35,8 @@ powershell -ExecutionPolicy Bypass -File scripts\init.ps1
 
 It verifies `bash`/`cygpath` (Cygwin's `C:\cygwin64\bin`, or Git for Windows'
 `bin` + `usr\bin`), prints exact remediation when they are missing, warns when
-the only `bash` is the WSL launcher stub, and then delegates to `just init`.
+the only `bash` is the WSL launcher stub, imports persisted PATH entries added
+by WinGet into the current session, and then delegates to `just init`.
 
 Windows-specific behavior of the recipe itself:
 
@@ -138,8 +140,10 @@ build artifacts (`cargo sweep`: uninstalled toolchains, then anything untouched
 for 14 days, then a 120 GB per-root backstop cap). With a warm kache store,
 swept artifacts return as link-restores rather than recompiles, and a lean
 `target/` keeps kache's per-crate keying fast. Schedule it per host — launchd
-on macOS, Task Scheduler on Windows, cron or a systemd timer on Linux. The
-decisions and sizing evidence live in `docs/kache-strategy.md`.
+on macOS, `just install-windows-sweep` on Windows, and cron or a systemd timer
+on Linux. The Windows task uses an 80 GB cap and can be inspected with
+`just windows-sweep-status`. The decisions and sizing evidence live in
+`docs/kache-strategy.md`.
 
 Judge the cache with `kache stats` (hit rate, time saved), not `kache doctor`
 — a green doctor with a low hit rate is a failing cache.
@@ -195,10 +199,30 @@ After the prerequisites are ready, initialization installs these monorepo
 CLIs:
 
 - `sniff`
+- Biscuit Hash (`bh`)
 - Biscuit Terminal CLI tools
 - Darkmatter (`md`)
 - Playa
 - Biscuit Speaks (`so-you-say`)
+- Claudine
+
+Initialization also guarantees the shell utilities used by shared recipes,
+including `find`, `du`, `awk`, `jq`, `fd`, `rg`, and `fzf`, and installs
+`eza` plus `cargo-sweep` for repository and target-directory maintenance.
+
+## Installed CI/CD Tools
+
+The CI/CD stage ensures tools invoked directly by repository workflows and
+their local reproduction recipes:
+
+- Python 3.10+, GitHub CLI, Node.js 22+, npm, and pnpm
+- `cargo-nextest`, `cargo-llvm-cov`, and `release-plz`
+- `cargo-fuzz` plus the nightly Rust toolchain on supported Unix hosts
+- `cross` and Bencher on Linux, where their owning workflows run
+
+Third-party GitHub Actions remain responsible for binaries used only inside
+the action implementation. A successful `just init` never treats a missing
+applicable command as a successful bootstrap.
 
 It also ensures GitNexus is installed globally through npm, installing its
 native build toolchain first (`node-gyp`, `node-addon-api`, and `tree-sitter`
@@ -212,6 +236,8 @@ If initialization stops, fix the reported prerequisite and run `just init`
 again. Useful focused checks are:
 
 ```sh
+just _ensure-host-tools
+just _ensure-ci-tools
 rustc --version
 cargo --version
 sniff runtime

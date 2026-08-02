@@ -120,10 +120,16 @@
         assert_eq!(work.topology_probes, 0);
         assert_eq!(work.ambient_fallbacks, 0);
         for group in ["os", "hardware", "gpu", "git", "repo", "file_changes"] {
+            // Both counters, because a group that is only ever a reuse — `git`
+            // and `repo` clone evidence the repository entry already holds —
+            // would slip past a captures-only assertion even when requested.
             assert_eq!(
-                work.runtime_evidence_captures.get(group),
-                None,
-                "unreferenced host group `{group}` should not be captured"
+                (
+                    work.runtime_evidence_captures.get(group),
+                    work.runtime_evidence_reuses.get(group),
+                ),
+                (None, None),
+                "unreferenced host group `{group}` should be neither captured nor reused"
             );
         }
     }
@@ -152,9 +158,9 @@
             &invocation,
         )
         .unwrap();
-        let (_, _, materialized, _) = result.0.expect("the timeout activates the harness");
+        let harness = result.0.expect("the timeout activates the harness");
 
-        let resolved_os = materialized.frontmatter["resolved_os"]
+        let resolved_os = harness.materialized.frontmatter["resolved_os"]
             .as_str()
             .expect("frontmatter interpolation preserves a string");
         assert!(!resolved_os.is_empty());

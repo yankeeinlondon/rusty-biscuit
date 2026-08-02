@@ -455,12 +455,8 @@ pub(crate) fn prepare_and_run_active_document(
     // Build per-document provider-selection state from the invocation owner
     // and definitive source bundle without another repository observation.
     let prep_ctx_t = std::time::Instant::now();
-    let prep_context = CompositionPrepContext::from_invocation(
-        current_file,
-        invocation,
-        source_context,
-        &shared.excluded(),
-    )?;
+    let prep_context =
+        CompositionPrepContext::from_invocation(invocation, source_context, &shared.excluded())?;
     record_prep_substage(&mut prep_substages, perf_enabled, "prep context", prep_ctx_t);
     // This document's own repository root resolves its `@repo/…` proxy
     // targets; captured before `execute_loop_or_single` consumes the context.

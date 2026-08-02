@@ -9,7 +9,9 @@ use std::fs;
 use tempfile::tempdir;
 
 mod common;
-use common::{CliProcessFixture, augmented_path, strip_ansi, write_executable};
+#[cfg(unix)]
+use common::CliProcessFixture;
+use common::{augmented_path, strip_ansi, write_executable};
 
 #[cfg(windows)]
 fn shim_name(name: &str) -> String {

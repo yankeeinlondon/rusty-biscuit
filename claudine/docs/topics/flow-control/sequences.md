@@ -483,6 +483,14 @@ An external `task:` reference is exclusive with the other executables and is an
 immutable expansion of the referenced file — v1 does not support patching or
 overriding fields at the referencing site.
 
+A task's `side_effect` action and its `setup`/`teardown` stacks mutate
+relative to the document that authored the task — its own directory and
+repository — not the document a `prompt:` step composes and runs. An
+externalized `task:` (or `group:`) file that carries `set_frontmatter` or
+another file-touching effect therefore targets files next to itself, including
+when it lives in a different repository from the sequence document that
+references it.
+
 ### Shell tasks
 
 ```yaml

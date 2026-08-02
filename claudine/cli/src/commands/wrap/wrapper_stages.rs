@@ -365,7 +365,21 @@ fn wrapper_harness_frontmatter_enabled(source_path: &Path) -> Result<bool> {
     Ok(claudine::harness::has_harness_properties(&frontmatter))
 }
 
-#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+/// The provider memory file a direct wrapper passthrough runs as its harness.
+///
+/// `source_context` is the one derivation of `source_path` this invocation
+/// makes: the materialized seed and the shell options below were both built
+/// against it, so the execution stage adopts it rather than deriving a second
+/// context for the same path.
+pub(crate) struct WrapperHarness {
+    pub(crate) source_path: PathBuf,
+    pub(crate) source_context: claudine::invocation_context::SourceContext,
+    pub(crate) base_prompt: String,
+    pub(crate) materialized: harness_orch::MaterializedHarnessPrompt,
+    pub(crate) shell_options: claudine::harness::ShellApprovalOptions,
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn detect_wrapper_harness(
     provider: Provider,
     _profile: &dyn WrapperProfile,
@@ -375,17 +389,7 @@ pub(crate) fn detect_wrapper_harness(
     child_cwd: &Path,
     cwd: &Path,
     invocation: &claudine::invocation_context::InvocationContext,
-) -> Result<
-    (
-        Option<(
-            PathBuf,
-            String,
-            harness_orch::MaterializedHarnessPrompt,
-            claudine::harness::ShellApprovalOptions,
-        )>,
-        Option<std::time::Duration>,
-    ),
-> {
+) -> Result<(Option<WrapperHarness>, Option<std::time::Duration>)> {
     let base_prompt = prompt_source
         .as_inline()
         .map(|s| s.to_string())
@@ -402,7 +406,7 @@ pub(crate) fn detect_wrapper_harness(
         let source_context = invocation.derive_source(&source_path)?;
         invocation.record_harness_materialization();
         let materialization_started = std::time::Instant::now();
-        let seed = harness_orch::materialize_passthrough_harness_seed(
+        let materialized = harness_orch::materialize_passthrough_harness_seed(
             &source_path,
             base_prompt.clone(),
             Some(child_cwd),
@@ -417,7 +421,13 @@ pub(crate) fn detect_wrapper_harness(
         );
 
         Ok((
-            Some((source_path, base_prompt, seed, shell_options)),
+            Some(WrapperHarness {
+                source_path,
+                source_context,
+                base_prompt,
+                materialized,
+                shell_options,
+            }),
             Some(materialization_elapsed),
         ))
     } else {
@@ -478,12 +488,7 @@ fn passthrough_launch_intent(
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_execution_stage(
-    wrapper_harness: Option<(
-        PathBuf,
-        String,
-        harness_orch::MaterializedHarnessPrompt,
-        claudine::harness::ShellApprovalOptions,
-    )>,
+    wrapper_harness: Option<WrapperHarness>,
     use_structured: bool,
     provider: Provider,
     profile: &dyn WrapperProfile,
@@ -509,8 +514,14 @@ pub(crate) fn run_execution_stage(
     mut perf_collector: Option<&mut crate::perf::CommandPerfCollector>,
     invocation: &claudine::invocation_context::InvocationContext,
 ) -> Result<(i32, Option<String>)> {
-    if let Some((source_path, base_prompt, initial_materialized, shell_options)) = wrapper_harness {
-        let source_context = invocation.derive_source(&source_path)?;
+    if let Some(WrapperHarness {
+        source_path,
+        source_context,
+        base_prompt,
+        materialized: initial_materialized,
+        shell_options,
+    }) = wrapper_harness
+    {
         let initial_compose_context = initial_materialized.compose_context.clone();
         let input_layers = claudine::composition::CallerInputLayers {
             file_resolution_context: initial_materialized.file_resolution_context.clone(),

@@ -16,3 +16,27 @@ The sequence fixture passes under the focused CLI integration test. The overlay
 test also passes with Darkmatter's native-identity/presentation-value split.
 GitNexus could not resolve either test symbol (risk `UNKNOWN`); direct inventory
 found no callers or production-flow participation.
+
+## Post-acceptance cluster (2026-08-02)
+
+Two CLI failures appeared on native Windows after the Phase 6 acceptance
+boundary, alongside the two library failures recorded in the library path note.
+All four came from `8a11bd9c4` (`fix(claudine): propagate invocation context`).
+Neither is a product defect, and the acceptance record above is unchanged.
+
+| Test | Classification | Owning cause | Resolution |
+|---|---|---|---|
+| `inline_compose_writes_hash_that_passes_md_diff` | Host provisioning gap in the fixture | `md_bin()` probed only the workspace target profile directory. `just init` does install `md` — root `justfile` → `darkmatter`'s `install` → `cargo install --path ./cli` — but that populates the Cargo bin directory, which the probe never consulted. Linux runs passed because a workspace build happened to be present. | Fall back to `PATH` after the target-directory probe, so an `init`-provisioned `md` satisfies the test while a workspace build still wins when one exists. |
+| `isolated_fixture_can_opt_in_to_user_prompt_discovery` | Portable test-fixture defect | The same Known Folder inertness recorded in the home/config discovery note: the subprocess fixture treated `HOME`/`USERPROFILE` as an injectable user-global root, so on Windows the child read the real user profile and fell back to the built-in prompt. | Gate the subprocess assertion `#[cfg(unix)]` with that reason, matching the nine MCP fixtures, and pin the user-home leg of standard discovery on every platform through the explicit-home seam (`standard_discovery_user_home_is_injectable`). The pre-existing `standard_discovery_user_home_fallback` asserts nothing when the real profile lacks the file. |
+
+The same commit also left two imports used only by `#[cfg(unix)]` tests —
+`std::fs` in `propagated_context_fixtures.rs` and `CliProcessFixture` in
+`contextual_errors.rs` — which warn on Windows and so fail the warnings-denied
+lint gate. Both are gated with their consumers, as the home/config discovery
+note did for `mcp_cli`.
+
+Native Windows verification: `claudine-cli` 2,018/2,018 with 8 skipped and
+`claudine` 3,891/3,891, both with retries disabled; Clippy clean across both
+packages with `--all-features --tests`. Windows now runs one fewer CLI test by
+design. Linux execution remains unavailable on this host (the WSL distribution
+fails to start), so the Unix legs are unverified here.

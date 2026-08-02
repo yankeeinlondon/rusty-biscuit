@@ -117,7 +117,7 @@ mod loading {
         assert_eq!(graph.prompt_documents.len(), 1);
         assert_eq!(
             graph.prompt_documents[0].path,
-            dunce::canonicalize(task_repo.join("repo-prompt.md")).unwrap(),
+            fs::canonicalize(task_repo.join("repo-prompt.md")).unwrap(),
             "the nested bare reference must search the task document's repository root",
         );
         assert_eq!(invocation.work_snapshot().topology_probes, 2);

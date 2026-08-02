@@ -263,6 +263,39 @@ to SIGKILL. These internals are intentionally not part of the
 user-facing surface; they are constants from the user's perspective and
 must not be promoted to a third public timeout concept.
 
+### Idle-flush cadence
+
+A **second, separate ticker** runs `flush_if_idle`: it releases assistant
+prose still sitting in the block buffer during a silence, and emits the
+awaiting-subagent diagnostic described under
+[Subagent diagnostics](#subagent-diagnostics-in-error-reports). Its cadence
+and its silence window are one value, defaulting to `30s`.
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `CLAUDINE_IDLE_FLUSH_INTERVAL` | `30s` | How often the idle-flush ticker runs, **and** how long a held block must sit before a tick releases it. Duration string. |
+
+This is a **render cadence, not a timeout rule.** It terminates nothing and
+produces no `error_kind`; `timeout` and `step_timeout` remain the only two
+rules Claudine enforces. Lowering it surfaces held prose sooner at the cost
+of more wake-ups; raising it batches prose into fewer, larger flushes.
+
+Cadence and window are deliberately a single knob rather than two, because
+the window means *"held for at least one full tick"* — a window longer than
+the cadence only spends ticks that cannot flush, and a shorter one buys no
+granularity, since nothing between ticks can observe it.
+
+Parsing follows the same `parse_timeout` grammar as the two timeouts and the
+same fall-back posture as `CLAUDINE_WATCHDOG_INTERVAL`: the value is read
+once when the ticker spawns, and an absent, malformed, or non-positive value
+(including `0s`) takes the built-in `30s`. There is **no** `0s` disable
+sentinel here — a zero cadence would be a spin loop, not a disabled rule.
+
+The override exists because the flush is only observable end-to-end from a
+real terminal. `level2_prompt_idle_flush_keeps_the_task_bar_in_tmux` drives
+the real binary in a tmux pane, where an environment variable is the only
+seam that reaches the ticker.
+
 ## Defaults and rationale
 
 - **Why `timeout` has no built-in default.** The wall-clock ceiling is a
@@ -361,7 +394,8 @@ labelled `Step Timeout` (rendered through `SemanticEvent::Error` with
 other agent-native errors), enumerating each outstanding subagent's id,
 name, and elapsed time since its last progress event.
 
-In addition, the 30-second `flush_if_idle` ticker (which already exists
+In addition, the `flush_if_idle` ticker (30s by default — see
+[Idle-flush cadence](#idle-flush-cadence); it already exists
 to flush dangling assistant prose during long silences) emits at most
 **one** diagnostic line per active subagent per silence window:
 
