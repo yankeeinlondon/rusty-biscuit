@@ -228,12 +228,19 @@ Roll back by reverting that one authority value; nothing else encodes it.
 
 Shared CLI tools used in CI:
 
+- `python3`, `jq`, and `gh` — scope calculation and GitHub orchestration.
+- Node.js, npm, and pnpm — frontend legs declared with the `node` capability.
 - `cargo-nextest` — the canonical test runner for L1 tiers.
 - `just` — orchestration entry point for every job.
 - `cargo-llvm-cov` — coverage.
 - `cargo-fuzz` — fuzz targets.
 - `cross` — integration cross-compilation.
 - `bencher` — nightly benchmark upload.
+- `release-plz` — release planning and publication.
+
+The root `just init` recipe has a CI/CD stage that ensures the applicable
+local equivalents. Binaries encapsulated entirely inside a third-party action
+remain owned by that action.
 
 ## Policy Summary
 

@@ -133,7 +133,7 @@ test-changed-areas:
 test-githooks: test-pre-push-hook test-changed-areas
 
 # run doctests (all workspace crates, or specific areas: just doctest claudine playa)
-doctest *args="":
+doctest *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ -z "{{ args }}" ]]; then
@@ -425,26 +425,40 @@ cp:
     @echo "All committed files from {{ BOLD }}rusty-biscuit{{ RESET }} monorepo have now been pushed to remote."
     @echo
 
-# install rusty-biscuit and third-party CLIs used for development
+# install host, CI/CD, and rusty-biscuit tools used by repository recipes
 #
 # On native Windows, run scripts\init.ps1 instead of invoking this recipe
 # directly: just needs bash AND cygpath on PATH before it can run any recipe,
 # so the "no shell environment" check has to happen outside just.
-init: _ensure-native-bash _ensure-build-deps _ensure-native-libs _ensure-nextest _ensure-gitnexus
+init: _ensure-native-bash
     #!/usr/bin/env bash
     set -euo pipefail
-    # Put cargo on PATH in case _ensure-build-deps just installed Rust
-    source scripts/cargo-path.sh
     echo -e "Initializing the {{ RED }}rusty-biscuit{{ RESET }} monorepo"
     echo
-    echo -e "First step is to ensure CLIs used for development are installed"
+
+    echo -e "{{ BOLD }}Host prerequisites{{ RESET }}"
+    just _ensure-build-deps
+    source scripts/cargo-path.sh
+    just _ensure-native-libs
+    just _ensure-host-tools
+    echo
+
+    echo -e "{{ BOLD }}CI/CD tools{{ RESET }}"
+    just _ensure-ci-tools
+    echo
+
+    echo -e "{{ BOLD }}Repository and developer tools{{ RESET }}"
+    just _ensure-cargo-sweep
+    just _ensure-gitnexus
     echo
     (cd sniff && just install)
     sniff runtime
+    (cd biscuit-hash && just install)
     (cd biscuit-terminal && just install)
     (cd darkmatter && just install)
     (cd playa && just install)
     (cd biscuit-speaks && just install)
+    (cd claudine && just install)
 
 # "Accidental WSL" guard. Must be a LINEWISE recipe: just runs shebang recipes
 # through the cygpath-translated interpreter (Cygwin/Git Bash), but linewise
@@ -468,6 +482,14 @@ _ensure-native-bash:
         echo "  (e.g. ~/rusty-biscuit) and run 'just init' from there." >&2; \
         exit 1; \
     fi
+
+# ensure repository shell and interactive utility dependencies are available
+_ensure-host-tools:
+    @bash scripts/ensure-host-tools.sh
+
+# ensure CLIs invoked directly by CI/CD and local reproduction recipes exist
+_ensure-ci-tools: _ensure-nextest
+    @bash scripts/ensure-ci-tools.sh
 
 # ensure Rust, cargo, and C build tools are available
 _ensure-build-deps:
@@ -953,14 +975,27 @@ _ensure-cargo-sweep:
         RUSTC_WRAPPER="" cargo install --locked cargo-sweep
     fi
 
-# prune Cargo target/ dirs, which cargo never garbage-collects. With kache
-# wired, swept artifacts come back as link-restores, not recompiles — and a
-# lean target/ keeps kache's per-crate keying fast (~100x slower on huge
-# trees). Passes: uninstalled toolchains, untouched >14d, then a 120GB
-# backstop cap per root (docs/kache-strategy.md). Roots default to this repo;
-# override with `just sweep <path>...`.
+# prune Cargo target/ dirs, which cargo never garbage-collects. Passes:
+# uninstalled toolchains, untouched >14d, then a 120GB default backstop cap per
+# root (docs/kache-strategy.md). Constrained Windows hosts use the native 80GB
+# policy below. Roots default to this repo; override with paths.
 sweep *args="": _ensure-cargo-sweep
     @scripts/sweep.sh {{ args }}
+
+# verify the Cargo target volume has enough free space for another Windows gate
+storage-check: _storage_preflight
+
+# run the native Windows 80 GB sweep policy now
+windows-sweep:
+    @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows-cargo-sweep.ps1 -Operation run
+
+# install the native Windows sweep policy in Task Scheduler
+install-windows-sweep:
+    @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows-cargo-sweep.ps1 -Operation install
+
+# show the native Windows sweep task's state and next run
+windows-sweep-status:
+    @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows-cargo-sweep.ps1 -Operation status
 
 # ensure the test runner every tier above L1 depends on is available
 #

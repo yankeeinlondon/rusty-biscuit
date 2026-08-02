@@ -23,6 +23,24 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# WinGet updates the persisted user PATH without changing an already-open
+# terminal. Honor its ordering and retain session-only entries afterwards.
+$persistedPaths = @(
+    [Environment]::GetEnvironmentVariable('Path', 'Machine') -split ';'
+    [Environment]::GetEnvironmentVariable('Path', 'User') -split ';'
+) | Where-Object { $_ }
+$currentPaths = @($env:Path -split ';') | Where-Object { $_ }
+$sessionOnlyPaths = @($currentPaths | Where-Object { $persistedPaths -notcontains $_ })
+$env:Path = (@($persistedPaths) + @($sessionOnlyPaths)) -join ';'
+
+$python = Get-ChildItem -LiteralPath "$env:LOCALAPPDATA\Programs\Python" `
+    -Filter python.exe -Recurse -ErrorAction SilentlyContinue |
+    Sort-Object FullName -Descending |
+    Select-Object -First 1
+if ($python) {
+    $env:Path = "$($python.DirectoryName);$env:Path"
+}
+
 function Write-Step([string]$Message) { Write-Host "`n==> $Message" }
 function Fail([string]$Message, [string[]]$Remediation) {
     Write-Host "`nERROR: $Message" -ForegroundColor Red

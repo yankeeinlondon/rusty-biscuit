@@ -19,9 +19,9 @@ use it. Rationale and measurements: `fixes/2026-07-30-ci-cd-stabilization/plan.m
   config (never overwrites). Config path: `~/.config/kache/config.toml` on macOS/Linux,
   `%APPDATA%\kache\config.toml` on Windows.
 - **Sweep:** version-controlled at `scripts/sweep.sh` (three passes + census below), run via
-  `just sweep [roots...]`. Schedule per host: launchd (Mac, done — see below), Task Scheduler on
-  Windows, cron/systemd timer on Linux. Unaffected by the above — target hygiene matters with or
-  without a cache.
+  `just sweep [roots...]`. Schedule per host: launchd on macOS,
+  `just install-windows-sweep` on Windows, and cron/systemd timer on Linux.
+  Target hygiene matters with or without a cache.
 - **CI: kache removed.** `Swatinem/rust-cache@v2` remains on every native leg. The measured legs
   returned 0–6% hit rates (0.4–2.3% weighted by compile cost, ~2–15s saved) because
   `kache-action@v1` fell back to the GitHub Actions cache, whose entries are immutable and
@@ -124,6 +124,20 @@ Plus a `[census]` line logging the 10 largest `target/` dirs before sweeping, an
 
 Passes 1–2 do the real work (50–100+ GiB per run historically). Pass 3 only fires on runaways.
 
+### Native Windows policy
+
+`scripts/windows-cargo-sweep.ps1` provides the Windows scheduler integration.
+It skips safely while Cargo, rustc, Clippy, or a linker is active, caps the
+resolved target tree at 80 GB, and logs before/after capacity to
+`%LOCALAPPDATA%\rusty-biscuit\logs\cargo-sweep.log`. Run
+`just install-windows-sweep` once to register the current-user task for Sunday
+and Wednesday at 04:00; inspect it with `just windows-sweep-status`.
+
+The shared Cargo gate recipes also run `scripts/storage-preflight.sh`. It is a
+no-op off Windows and refuses to start below 50 GiB free on Cargo's actual
+target volume. `BISCUIT_BUILD_MIN_FREE_GIB` changes the threshold; zero is an
+explicit emergency disable.
+
 ## Starting maxsize: **120GB**
 
 - `cargo-sweep`'s size unit is **decimal** and defaults to MB unsuffixed → 120GB = **111.8 GiB**.
@@ -142,10 +156,28 @@ to 150–200GB. If nothing ever approaches 120GB, it can come down.
 - `[profile.dev] debug = "line-tables-only"` — already committed workspace-wide (`43056c8bc`).
   Nothing to do.
 - `local_max_size` stays at 100GiB pending real post-purge usage data.
-- `[profile.dev.package."*"] debug = 0` — available if disk pressure returns; costs `file:line` in
-  dependency backtrace frames. Not needed at 1.0 Ti free.
+- `[profile.dev.package."*"] debug = 0` — enabled after dependency PDBs reached
+  34 GiB on the constrained Windows host. Cargo excludes workspace members
+  from this wildcard, so their backtraces retain line tables; dependency
+  frames lose source locations.
 - `cargo-sweep` **stays** alongside kache. Not redundant: kache's per-crate keying degrades ~100×
   on a huge tree (~18 s/crate on a 957k-file `target/deps` vs ~30–170 ms clean).
+
+The 280 GiB native-Windows build volume also carries a roughly 140 GiB WSL
+VHDX, so its 80 GB cap is intentionally lower than the 120 GB general default.
+A dry run against a 141 GiB target measured 76.68 GiB reclaimable. That host's
+ignored `.cargo/config.toml` also sets `build.incremental = false`; keep the
+setting consistent because toggling it inside one target temporarily retains
+both artifact variants.
+
+### WSL VHD maintenance
+
+Do not build this workspace in WSL on the constrained host. Before compacting
+its VHDX, create and verify a backup on a different physical disk, stop WSL,
+and confirm that the VHDX is detached. Reclaim guest blocks with the distro's
+normal cleanup plus `fstrim`, then compact the detached disk from elevated
+Windows. Do not enable WSL's sparse-VHD option as a substitute for compaction;
+the option is explicitly unsafe and has open data-corruption reports.
 
 ## Why aggressive sweeping is now safe
 
