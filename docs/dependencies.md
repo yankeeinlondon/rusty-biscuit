@@ -572,12 +572,6 @@ This is a Rust workspace with the following modules:
 
     _Tags: encoding, base64, data_
 
-- [percent-encoding](https://github.com/servo/rust-url) _v2.3_ [📄](https://docs.rs/percent-encoding)
-
-    _Percent encoding and decoding for URL components following RFC 3986._
-
-    _Tags: encoding, url, web_
-
 - [urlencoding](https://github.com/bt/rust_urlencoding) _v2.1_ [📄](https://docs.rs/urlencoding)
 
     _URL percentage encoding library. Treats + as literal during decoding, not as space._
