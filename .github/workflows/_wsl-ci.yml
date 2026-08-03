@@ -26,8 +26,8 @@ name: wsl-ci
 #
 # EXT4, NOT /mnt/c
 #
-# The repo is cloned into the guest filesystem (`/home/runner/rusty-biscuit`)
-# rather than built over `GITHUB_WORKSPACE`, which is a 9p mount. The 9p boundary
+# The repo is cloned into the guest filesystem rather than built over
+# `GITHUB_WORKSPACE`, which is a 9p mount. The 9p boundary
 # penalty is severe for a build tree, and ext4 is also where real WSL developers
 # keep their repos, so this is the configuration worth testing.
 #
@@ -101,6 +101,25 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install just
         uses: extractions/setup-just@v2
+      # Every test binary in the archive carries this job's workspace path baked
+      # in as `env!("CARGO_MANIFEST_DIR")`, and the guest clones itself to the
+      # same literal so those fixtures resolve. Nothing else enforces that
+      # coupling, so assert it here — a mismatch caught now is one clear error,
+      # where a mismatch discovered later is every fixture-reading test in the
+      # area failing on a missing file and looking like a code regression.
+      - name: Verify the guest path assumption holds
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="/home/runner/work/${{ github.event.repository.name }}/${{ github.event.repository.name }}"
+          if [ "$GITHUB_WORKSPACE" != "$expected" ]; then
+            echo "The WSL2 guest clones to '$expected', but this archive is being" >&2
+            echo "built at '$GITHUB_WORKSPACE'." >&2
+            echo "Every env!(\"CARGO_MANIFEST_DIR\") fixture lookup would miss in the guest." >&2
+            echo "Update GUEST_ROOT in .github/workflows/_wsl-ci.yml to match." >&2
+            exit 1
+          fi
+          echo "archive build path matches the guest clone path: $expected"
       - name: Verify the archive passthrough is wired
         shell: bash
         run: |
@@ -168,12 +187,28 @@ jobs:
       BISCUIT_CI_AREA: ${{ inputs.area }}
       BISCUIT_CI_ENVIRONMENT: wsl2-ubuntu
       BISCUIT_CI_SHARD: ${{ matrix.shard }}
+      # The guest checkout must sit at the SAME ABSOLUTE PATH the archive was
+      # built at, because `env!("CARGO_MANIFEST_DIR")` is a string literal
+      # compiled into every test binary. `--workspace-remap` cannot touch it —
+      # that only tells nextest where the workspace root moved to — so any test
+      # resolving a fixture through the macro opened a path that did not exist
+      # in the guest and failed on a missing file, not on its own assertion.
+      #
+      # The archive is built by the `archive` job on `ubuntu-latest`, where
+      # `GITHUB_WORKSPACE` is `/home/runner/work/<repo>/<repo>`. Deriving it from
+      # the repository name keeps the two ends coupled through one expression
+      # rather than a hardcoded string that drifts if the repo is renamed. The
+      # verification step below asserts the coupling actually holds rather than
+      # trusting it.
+      GUEST_ROOT: /home/runner/work/${{ github.event.repository.name }}/${{ github.event.repository.name }}
       # Pinned rather than defaulted. The guest's staging root is the one path
       # two different `wsl-bash` invocations must agree on — the tests write it,
       # and a later step copies it across the 9p mount for upload — and each
       # invocation gets a fresh environment, so the value is declared once here
       # and interpolated into both.
-      BISCUIT_JUNIT_STAGE_DIR: /home/runner/rusty-biscuit/target/nextest/ci-reports
+      # Spelled out rather than built from `GUEST_ROOT`: one `env:` entry cannot
+      # reference another in the same block.
+      BISCUIT_JUNIT_STAGE_DIR: /home/runner/work/${{ github.event.repository.name }}/${{ github.event.repository.name }}/target/nextest/ci-reports
     steps:
       - uses: actions/checkout@v4
       # Inside the workspace, not RUNNER_TEMP: the guest reaches this through the
@@ -267,12 +302,15 @@ jobs:
           workspace="$(pwd)"
           git config --global --add safe.directory '*'
           revision="$(git -C "$workspace" rev-parse HEAD)"
-          rm -rf /home/runner/rusty-biscuit
+          rm -rf "${{ env.GUEST_ROOT }}"
+          # `git clone` creates the leaf but not the intervening directories, and
+          # the guest has no `/home/runner/work` until something makes it.
+          mkdir -p "$(dirname "${{ env.GUEST_ROOT }}")"
           # Building over the workspace pays the 9p boundary penalty on every
           # file access; ext4 is both faster and where real WSL developers keep
           # their repositories, so it is the configuration worth testing.
-          git clone --no-hardlinks "$workspace" /home/runner/rusty-biscuit
-          git -C /home/runner/rusty-biscuit checkout --detach "$revision"
+          git clone --no-hardlinks "$workspace" "${{ env.GUEST_ROOT }}"
+          git -C "${{ env.GUEST_ROOT }}" checkout --detach "$revision"
           cp "$workspace/nextest-archive/nextest-archive.tar.zst" /home/runner/
       - name: Install just and cargo-nextest in the guest
         shell: wsl-bash {0}
@@ -308,7 +346,7 @@ jobs:
           # A WSL2 guest IS Linux, so `_ensure-native-libs` keys off `uname -s`
           # and reads the area's `ubuntu-latest` package list. There is no
           # separate `wsl2-ubuntu` key in areas.json.
-          cd /home/runner/rusty-biscuit
+          cd "${{ env.GUEST_ROOT }}"
           just _ensure-native-libs "${{ inputs.area }}"
       # DIAGNOSTIC ONLY — nothing below changes what runs or how it is reported.
       #
@@ -394,8 +432,8 @@ jobs:
           # a standalone binary and stage its JUnit report without shelling out
           # to `cargo metadata`. See fixes/2026-07-27-refactor/wsl-archive-requirements.md.
           export BISCUIT_NEXTEST_BIN='cargo-nextest nextest'
-          export BISCUIT_JUNIT_WORKSPACE_ROOT=/home/runner/rusty-biscuit
-          export BISCUIT_JUNIT_TARGET_DIR=/home/runner/rusty-biscuit/target
+          export BISCUIT_JUNIT_WORKSPACE_ROOT="${{ env.GUEST_ROOT }}"
+          export BISCUIT_JUNIT_TARGET_DIR="${{ env.GUEST_ROOT }}/target"
           export BISCUIT_JUNIT_STAGE_DIR='${{ env.BISCUIT_JUNIT_STAGE_DIR }}'
 
           archive=/home/runner/nextest-archive.tar.zst
@@ -430,12 +468,12 @@ jobs:
 
           # --workspace-remap is not optional: the archive records the BUILD
           # host's source paths, and the guest checkout is somewhere else.
-          args=(--no-fail-fast --archive-file "$archive" --workspace-remap /home/runner/rusty-biscuit)
+          args=(--no-fail-fast --archive-file "$archive" --workspace-remap "${{ env.GUEST_ROOT }}")
           if [ "${{ matrix.shard }}" != "1/1" ]; then
             args+=(--partition "count:${{ matrix.shard }}")
           fi
 
-          cd "/home/runner/rusty-biscuit/${{ inputs.area }}"
+          cd "${{ env.GUEST_ROOT }}/${{ inputs.area }}"
           just test "${args[@]}"
       - name: Stage the JUnit reports for upload
         id: stage_junit
