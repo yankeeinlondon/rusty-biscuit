@@ -113,6 +113,22 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 filter = 'test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
+# This test composes every variable the `ctx` catalog declares, once under a
+# deliberate full `ComposeContext::capture()` and once under ambient
+# `ComposeOptions::new()`, then compares the two renderings. Two complete
+# runtime captures is not incidental cost — it *is* the comparison, and each
+# walks the working tree for repository, document, and file-change facts
+# (~1.9s apiece in this monorepo on Windows). ~3.5s isolated, which crosses the
+# 5s slow marker only under full-suite contention.
+#
+# It earns that: when the 2026-08-02 ambient-capture regression is reintroduced,
+# this reports all 36 blanked variables by name. The narrower two-variable test
+# it replaced cost nearly as much, because the capture dominates regardless of
+# how many variables are read.
+[[profile.default.overrides]]
+filter = 'test(=every_catalog_variable_survives_ambient_options)'
+slow-timeout = { period = "15s", terminate-after = 2 }
+
 # These merge-regression tests intentionally perform several complete compose
 # or lifecycle passes. Each pass remains bounded, but their combined debug-build
 # runtime can exceed the shared 30s ceiling even when run in isolation.
@@ -303,6 +319,13 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 [[profile.ci.overrides]]
 filter = 'test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)'
 slow-timeout = { period = "30s", terminate-after = 3 }
+
+# See the default-profile note: this test's cost is two complete runtime
+# captures, which is the comparison it performs. CI hosts walk the tree more
+# slowly still, so the same leash applies.
+[[profile.ci.overrides]]
+filter = 'test(=every_catalog_variable_survives_ambient_options)'
+slow-timeout = { period = "15s", terminate-after = 2 }
 
 # See the default-profile note: WezTerm CLI capture round trips make this
 # command-dense real-terminal test exceed CI's 30s termination ceiling on

@@ -7,7 +7,7 @@
 
 use crate::markdown::Markdown;
 use crate::markdown::compose::util::{
-    document_resolution_context, find_git_root_from, find_package_area_from,
+    document_resolution_context, find_git_root_from, package_area_for_reference,
 };
 use crate::markdown::compose::{ComposeOptions, ComposeReport, ComposeSource};
 use crate::markdown::reference::{
@@ -164,7 +164,8 @@ fn resolve_absolute(
             Some(snapshot) => snapshot.for_base(dir),
             None => {
                 let repo_root = find_git_root_from(dir);
-                let package_area = find_package_area_from(dir, repo_root.as_deref());
+                let package_area =
+                    package_area_for_reference(&file_ref, dir, repo_root.as_deref());
                 document_resolution_context(
                     dir,
                     None,

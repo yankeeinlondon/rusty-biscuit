@@ -320,6 +320,7 @@ fn dm2_subtree_resolves_injected_eager_and_lazy_globals() {
         [("phase".to_string(), serde_json::json!(2))].into();
     let state = EffectiveStateBuilder::new()
         .with_frontmatter(fm)
+        .with_context(ComposeContext::capture_minimal())
         .build()
         .unwrap();
 
@@ -363,6 +364,7 @@ fn dm2_subtree_layered_seed_state_still_resolves() {
     .into();
     let state = EffectiveStateBuilder::new()
         .with_frontmatter(fm)
+        .with_context(ComposeContext::capture_minimal())
         .build()
         .unwrap();
 
@@ -388,6 +390,7 @@ fn dm2_subtree_parity_with_main_compose_whole_value() {
         [("count".to_string(), serde_json::json!(5))].into();
     let state = EffectiveStateBuilder::new()
         .with_frontmatter(fm)
+        .with_context(ComposeContext::capture_minimal())
         .build()
         .unwrap();
 
@@ -412,6 +415,7 @@ fn dm2_subtree_parity_with_main_compose_mixed_string() {
         [("count".to_string(), serde_json::json!(5))].into();
     let state = EffectiveStateBuilder::new()
         .with_frontmatter(fm)
+        .with_context(ComposeContext::capture_minimal())
         .build()
         .unwrap();
 
@@ -499,6 +503,7 @@ fn dm2_subtree_strict_rejects_unknown_root() {
         [("phase".to_string(), serde_json::json!(2))].into();
     let state = EffectiveStateBuilder::new()
         .with_frontmatter(fm)
+        .with_context(ComposeContext::capture_minimal())
         .build()
         .unwrap();
 
@@ -525,6 +530,7 @@ fn dm2_subtree_strict_known_but_empty_renders_empty() {
         [("spec_file".to_string(), serde_json::Value::Null)].into();
     let state = EffectiveStateBuilder::new()
         .with_frontmatter(fm)
+        .with_context(ComposeContext::capture_minimal())
         .build()
         .unwrap();
 
@@ -569,6 +575,7 @@ fn dm2_subtree_strict_rejects_unknown_function() {
         [("phase".to_string(), serde_json::json!(2))].into();
     let state = EffectiveStateBuilder::new()
         .with_frontmatter(fm)
+        .with_context(ComposeContext::capture_minimal())
         .build()
         .unwrap();
 
@@ -599,6 +606,7 @@ fn dm2_subtree_strict_rejects_unknown_root_in_function_argument() {
         [("phase".to_string(), serde_json::json!(2))].into();
     let state = EffectiveStateBuilder::new()
         .with_frontmatter(fm)
+        .with_context(ComposeContext::capture_minimal())
         .build()
         .unwrap();
 

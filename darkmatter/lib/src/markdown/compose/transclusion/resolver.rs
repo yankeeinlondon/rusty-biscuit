@@ -2,7 +2,7 @@
 
 use super::types::{DirectiveKind, ResolvedTarget, TransclusionError};
 use crate::markdown::compose::util::{
-    document_resolution_context, find_git_root_from, find_package_area_from,
+    document_resolution_context, find_git_root_from, package_area_for_reference,
 };
 use crate::markdown::compose::{ComposeSource, TransclusionOptions};
 use crate::markdown::compose::context::options::SourceDerivation;
@@ -151,7 +151,8 @@ fn resolve_file_reference(
         },
         None => {
             let repo_root = find_git_root_from(&base_dir);
-            let package_area = find_package_area_from(&base_dir, repo_root.as_deref());
+            let package_area =
+                package_area_for_reference(file_ref, &base_dir, repo_root.as_deref());
             document_resolution_context(
                 &base_dir,
                 source_file_path(source).as_deref(),

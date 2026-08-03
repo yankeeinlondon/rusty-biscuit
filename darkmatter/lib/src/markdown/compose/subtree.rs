@@ -590,8 +590,11 @@ mod tests {
             .into_iter()
             .map(|(k, v)| (k.to_string(), v))
             .collect();
+        // No fixture here reads `ctx.*`, so the builder's full-capture default
+        // would walk the working tree once per state for values nothing reads.
         EffectiveStateBuilder::new()
             .with_frontmatter(fm)
+            .with_context(crate::markdown::compose::ComposeContext::capture_minimal())
             .build()
             .unwrap()
     }

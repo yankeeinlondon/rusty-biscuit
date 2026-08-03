@@ -10,7 +10,7 @@ fn test_stage2_file_transclusion_relevels_to_parent_heading() {
     std::fs::write(&child, "# Child\n\nBody").unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options().with_source_file(root);
+    let options = ComposeOptions::new().with_source_file(root);
     let (composed, report) = md.compose_with(options).unwrap();
 
     assert!(composed.content().contains("### Child"));
@@ -30,7 +30,7 @@ fn test_stage2_nested_transclusion_counts_recursive_includes() {
     std::fs::write(&b, "# Leaf").unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options().with_source_file(root);
+    let options = ComposeOptions::new().with_source_file(root);
     let (composed, report) = md.compose_with(options).unwrap();
 
     assert!(composed.content().contains("# Leaf"));
@@ -48,7 +48,7 @@ fn test_stage2_duplicate_sibling_includes_are_not_treated_as_cycles() {
     std::fs::write(&child, "# Child").unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options().with_source_file(&root);
+    let options = ComposeOptions::new().with_source_file(&root);
     let (composed, report) = md.compose_with(options).unwrap();
 
     assert_eq!(composed.content().matches("# Child").count(), 2);
@@ -69,7 +69,7 @@ fn test_stage2_diamond_dependency_graph_is_allowed() {
     std::fs::write(&shared, "### Shared").unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options().with_source_file(&root);
+    let options = ComposeOptions::new().with_source_file(&root);
     let (composed, report) = md.compose_with(options).unwrap();
 
     assert_eq!(composed.content().matches("### Shared").count(), 2);
@@ -86,7 +86,7 @@ fn test_stage2_cycle_detection_fails() {
     std::fs::write(&b, "::file ./a.md").unwrap();
 
     let md = Markdown::try_from(a.as_path()).unwrap();
-    let options = context_free_options().with_source_file(a);
+    let options = ComposeOptions::new().with_source_file(a);
     let err = md.compose_with(options).unwrap_err();
 
     assert!(matches!(
@@ -106,7 +106,7 @@ fn test_stage2_code_transclusion_wraps_fenced_block() {
     std::fs::write(&code, "fn main() {\n    println!(\"hi\");\n}\n").unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options().with_source_file(root);
+    let options = ComposeOptions::new().with_source_file(root);
     let (composed, report) = md.compose_with(options).unwrap();
 
     assert!(composed.content().contains("```rs"));
@@ -124,7 +124,7 @@ fn test_stage2_code_transclusion_uses_fallback_language_for_unknown_extension() 
     std::fs::write(&code, "hello").unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options().with_source_file(root);
+    let options = ComposeOptions::new().with_source_file(root);
     let (composed, report) = md.compose_with(options).unwrap();
 
     assert!(composed.content().contains("```txt"));
@@ -142,7 +142,7 @@ fn test_stage2_repeated_code_includes_are_allowed() {
     std::fs::write(&code, "fn repeated() {}\n").unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options().with_source_file(&root);
+    let options = ComposeOptions::new().with_source_file(&root);
     let (composed, report) = md.compose_with(options).unwrap();
 
     assert_eq!(composed.content().matches("fn repeated() {}").count(), 2);
@@ -163,7 +163,7 @@ fn test_stage2_when_false_skips_directive() {
     std::fs::write(&child, "# Child").unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options().with_source_file(root);
+    let options = ComposeOptions::new().with_source_file(root);
     let (composed, report) = md.compose_with(options).unwrap();
 
     assert!(!composed.content().contains("Child"));
@@ -186,7 +186,7 @@ fn test_stage2_frontmatter_prologue_epilogue() {
     std::fs::write(&outro, "Outro").unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options().with_source_file(root);
+    let options = ComposeOptions::new().with_source_file(root);
     let (composed, report) = md.compose_with(options).unwrap();
 
     assert!(composed.content().starts_with("Intro"));
@@ -220,7 +220,7 @@ fn test_stage2_frontmatter_reference_parse_errors_match_preflight_and_execution(
             .unwrap();
 
             let md = Markdown::try_from(root.as_path()).unwrap();
-            let options = context_free_options()
+            let options = ComposeOptions::new()
                 .with_source_file(&root)
                 .with_ignore_invalid_references(Some(true));
             let preflight_error = md.compose_preflight(&options).unwrap_err();
@@ -263,7 +263,7 @@ fn test_stage2_frontmatter_inline_content_matches_preflight_and_execution() {
     .unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options().with_source_file(&root);
+    let options = ComposeOptions::new().with_source_file(&root);
     let preflight = md.compose_preflight(&options).unwrap();
     assert!(preflight.preflight_graph.edges.is_empty());
 
@@ -288,7 +288,7 @@ fn test_stage2_same_file_can_be_used_in_prologue_and_body() {
     std::fs::write(&shared, "## Shared").unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options().with_source_file(&root);
+    let options = ComposeOptions::new().with_source_file(&root);
     let (composed, report) = md.compose_with(options).unwrap();
 
     assert_eq!(composed.content().matches("## Shared").count(), 2);
@@ -316,7 +316,7 @@ fn test_toc_linking_fail_fast_false_becomes_warning() {
     std::fs::write(&root, "::toc-linking ./missing.md").unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options()
+    let options = ComposeOptions::new()
         .with_source_file(&root)
         .with_fail_fast(false);
     let (composed, report) = md.compose_with(options).unwrap();
@@ -346,7 +346,7 @@ fn test_toc_linking_fail_fast_true_returns_error() {
     std::fs::write(&root, "::toc-linking ./missing.md").unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options()
+    let options = ComposeOptions::new()
         .with_source_file(&root)
         .with_fail_fast(true);
     let err = md.compose_with(options).unwrap_err();
@@ -364,7 +364,7 @@ fn test_stage2_h6_overflow_converts_to_bold_text() {
     std::fs::write(&child, "## Child\n\n### Deep").unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options().with_source_file(root);
+    let options = ComposeOptions::new().with_source_file(root);
     let (composed, report) = md.compose_with(options).unwrap();
 
     assert!(composed.content().contains("###### Child"));
@@ -392,7 +392,7 @@ fn test_stage2_consecutive_file_directives_separated_by_blank_line() {
     std::fs::write(&two, "## Section Two\n\nParagraph.").unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options().with_source_file(root);
+    let options = ComposeOptions::new().with_source_file(root);
     let (composed, report) = md.compose_with(options).unwrap();
 
     // Two transclusions should have occurred
@@ -417,7 +417,7 @@ fn test_stage2_frontmatter_inline_string_prologue() {
     .unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options().with_source_file(root);
+    let options = ComposeOptions::new().with_source_file(root);
     let (composed, report) = md.compose_with(options).unwrap();
 
     assert!(composed.content().starts_with("**Draft** document"));
@@ -432,7 +432,7 @@ fn test_stage2_frontmatter_inline_string_epilogue() {
     std::fs::write(&root, "---\nepilogue: \"End of document.\"\n---\nBody.").unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options().with_source_file(root);
+    let options = ComposeOptions::new().with_source_file(root);
     let (composed, report) = md.compose_with(options).unwrap();
 
     assert!(
@@ -458,7 +458,7 @@ fn test_stage2_frontmatter_mixed_file_and_inline() {
     std::fs::write(&intro, "File intro.").unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options().with_source_file(root);
+    let options = ComposeOptions::new().with_source_file(root);
     let (composed, report) = md.compose_with(options).unwrap();
 
     let content = composed.content();
@@ -478,7 +478,7 @@ fn test_stage2_frontmatter_bare_filename_is_treated_as_file_reference() {
     std::fs::write(&intro, "Intro text.").unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options().with_source_file(root);
+    let options = ComposeOptions::new().with_source_file(root);
     let (composed, report) = md.compose_with(options).unwrap();
 
     let content = composed.content();
@@ -497,7 +497,7 @@ fn test_stage2_parent_frontmatter_propagates_to_child_interpolation() {
     std::fs::write(&child, "Written by {{ author }}.").unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options().with_source_file(root);
+    let options = ComposeOptions::new().with_source_file(root);
     let (composed, _report) = md.compose_with(options).unwrap();
 
     assert!(composed.content().contains("Written by Alice."));
@@ -517,7 +517,7 @@ fn test_stage2_parent_replace_map_propagates_to_child() {
     std::fs::write(&child, "Content with PLACEHOLDER here.").unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options().with_source_file(root);
+    let options = ComposeOptions::new().with_source_file(root);
     let (composed, _report) = md.compose_with(options).unwrap();
 
     assert!(composed.content().contains("Content with actual here."));
@@ -537,7 +537,7 @@ fn test_stage2_replace_parent_wins_inverts_precedence() {
     std::fs::write(&child, "---\nreplace:\n  TOKEN: child\n---\nTOKEN").unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options().with_source_file(root);
+    let options = ComposeOptions::new().with_source_file(root);
     let (composed, _report) = md.compose_with(options).unwrap();
 
     assert_eq!(composed.content().trim(), "parent");
@@ -559,7 +559,7 @@ fn test_stage2_replace_one_off_does_not_propagate_to_grandchildren() {
     std::fs::write(&grand, "Grand: ONE A").unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options().with_source_file(root);
+    let options = ComposeOptions::new().with_source_file(root);
     let (composed, _report) = md.compose_with(options).unwrap();
 
     let content = composed.content();
@@ -581,7 +581,7 @@ fn test_stage2_prologue_epilogue_do_not_propagate_to_children() {
     std::fs::write(&child, "Child body.").unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options().with_source_file(root);
+    let options = ComposeOptions::new().with_source_file(root);
     let (composed, _report) = md.compose_with(options).unwrap();
 
     let content = composed.content();
@@ -605,7 +605,7 @@ fn test_stage2_inline_epilogue_with_markdown_links() {
     .unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options().with_source_file(root);
+    let options = ComposeOptions::new().with_source_file(root);
     let (composed, _report) = md.compose_with(options).unwrap();
 
     let content = composed.content();
@@ -630,7 +630,7 @@ fn test_stage2_exclude_removes_section() {
     .unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options().with_source_file(root);
+    let options = ComposeOptions::new().with_source_file(root);
     let (composed, report) = md.compose_with(options).unwrap();
 
     assert!(composed.content().contains("## Keep"));
@@ -655,7 +655,7 @@ fn test_stage2_exclude_wildcard() {
     .unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options().with_source_file(root);
+    let options = ComposeOptions::new().with_source_file(root);
     let (composed, _) = md.compose_with(options).unwrap();
 
     assert!(composed.content().contains("## Keep"));
@@ -673,7 +673,7 @@ fn test_stage2_exclude_prelude() {
     std::fs::write(&child, "Prelude text here.\n\n## Heading\n\nBody.").unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options().with_source_file(root);
+    let options = ComposeOptions::new().with_source_file(root);
     let (composed, _) = md.compose_with(options).unwrap();
 
     assert!(!composed.content().contains("Prelude text"));
@@ -695,7 +695,7 @@ fn test_stage2_multiple_excludes() {
     .unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options().with_source_file(root);
+    let options = ComposeOptions::new().with_source_file(root);
     let (composed, _) = md.compose_with(options).unwrap();
 
     assert!(!composed.content().contains("## A"));
@@ -719,7 +719,7 @@ fn test_stage2_quotation_wrapper_does_not_absorb_following_content() {
     std::fs::write(&child, "Quoted content here.").unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options().with_source_file(root);
+    let options = ComposeOptions::new().with_source_file(root);
     let (composed, report) = md.compose_with(options).unwrap();
 
     assert_eq!(report.transclusions_applied, 1);
@@ -753,10 +753,10 @@ fn test_stage2_when_env_match_includes_directive() {
     std::fs::write(&child, "Claude content.").unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let mut ctx = context_free_context();
+    let mut ctx = ComposeContext::capture_minimal();
     ctx.env_mut()
         .insert("AGENT".to_string(), "claude".to_string());
-    let options = context_free_options()
+    let options = ComposeOptions::new()
         .with_source_file(root)
         .with_context(ctx);
     let (composed, report) = md.compose_with(options).unwrap();
@@ -780,10 +780,10 @@ fn test_stage2_when_env_mismatch_skips_directive() {
     std::fs::write(&child, "Claude content.").unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let mut ctx = context_free_context();
+    let mut ctx = ComposeContext::capture_minimal();
     ctx.env_mut()
         .insert("AGENT".to_string(), "opencode".to_string());
-    let options = context_free_options()
+    let options = ComposeOptions::new()
         .with_source_file(root)
         .with_context(ctx);
     let (composed, report) = md.compose_with(options).unwrap();
@@ -809,7 +809,7 @@ fn test_stage2_when_env_unset_skips_equality() {
     let md = Markdown::try_from(root.as_path()).unwrap();
     // Use a fixed context with no AGENT env var
     let ctx = ComposeContext::fixed_for_testing();
-    let options = context_free_options()
+    let options = ComposeOptions::new()
         .with_source_file(root)
         .with_context(ctx);
     let (composed, report) = md.compose_with(options).unwrap();
@@ -845,10 +845,10 @@ fn test_stage2_mutual_exclusion_conditions() {
 
     // Test 1: AGENT=claude → only cc.md included
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let mut ctx = context_free_context();
+    let mut ctx = ComposeContext::capture_minimal();
     ctx.env_mut()
         .insert("AGENT".to_string(), "claude".to_string());
-    let opts = context_free_options()
+    let opts = ComposeOptions::new()
         .with_source_file(&root)
         .with_context(ctx);
     let (out, report) = md.compose_with(opts).unwrap();
@@ -863,10 +863,10 @@ fn test_stage2_mutual_exclusion_conditions() {
 
     // Test 2: AGENT=opencode → only oc.md included
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let mut ctx = context_free_context();
+    let mut ctx = ComposeContext::capture_minimal();
     ctx.env_mut()
         .insert("AGENT".to_string(), "opencode".to_string());
-    let opts = context_free_options()
+    let opts = ComposeOptions::new()
         .with_source_file(&root)
         .with_context(ctx);
     let (out, report) = md.compose_with(opts).unwrap();
@@ -879,7 +879,7 @@ fn test_stage2_mutual_exclusion_conditions() {
     // Test 3: AGENT not set → only default.md included
     let md = Markdown::try_from(root.as_path()).unwrap();
     let ctx = ComposeContext::fixed_for_testing();
-    let opts = context_free_options()
+    let opts = ComposeOptions::new()
         .with_source_file(&root)
         .with_context(ctx);
     let (out, report) = md.compose_with(opts).unwrap();
@@ -911,7 +911,7 @@ fn test_stage2_relevel_h1_child_under_h3_parent() {
     std::fs::write(&child, "# Child Title\n\n## Child Sub\n\nBody.").unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let options = context_free_options().with_source_file(root);
+    let options = ComposeOptions::new().with_source_file(root);
     let (composed, _) = md.compose_with(options).unwrap();
 
     // Parent heading before directive is H3, so child should be re-leveled:
@@ -935,7 +935,7 @@ fn page_block_true_preserves_content_through_pipeline() {
     let content = "---\nflag: true\n---\n\nbefore\n\n::block when=\"flag\"\n\nkept content\n\n::end-block\n\nafter\n";
     let md: Markdown = content.into();
 
-    let options = context_free_options().only(&[ComposeOperation::PageBlocks]);
+    let options = ComposeOptions::new().only(&[ComposeOperation::PageBlocks]);
 
     let (composed, report) = md.compose_with(options).unwrap();
     assert!(
@@ -959,7 +959,7 @@ fn page_block_false_removes_content_through_pipeline() {
     let content = "---\nflag: false\n---\n\nbefore\n\n::block when=\"flag\"\n\nremoved\n\n::end-block\n\nafter\n";
     let md: Markdown = content.into();
 
-    let options = context_free_options().only(&[ComposeOperation::PageBlocks]);
+    let options = ComposeOptions::new().only(&[ComposeOperation::PageBlocks]);
 
     let (composed, report) = md.compose_with(options).unwrap();
     assert!(
@@ -988,7 +988,7 @@ fn page_block_condition_can_read_frontmatter_from_file() {
     std::fs::write(&root, content).unwrap();
     let md: Markdown = content.into();
 
-    let options = context_free_options()
+    let options = ComposeOptions::new()
         .only(&[ComposeOperation::PageBlocks])
         .with_source_file(&root);
 
@@ -1007,7 +1007,7 @@ fn page_block_coexists_with_interpolation() {
         "---\nshow: true\n---\n\n::block when=\"show\"\n\nShown: {{show}}\n\n::end-block\n";
     let md: Markdown = content.into();
 
-    let options = context_free_options().only(&[
+    let options = ComposeOptions::new().only(&[
         ComposeOperation::Interpolation,
         ComposeOperation::PageBlocks,
     ]);
@@ -1027,7 +1027,7 @@ fn page_block_report_and_warnings_populated() {
     let content = "---\na: true\nb: false\n---\n\n::block when=\"a\" unknown=\"x\"\n\nA\n\n::end-block\n\n::block when=\"b\"\n\nB\n\n::end-block\n";
     let md: Markdown = content.into();
 
-    let options = context_free_options().only(&[ComposeOperation::PageBlocks]);
+    let options = ComposeOptions::new().only(&[ComposeOperation::PageBlocks]);
 
     let (_, report) = md.compose_with(options).unwrap();
     assert_eq!(report.page_blocks_rendered, 1);
@@ -1046,7 +1046,7 @@ fn page_block_toggle_disabled_leaves_directives_as_text() {
     let content = "::block when=\"x\"\nbody\n::end-block\n";
     let md: Markdown = content.into();
 
-    let options = context_free_options().only(&[]);
+    let options = ComposeOptions::new().only(&[]);
 
     let (composed, report) = md.compose_with(options).unwrap();
     assert!(
@@ -1062,7 +1062,7 @@ fn perf_disabled_produces_no_report() {
     let content = "# Test\nSome content";
     let md: Markdown = content.into();
 
-    let options = context_free_options(); // perf_enabled defaults to false
+    let options = ComposeOptions::new(); // perf_enabled defaults to false
     let (_, report) = md.compose_with(options).unwrap();
     assert!(report.perf.is_none(), "Perf should be None when disabled");
 }
@@ -1072,7 +1072,7 @@ fn perf_enabled_produces_report() {
     let content = "# Test\nSome content";
     let md: Markdown = content.into();
 
-    let options = context_free_options().with_perf(true);
+    let options = ComposeOptions::new().with_perf(true);
     let (_, report) = md.compose_with(options).unwrap();
     assert!(
         report.perf.is_some(),
@@ -1094,7 +1094,7 @@ fn perf_enabled_with_interpolation() {
     let content = "---\nname: World\n---\nHello {{ name }}!";
     let md: Markdown = content.into();
 
-    let options = context_free_options().with_perf(true);
+    let options = ComposeOptions::new().with_perf(true);
     let (composed, report) = md.compose_with(options).unwrap();
 
     assert!(composed.content().contains("Hello World!"));
@@ -1125,7 +1125,7 @@ mod remote_transclusion_tests {
             allowed_hosts,
             ..Default::default()
         };
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .with_source_file(source_file)
             .with_allow_remote_transclusion(true)
             .with_remote_read_config(config)
@@ -1254,7 +1254,7 @@ mod remote_transclusion_tests {
         std::fs::write(&root, &content).unwrap();
 
         let md: Markdown = content.clone().into();
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .with_source_file(&root)
             .with_allow_remote_transclusion(true)
             .disable(ComposeOperation::Cleanup)
@@ -1437,7 +1437,7 @@ mod remote_transclusion_tests {
             allowed_hosts: vec!["127.0.0.1".into()],
             ..Default::default()
         };
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .with_source_file(&root)
             .with_allow_remote_transclusion(true)
             .with_remote_read_config(config)
@@ -1538,7 +1538,7 @@ mod remote_transclusion_tests {
             allowed_hosts: vec!["127.0.0.1".into()],
             ..Default::default()
         };
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .with_source_file(&root)
             .with_remote_read_config(config)
             .only(&[ComposeOperation::Interpolation]);
@@ -1647,7 +1647,7 @@ mod remote_transclusion_tests {
             allowed_hosts: vec!["127.0.0.1".into()],
             ..Default::default()
         };
-        let base_options = context_free_options()
+        let base_options = ComposeOptions::new()
             .with_source_file(&root)
             .with_allow_remote_transclusion(true)
             .with_remote_read_config(config)
@@ -1807,7 +1807,7 @@ mod remote_transclusion_tests {
                 refresh,
                 ..Default::default()
             };
-            context_free_options()
+            ComposeOptions::new()
                 .with_source_file(&root)
                 .with_allow_remote_transclusion(true)
                 .with_remote_read_config(config)
@@ -1910,7 +1910,7 @@ mod remote_transclusion_tests {
         std::fs::write(&root, &content).unwrap();
 
         let md: Markdown = content.clone().into();
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .with_source_file(&root)
             .with_allow_remote_transclusion(true)
             .disable(ComposeOperation::Cleanup)
@@ -1940,7 +1940,7 @@ mod file_links_compose {
         std::fs::write(&root, "# Root\n\n::file-links docs/*\n\nFooter.\n").unwrap();
 
         let md = Markdown::try_from(root.as_path()).unwrap();
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .with_source_file(&root)
             .disable(ComposeOperation::Cleanup)
             .disable(ComposeOperation::Normalization);
@@ -1980,7 +1980,7 @@ mod file_links_compose {
         // Full default pipeline (cleanup + normalization enabled) proves the
         // embedded block survives end to end.
         let (composed, _report) = md
-            .compose_with(context_free_options().with_source_file(&root))
+            .compose_with(ComposeOptions::new().with_source_file(&root))
             .unwrap();
         assert!(
             composed.content().contains("bt:render-tree"),
@@ -2057,7 +2057,7 @@ mod file_links_compose {
 
         let md = Markdown::try_from(root.as_path()).unwrap();
         let (composed, _report) = md
-            .compose_with(context_free_options().with_source_file(&root))
+            .compose_with(ComposeOptions::new().with_source_file(&root))
             .unwrap();
 
         let options = TerminalOptions {
@@ -2108,7 +2108,7 @@ mod file_links_compose {
         std::fs::write(&root, "# Root\n\n::file-links --dir docs\n\n").unwrap();
 
         let md = Markdown::try_from(root.as_path()).unwrap();
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .with_source_file(&root)
             .disable(ComposeOperation::Cleanup)
             .disable(ComposeOperation::Normalization);
@@ -2137,7 +2137,7 @@ mod file_links_compose {
         std::fs::write(&root, "# Root\n\n::file-links --dir docs --depth 2\n\n").unwrap();
 
         let md = Markdown::try_from(root.as_path()).unwrap();
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .with_source_file(&root)
             .disable(ComposeOperation::Cleanup)
             .disable(ComposeOperation::Normalization);
@@ -2156,7 +2156,7 @@ mod file_links_compose {
         std::fs::write(&root, "# Root\n\n::file-links *.md\n\n").unwrap();
 
         let md = Markdown::try_from(root.as_path()).unwrap();
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .with_source_file(&root)
             .disable(ComposeOperation::Cleanup)
             .disable(ComposeOperation::Normalization);
@@ -2176,7 +2176,7 @@ mod file_links_compose {
         std::fs::write(&root, "# Root\n\n::file-links *.nonexistent\n\n").unwrap();
 
         let md = Markdown::try_from(root.as_path()).unwrap();
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .with_source_file(&root)
             .with_fail_fast(true)
             .disable(ComposeOperation::Cleanup)
@@ -2195,7 +2195,7 @@ mod file_links_compose {
         std::fs::write(&root, "# Root\n\n::file-links *.nonexistent\n\n").unwrap();
 
         let md = Markdown::try_from(root.as_path()).unwrap();
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .with_source_file(&root)
             .with_fail_fast(false)
             .disable(ComposeOperation::Cleanup)
@@ -2227,7 +2227,7 @@ mod file_links_compose {
         std::fs::write(&root, "# Root\n\n::file-links --dir report.pdf\n\n").unwrap();
 
         let md = Markdown::try_from(root.as_path()).unwrap();
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .with_source_file(&root)
             .with_fail_fast(true)
             .disable(ComposeOperation::Cleanup)
@@ -2250,7 +2250,7 @@ mod file_links_compose {
         std::fs::write(&root, "# Root\n\n::file-links --dir report.pdf\n\n").unwrap();
 
         let md = Markdown::try_from(root.as_path()).unwrap();
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .with_source_file(&root)
             .with_ignore_invalid_references(Some(true))
             .disable(ComposeOperation::Cleanup)
@@ -2280,7 +2280,7 @@ mod file_links_compose {
         std::fs::write(&root, "# Root\n\n::file-links *.md\n\n").unwrap();
 
         let md = Markdown::try_from(root.as_path()).unwrap();
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .with_source_file(&root)
             .disable(ComposeOperation::FileLinks)
             .disable(ComposeOperation::Cleanup)
@@ -2303,7 +2303,7 @@ mod file_links_compose {
         std::fs::write(&root, "# Root\n\n- Item\n  ::file-links docs/*\n\n").unwrap();
 
         let md = Markdown::try_from(root.as_path()).unwrap();
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .with_source_file(&root)
             .disable(ComposeOperation::Cleanup)
             .disable(ComposeOperation::Normalization);
@@ -2328,7 +2328,7 @@ mod file_links_compose {
         std::fs::write(&root, "# Root\n\n::file-links\n\n").unwrap();
 
         let md = Markdown::try_from(root.as_path()).unwrap();
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .with_source_file(&root)
             .with_fail_fast(true)
             .disable(ComposeOperation::Cleanup)
@@ -2348,7 +2348,7 @@ mod file_links_compose {
         std::fs::write(&root, "# Root\n\n::file-links ../*\n\n").unwrap();
 
         let md = Markdown::try_from(root.as_path()).unwrap();
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .with_source_file(&root)
             .disable(ComposeOperation::Cleanup)
             .disable(ComposeOperation::Normalization);
@@ -2377,7 +2377,7 @@ mod file_links_compose {
         std::fs::write(&root, "# Root\n\n::file-links docs/*\n\n").unwrap();
 
         let md = Markdown::try_from(root.as_path()).unwrap();
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .with_source_file(&root)
             .disable(ComposeOperation::Cleanup)
             .disable(ComposeOperation::Normalization);
@@ -2412,7 +2412,7 @@ mod file_links_compose {
         .unwrap();
 
         let md = Markdown::try_from(root.as_path()).unwrap();
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .with_source_file(&root)
             .disable(ComposeOperation::Cleanup)
             .disable(ComposeOperation::Normalization);

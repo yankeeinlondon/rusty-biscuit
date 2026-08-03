@@ -26,7 +26,7 @@ mod frontmatter_shell_expansion_integration {
         let content = "---\ngreeting: \"$(echo hello)\"\n---\nMessage: {{greeting}}\n";
         let md: Markdown = content.into();
 
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .only(&[
                 ComposeOperation::FrontmatterInterpolation,
                 ComposeOperation::FrontmatterShellExpansion,
@@ -53,7 +53,7 @@ mod frontmatter_shell_expansion_integration {
         let content = "---\nfile: README.md\ndir: \"$(dirname {{file}})\"\n---\nDir: {{dir}}\n";
         let md: Markdown = content.into();
 
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .only(&[
                 ComposeOperation::FrontmatterInterpolation,
                 ComposeOperation::FrontmatterShellExpansion,
@@ -82,7 +82,7 @@ mod frontmatter_shell_expansion_integration {
             "---\nfm_val: \"$(echo from-frontmatter)\"\n---\n::shell echo from-body\n";
         let md: Markdown = content.into();
 
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .only(&[
                 ComposeOperation::FrontmatterShellExpansion,
                 ComposeOperation::ShellExpansion,
@@ -105,7 +105,7 @@ mod frontmatter_shell_expansion_integration {
         let md: Markdown = content.into();
 
         let options =
-            context_free_options().only(&[ComposeOperation::FrontmatterShellExpansion]);
+            ComposeOptions::new().only(&[ComposeOperation::FrontmatterShellExpansion]);
 
         let (composed, report) = md.compose_with(options).unwrap();
         assert_eq!(report.frontmatter_shell_expansions_applied, 0);
@@ -118,7 +118,7 @@ mod frontmatter_shell_expansion_integration {
         let content = "---\nval: \"$(sleep 1)\"\n---\nValue: {{val}}\n";
         let md: Markdown = content.into();
 
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .only(&[
                 ComposeOperation::FrontmatterShellExpansion,
                 ComposeOperation::Interpolation,
@@ -143,7 +143,7 @@ mod frontmatter_shell_expansion_integration {
         let content = "---\ncmd_name: echo\nval: \"$({{cmd_name}} hello)\"\n---\n";
         let md: Markdown = content.into();
 
-        let options = context_free_options().only(&[
+        let options = ComposeOptions::new().only(&[
             ComposeOperation::FrontmatterInterpolation,
             ComposeOperation::FrontmatterShellExpansion,
         ]);
@@ -161,7 +161,7 @@ mod frontmatter_shell_expansion_integration {
         let content = "---\nval: \"$(echo a | cat)\"\n---\n";
         let md: Markdown = content.into();
 
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .only(&[ComposeOperation::FrontmatterShellExpansion])
             .with_shell(ShellExpansionOptions {
                 policy_root: Some(temp_dir.path().to_path_buf()),
@@ -183,7 +183,7 @@ mod frontmatter_shell_expansion_integration {
         let content = "---\nval: \"$(false || echo fallback)\"\n---\n";
         let md: Markdown = content.into();
 
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .only(&[ComposeOperation::FrontmatterShellExpansion])
             .with_shell(ShellExpansionOptions {
                 policy_root: Some(temp_dir.path().to_path_buf()),
@@ -216,7 +216,7 @@ mod frontmatter_shell_expansion_integration {
         );
         let md: Markdown = content.into();
 
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .only(&[
                 ComposeOperation::FrontmatterInterpolation,
                 ComposeOperation::FrontmatterShellExpansion,
@@ -257,7 +257,7 @@ mod frontmatter_shell_expansion_integration {
         );
         let md: Markdown = content.into();
 
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .only(&[
                 ComposeOperation::FrontmatterInterpolation,
                 ComposeOperation::FrontmatterShellExpansion,
@@ -298,7 +298,7 @@ mod frontmatter_shell_expansion_integration {
         );
         let md: Markdown = content.into();
 
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .only(&[
                 ComposeOperation::FrontmatterInterpolation,
                 ComposeOperation::FrontmatterShellExpansion,
@@ -328,7 +328,7 @@ mod infix_logic_conditions {
 
     fn compose_with_page_blocks(content: &str) -> (String, ComposeReport) {
         let md: Markdown = content.into();
-        let options = context_free_options().only(&[ComposeOperation::PageBlocks]);
+        let options = ComposeOptions::new().only(&[ComposeOperation::PageBlocks]);
         let (composed, report) = md.compose_with(options).unwrap();
         (composed.content().to_string(), report)
     }
@@ -404,7 +404,7 @@ mod infix_logic_conditions {
         )
         .unwrap();
 
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .with_source_file(&root)
             .only(&[ComposeOperation::BlockTransclusion]);
 
@@ -428,7 +428,7 @@ mod infix_logic_conditions {
         )
         .unwrap();
 
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .with_source_file(&root)
             .only(&[ComposeOperation::BlockTransclusion]);
 
@@ -444,7 +444,7 @@ mod infix_logic_conditions {
         // Bare `|` in condition expressions should produce a parse error
         let content = "---\na: true\n---\n::block when=\"a | b\"\ninside\n::end-block\n";
         let md: Markdown = content.into();
-        let options = context_free_options().only(&[ComposeOperation::PageBlocks]);
+        let options = ComposeOptions::new().only(&[ComposeOperation::PageBlocks]);
         let err = md.compose_with(options).unwrap_err();
 
         let err_string = format!("{}", err);

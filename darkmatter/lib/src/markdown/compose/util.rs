@@ -8,7 +8,7 @@
 use super::Markdown;
 use super::context;
 use super::context::options::ComposeOptions;
-use biscuit_file::{FileResolutionContext, PathPosition};
+use biscuit_file::{FileReference, FileReferenceKind, FileResolutionContext, PathPosition};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -76,6 +76,30 @@ pub(crate) fn find_package_area_from(
     } else {
         root.join(area.as_ref())
     })
+}
+
+/// The package-area anchor for `file_ref`, discovered only when its kind can
+/// consume one.
+///
+/// Discovery walks the whole repository through sniff — ~530ms in this
+/// monorepo, and the dominant cost of resolving any reference that never reads
+/// the result. `biscuit_file` anchors on a package area for
+/// [`FileReferenceKind::Package`] alone, and gates repository-root discovery by
+/// kind for the same reason: an absolute, relative, home, or vault reference
+/// "cannot fail on a git error it never needed". Computing the area eagerly
+/// defeats that layering and pays the walk regardless.
+///
+/// Prefer this over calling [`find_package_area_from`] directly wherever a
+/// reference is in hand, so the gate lives in one place rather than at each
+/// ambient-fallback site.
+pub(crate) fn package_area_for_reference(
+    file_ref: &FileReference,
+    base_dir: &Path,
+    repository_root: Option<&Path>,
+) -> Option<PathBuf> {
+    (file_ref.class().kind == FileReferenceKind::Package)
+        .then(|| find_package_area_from(base_dir, repository_root))
+        .flatten()
 }
 
 /// Build an explicit, request-scoped [`FileResolutionContext`] for a
