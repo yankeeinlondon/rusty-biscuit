@@ -186,40 +186,56 @@ jobs:
       # No `wsl-version:` pin — the action already defaults to 2, and pinning 1
       # would be an explicit downgrade to an environment without WSLg.
       #
-      # WHY A SECOND ATTEMPT, AND WHY IT MUST WAIT
+      # WHY v7 AND NOT v4 — THIS IS WHAT STOPS THE 403
       #
-      # `Vampire/setup-wsl@v4` retries internally, so a bare re-run would buy
-      # nothing. In run 30595280027 that internal retry was measurably useless:
-      # `wsl.exe --update` returned `Forbidden (403)`
-      # (`Wsl/UpdatePackage/0x80190193`) in 0.2s, and the action burned ten
-      # attempts inside 2.4 seconds with no backoff between them. The three
-      # shards that DID provision spent 46 seconds inside that same `--update`
-      # call fetching WSL 2.7.11 — all four runners were racing one Microsoft
-      # endpoint at the same instant and one of them got throttled.
+      # v4 issued `wsl.exe --update` unconditionally whenever WSLv2 was to be
+      # used, and that call is what failed: `Forbidden (403)`,
+      # `Wsl/UpdatePackage/0x80190193`, returned by Microsoft's update endpoint.
+      # It took out `biscuit-contract` and `biscuit-tui` in run 30755610413 —
+      # both attempts below, so no guest existed and the cells reported MISSING.
       #
-      # So the missing ingredient is delay, not more attempts. `continue-on-error`
-      # on the first attempt is what makes the second reachable; the second is
-      # NOT `continue-on-error`, because a guest that cannot be provisioned twice
-      # must still turn the cell red.
+      # The action cannot be told to skip that call, and retrying does not fix
+      # it: upstream already retries ten times internally and the maintainer
+      # closed Vampire/setup-wsl#66 concluding there is nothing more the action
+      # can do, pending actions/runner-images#10563.
+      #
+      # v5.0.0 changed the behaviour instead of the retry count: the update is
+      # now issued ONLY for GitHub-hosted `windows-2022`, because the newer
+      # images already ship it. These legs run `windows-latest`, which is
+      # `windows-2025-vs2026` (Windows Server 2025, 10.0.26100) — so on v5+ the
+      # call is not made at all and the 403 has no surface to appear on.
+      # v6 additionally retries Debian's apt step; v7 moves to Node 24, which
+      # these runs are already forced onto by `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24`.
+      #
+      # WHY A SECOND ATTEMPT SURVIVES
+      #
+      # Provisioning can still fail for reasons unrelated to `--update` — the
+      # distribution appx download and the guest's own apt step both cross the
+      # network. `continue-on-error` on the first attempt is what makes the
+      # second reachable; the second is NOT `continue-on-error`, because a guest
+      # that cannot be provisioned twice must still turn the cell red.
+      #
+      # The 90s wait is retained but no longer rests on the contention theory it
+      # was written for. Run 30755610413 does not support that theory: claudine's
+      # four shards started within two seconds of each other and all provisioned
+      # cleanly, while the two 403s hit isolated legs 28 minutes apart. Treat the
+      # wait as ordinary backoff against a flaky endpoint, not as de-racing.
       - name: Provision the WSL2 guest
         id: provision
         continue-on-error: true
-        uses: Vampire/setup-wsl@v4
+        uses: Vampire/setup-wsl@v7
         with:
           distribution: ${{ inputs.distribution }}
           set-as-default: true
           additional-packages: ca-certificates curl git xz-utils
-      - name: Let the update throttle clear before a second attempt
+      - name: Let the endpoint settle before a second attempt
         if: ${{ steps.provision.outcome == 'failure' }}
         shell: bash
-        # Longer than the 46s the successful shards spent downloading, so the
-        # sibling shards this one was competing with have finished by the time it
-        # asks again.
         run: sleep 90
       - name: Provision the WSL2 guest (second attempt)
         id: provision_retry
         if: ${{ steps.provision.outcome == 'failure' }}
-        uses: Vampire/setup-wsl@v4
+        uses: Vampire/setup-wsl@v7
         with:
           distribution: ${{ inputs.distribution }}
           set-as-default: true
@@ -265,9 +281,24 @@ jobs:
           # Deliberately NOT rustup: the guest only RUNS prebuilt test binaries
           # from the archive, so a Rust toolchain would add minutes and buy
           # nothing. cargo-nextest executes an archive without Cargo or rustc.
-          curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh \
-            | bash -s -- --to /usr/local/bin
-          curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C /usr/local/bin
+          #
+          # Both URLs redirect to GitHub release assets, which rate-limit
+          # unauthenticated downloads. A single 403 here is fatal twice over:
+          # `-f` makes curl exit non-zero, and `pipefail` propagates that even
+          # though the failing command is upstream of a pipe. That is exactly how
+          # `biscuit-terminal` was lost in run 30755610413 — `curl: (22) ... 403`
+          # on a guest that had provisioned perfectly, so the cell reported
+          # MISSING while every one of its tests passes on a real WSL2 host.
+          #
+          # `--retry-all-errors` is required in addition to `--retry`: 403 is not
+          # in curl's default retryable set, which is transient-by-status only.
+          curl_get() {
+            curl --proto '=https' --tlsv1.2 -sSfL \
+              --retry 5 --retry-delay 5 --retry-all-errors \
+              --connect-timeout 15 "$@"
+          }
+          curl_get https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+          curl_get https://get.nexte.st/latest/linux | tar zxf - -C /usr/local/bin
           just --version
           cargo-nextest nextest --version
       - name: Install native prerequisites in the guest
