@@ -64,7 +64,7 @@ sanity:
     @just _sanity_all "claudine-catalog-types claudine claudine-contract claudine-cli claudine-gen"
 
 # test just the CLI in Claudine
-test-cli *args="":
+test-cli *args="": _ensure-md
     @just _test claudine-cli {{ args }}
 
 # test just the Claudine Library
@@ -77,8 +77,35 @@ test-rendezvous *args:
     @just _test rendezvous-daemon {{ args }}
     @just _test rendezvous-client {{ args }}
 
+# Build darkmatter's `md` into the workspace target dir, where
+# `inline_compose_hash` looks for it before falling back to PATH.
+#
+# claudine writes a Darkmatter content hash and then verifies it round-trips by
+# shelling out to `md diff`, so `md` is a test *fixture* for this area, not an
+# optional convenience. CI builds only claudine's own crates, which is why
+# `inline_compose_writes_hash_that_passes_md_diff` failed identically on macOS,
+# Ubuntu and Windows while passing for anyone whose target dir happened to
+# carry a previous build. Wiring it into the canonical recipe fixes CI and the
+# clean-checkout developer with one change, the same way `_ensure-native-libs`
+# serves both.
+#
+# Guarded on cargo's presence, not just on `md`'s absence: the `wsl2-ubuntu` leg
+# runs this same recipe against a prebuilt nextest archive in a guest that has
+# no Cargo and no rustc, so an unconditional build would turn every WSL2 claudine
+# leg red. There it warns and leaves the one affected test to fail as it already
+# does, rather than taking the whole area down with it.
+_ensure-md:
+    @if ! command -v md >/dev/null 2>&1 && [ ! -x ../target/debug/md ]; then \
+        if command -v cargo >/dev/null 2>&1; then \
+            cargo build -q -p darkmatter-cli --bin md; \
+        else \
+            echo "warning: 'md' not found and cargo is unavailable (prebuilt-archive run);" >&2; \
+            echo "         inline_compose_writes_hash_that_passes_md_diff will fail." >&2; \
+        fi; \
+    fi
+
 # Test the catalog types, library, contract adapter, CLI, and generator.
-test *args="":
+test *args="": _ensure-md
     @just _test_all "claudine-catalog-types claudine claudine-contract claudine-cli claudine-gen" {{ args }}
 
 # test just the contract adapter library
