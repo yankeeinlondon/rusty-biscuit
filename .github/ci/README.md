@@ -107,11 +107,11 @@ Same job count per area as before, aimed better. The trade-off is explicit:
 
 ### The `node` capability
 
-`homelab` is the only area whose canonical `just test` also drives a JavaScript
-suite — `homelab/server/frontend`, Vue + Vitest under jsdom, 22 tests. pnpm is on
-no GitHub runner image, so until this flag existed `pnpm: command not found`
-killed the `test` recipe on every runner *after* all the Rust packages had
-passed. The suite had **never once run in CI**, and because the rollup parses
+`homelab` is the only area whose canonical `just test` and `just lint` also drive
+a JavaScript suite — `homelab/server/frontend`, Vue + Vitest under jsdom, 22
+tests, plus an oxlint pass. pnpm is on no GitHub runner image, so until this flag
+existed `pnpm: command not found` killed the `test` recipe on every runner
+*after* all the Rust packages had passed. The suite had **never once run in CI**, and because the rollup parses
 Rust JUnit only, `homelab` rendered `PASS 222/0/0` on macOS, Linux, and Windows
 while every `homelab / test` job was red (measured, run 30427703024). The
 producer status artifact caught the failure and the verdict blocked, so the
@@ -135,15 +135,27 @@ terminal backend.
 Two rules keep a missing capability from reading as success:
 
 - **The skip is loud and never silent.** Where pnpm is absent, `test-frontend`
-  prints an unmissable block saying the suite did not run and why, then exits 0.
-  A developer without pnpm is not blocked; nobody can mistake the run for one
-  that covered the frontend.
+  and `lint-frontend` each print an unmissable block saying the suite or lint did
+  not run and why, then exit 0. A developer without pnpm is not blocked; nobody
+  can mistake the run for one that covered the frontend.
 - **A declared-but-missing capability hard-fails.** On the leg whose area
   declared `node`, `_area-ci.yml` verifies reachability in a named step
   (`pnpm --version`, mirroring the L2 tier's `tmux -V`) and exports
   `BISCUIT_FRONTEND_REQUIRED=1`, which turns the recipe's loud skip into a
   failure. Same asymmetry as the per-backend L2 requirement: a provisioned
   capability hard-fails when missing, an inapplicable one skips cleanly.
+
+Both the `test` and `lint` jobs provision the toolchain, because both drive pnpm.
+`lint` is pinned to `ubuntu-latest` — exactly `NODE_PROVISIONED_ENVIRONMENTS` —
+so it gates on that environment appearing in `node-environments` rather than on a
+matrix value. Adding a pnpm-driven recipe to a job that does not provision Node
+reintroduces the original defect in that job alone, which is how `lint` kept
+failing after `test` was fixed.
+
+On developer hosts the toolchain comes from `just init`: `scripts/ensure-ci-tools.sh`
+requires Node 22+ (it does not install it — version managers own that binary) and
+installs pnpm through npm, elevating with `sudo` when npm's global prefix is
+root-owned.
 
 An area that sets `"node": true` but declares no environment in
 `NODE_PROVISIONED_ENVIRONMENTS` fails the scope calculation — the suite would

@@ -326,6 +326,54 @@ impl ShellRunner for Recorder {
     }
 }
 
+/// A one-shot ordering between two of a parallel group's commands: the waiter
+/// blocks until the opener has arrived.
+///
+/// The wait is bounded so a regression that never opens the gate fails
+/// [`FakeTaskShell::gate_released`] instead of hanging the run.
+struct CommandGate {
+    opener: String,
+    waiter: String,
+    open: Mutex<bool>,
+    released: Mutex<bool>,
+    passed: std::sync::Condvar,
+}
+
+impl CommandGate {
+    /// How long the waiter blocks. Generous enough that a loaded gate never
+    /// trips it.
+    const TIMEOUT: Duration = Duration::from_secs(10);
+
+    fn new(opener: &str, waiter: &str) -> Self {
+        Self {
+            opener: opener.to_string(),
+            waiter: waiter.to_string(),
+            open: Mutex::new(false),
+            released: Mutex::new(false),
+            passed: std::sync::Condvar::new(),
+        }
+    }
+
+    /// Open the gate, wait on it, or pass straight through.
+    fn arrive(&self, command: &str) {
+        if command == self.opener {
+            *self.open.lock().unwrap() = true;
+            self.passed.notify_all();
+        } else if command == self.waiter {
+            let open = self.open.lock().unwrap();
+            let (open, wait) = self
+                .passed
+                .wait_timeout_while(open, Self::TIMEOUT, |open| !*open)
+                .unwrap();
+            *self.released.lock().unwrap() = *open && !wait.timed_out();
+        }
+    }
+
+    fn released(&self) -> bool {
+        *self.released.lock().unwrap()
+    }
+}
+
 /// A [`TaskShellRunner`] that records the exact bytes and timeout it received
 /// and replays a programmed result per invocation.
 #[derive(Default)]
@@ -338,6 +386,9 @@ struct FakeTaskShell {
     /// How long a given command blocks before reporting, so a test can decide
     /// completion order independently of declaration order.
     delays: Mutex<HashMap<String, Duration>>,
+    /// A hard ordering between two concurrent commands, when a test needs one
+    /// member to be *provably* past a point before another proceeds.
+    gate: Option<CommandGate>,
     /// Per-command stdout. A shared FIFO of results is order-dependent, which a
     /// concurrent group has no ordering guarantee for.
     by_command: Mutex<HashMap<String, String>>,
@@ -393,6 +444,21 @@ impl FakeTaskShell {
             .unwrap()
             .insert(command.to_string(), Duration::from_millis(millis));
         self
+    }
+    /// Hold `waiter` until `opener` has started, so the two commands' *stages*
+    /// are ordered and not merely their durations.
+    ///
+    /// `delay` can only make one command likely to finish first; a test whose
+    /// subject is "the write happened before the read" needs the guarantee, and
+    /// gets it here rather than from a sleep long enough to look safe.
+    fn gated(mut self, opener: &str, waiter: &str) -> Self {
+        self.gate = Some(CommandGate::new(opener, waiter));
+        self
+    }
+    /// Whether the gate's waiter was released by the opener rather than by the
+    /// timeout. A timed-out gate ordered nothing.
+    fn gate_released(&self) -> bool {
+        self.gate.as_ref().is_some_and(CommandGate::released)
     }
     fn failing_to_spawn() -> Self {
         let shell = Self::default();
@@ -450,6 +516,9 @@ impl TaskShellRunner for FakeTaskShell {
             let mut gauge = self.in_flight.lock().unwrap();
             gauge.0 += 1;
             gauge.1 = gauge.1.max(gauge.0);
+        }
+        if let Some(gate) = &self.gate {
+            gate.arrive(command);
         }
         // Per-command delays let a parallel test invert completion order
         // without a real process: the *last*-declared task can finish first.
@@ -3195,6 +3264,14 @@ mod parallel_groups {
 
     /// Snapshot isolation: a sibling's `set` is not observable mid-group, so a
     /// task interpolating the key reads the value from *before* the group.
+    ///
+    /// The two members are staged so the read provably follows the write on
+    /// every run. The writer's `set` lands in `setup`, one whole stage before it
+    /// opens the gate from its `write` command; the reader is held at `read`
+    /// until then and interpolates in `teardown` — a stage whose state is read
+    /// fresh, after the gate. Left to race, a broken isolation boundary shows up
+    /// on only some runs, and the reader's own stale write-back can hide it on
+    /// the rest.
     #[test]
     fn a_sibling_mutation_is_invisible_until_the_group_completes() {
         let dir = TempDir::new().unwrap();
@@ -3210,7 +3287,7 @@ mod parallel_groups {
                     "execution": "parallel",
                     "tasks": [
                         { "name": "writer", "shell": "write", "setup": [{ "action": [{ "set": ["marker", "written"] }] }] },
-                        { "name": "reader", "shell": "read", "setup": [{ "action": [{ "set": ["observed", "{{ marker }}"] }] }] },
+                        { "name": "reader", "shell": "read", "teardown": [{ "action": [{ "set": ["observed", "{{ marker }}"] }] }] },
                     ],
                 },
             }])),
@@ -3219,12 +3296,10 @@ mod parallel_groups {
         );
         let fixture = Fixture::build(dir, &source).unwrap();
         let recorder = Recorder::default();
-        // The writer finishes first in wall-clock terms; a shared cell would let
-        // the reader observe it.
         let shell = FakeTaskShell::default()
             .stdout_for("write", "w")
             .stdout_for("read", "r")
-            .delay("read", 60);
+            .gated("write", "read");
         let runtime = Arc::new(RuntimeState::new());
         let mut wiring = Wiring::new(&recorder, &shell);
         wiring.runtime = Some(&runtime);
@@ -3242,6 +3317,11 @@ mod parallel_groups {
             merged.get("marker"),
             Some(&json!("written")),
             "the write must still land once the group completes",
+        );
+        assert!(
+            shell.gate_released(),
+            "the reader must have been released by the writer, not by the gate's \
+             timeout; a timed-out gate ordered nothing",
         );
     }
 

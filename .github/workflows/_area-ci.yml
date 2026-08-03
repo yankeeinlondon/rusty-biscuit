@@ -362,6 +362,11 @@ jobs:
       # each package in the area; this keeps the area's workspace dependencies
       # held to the same bar while they are compiled for that clippy run.
       RUSTFLAGS: "-D warnings"
+      # Same contract the `test` job carries, for the same capability: on the leg
+      # that provisions pnpm, a missing pnpm is a PROVISIONING FAILURE and
+      # `lint-frontend` must fail rather than self-skip. This job is pinned to
+      # ubuntu-latest, which is exactly `NODE_PROVISIONED_ENVIRONMENTS`.
+      BISCUIT_FRONTEND_REQUIRED: ${{ contains(fromJSON(inputs.node-environments), 'ubuntu-latest') && '1' || '' }}
     steps:
       - uses: actions/checkout@v4
       - name: Install just
@@ -380,6 +385,28 @@ jobs:
         with:
           workspaces: ". -> target"
           shared-key: area-ci-${{ inputs.area }}-lint-ubuntu-latest
+      # `just lint` calls `lint-frontend` for an area declaring the `node`
+      # capability, so this job needs the same toolchain the `test` job gets.
+      # Without it `pnpm: command not found` killed `homelab / lint` AFTER every
+      # Rust package had already passed clippy — the `test` job's exact failure
+      # mode, in the one job that was never given the fix.
+      - name: Set up pnpm
+        if: ${{ contains(fromJSON(inputs.node-environments), 'ubuntu-latest') }}
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Set up Node
+        if: ${{ contains(fromJSON(inputs.node-environments), 'ubuntu-latest') }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify the pnpm toolchain
+        if: ${{ contains(fromJSON(inputs.node-environments), 'ubuntu-latest') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          pnpm --version
       - name: Lint and documentation guards
         run: cd "${{ inputs.area }}" && just lint
       # `lint` emits no JUnit, so this artifact is the sole basis for its rollup

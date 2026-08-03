@@ -312,11 +312,40 @@ dev-frontend:
 
 
 # lint frontend code with oxlint
+#
+# Self-gates on pnpm exactly as `test-frontend` does, and for the same reason:
+# `lint` runs on every developer host, most of which have no Node toolchain, and
+# a missing optional capability must not read as a lint failure of the Rust
+# packages that already passed above it. See `test-frontend` for why the two
+# absent-pnpm paths are asymmetric.
 lint-frontend:
-    @echo ""
-    @echo "Linting Frontend"
-    @echo ""
-    @cd server/frontend && pnpm lint
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v pnpm >/dev/null 2>&1; then
+        echo ""
+        echo "================================================================"
+        echo "  !! FRONTEND LINT DID NOT RUN !!"
+        echo ""
+        echo "  pnpm is not on PATH, so homelab/server/frontend was NOT linted."
+        echo "  Nothing else in this run covers it."
+        echo ""
+        echo "  Install pnpm (https://pnpm.io/installation) to run it here."
+        echo "================================================================"
+        echo ""
+        if [ -n "${BISCUIT_FRONTEND_REQUIRED:-}" ]; then
+            echo "BISCUIT_FRONTEND_REQUIRED is set, so this environment DECLARED the" >&2
+            echo "node capability (\"node\": true in .github/ci/areas.json). A missing" >&2
+            echo "pnpm here is a PROVISIONING FAILURE, not an absent capability." >&2
+            exit 1
+        fi
+        exit 0
+    fi
+    echo ""
+    echo "Linting Frontend"
+    echo ""
+    cd ./server/frontend
+    pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+    pnpm lint
 
 # run frontend unit tests (Vue + Vitest under jsdom)
 #
