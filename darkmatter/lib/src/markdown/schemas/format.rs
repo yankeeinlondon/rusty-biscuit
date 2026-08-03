@@ -387,7 +387,8 @@ fn resolve_file_reference_in_context(
                 ),
                 None => {
                     let repository_root = crate::markdown::compose::find_git_root_from(base_dir);
-                    let package_area = crate::markdown::compose::find_package_area_from(
+                    let package_area = crate::markdown::compose::package_area_for_reference(
+                        &reference,
                         base_dir,
                         repository_root.as_deref(),
                     );

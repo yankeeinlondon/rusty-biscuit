@@ -393,7 +393,8 @@ fn rewrite_file_value(
         ),
         None => {
             let repository_root = crate::markdown::compose::find_git_root_from(base_dir);
-            let package_area = crate::markdown::compose::find_package_area_from(
+            let package_area = crate::markdown::compose::package_area_for_reference(
+                &file_ref,
                 base_dir,
                 repository_root.as_deref(),
             );

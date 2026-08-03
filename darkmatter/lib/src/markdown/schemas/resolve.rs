@@ -29,7 +29,7 @@ use std::{
 
 use biscuit_file::{FileReference, FileReferenceKind, FileResolutionContext};
 use crate::markdown::compose::{
-    document_resolution_context, find_git_root_from, find_package_area_from,
+    document_resolution_context, find_git_root_from, package_area_for_reference,
 };
 use indexmap::IndexMap;
 use serde_json::{Map, Value};
@@ -548,7 +548,8 @@ fn resolve_file_reference_in_context(
         Some(snapshot) => file_ref.resolve_in_context(&snapshot.for_base(base_dir)),
         None => {
             let repo_root = find_git_root_from(base_dir);
-            let package_area = find_package_area_from(base_dir, repo_root.as_deref());
+            let package_area =
+                package_area_for_reference(file_ref, base_dir, repo_root.as_deref());
             let context = document_resolution_context(
                 base_dir,
                 None,
