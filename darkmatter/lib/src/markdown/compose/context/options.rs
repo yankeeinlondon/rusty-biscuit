@@ -456,11 +456,23 @@ impl std::fmt::Debug for ComposeOptions {
 impl ComposeOptions {
     /// Creates new compose options with all operations enabled and captured context.
     ///
-    /// Captures runtime context (timestamps, environment variables) at
-    /// construction time. If you already have a `ComposeContext`, use
-    /// [`new_with_context`](Self::new_with_context) to avoid redundant capture.
+    /// Captures only the zero-discovery runtime context — date/time and the
+    /// environment snapshot. A constructor has no document to consult, so
+    /// eagerly probing Git, repository topology, working-tree changes,
+    /// languages, documents, OS, hardware, and GPU would be speculative: it
+    /// walks the whole working tree once per call (~2s inside this monorepo on
+    /// Windows) for values most callers never read. Any `ctx.*` key from those
+    /// groups is still captured on demand during expression evaluation, so
+    /// this changes cost, not what resolves.
+    ///
+    /// When the document is already available, prefer
+    /// [`new_with_context`](Self::new_with_context) with
+    /// [`ComposeContext::capture_for_document`] — it captures exactly the
+    /// groups the document names, which also folds them into the compose cache
+    /// key. [`ComposeContext::capture`] remains available for callers that
+    /// genuinely want the full snapshot.
     pub fn new() -> Self {
-        Self::new_with_context(ComposeContext::capture())
+        Self::new_with_context(ComposeContext::capture_minimal())
     }
 
     /// Creates new compose options using a pre-captured context.
@@ -2429,6 +2441,45 @@ fn remote_fetch_opt_same_instance(
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    /// `ComposeOptions::new()` must not perform host or repository discovery.
+    ///
+    /// A constructor has no document to justify probing Git, repository
+    /// topology, working-tree changes, languages, documents, OS, hardware, or
+    /// GPU. Reintroducing that capture is not a visible failure — every test
+    /// still passes, the suite just silently gets a working-tree walk per
+    /// construction (~2s inside this monorepo on Windows, across ~400 call
+    /// sites). That is precisely the regression this asserts against, so it is
+    /// pinned on the group identity rather than on a duration, which would be
+    /// flaky and would not say what broke.
+    ///
+    /// The lazily-captured groups stay reachable: an expression naming one
+    /// captures it on demand during evaluation.
+    #[test]
+    fn new_captures_no_discovery_derived_group() {
+        use crate::markdown::compose::context::capture::ContextGroup;
+
+        let options = ComposeOptions::new();
+
+        let discovered: Vec<(&String, ContextGroup)> = options
+            .context
+            .values()
+            .iter()
+            .filter_map(|(key, _)| {
+                ContextGroup::for_key(key)
+                    .filter(|group| *group != ContextGroup::DateTime)
+                    .map(|group| (key, group))
+            })
+            .collect();
+
+        assert!(
+            discovered.is_empty(),
+            "ComposeOptions::new() captured discovery-derived keys: {discovered:?}. \
+             Construct with `new_with_context(ComposeContext::capture_for_document(..))` \
+             when a document is in hand, or `ComposeContext::capture()` for a deliberate \
+             full snapshot.",
+        );
+    }
 
     #[test]
     fn file_ref_fallback_dir_defaults_to_none() {

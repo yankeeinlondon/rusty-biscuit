@@ -536,7 +536,12 @@ impl EffectiveStateBuilder {
     /// Returns `CtxMergeError::InvalidUserCtx` when the document defines `ctx`
     /// as a non-object value and `allow_ctx_override` is false.
     pub fn build(self) -> Result<EffectiveState, CtxMergeError> {
-        let context = self.context.unwrap_or_else(ComposeContext::capture);
+        // Zero-discovery default, matching `ComposeOptions::new`: a builder with
+        // no supplied context has no document to justify walking the working
+        // tree for Git, repository, file-change, language, document, OS,
+        // hardware, and GPU values. Those groups are still captured on demand
+        // when an expression names one.
+        let context = self.context.unwrap_or_else(ComposeContext::capture_minimal);
 
         let frontmatter_value = Value::Object(self.frontmatter.clone().into_iter().collect());
         let external_value = self

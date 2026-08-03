@@ -146,6 +146,25 @@ impl ComposeContext {
         }
     }
 
+    /// Captures only the groups that cost no discovery: date/time, plus the
+    /// environment snapshot every capture takes.
+    ///
+    /// Git, repository, file-change, language, document, OS, hardware, and GPU
+    /// values are left uncaptured. Nothing becomes unresolvable: an expression
+    /// naming one of those keys triggers
+    /// [`resolve_ctx`](crate::markdown::compose::expression) to capture that
+    /// single group on demand. Skipping them up front therefore drops work no
+    /// document read, rather than narrowing what `ctx.*` can answer.
+    ///
+    /// Prefer [`capture_for_document`](Self::capture_for_document) when the
+    /// document is already in hand — it captures exactly the groups the
+    /// document names, which additionally keeps those groups inside the
+    /// compose cache key (see `cache::hashing::context_hash`).
+    pub fn capture_minimal() -> Self {
+        let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        Self::capture_for_content(&base_dir, "")
+    }
+
     /// Captures the runtime context using the given base directory.
     pub fn capture_for_dir(base_dir: &std::path::Path) -> Self {
         let (values, capture_diagnostics, timings, environment) =

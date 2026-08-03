@@ -15,7 +15,7 @@ mod schema_validation_integration {
         let content = "---\n$schema:\n  spec: 'file(required)'\nspec: \"\"\ndir: \"$(dirname '{{ spec }}')\"\n---\nBody\n";
         let md: Markdown = content.into();
 
-        let options = context_free_options().only(&[
+        let options = ComposeOptions::new().only(&[
             ComposeOperation::FrontmatterInterpolation,
             ComposeOperation::FrontmatterShellExpansion,
             ComposeOperation::Interpolation,
@@ -56,7 +56,7 @@ mod schema_validation_integration {
             "---\n$schema:\n  spec: 'number(required)'\nspec: \"$(echo 1)\"\n---\nBody\n";
         let md: Markdown = content.into();
 
-        let options = context_free_options().only(&[ComposeOperation::Interpolation]);
+        let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
         let err = md.compose_with(options).unwrap_err();
         match err {
@@ -78,7 +78,7 @@ mod schema_validation_integration {
         let md: Markdown = content.into();
 
         // Even with fail_fast=false, schema validation is a hard error.
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .only(&[
                 ComposeOperation::FrontmatterInterpolation,
                 ComposeOperation::FrontmatterShellExpansion,
@@ -102,7 +102,7 @@ mod schema_validation_integration {
         let content = "---\n$schema:\n  spec: string(required)\n  has_spec: boolean\nspec: design.md\nhas_spec: \"{{spec ? true : false}}\"\n---\nBody\n";
         let md: Markdown = content.into();
 
-        let options = context_free_options().only(&[
+        let options = ComposeOptions::new().only(&[
             ComposeOperation::FrontmatterInterpolation,
             ComposeOperation::Interpolation,
         ]);
@@ -138,7 +138,7 @@ mod schema_validation_integration {
             .unwrap();
 
             let md = Markdown::try_from(prompt.as_path()).unwrap();
-            let options = context_free_options()
+            let options = ComposeOptions::new()
                 .with_source_file(prompt)
                 .only(&[
                     ComposeOperation::FrontmatterInterpolation,
@@ -177,7 +177,7 @@ mod schema_validation_integration {
 
         for expected_iteration in 1..=3 {
             let md = Markdown::try_from(prompt.as_path()).unwrap();
-            let options = context_free_options()
+            let options = ComposeOptions::new()
                 .with_source_file(prompt.clone())
                 .only(&[
                     ComposeOperation::FrontmatterInterpolation,
@@ -263,7 +263,7 @@ mod schema_validation_integration {
         let md: Markdown = content.into();
 
         // `spec=` provided via --set; no `plan`/`review` → second arm wins.
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .with_set_overrides(serde_json::json!({ "spec": "features/plan.md" }))
             .only(&[
                 ComposeOperation::FrontmatterInterpolation,
@@ -310,7 +310,7 @@ mod schema_validation_integration {
         .unwrap();
 
         let md = Markdown::try_from(root.as_path()).unwrap();
-        let options = context_free_options().with_source_file(root);
+        let options = ComposeOptions::new().with_source_file(root);
         let (composed, report) = md.compose_with(options).unwrap();
 
         assert!(composed.content().contains("Child body"));
@@ -336,7 +336,7 @@ mod schema_validation_integration {
         let md = Markdown::try_from(root.as_path()).unwrap();
         // fail_fast=true so the schema validation error propagates rather
         // than being downgraded to a transclusion warning.
-        let options = context_free_options()
+        let options = ComposeOptions::new()
             .with_source_file(root)
             .with_fail_fast(true);
         let err = md.compose_with(options).unwrap_err();
@@ -411,7 +411,7 @@ mod schema_validation_integration {
         .unwrap();
 
         let mk_options = |baseline_prop: &str| {
-            context_free_options()
+            ComposeOptions::new()
                 .with_source_file(&root)
                 .with_baseline_schema(baseline_required(baseline_prop))
                 .with_cache_access_mode(CacheAccessMode::ReadWrite)
@@ -499,7 +499,7 @@ mod schema_validation_integration {
         std::fs::write(fallback_present.join("anchored.md"), "# Anchored\n").unwrap();
 
         let mk_options = |fallback: &std::path::Path| {
-            context_free_options()
+            ComposeOptions::new()
                 .with_source_file(&root)
                 .with_file_ref_fallback_dir(fallback.to_path_buf())
                 .with_cache_access_mode(CacheAccessMode::ReadWrite)

@@ -164,15 +164,10 @@ impl Fixture {
         let root = self.directory.path().join("root.md");
         std::fs::write(&root, content).expect("write document");
         let markdown: Markdown = content.into();
-        // Demand-driven capture, not `ComposeOptions::new()`: the full capture
-        // scans git, repo, file changes, languages, docs, OS, hardware and GPU
-        // rooted at the *real* working tree, once per compose. No fixture here
-        // reads `ctx.*`, so it buys nothing, and a test that composes on every
-        // surface pays it six times over. `capture_for_content` reads the
-        // document instead — date/time only when nothing asks for a group, and
-        // `ctx.*` still captures on demand during evaluation. The fixture's own
-        // repository is the base directory because that is where the document
-        // being composed actually lives.
+        // Capture is rooted at the fixture's own repository rather than the
+        // process working directory, because that is where the document being
+        // composed actually lives — so any `ctx.*` group a fixture does ask for
+        // describes that repository and not the one holding this test.
         let options = ComposeOptions::new_with_context(ComposeContext::capture_for_content(
             self.directory.path(),
             content,
