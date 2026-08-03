@@ -27,6 +27,13 @@ use tracing::{info, instrument, trace};
 impl Markdown {
     /// Internal pipeline runner.
     pub(crate) fn run_compose_pipeline(&mut self, mut options: ComposeOptions) -> MarkdownResult<ComposeReport> {
+        // `ComposeOptions::new` captures no discovered `ctx.*` group because a
+        // constructor has no document to justify the walk. This is the first
+        // point that has both, so it is where the two meet: the context grows
+        // to exactly the groups this document names, and stays untouched when
+        // it names none or when the caller chose the context themselves.
+        options.upgrade_ambient_context_for(self);
+
         // Resolve persistent cache root if configured
         let persistent_root = options.cache_root.as_ref().map(|root| {
             cache::FileStore::resolve_cache_root(Some(root), options.cache_namespace.as_deref())

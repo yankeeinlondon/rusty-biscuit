@@ -536,12 +536,15 @@ impl EffectiveStateBuilder {
     /// Returns `CtxMergeError::InvalidUserCtx` when the document defines `ctx`
     /// as a non-object value and `allow_ctx_override` is false.
     pub fn build(self) -> Result<EffectiveState, CtxMergeError> {
-        // Zero-discovery default, matching `ComposeOptions::new`: a builder with
-        // no supplied context has no document to justify walking the working
-        // tree for Git, repository, file-change, language, document, OS,
-        // hardware, and GPU values. Those groups are still captured on demand
-        // when an expression names one.
-        let context = self.context.unwrap_or_else(ComposeContext::capture_minimal);
+        // A full capture is the safe default here, unlike `ComposeOptions::new`.
+        // `build` materializes `ctx` into `data` as a fixed snapshot, and no
+        // later stage re-reads it, so a group missing here renders empty rather
+        // than being fetched on demand. The compose pipeline can narrow this
+        // safely because it sees the document and captures what the document
+        // names; a bare builder sees neither, so narrowing would silently blank
+        // `ctx.*`. Callers that read no runtime context should pass
+        // [`ComposeContext::capture_minimal`] explicitly.
+        let context = self.context.unwrap_or_else(ComposeContext::capture);
 
         let frontmatter_value = Value::Object(self.frontmatter.clone().into_iter().collect());
         let external_value = self

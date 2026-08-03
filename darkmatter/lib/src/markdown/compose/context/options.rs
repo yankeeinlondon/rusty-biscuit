@@ -238,6 +238,17 @@ pub struct ComposeOptions {
     /// environment variables).
     context: ComposeContext,
 
+    /// Whether [`context`](Self::context) is the zero-discovery default
+    /// [`ComposeOptions::new`] installs, rather than one the caller chose.
+    ///
+    /// A constructor cannot know which `ctx.*` groups a document needs, so
+    /// `new` captures none of the discovered ones. The compose pipeline can
+    /// know — it has the document — and upgrades the context to exactly the
+    /// groups the document names before any stage reads `ctx`. Only a default
+    /// context is upgraded: a caller who supplied one is expressing intent
+    /// (a pinned test snapshot, a repository-scoped capture) that must survive.
+    context_is_ambient_default: bool,
+
     /// When true, external `replace` keys override document `replace`
     /// keys (used during recursive transclusion to inherit parent
     /// replacements).
@@ -472,7 +483,37 @@ impl ComposeOptions {
     /// key. [`ComposeContext::capture`] remains available for callers that
     /// genuinely want the full snapshot.
     pub fn new() -> Self {
-        Self::new_with_context(ComposeContext::capture_minimal())
+        let mut options = Self::new_with_context(ComposeContext::capture_minimal());
+        options.context_is_ambient_default = true;
+        options
+    }
+
+    /// Replaces an ambient-default context with one captured for `document`.
+    ///
+    /// No-op unless the context is the default [`Self::new`] installed and
+    /// `document` names a `ctx.*` group beyond date/time — so a document that
+    /// reads no runtime context, or options carrying a caller-chosen context,
+    /// pay nothing and keep what they have.
+    pub(crate) fn upgrade_ambient_context_for(&mut self, document: &crate::markdown::Markdown) {
+        if !self.context_is_ambient_default {
+            return;
+        }
+        let requirements = super::capture::ContextRequirements::for_document(document);
+        if !requirements
+            .iter()
+            .any(|group| group != super::capture::ContextGroup::DateTime)
+        {
+            return;
+        }
+        let base_dir = match &self.source {
+            ComposeSource::File(path) => path
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| PathBuf::from(".")),
+            _ => std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        };
+        self.context = ComposeContext::capture_for_document(&base_dir, document);
+        self.context_is_ambient_default = false;
     }
 
     /// Creates new compose options using a pre-captured context.
@@ -516,6 +557,7 @@ impl ComposeOptions {
             cache_namespace: None,
             perf_enabled: false,
             context,
+            context_is_ambient_default: false,
             replace_parent_wins: false,
             one_off_replace: None,
             interpolate_code_blocks: false,
@@ -1866,6 +1908,7 @@ impl ComposeOptions {
             cache_namespace,
             perf_enabled,
             context,
+            context_is_ambient_default,
             replace_parent_wins,
             one_off_replace,
             interpolate_code_blocks,
@@ -2095,6 +2138,14 @@ impl ComposeOptions {
         // complete and fail closed rather than reuse the cache product.
         enc.field("context");
         enc.u64(graph_context_fingerprint(context));
+
+        // Whether `context` above is still the constructor's zero-discovery
+        // default. Encoded because graph identity is conservative and fails
+        // closed: this flag decides whether the pipeline may replace `context`
+        // wholesale with a document-scoped capture, so two option sets that
+        // compare equal today can still diverge once composed.
+        enc.field("context_is_ambient_default");
+        enc.bool(*context_is_ambient_default);
 
         enc.field("replace_parent_wins");
         enc.bool(*replace_parent_wins);
