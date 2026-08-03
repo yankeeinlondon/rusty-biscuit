@@ -138,17 +138,52 @@ ensure_gh() {
 ensure_python
 ensure_gh
 
+ensure_pnpm() {
+    if command -v pnpm >/dev/null 2>&1; then
+        return
+    fi
+
+    echo "Installing pnpm..."
+    # `npm install --global` writes to npm's prefix, which for a distro or
+    # Homebrew Node is root-owned (`/usr/local/lib/node_modules`). Unelevated it
+    # dies EACCES, and under `set -e` that aborts `just init` outright — leaving
+    # pnpm uninstalled, so homelab's frontend lint and test recipes self-skip on
+    # every later run. Attempt unelevated first so a user-prefix or nvm/fnm Node
+    # (and Windows, which has no sudo) never pulls in a needless sudo prompt.
+    if ! npm install --global pnpm 2>/dev/null; then
+        if [[ "$(id -u)" -ne 0 ]] && command -v sudo >/dev/null 2>&1; then
+            echo "npm's global prefix is not writable; retrying with sudo..."
+            sudo npm install --global pnpm
+        else
+            echo "Could not install pnpm into npm's global prefix ($(npm config get prefix))." >&2
+            echo "Install it manually (https://pnpm.io/installation) and re-run 'just init'." >&2
+            exit 1
+        fi
+    fi
+    hash -r
+
+    if ! command -v pnpm >/dev/null 2>&1; then
+        echo "pnpm was installed but is not visible on PATH; open a new terminal and re-run 'just init'." >&2
+        exit 1
+    fi
+}
+
+# Node is not auto-installed: version managers (nvm, fnm, volta) own the node
+# binary on most developer hosts, and most distro `nodejs` packages predate 22.
+# A package-manager install would shadow or downgrade a working toolchain, so
+# this stops with the concrete remedies instead.
 if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
-    echo "Node.js 22+ and npm are required by CI/CD jobs with the node capability." >&2
+    echo "Node.js 22+ and npm are required: pnpm installs through npm, and homelab's" >&2
+    echo "'just lint' and 'just test' drive a Vue suite through pnpm." >&2
+    echo "Install from https://nodejs.org/, or via nvm/fnm/volta, then re-run 'just init'." >&2
     exit 1
 fi
 if (( $(node -p 'Number(process.versions.node.split(".")[0])') < 22 )); then
     echo "Node.js 22+ is required; found $(node --version)." >&2
+    echo "Upgrade via https://nodejs.org/ or your version manager, then re-run 'just init'." >&2
     exit 1
 fi
-if ! command -v pnpm >/dev/null 2>&1; then
-    npm install --global pnpm
-fi
+ensure_pnpm
 
 install_cargo_binary cargo-llvm-cov cargo-llvm-cov
 rustup component add llvm-tools-preview
