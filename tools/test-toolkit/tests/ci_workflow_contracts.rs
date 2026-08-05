@@ -263,39 +263,58 @@ fn area_ci_selects_the_ci_nextest_profile_explicitly() {
     );
 }
 
-/// Canaries run first as an early signal, and must NOT gate the fan-out.
+/// The fan-out has no stage in front of it, and nothing named `canary` remains.
 ///
-/// Reversed from the original contract, which required exactly the gate this now
-/// forbids. Gating traded visibility for runner minutes, and visibility is what
-/// this pipeline exists to provide: three consecutive runs produced zero area
-/// evidence because one canary test failed — a Windows compile-check, a WSL2
-/// binary path, and a 40ms timing assertion on macOS. None of those said anything
-/// about the other twenty areas, yet each erased them.
+/// A sampled canary was tried twice and failed twice. Gating on its result erased
+/// twenty areas' evidence for one unrelated failure — a Windows compile-check, a
+/// WSL2 binary path, a 40ms macOS timing assertion. Un-gating left a `needs:`
+/// edge that still waited for *completion*, so a canary leg that could not get a
+/// runner stalled every area indefinitely, which is worse: a stall leaves no
+/// failure to read. Each area now gates on its own compile check instead.
 #[test]
-fn global_changes_run_canaries_first_without_gating_the_fan_out() {
+fn the_area_fan_out_has_no_stage_in_front_of_it() {
     let ci = workflow("ci.yml");
     assert!(
-        ci.contains("canary:") && ci.contains("fromJSON(needs.scope.outputs.canary_matrix)"),
-        "ci.yml must define a canary stage driven by the scope-derived canary matrix (D11)"
+        !ci.contains("\n  canary:"),
+        "ci.yml must not define a canary stage"
     );
     assert!(
-        ci.contains("has_canaries"),
-        "the canary stage must gate on a full-scope canary selection"
-    );
-    // `needs:` is retained for ORDERING — the canary still runs first.
-    assert!(
-        ci.contains("needs: [scope, preflight, canary]"),
-        "the area fan-out must still be ordered after the canary stage (D11)"
+        !ci.contains("canary_matrix") && !ci.contains("has_canaries"),
+        "the scope job must not emit a canary matrix or selection flag"
     );
     assert!(
-        !ci.contains("needs.canary.result == 'success'"),
-        "no job may gate on canary success — one canary failure must not erase \
-         every other area's evidence"
+        !ci.contains("needs: [scope, preflight, canary]"),
+        "no job may wait on a canary stage — waiting for completion stalls the \
+         fan-out whenever the canary cannot get a runner"
+    );
+    assert!(
+        ci.contains("needs: [scope, preflight]"),
+        "the area fan-out must depend on scope and preflight only"
     );
     let areas = read(".github/ci/areas.json");
     assert!(
-        areas.contains(r#""canary": true"#),
-        "areas.json must declare initial global-change canaries (D11)"
+        !areas.contains(r#""canary""#),
+        "areas.json must not declare canaries"
+    );
+}
+
+/// An area's compile check covers the impacted packages, never the workspace.
+///
+/// `cargo check --all-targets` with no `-p` checks everything, so a narrowing
+/// bug here does not fail loudly — it silently checks 31 areas' worth of code on
+/// every run. The scope calculator owns the narrowing; this asserts the workflow
+/// still routes the scope-derived value rather than a static one.
+#[test]
+fn the_compile_check_uses_the_scope_derived_package_list() {
+    let ci = workflow("ci.yml");
+    assert!(
+        ci.contains("check-args: ${{ matrix.check_args }}"),
+        "area-ci must pass the scope-derived check_args, not a static list"
+    );
+    let area_ci = workflow("_area-ci.yml");
+    assert!(
+        area_ci.contains("cargo check --all-targets ${{ inputs.check-args }}"),
+        "the check job must run cargo check over the passed package list"
     );
 }
 
@@ -626,7 +645,6 @@ fn ci_summarizes_the_first_actionable_failure_class() {
     for stage in [
         "bootstrap (scope calculation)",
         "bootstrap (preflight)",
-        "canary (shared-change regression)",
         "coverage",
     ] {
         assert!(
@@ -1202,8 +1220,9 @@ fn a_declared_node_capability_is_provisioned_verified_and_hard_required() {
     assert_eq!(
         ci.matches("node-environments: ${{ toJSON(matrix.node_environments) }}")
             .count(),
-        2,
-        "both the canary and area fan-out call sites must forward the derived node environments"
+        1,
+        "the area fan-out must forward the derived node environments. There is \
+         one call site: the canary stage that used to be the second is gone"
     );
 
     let test_job = job_block("_area-ci.yml", "  test:");
@@ -1399,7 +1418,6 @@ fn ci_verdict_is_the_single_required_check() {
     for producer in [
         "scope",
         "preflight",
-        "canary",
         "area-ci",
         "affected-coverage",
         "claudine-generator-signals",

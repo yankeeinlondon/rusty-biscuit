@@ -98,14 +98,12 @@ AREA_DEFAULTS: dict[str, Any] = {
     # Capability policy (D8/D9/D11). `backends`: L2 terminal backends this area's
     # tests require. `native`: runner OS -> system packages needed to build/test.
     # `node`: whether this area's canonical `just test` also drives a JavaScript
-    # suite, so the leg needs Node + pnpm. `canary`: whether this area is a
-    # global-change canary (Phase 4). `policy_gaps`: tiers this area owns tests
-    # for that no environment can currently host — recorded so the rollup
+    # suite, so the leg needs Node + pnpm. `policy_gaps`: tiers this area owns
+    # tests for that no environment can currently host — recorded so the rollup
     # renders POLICY GAP, never green.
     "backends": [],
     "native": {},
     "node": False,
-    "canary": False,
     "policy_gaps": [],
 }
 
@@ -297,7 +295,7 @@ def validate_area_schema(areas: list[dict[str, Any]], today: date | None = None)
         # Types before semantics: every rule below reads these flags, so a
         # mistyped one must be reported as the typo it is rather than as the
         # policy violation its truthiness happens to produce.
-        for field in ("l2", "browser", "ai_provider_stubs", "canary", "ci", "node"):
+        for field in ("l2", "browser", "ai_provider_stubs", "ci", "node"):
             if field in area and not isinstance(area[field], bool):
                 raise RuntimeError(f"area '{label}' field '{field}' must be a boolean")
 
@@ -647,6 +645,49 @@ def lockfile_impacted_names(
     return impacted & workspace_names
 
 
+def scoped_check_args(configured: str, impacted: set[str]) -> str:
+    """Narrow an area's `check_args` to the packages this run actually impacts.
+
+    The compile check gates that area's tests, so checking packages the change
+    cannot reach costs runner time and can fail the gate on something the branch
+    did not touch. Non-`-p` tokens are preserved verbatim — two areas carry
+    `--features`, and dropping those would check a different configuration than
+    the one the tests run under.
+
+    ## Notes
+
+    Falls back to `configured` when no configured package is impacted. An empty
+    `-p` list is not a narrower check: `cargo check --all-targets` with no `-p`
+    checks the entire workspace, so emitting one would silently invert this.
+    """
+    tokens = configured.split()
+    packages: list[str] = []
+    passthrough: list[str] = []
+
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "-p" and index + 1 < len(tokens):
+            packages.append(tokens[index + 1])
+            index += 2
+            continue
+        if token.startswith("-p="):
+            packages.append(token[len("-p=") :])
+            index += 1
+            continue
+        passthrough.append(token)
+        index += 1
+
+    selected = [package for package in packages if package in impacted]
+    if not selected:
+        return configured
+
+    narrowed: list[str] = []
+    for package in selected:
+        narrowed += ["-p", package]
+    return " ".join(narrowed + passthrough)
+
+
 def curated_areas(root: Path) -> list[str]:
     justfile = (root / "justfile").read_text(encoding="utf-8")
     match = re.search(r'^areas := "([^"]+)"$', justfile, re.MULTILINE)
@@ -839,13 +880,18 @@ def calculate_scope(
     ]
     selected_packages = sorted(packages[package_id]["name"] for package_id in affected_ids)
 
+    # The compile check gates the tests, so it must cover exactly the packages
+    # this run can reach — no wider, or the gate fails on code the branch never
+    # touched. A full-scope run is already every package, so narrowing is a
+    # no-op there and the configured value stands.
+    impacted_names = set(selected_packages)
+    for area in selected_areas:
+        if area.get("check_args"):
+            area["check_args"] = scoped_check_args(area["check_args"], impacted_names)
+
     change_class, preflight_os, preflight_reason = classify_preflight(
         files, selected_areas, full_scope, force_all
     )
-
-    canaries = [
-        area["area"] for area in selected_areas if area.get("canary", False)
-    ]
 
     return {
         "areas": selected_areas,
@@ -854,7 +900,6 @@ def calculate_scope(
         "change_class": change_class,
         "preflight_os": preflight_os,
         "preflight_reason": preflight_reason,
-        "canaries": canaries,
     }
 
 

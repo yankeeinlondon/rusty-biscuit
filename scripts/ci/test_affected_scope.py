@@ -11,6 +11,7 @@ from pathlib import Path
 
 from affected_scope import (
     calculate_scope,
+    scoped_check_args,
     lockfile_impacted_names,
     parse_lockfile,
     environment_policy,
@@ -209,7 +210,6 @@ class AreaSchemaTests(unittest.TestCase):
                     "check_args": "-p alpha",
                     "backends": ["tmux", "wezterm"],
                     "native": {"ubuntu-latest": ["libasound2-dev"]},
-                    "canary": True,
                 }
             ]
         )
@@ -911,6 +911,38 @@ class LockfileFullScopeFallbackTests(unittest.TestCase):
 
         self.assertFalse(scope["full_scope"])
         self.assertEqual(["alpha"], [area["area"] for area in scope["areas"]])
+
+
+class ScopedCheckArgsTests(unittest.TestCase):
+    """`check_args` covers the impacted packages, never the workspace."""
+
+    def test_only_impacted_packages_are_checked(self) -> None:
+        self.assertEqual(
+            "-p alpha-core",
+            scoped_check_args("-p alpha-core -p alpha-cli", {"alpha-core"}),
+        )
+
+    def test_non_package_flags_survive_narrowing(self) -> None:
+        self.assertEqual(
+            "-p sniff --features sniff/remote",
+            scoped_check_args(
+                "-p sniff -p sniff-cli --features sniff/remote", {"sniff"}
+            ),
+        )
+
+    def test_an_unimpacted_area_keeps_its_configured_args(self) -> None:
+        # Never return an empty `-p` list: `cargo check --all-targets` with no
+        # `-p` checks the whole workspace, inverting the narrowing.
+        configured = "-p alpha-core -p alpha-cli"
+        self.assertEqual(configured, scoped_check_args(configured, {"unrelated"}))
+
+    def test_every_impacted_package_is_kept(self) -> None:
+        self.assertEqual(
+            "-p alpha-core -p alpha-cli",
+            scoped_check_args(
+                "-p alpha-core -p alpha-cli", {"alpha-core", "alpha-cli"}
+            ),
+        )
 
 
 if __name__ == "__main__":

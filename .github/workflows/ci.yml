@@ -42,8 +42,6 @@ jobs:
       preflight_os: ${{ steps.scope.outputs.preflight_os }}
       preflight_reason: ${{ steps.scope.outputs.preflight_reason }}
       change_class: ${{ steps.scope.outputs.change_class }}
-      canary_matrix: ${{ steps.scope.outputs.canary_matrix }}
-      has_canaries: ${{ steps.scope.outputs.has_canaries }}
       area_names: ${{ steps.scope.outputs.area_names }}
     steps:
       - uses: actions/checkout@v4
@@ -94,24 +92,16 @@ jobs:
           scope_json="$(python3 scripts/ci/affected_scope.py "${scope_args[@]}")"
           packages="$(jq -c '.packages' <<<"$scope_json")"
 
-          # Canary orchestration (D11): a global (full-scope) change runs the
-          # canary areas FIRST, as an early signal. They no longer gate the rest
-          # of the fan-out — see the `area-ci` job. A package-local change has no
-          # canary stage and fans out directly.
-          if [[ "$(jq -r '.full_scope' <<<"$scope_json")" == "true" ]]; then
-            canary_matrix="$(jq -c '{include: [.areas[] | select(.canary == true)]}' <<<"$scope_json")"
-            area_matrix="$(jq -c '{include: [.areas[] | select(.canary != true)]}' <<<"$scope_json")"
-          else
-            canary_matrix='{"include":[]}'
-            area_matrix="$(jq -c '{include: .areas}' <<<"$scope_json")"
-          fi
+          # Every selected area fans out directly. There is no canary stage:
+          # the compile check that gates each area's own tests is a cheaper and
+          # strictly better predictor than a sample of two other areas, and it
+          # cannot stall the fan-out because it runs inside it.
+          area_matrix="$(jq -c '{include: .areas}' <<<"$scope_json")"
 
           {
             echo "area_matrix=$area_matrix"
-            echo "canary_matrix=$canary_matrix"
             echo "packages=$packages"
             echo "has_areas=$(jq -r '.include | length > 0' <<<"$area_matrix")"
-            echo "has_canaries=$(jq -r '(.full_scope == true) and ((.canaries | length) > 0)' <<<"$scope_json")"
             echo "has_packages=$(jq -r '.packages | length > 0' <<<"$scope_json")"
             echo "full_scope=$(jq -r '.full_scope' <<<"$scope_json")"
             echo "claudine=$(jq -r 'any(.areas[]; .area == "claudine")' <<<"$scope_json")"
@@ -133,7 +123,6 @@ jobs:
             echo "| full scope | $(jq -r '.full_scope' <<<"$scope_json") |"
             echo "| reason | $(jq -r '.preflight_reason' <<<"$scope_json") |"
             echo "| preflight OS | $(jq -rc '.preflight_os | join(", ")' <<<"$scope_json") |"
-            echo "| canaries | $(jq -rc 'if (.full_scope == true) and ((.canaries | length) > 0) then (.canaries | join(", ")) else "(none — no canary stage)" end' <<<"$scope_json") |"
             echo "| affected areas | $(jq -rc 'if (.areas | length) > 0 then ([.areas[].area] | join(", ")) else "(none)" end' <<<"$scope_json") |"
             echo "| affected packages | $(jq -r '.packages | length' <<<"$scope_json") |"
             echo "| toolchain | $(grep '^channel' rust-toolchain.toml | cut -d'"' -f2) |"
@@ -191,52 +180,15 @@ jobs:
       - name: Test affected-scope calculation
         run: python3 scripts/ci/test_affected_scope.py
 
-  # Global-change canaries (D11). For a full-scope change, run a small
-  # representative set (pure-Rust, native-dependency, heavy) BEFORE the rest of
-  # the areas fan out. A canary failure prevents the remaining full-scope jobs
-  # from starting; canary success does NOT replace full validation.
-  canary:
-    name: canary / ${{ matrix.area }}
-    needs: [scope, preflight]
-    if: needs.scope.outputs.has_canaries == 'true'
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.scope.outputs.canary_matrix) }}
-    uses: ./.github/workflows/_area-ci.yml
-    with:
-      area: ${{ matrix.area }}
-      check-args: ${{ matrix.check_args }}
-      # `native_environments`, `l2_environments`, and `wsl` are DERIVED by
-      # `affected_scope.py` from the single `environments` policy field, so the
-      # reusable workflow receives pre-split, un-confusable inputs and cannot
-      # route `wsl2-ubuntu` into a `runs-on` matrix.
-      native-environments: ${{ toJSON(matrix.native_environments) }}
-      check-os: ${{ toJSON(matrix.check_os) }}
-      l2-environments: ${{ toJSON(matrix.l2_environments) }}
-      node-environments: ${{ toJSON(matrix.node_environments) }}
-      backends: ${{ toJSON(matrix.backends) }}
-      shards: ${{ toJSON(matrix.shards) }}
-      l2: ${{ matrix.l2 }}
-      browser: ${{ matrix.browser }}
-      wsl: ${{ matrix.wsl }}
-      ai-provider-stubs: ${{ matrix.ai_provider_stubs }}
-    secrets: inherit
-
   area-ci:
     name: ${{ matrix.area }}
-    needs: [scope, preflight, canary]
-    # Ordering only. The canary runs FIRST as an early signal, but its result no
-    # longer gates this fan-out.
-    #
-    # Gating on it traded visibility for runner minutes, and visibility is the
-    # thing this pipeline exists to provide. Three consecutive runs produced ZERO
-    # area evidence because one canary test failed — a Windows compile-check, a
-    # WSL2 binary path, and a 40ms timing assertion on macOS. None of the three
-    # said anything about the other 20 areas, yet each erased them: 31 jobs
-    # instead of 168, and no way to tell a passing area from an unscheduled one.
-    #
-    # A red canary is still loud — it is a failed job and the verdict counts it.
-    # It simply no longer decides whether anything else is allowed to report.
+    needs: [scope, preflight]
+    # No stage sits in front of this. A sampled canary was tried and removed:
+    # gating on it erased 20 areas' evidence for one unrelated failure, and
+    # un-gating it left a `needs:` edge that stalled the whole fan-out whenever
+    # its scarcest leg could not get a runner. Each area now gates its own tests
+    # on its own compile check, inside `_area-ci.yml`, where the predictor is
+    # exact and cannot block anything it is unrelated to.
     if: >-
       !cancelled() &&
       needs.scope.outputs.has_areas == 'true'
@@ -265,7 +217,7 @@ jobs:
 
   affected-coverage:
     name: Coverage for affected packages
-    needs: [scope, preflight, canary]
+    needs: [scope, preflight]
     if: >-
       !cancelled() &&
       github.event_name == 'pull_request' &&
@@ -317,7 +269,7 @@ jobs:
 
   claudine-generator-signals:
     name: Claudine generator and signals drift
-    needs: [scope, preflight, canary]
+    needs: [scope, preflight]
     if: >-
       !cancelled() &&
       needs.scope.outputs.claudine == 'true'
@@ -342,7 +294,7 @@ jobs:
 
   darkmatter-no-color:
     name: Darkmatter color-depth tests under NO_COLOR=1
-    needs: [scope, preflight, canary]
+    needs: [scope, preflight]
     if: >-
       !cancelled() &&
       needs.scope.outputs.darkmatter == 'true'
@@ -370,7 +322,7 @@ jobs:
   # evidence; shared bootstrap lives in the reusable workflow it calls.
   rendezvous:
     name: rendezvous
-    needs: [scope, preflight, canary]
+    needs: [scope, preflight]
     if: >-
       !cancelled() &&
       (contains(fromJSON(needs.scope.outputs.area_names), 'claudine') ||
@@ -380,7 +332,7 @@ jobs:
 
   biscuit-tui-captured-stdout:
     name: biscuit-tui-captured-stdout
-    needs: [scope, preflight, canary]
+    needs: [scope, preflight]
     if: >-
       !cancelled() &&
       contains(fromJSON(needs.scope.outputs.area_names), 'biscuit-tui')
@@ -389,7 +341,7 @@ jobs:
 
   playa-windows:
     name: playa-windows
-    needs: [scope, preflight, canary]
+    needs: [scope, preflight]
     if: >-
       !cancelled() &&
       contains(fromJSON(needs.scope.outputs.area_names), 'playa')
@@ -401,7 +353,7 @@ jobs:
   # workflow is messenger's entire CI ownership.
   messenger-desktop:
     name: messenger-desktop
-    needs: [scope, preflight, canary]
+    needs: [scope, preflight]
     if: >-
       !cancelled() &&
       contains(fromJSON(needs.scope.outputs.packages), 'messenger')
@@ -433,11 +385,10 @@ jobs:
     name: ci-verdict
     # Every job that can produce a result or status artifact. The `wsl` leg and
     # each area's `check`/`lint`/`test`/`l2`/`browser` jobs are nested inside
-    # `area-ci`/`canary`, so they are covered transitively.
+    # `area-ci`, so they are covered transitively.
     needs:
       - scope
       - preflight
-      - canary
       - area-ci
       - affected-coverage
       - claudine-generator-signals
@@ -568,7 +519,6 @@ jobs:
     needs:
       - scope
       - preflight
-      - canary
       - affected-coverage
       - claudine-generator-signals
       - darkmatter-no-color
@@ -589,7 +539,6 @@ jobs:
           RESULTS: |
             bootstrap (scope calculation):${{ needs.scope.result }}
             bootstrap (preflight):${{ needs.preflight.result }}
-            canary (shared-change regression):${{ needs.canary.result }}
             claudine generator drift:${{ needs.claudine-generator-signals.result }}
             darkmatter NO_COLOR contract:${{ needs.darkmatter-no-color.result }}
             rendezvous native IPC runtime:${{ needs.rendezvous.result }}
