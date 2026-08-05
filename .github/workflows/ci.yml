@@ -78,7 +78,16 @@ jobs:
               scope_args=(--all)
             else
               mapfile -d '' changed_files < <(git diff --name-only -z "$base" "$head")
-              scope_args=(-- "${changed_files[@]}")
+              scope_args=()
+              # A lockfile change is scoped from its own diff rather than
+              # escalated to the whole workspace, which needs the base revision's
+              # copy. If the extraction fails the flag is simply not passed and
+              # `affected_scope.py` falls back to full scope — the safe default
+              # is never silently skipped, only ever widened.
+              if git show "$base:Cargo.lock" >base-Cargo.lock 2>/dev/null; then
+                scope_args+=(--base-lockfile base-Cargo.lock)
+              fi
+              scope_args+=(-- "${changed_files[@]}")
             fi
           fi
 
