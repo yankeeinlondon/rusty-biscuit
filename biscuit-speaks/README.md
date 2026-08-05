@@ -141,6 +141,7 @@ These providers are often found on hosts and may be added to this library in the
 | `ELEVENLABS_API_KEY`  | ElevenLabs API key (preferred)      |
 | `ELEVEN_LABS_API_KEY` | ElevenLabs API key (alternative)    |
 | `TTS_PROVIDER`        | Override default provider selection |
+| `BISCUIT_SPEAKS_CACHE` | Path to the provider capability cache **file**, replacing `~/.biscuit-speaks-cache.json`. Its parent directory must already exist. |
 
 ## API Overview
 

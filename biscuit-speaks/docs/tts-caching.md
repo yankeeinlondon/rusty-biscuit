@@ -95,6 +95,14 @@ Files live in the OS temp directory and are cleaned up by the operating system o
 
 A separate cache at `~/.biscuit-speaks-cache.json` stores discovered TTS provider capabilities (installed voices, available voices). This avoids expensive re-enumeration of the host system on every TTS operation.
 
+### Location
+
+`BISCUIT_SPEAKS_CACHE` names the cache file directly and takes priority over the home-directory default; an empty value is treated as unset. Its parent directory must already exist.
+
+Because environment is inherited by child processes, setting it also confines a re-spawned `so-you-say` -- which is how `--background --refresh-cache`, whose rewrite happens in a detached grandchild, is kept out of the caller's real cache during tests.
+
+`cache_file_path()` reads the variable; `resolve_cache_path()` applies the precedence rule and is what the tests exercise, so the rule can be asserted without mutating process-global environment state.
+
 ### Structure
 
 The cache file is a JSON envelope with:
