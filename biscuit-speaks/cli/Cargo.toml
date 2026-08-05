@@ -19,6 +19,9 @@ sniff = { path = "../../sniff/lib" }
 strum = "0.28"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
+[dev-dependencies]
+tempfile = "3"
+
 # Opt-out of benchmarking: this is a thin CLI wrapper; benchmarks belong
 # on the underlying library crate.
 [package.metadata.benchmarks]
