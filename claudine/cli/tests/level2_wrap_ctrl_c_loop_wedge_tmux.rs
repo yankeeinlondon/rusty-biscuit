@@ -172,7 +172,7 @@ fn double_ctrl_c_force_exits(deadline: Duration) -> (bool, String) {
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
 
-    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let claudine = common::claudine_bin();
     // The sentinel carries claudine's exit code (`$?` after the `;`), so a
     // match proves not just "control returned" but "returned with exit 130" —
     // the force-exit code. `;` (not `&&`) runs the echo regardless of code.

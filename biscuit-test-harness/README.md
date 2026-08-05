@@ -63,6 +63,24 @@ fn level2_prose_emits_sgr() {
 }
 ```
 
+## Locating the binary under test — `bin_exe!`
+
+Any test that spawns a workspace binary should take its path from
+[`bin_exe!`](src/bin_exe.rs) rather than `env!("CARGO_BIN_EXE_<name>")`:
+
+```rust
+use biscuit_test_harness::bin_exe;
+
+let output = Command::new(bin_exe!("so-you-say")).arg("--help").output()?;
+```
+
+The `env!` form bakes in an absolute path under the *build* host's target
+directory. That is fine wherever the runner built the binary, and wrong for the
+`wsl2-ubuntu` CI leg, which executes a `cargo nextest archive` built elsewhere
+and extracted into a temp directory — every spawn there fails with
+`NotFound`. `bin_exe!` reads nextest's run-time republication of the path first
+and keeps the compile-time value as the fallback.
+
 ## The `TerminalHarness` trait
 
 Every backend implements one **shell-model-first** contract:

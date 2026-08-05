@@ -130,7 +130,7 @@ fn ctrl_c_terminates(extra_env: &[(&str, &str)], deadline: Duration) -> (bool, S
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
 
-    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let claudine = common::claudine_bin();
     // Build one command line: env prefixes, the wrapper invocation, then a
     // chained marker echo. When (and only when) claudine exits and the pane
     // returns to the shell, the sentinel is echoed — the unambiguous

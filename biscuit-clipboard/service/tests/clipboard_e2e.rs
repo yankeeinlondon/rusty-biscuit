@@ -50,11 +50,9 @@ fn e2e_enabled() -> bool {
         .unwrap_or(false)
 }
 
-/// Locate the `clipper` binary.
-///
-/// Cargo sets `CARGO_BIN_EXE_clipper` when running integration tests.
-fn clipper_bin() -> String {
-    std::env::var("CARGO_BIN_EXE_clipper").unwrap_or_else(|_| "clipper".to_string())
+/// Locate the `clipper` binary built for this test binary.
+fn clipper_bin() -> std::path::PathBuf {
+    biscuit_test_harness::bin_exe!("clipper")
 }
 
 /// Spawn `clipper` with a temp runtime directory and wait for it to

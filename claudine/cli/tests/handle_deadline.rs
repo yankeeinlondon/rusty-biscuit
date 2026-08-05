@@ -61,7 +61,7 @@ fn handle_exits_on_deadline() {
     fs::create_dir_all(&home_dir).unwrap();
     fs::create_dir_all(&cwd).unwrap();
 
-    let bin = env!("CARGO_BIN_EXE_claudine");
+    let bin = common::claudine_bin();
     let mut child = Command::new(bin)
         .current_dir(&cwd)
         .env("HOME", &home_dir)

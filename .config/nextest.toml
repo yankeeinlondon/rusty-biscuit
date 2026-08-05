@@ -43,6 +43,17 @@ slow-timeout = { period = "5s", terminate-after = 6 }
 # clean tests are not slowed — only an actual leak waits the window out. To
 # downgrade leaks back to a non-fatal warning, drop `result = "fail"`.
 leak-timeout = { period = "100ms", result = "fail" }
+# `cargo nextest archive` carries test binaries and non-test *bin* targets;
+# examples are built but never archived. biscuit-terminal's PTY tests spawn the
+# `discovery_probe` example, so without this they fail in the only environment
+# that runs from an archive — the `wsl2-ubuntu` leg — with "discovery_probe
+# example not found". Both layouts are listed because the CI archive builds with
+# an explicit `--target` (triple subdirectory) while local builds do not;
+# `on-missing = "ignore"` keeps whichever one does not apply silent.
+archive.include = [
+    { path = "debug/examples/discovery_probe", relative-to = "target", on-missing = "ignore" },
+    { path = "x86_64-unknown-linux-gnu/debug/examples/discovery_probe", relative-to = "target", on-missing = "ignore" },
+]
 
 [[profile.default.overrides]]
 platform = { host = "cfg(windows)" }

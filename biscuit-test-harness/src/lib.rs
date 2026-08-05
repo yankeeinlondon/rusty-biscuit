@@ -35,6 +35,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 pub mod apple_terminal;
+pub mod bin_exe;
 pub mod cliclick;
 pub mod kitty;
 pub mod layout_invariants;

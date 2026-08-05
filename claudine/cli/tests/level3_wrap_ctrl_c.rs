@@ -164,7 +164,7 @@ fn ctrl_c_terminates(extra_env: &[(&str, &str)], deadline: Duration) -> (bool, S
         .with_expected_window_title("claudine");
     harness.spawn_shell().expect("spawn WezTerm shell pane");
 
-    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let claudine = common::claudine_bin();
     // `cd` into the workspace before launching claudine. A `wezterm cli spawn`
     // pane inherits the mux server's working directory — typically the
     // developer's real home or a large repo — and claudine's startup repo

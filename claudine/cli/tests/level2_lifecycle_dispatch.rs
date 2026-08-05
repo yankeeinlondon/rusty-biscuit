@@ -176,7 +176,7 @@ fn run_compose_in_tmux_with_args(
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
 
-    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let claudine = common::claudine_bin();
     let sentinel = format!("L2_LC_DONE_{seq}");
     let env_pairs: Vec<(&str, String)> = vec![
         ("NO_COLOR", "1".to_string()),

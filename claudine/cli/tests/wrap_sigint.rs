@@ -55,7 +55,7 @@ exit 0
 "#,
     );
 
-    let bin = env!("CARGO_BIN_EXE_claudine");
+    let bin = common::claudine_bin();
     let child = std::process::Command::new(bin)
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())

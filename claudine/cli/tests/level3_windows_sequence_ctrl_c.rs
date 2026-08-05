@@ -255,7 +255,7 @@ fn level3_windows_sequence_ctrl_c_fans_out_to_parallel_children() {
         &format!("set USERPROFILE={}", workspace.path().display()),
     );
 
-    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let claudine = common::claudine_bin();
     send_line(
         &mut harness,
         &format!(

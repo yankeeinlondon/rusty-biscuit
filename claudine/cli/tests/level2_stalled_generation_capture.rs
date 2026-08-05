@@ -179,7 +179,7 @@ done
     // ambient `NO_COLOR` out-votes — see `common::clear_no_color`.
     clear_no_color(&mut harness);
 
-    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let claudine = common::claudine_bin();
     let env_pairs: [(&str, String); 7] = [
         ("FORCE_COLOR", "1".to_string()),
         ("HOME", workspace.path().display().to_string()),

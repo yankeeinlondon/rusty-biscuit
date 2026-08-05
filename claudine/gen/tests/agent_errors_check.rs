@@ -18,6 +18,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use biscuit_test_harness::bin_exe;
+
 use claudine_gen::{
     Check, GateErrorScope, GateStatus, check_agent_errors, evaluate_agent_errors,
 };
@@ -76,7 +78,7 @@ fn outcome_error_scope(path: &Path) -> Option<String> {
 }
 
 fn run_checker(area: &Path, slug: &str, findings: &Path) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_claudine-gen"))
+    Command::new(bin_exe!("claudine-gen"))
         .arg("--area")
         .arg(area)
         .arg("agent-errors")

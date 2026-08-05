@@ -138,7 +138,7 @@ fn run_loop_in_tmux(staged: &Staged, expected_min_lines: usize) -> String {
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
 
-    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let claudine = common::claudine_bin();
     let sentinel = format!("L2_LOOP_DONE_{seq}");
     let env_prefix = format!(
         "NO_COLOR='1' HOME='{home}' PATH='{path}' ",

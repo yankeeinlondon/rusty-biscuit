@@ -70,7 +70,7 @@ fn stage_goose_stub(bin_dir: &Path, marker_file: &Path, prompt_file: &Path) {
 }
 
 fn send_compose_command(harness: &mut WezTermHarness, ws: &TestWorkspace, sentinel: &str) {
-    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let claudine = common::claudine_bin();
     let home = ws.path().to_string_lossy();
     let path = augmented_path(&ws.path().join("bin"));
 
