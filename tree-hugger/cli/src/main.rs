@@ -4,6 +4,7 @@ use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
+use biscuit_file::to_portable_string;
 use biscuit_terminal::discovery::detection::ColorDepth;
 use biscuit_terminal::prelude::{Prose, Terminal, TerminalRenderable, WordWrap, strip_escape_codes};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
@@ -11,7 +12,6 @@ use clap_complete::Shell;
 use clap_complete::engine::{ArgValueCompleter, CompletionCandidate};
 use clap_complete::env::{CompleteEnv, Shells};
 use owo_colors::{OwoColorize, Style};
-use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
 use tree_hugger::adapter::{
     AdapterConfig, AdapterMetadata, ExternalDiagnosticAdapter, OxlintAdapter,
@@ -28,6 +28,7 @@ use tree_hugger::{
     find_git_root, find_package_root,
 };
 use tree_hugger::god_files::{GodAnalysis, GodFiles, RefactorHint, RiskBand, SymbolBlock};
+use url::Url;
 mod import_format;
 mod prelude;
 mod scanner;
@@ -769,30 +770,28 @@ fn source_line_for_symbol(symbol: &SymbolInfo) -> Option<String> {
 }
 
 /// Creates an OSC8 hyperlink for a file path with line number.
+///
+/// Falls back to undecorated `text` when `path` has no `file://` spelling, so a
+/// path a terminal could not follow anyway is never wrapped in a dead link.
 fn hyperlink(path: &Path, line: usize, text: &str) -> String {
-    const FILE_URL_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC.remove(b'/').remove(b':');
-    let absolute_path = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .map(|root| root.join(path))
-            .unwrap_or_else(|_| path.to_path_buf())
+    let Some(url) = file_url(path) else {
+        return text.to_string();
     };
-    let path_str = absolute_path.to_string_lossy();
-    let encoded = utf8_percent_encode(&path_str, FILE_URL_ENCODE_SET);
-    format!(
-        "\x1b]8;;file://{}#L{}\x1b\\{}\x1b]8;;\x1b\\",
-        encoded, line, text
-    )
+    format!("\x1b]8;;{}#L{}\x1b\\{}\x1b]8;;\x1b\\", url, line, text)
 }
 
+/// Renders a path for display, relative to `root` when it lies beneath it.
+///
+/// Output is slash-separated on every platform: these strings are the CLI's
+/// user-facing and grep-able surface, and Windows backslashes would make them
+/// diverge from the paths callers typed and from the other platforms' output.
 fn display_path(path: &Path, root: Option<&Path>) -> String {
     if let Some(root) = root
         && let Ok(relative) = path.strip_prefix(root)
     {
-        return relative.display().to_string();
+        return to_portable_string(relative);
     }
-    path.display().to_string()
+    to_portable_string(path)
 }
 
 #[derive(ValueEnum, Debug, Clone, Copy)]
@@ -1310,16 +1309,33 @@ fn complete_source_path(current: &OsStr) -> Vec<CompletionCandidate> {
             if COMPLETION_SKIPPED_DIRS.contains(&name) {
                 continue;
             }
-            let mut suggestion = prefix.join(&raw).into_os_string();
-            suggestion.push("/");
-            candidates.push(CompletionCandidate::new(suggestion));
+            candidates.push(CompletionCandidate::new(format!(
+                "{}/",
+                completion_candidate(prefix, name)
+            )));
         } else if ProgrammingLanguage::from_path(&path).is_some() {
-            let suggestion = prefix.join(&raw).into_os_string();
-            candidates.push(CompletionCandidate::new(suggestion));
+            candidates.push(CompletionCandidate::new(completion_candidate(prefix, name)));
         }
     }
     candidates.sort_by(|a, b| a.get_value().cmp(b.get_value()));
     candidates
+}
+
+/// Joins a completion prefix and an entry name into one candidate path.
+///
+/// `Path::join` would splice in the platform separator, so a Windows candidate
+/// came back mixed — `tree-hugger\cli/` — which the shell cannot re-complete
+/// against and which diverges from the slash-separated paths `hug` prints.
+fn completion_candidate(prefix: &Path, name: &str) -> String {
+    if prefix.as_os_str().is_empty() {
+        return name.to_string();
+    }
+    let base = to_portable_string(prefix);
+    if base.ends_with('/') {
+        format!("{base}{name}")
+    } else {
+        format!("{base}/{name}")
+    }
 }
 
 /// Splits a partial path into `(directory_prefix, name_partial)`.
@@ -2749,7 +2765,7 @@ fn render_unified_diagnostic(diagnostic: &Diagnostic, file: &Path, config: &Outp
     // Location line: "  --> file:line:col"
     let location = format!(
         "{}:{}:{}",
-        file.display(),
+        to_portable_string(file),
         diagnostic.range.start_line,
         diagnostic.range.start_column
     );
@@ -3153,11 +3169,19 @@ fn prose_line(term: &Terminal, plain: bool, indent: usize, markup: &str) {
     println!("{}{}", " ".repeat(indent), rendered);
 }
 
-/// Build a percent-encoded `file://` URL for an absolute path.
-fn file_url(absolute_path: &str) -> String {
-    const FILE_URL_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC.remove(b'/').remove(b':');
-    let encoded = utf8_percent_encode(absolute_path, FILE_URL_ENCODE_SET);
-    format!("file://{encoded}")
+/// Builds a `file://` URL for `path`, resolving a relative path against the
+/// process working directory.
+///
+/// `Url::from_file_path` owns the platform spelling: a Windows path becomes
+/// `file:///C:/…`, not the `file://C:%5C…` a percent-encoder would produce from
+/// the native separators. Returns `None` for a path it cannot express as a URL.
+fn file_url(path: &Path) -> Option<String> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().ok()?.join(path)
+    };
+    Url::from_file_path(absolute).ok().map(String::from)
 }
 
 /// Render the full god-files report via biscuit-terminal `Prose`.
@@ -3220,12 +3244,10 @@ fn render_god_analysis(term: &Terminal, plain: bool, analysis: &GodAnalysis) {
         RiskBand::Moderate => "yellow",
     };
 
-    let rel = Prose::escape_text(&analysis.relative_path.display().to_string());
-    let label = if term.osc_link_support {
-        let url = file_url(analysis.file.raw());
-        format!("<a href={}>{rel}</a>", Prose::quoted_attr(&url))
-    } else {
-        rel
+    let rel = Prose::escape_text(&to_portable_string(&analysis.relative_path));
+    let label = match file_url(Path::new(analysis.file.raw())).filter(|_| term.osc_link_support) {
+        Some(url) => format!("<a href={}>{rel}</a>", Prose::quoted_attr(&url)),
+        None => rel,
     };
 
     prose_line(
@@ -3388,5 +3410,102 @@ fn format_refactor_hint(hint: &RefactorHint) -> String {
                 comment_density * 100.0
             )
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_path_relativizes_beneath_the_root() {
+        let root = Path::new("/repo");
+        assert_eq!(
+            display_path(Path::new("/repo/src/main.rs"), Some(root)),
+            "src/main.rs"
+        );
+    }
+
+    #[test]
+    fn display_path_keeps_paths_outside_the_root_whole() {
+        assert_eq!(
+            display_path(Path::new("/elsewhere/x.rs"), Some(Path::new("/repo"))),
+            "/elsewhere/x.rs"
+        );
+    }
+
+    /// The regression the `hug` CLI shipped on Windows: relative output paths
+    /// came back `tree-hugger\cli\src\main.rs`, diverging from the paths the
+    /// caller typed and from the other platforms' output.
+    #[test]
+    #[cfg(windows)]
+    fn display_path_renders_windows_separators_as_slashes() {
+        let root = Path::new(r"C:\repo");
+        assert_eq!(
+            display_path(
+                Path::new(r"C:\repo\tree-hugger\cli\src\main.rs"),
+                Some(root)
+            ),
+            "tree-hugger/cli/src/main.rs"
+        );
+    }
+
+    /// A percent-encoder over the native spelling produced `file://C:%5Crepo…`,
+    /// which no terminal resolves.
+    #[test]
+    #[cfg(windows)]
+    fn file_url_uses_the_windows_drive_uri_shape() {
+        assert_eq!(
+            file_url(Path::new(r"C:\repo\a b.rs")).as_deref(),
+            Some("file:///C:/repo/a%20b.rs")
+        );
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn file_url_percent_encodes_reserved_characters() {
+        assert_eq!(
+            file_url(Path::new("/repo/a b.rs")).as_deref(),
+            Some("file:///repo/a%20b.rs")
+        );
+    }
+
+    #[test]
+    fn completion_candidate_without_a_prefix_is_the_bare_name() {
+        assert_eq!(
+            completion_candidate(Path::new(""), "tree-hugger"),
+            "tree-hugger"
+        );
+    }
+
+    #[test]
+    fn completion_candidate_does_not_double_a_trailing_separator() {
+        assert_eq!(
+            completion_candidate(Path::new("tree-hugger/"), "cli"),
+            "tree-hugger/cli"
+        );
+    }
+
+    /// A `Path::join` here produced `tree-hugger\cli` on Windows, giving the
+    /// shell a mixed-separator candidate once the trailing `/` was appended.
+    #[test]
+    fn completion_candidate_joins_with_a_slash() {
+        assert_eq!(
+            completion_candidate(Path::new("tree-hugger"), "cli"),
+            "tree-hugger/cli"
+        );
+    }
+
+    #[test]
+    fn hyperlink_wraps_text_in_an_osc8_file_link() {
+        let absolute = if cfg!(windows) {
+            r"C:\repo\x.rs"
+        } else {
+            "/repo/x.rs"
+        };
+        let linked = hyperlink(Path::new(absolute), 12, "x.rs");
+        assert!(linked.contains("\x1b]8;;file:///"), "{linked}");
+        assert!(linked.contains("#L12"), "{linked}");
+        assert!(linked.ends_with("x.rs\x1b]8;;\x1b\\"), "{linked}");
     }
 }

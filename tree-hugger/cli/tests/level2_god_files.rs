@@ -80,13 +80,30 @@ fn write_moderate_fixture(dir: &Path) {
     std::fs::write(dir.join("god_moderate.py"), src).expect("write moderate fixture");
 }
 
+/// Render `path` as a single shell word for the POSIX shell running in the
+/// pane.
+///
+/// The harness types its command line into a shell, so a Windows path reaches
+/// it as a string full of `\` escapes — bash silently swallows them and looks
+/// up `W:rusty-biscuit-targetdebughug.exe`. Slash separators are what that
+/// shell (Git Bash / MSYS) expects on Windows; single quotes then keep spaces
+/// in a temp-dir path from splitting the word.
+fn shell_word(path: &Path) -> String {
+    let portable = biscuit_file::to_portable_string(path);
+    format!("'{}'", portable.replace('\'', "'\\''"))
+}
+
 /// Drive `hug god-files <dir>` in the pane (forcing color + OSC8 via
 /// `CLICOLOR_FORCE`) and capture the rendered frame.
 fn run_god_files<H: TerminalHarness>(harness: &mut H, dir: &Path) -> CapturedFrame {
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
 
-    let cmd = format!("{} god-files {}", hug(), dir.display());
+    let cmd = format!(
+        "{} god-files {}",
+        shell_word(Path::new(hug())),
+        shell_word(dir)
+    );
     harness
         .send_command_with_env(&cmd, &[("CLICOLOR_FORCE", "1")])
         .expect("send_command_with_env failed");

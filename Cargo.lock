@@ -1350,7 +1350,6 @@ dependencies = [
  "schematic-schema",
  "serde",
  "serde_json",
- "serial_test",
  "sniff",
  "tempfile",
  "thiserror 2.0.18",
@@ -1372,6 +1371,7 @@ dependencies = [
  "owo-colors",
  "sniff",
  "strum 0.28.0",
+ "tempfile",
  "tokio",
 ]
 
@@ -14336,13 +14336,13 @@ name = "tree-hugger-cli"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
+ "biscuit-file",
  "biscuit-terminal",
  "biscuit-test-harness",
  "clap 4.6.1",
  "clap_complete",
  "ignore",
  "owo-colors",
- "percent-encoding",
  "predicates",
  "serde",
  "serde_json",
@@ -14350,6 +14350,7 @@ dependencies = [
  "tempfile",
  "test-toolkit",
  "tree-hugger",
+ "url",
 ]
 
 [[package]]

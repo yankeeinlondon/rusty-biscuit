@@ -11,6 +11,8 @@ from pathlib import Path
 
 from affected_scope import (
     calculate_scope,
+    lockfile_impacted_names,
+    parse_lockfile,
     environment_policy,
     validate_area_schema,
     validate_no_shadow_workspaces,
@@ -753,6 +755,162 @@ class ShadowWorkspaceTests(unittest.TestCase):
         # is a real separate workspace rather than a shadow.
         (self.root / "standalone" / "Cargo.toml").write_text('[workspace]\nmembers = ["x"]\n')
         validate_no_shadow_workspaces(self.metadata, self.root)
+
+
+def lockfile(entries: dict[str, tuple[str, list[str]]]) -> str:
+    """Render `{name: (version, [deps])}` as Cargo.lock text."""
+    blocks = ['version = 4\n']
+    for name, (version, dependencies) in entries.items():
+        block = f'[[package]]\nname = "{name}"\nversion = "{version}"\n'
+        if dependencies:
+            rendered = "".join(f'    "{dep}",\n' for dep in dependencies)
+            block += f"dependencies = [\n{rendered}]\n"
+        else:
+            block += "dependencies = []\n"
+        blocks.append(block)
+    return "\n".join(blocks)
+
+
+class LockfileScopeTests(unittest.TestCase):
+    """`Cargo.lock` is scoped from its diff rather than escalated (PR #39)."""
+
+    WORKSPACE = {"alpha-core", "beta-app", "shared-tests"}
+
+    def test_a_dropped_dependency_impacts_only_its_dependents(self) -> None:
+        base = lockfile(
+            {
+                "alpha-core": ("0.1.0", ["serial_test", "shared-tests"]),
+                "beta-app": ("0.1.0", ["alpha-core"]),
+                "shared-tests": ("0.1.0", []),
+                "serial_test": ("3.0.0", []),
+            }
+        )
+        head = lockfile(
+            {
+                "alpha-core": ("0.1.0", ["shared-tests"]),
+                "beta-app": ("0.1.0", ["alpha-core"]),
+                "shared-tests": ("0.1.0", []),
+            }
+        )
+
+        impacted = lockfile_impacted_names(base, head, self.WORKSPACE)
+
+        self.assertEqual({"alpha-core", "beta-app"}, impacted)
+        self.assertNotIn(
+            "shared-tests", impacted, "a crate the change cannot reach stays out"
+        )
+
+    def test_an_unchanged_lockfile_impacts_nothing(self) -> None:
+        text = lockfile({"alpha-core": ("0.1.0", ["shared-tests"]),
+                         "shared-tests": ("0.1.0", [])})
+
+        self.assertEqual(set(), lockfile_impacted_names(text, text, self.WORKSPACE))
+
+    def test_a_transitive_bump_reaches_every_dependent(self) -> None:
+        base = lockfile(
+            {
+                "alpha-core": ("0.1.0", ["serde"]),
+                "beta-app": ("0.1.0", ["alpha-core"]),
+                "shared-tests": ("0.1.0", []),
+                "serde": ("1.0.0", []),
+            }
+        )
+        head = base.replace('version = "1.0.0"', 'version = "1.0.1"')
+
+        impacted = lockfile_impacted_names(base, head, self.WORKSPACE)
+
+        self.assertEqual({"alpha-core", "beta-app"}, impacted)
+
+    def test_an_unavailable_base_is_undecidable_not_empty(self) -> None:
+        head = lockfile({"alpha-core": ("0.1.0", [])})
+
+        self.assertIsNone(lockfile_impacted_names(None, head, self.WORKSPACE))
+
+    def test_an_unparseable_side_is_undecidable_not_empty(self) -> None:
+        head = lockfile({"alpha-core": ("0.1.0", [])})
+
+        self.assertIsNone(lockfile_impacted_names("", head, self.WORKSPACE))
+        self.assertIsNone(lockfile_impacted_names(head, "", self.WORKSPACE))
+
+    def test_parse_reduces_a_versioned_dependency_to_its_crate_name(self) -> None:
+        text = (
+            '[[package]]\nname = "alpha-core"\nversion = "0.1.0"\n'
+            'dependencies = [\n'
+            '    "serde 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",\n'
+            ']\n'
+        )
+
+        self.assertEqual(
+            {("alpha-core", "0.1.0"): frozenset({"serde"})}, parse_lockfile(text)
+        )
+
+
+class LockfileFullScopeFallbackTests(unittest.TestCase):
+    """Without a decidable diff the lockfile must still select everything."""
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        self.area_config = [
+            {"area": "alpha", "check_args": "-p alpha-core"},
+            {"area": "beta", "check_args": "-p beta-app"},
+        ]
+        packages = [
+            package(self.root, "alpha-core", "alpha/lib/Cargo.toml"),
+            package(self.root, "beta-app", "beta/app/Cargo.toml"),
+        ]
+        # Deliberately unrelated: `beta` appearing in a selection is then
+        # evidence of escalation rather than of legitimate reverse-dependency
+        # closure, which is the distinction these tests exist to draw.
+        self.metadata = {
+            "workspace_members": [item["id"] for item in packages],
+            "packages": packages,
+            "resolve": {
+                "nodes": [
+                    {"id": "alpha-core", "deps": []},
+                    {"id": "beta-app", "deps": []},
+                ]
+            },
+        }
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def test_a_lockfile_change_without_a_base_selects_the_full_workspace(self) -> None:
+        (self.root / "Cargo.lock").write_text(
+            lockfile({"alpha-core": ("0.1.0", [])}), encoding="utf-8"
+        )
+
+        scope = calculate_scope(
+            ["Cargo.lock"], self.root, self.metadata, self.area_config
+        )
+
+        self.assertTrue(scope["full_scope"])
+        self.assertEqual(["alpha", "beta"], [area["area"] for area in scope["areas"]])
+
+    def test_a_decidable_lockfile_change_does_not_select_the_full_workspace(
+        self,
+    ) -> None:
+        base = lockfile(
+            {"alpha-core": ("0.1.0", ["serde"]), "beta-app": ("0.1.0", []),
+             "serde": ("1.0.0", [])}
+        )
+        head = lockfile(
+            {"alpha-core": ("0.1.0", []), "beta-app": ("0.1.0", [])}
+        )
+        (self.root / "Cargo.lock").write_text(head, encoding="utf-8")
+
+        scope = calculate_scope(
+            ["Cargo.lock"],
+            self.root,
+            self.metadata,
+            self.area_config,
+            False,
+            base,
+        )
+
+        self.assertFalse(scope["full_scope"])
+        self.assertEqual(["alpha"], [area["area"] for area in scope["areas"]])
 
 
 if __name__ == "__main__":

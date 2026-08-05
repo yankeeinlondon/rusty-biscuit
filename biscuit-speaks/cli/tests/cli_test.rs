@@ -546,7 +546,16 @@ fn real_cli_speaks_with_default_provider() {
 
 #[test]
 fn test_cli_background_with_refresh_cache_is_allowed() {
+    // `--background` re-spawns the CLI detached and returns before reaching the
+    // refresh, so the cache rewrite happens in a grandchild that OUTLIVES this
+    // test. `BISCUIT_SPEAKS_CACHE` is inherited across that re-spawn, which is
+    // the only reason the orphan cannot reach the caller's real cache file.
+    // The temp directory may be gone by the time it writes; a failed write into
+    // a vanished directory is the intended outcome, not a missed assertion.
+    let cache_dir = tempfile::TempDir::new().expect("Failed to create temp dir");
+
     let output = cli()
+        .env("BISCUIT_SPEAKS_CACHE", cache_dir.path().join("cache.json"))
         .args(["--background", "--refresh-cache", "test"])
         .output()
         .expect("Failed to execute");
