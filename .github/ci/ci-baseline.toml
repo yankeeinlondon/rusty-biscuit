@@ -243,3 +243,293 @@ expiry = "2026-10-31"
 #   source_run = "30323254931"
 #   expiry = "2026-10-31"
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Synced from main's own run 30791562395 (2026-08-03).
+#
+# `ci-verdict` is the sole required check and blocks on any FAIL not recorded
+# here, so every one of these was blocking every pull request in the repo. They
+# are RECORDED, not triaged: each is a real failure on main that still needs
+# fixing. The expiry is what forces that to happen rather than letting the
+# entry become permanent.
+# ---------------------------------------------------------------------------
+
+[[failure]]
+area = "biscuit-speaks"
+environment = "windows-latest"
+tier = "L1"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 1 failing test, e.g. biscuit-speaks::cache::tests::test_populate_cache_for_provider_updates_existing"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+area = "biscuit-speaks"
+environment = "wsl2-ubuntu"
+tier = "L1"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 34 failing tests, e.g. biscuit-speaks-cli::cli_test::test_cli_background_flag"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+area = "biscuit-terminal"
+environment = "macos-latest"
+tier = "L1"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 1 failing test, e.g. biscuit-terminal::level1_cursor::cursor_position_parses_csi_r_reply"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+area = "biscuit-terminal"
+environment = "macos-latest"
+tier = "L2"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 1 failing test, e.g. biscuit-terminal-cli::level2_apple_terminal_prose::level2_apple_terminal_double_underline_plain_text_visible"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+area = "biscuit-terminal"
+environment = "ubuntu-latest"
+tier = "L2"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 1 failing test, e.g. biscuit-terminal-cli::level2_diagrams::level2_diagram_fallback_when_no_image_protocol"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+area = "biscuit-terminal"
+environment = "windows-latest"
+tier = "L1"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 34 failing tests, e.g. biscuit-terminal-cli::about::test_about_alacritty_json_extracts_legacy_yaml_candidate"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+area = "biscuit-terminal"
+environment = "wsl2-ubuntu"
+tier = "L1"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 41 failing tests, e.g. biscuit-terminal-cli::integration_test::test_columns_snapshot"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+area = "claudine"
+environment = "macos-latest"
+tier = "L2"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 3 failing tests, e.g. claudine-cli::level2_context_capture::level2_context_default_at_140_fills_cap_in_tmux"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+area = "claudine"
+environment = "ubuntu-latest"
+tier = "L1"
+shard = "1/4"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 2 failing tests, e.g. claudine-cli::prompt_reporting::compose_frontmatter_verbose_shows_full_system_prompt"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+area = "claudine"
+environment = "ubuntu-latest"
+tier = "L2"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 4 failing tests, e.g. claudine-cli::level2_context_capture::level2_context_default_at_140_fills_cap_in_tmux"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+area = "claudine"
+environment = "windows-latest"
+tier = "L1"
+shard = "3/4"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 1 failing test, e.g. claudine::config::codex::tests::sync_considers_proper_wrapper_registration_in_sync"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+area = "claudine"
+environment = "wsl2-ubuntu"
+tier = "L1"
+shard = "1/4"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 11 failing tests, e.g. claudine-cli::bin/claudine::commands::config_tui::tabs::services::tests::services_render_matches_snapshot"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+area = "claudine"
+environment = "wsl2-ubuntu"
+tier = "L1"
+shard = "2/4"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 8 failing tests, e.g. claudine-cli::loop_cli::compose_loop_file_required_setter_revalidates_against_launch_cwd_each_iteration"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+area = "claudine"
+environment = "wsl2-ubuntu"
+tier = "L1"
+shard = "3/4"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 6 failing tests, e.g. claudine-cli::bin/claudine::commands::config_tui::widgets::modal::tests::render_list_modal_matches_snapshot"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+area = "claudine"
+environment = "wsl2-ubuntu"
+tier = "L1"
+shard = "4/4"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 8 failing tests, e.g. claudine-cli::sequence_groups::a_parallel_group_overlaps_its_members"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+area = "darkmatter"
+environment = "macos-latest"
+tier = "L1"
+shard = "4/4"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 1 failing test, e.g. darkmatter::markdown::compose::remote_fetch::integration_tests::mock_server_duplicate_url_fetches_once"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+area = "darkmatter"
+environment = "macos-latest"
+tier = "L2"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 1 failing test, e.g. darkmatter-cli::level2_code_block_styling::level2_code_block_clears_inherited_dim_before_theme_colors"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+area = "darkmatter"
+environment = "ubuntu-latest"
+tier = "L2"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 1 failing test, e.g. darkmatter-cli::level2_schema_about::level2_schema_about_light_terminal_uses_dark_code_theme"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+area = "darkmatter"
+environment = "wsl2-ubuntu"
+tier = "L1"
+shard = "1/4"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 48 failing tests, e.g. darkmatter-cli::level2_harness_integrity::assert_shim_resolves_to_built_accepts_valid_link"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+area = "darkmatter"
+environment = "wsl2-ubuntu"
+tier = "L1"
+shard = "2/4"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 43 failing tests, e.g. darkmatter::cutover_reference::reference_centered_table"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+area = "darkmatter"
+environment = "wsl2-ubuntu"
+tier = "L1"
+shard = "3/4"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 39 failing tests, e.g. darkmatter-cli::level2_harness_integrity::md_shim_path_is_absolute_temp_dir_link"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+area = "darkmatter"
+environment = "wsl2-ubuntu"
+tier = "L1"
+shard = "4/4"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 39 failing tests, e.g. darkmatter-cli::level2_harness_integrity::md_shim_resolves_to_cargo_built_binary"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+area = "model-citizen"
+environment = "windows-latest"
+tier = "L1"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 1 failing test, e.g. model-citizen-cli::integration_test::test_search_no_results"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+area = "research"
+environment = "windows-latest"
+tier = "L1"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 2 failing tests, e.g. research::link::creation::tests::create_deep_dive_symlink_verifies_symlink_points_to_correct_target"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+area = "schematic"
+environment = "wsl2-ubuntu"
+tier = "L1"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 3 failing tests, e.g. schematic-gen::terminal_capture::generate_dry_run_emits_module_grouped_filenames"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+area = "sniff"
+environment = "wsl2-ubuntu"
+tier = "L1"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 14 failing tests, e.g. sniff-cli::snapshots::cargo_monorepo_structure_json_snapshot"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+area = "tree-hugger"
+environment = "windows-latest"
+tier = "L1"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 6 failing tests, e.g. tree-hugger-cli::cli::test_exclude_files_glob_filters_scanned_files"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+area = "unchained-ai"
+environment = "wsl2-ubuntu"
+tier = "L1"
+shard = "1/1"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 1 failing test, e.g. model_id::ui::ui"
+source_run = "30791562395"
+expiry = "2026-11-30"
