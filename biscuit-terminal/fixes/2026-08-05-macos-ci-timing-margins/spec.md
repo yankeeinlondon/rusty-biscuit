@@ -1,5 +1,5 @@
 ---
-status: draft
+status: implemented
 created: 2026-08-05
 ---
 
@@ -19,17 +19,51 @@ Neither is caused by the PR they were observed in (#35, which touches only
 `tree-hugger`). `cursor_position_parses_csi_r_reply` fails identically on
 `main`.
 
-Both are wall-clock margins that hold only when a thread is scheduled
-promptly. The CI runner image is `macos-26-arm64`, a 3-core machine; nextest
-defaults to `-j = ncpu`, so CI runs three test processes on three cores while a
-16-core developer host runs sixteen on sixteen. The same nominal configuration
-produces completely different scheduling scarcity, and both margins are below
-the noise floor on three cores.
+The cursor failure is a demonstrated wall-clock race. The `LEAK-FAIL` has a
+different evidence level: the test's reachable path owns no child process or
+inherited pipe handle, so delayed observation of closed output handles under
+runner contention is the leading explanation, but one CI occurrence does not
+prove the scheduler mechanism. The CI runner image is `macos-26-arm64`, a
+3-core machine; nextest defaults to `-j = ncpu`, so CI runs three test processes
+on three cores while a 16-core developer host runs sixteen on sixteen. The same
+nominal configuration produces different scheduling scarcity.
 
 This is not a "flaky test" in the sense of an unlucky coin flip.
 `cursor_position_parses_csi_r_reply` failed in *both* macOS runs examined, at
 the identical position in the run (2069/2942). On three cores it fails nearly
 always; on sixteen it fails nearly never.
+
+## Review Findings
+
+The proposed direction is sound, subject to these implementation constraints:
+
+1. **Generalize the shared answer type.** Reusing an `OscAnswer` for a CPR
+   exchange makes the abstraction and its documentation false. Rename it to a
+   protocol-neutral name such as `ProbeAnswer`, update its documentation, and
+   update the existing OSC-cache call sites in the same change.
+2. **Drive each probe through a terminal result marker.** Observing `ESC[6n` is
+   the trigger for the reply, not the completion condition. Each cursor test
+   must continue draining until its `cursor_position=...` or
+   `cursor_timeout=...` line is observed so the spawned child exits before the
+   PTY session is dropped.
+3. **Treat the 10ms poll interval as nominal, not guaranteed.** The new design
+   removes the fixed 80ms delay and process-start timing from the race, but the
+   driver thread can still be descheduled between observing the query and
+   writing the reply. The improvement is a substantially larger response
+   budget, not a hard 90ms margin.
+4. **Limit and order the nextest override deliberately.** The failure has only
+   been observed on macOS, so the new 1s override should include a macOS host
+   filter. It must appear after existing, more-specific leak-timeout overrides;
+   nextest uses the first matching override for each setting, and the existing
+   `browser_` 5s exception must retain precedence.
+5. **Do not encode test counts as a contract.** Counts vary with features and
+   tier filters and will drift. Scope validation must assert that `kind(lib)`
+   selects the library unit-test binary and no integration binaries, while
+   treating the observed count as diagnostic output only.
+6. **Retain the OSC timing debt explicitly.** The OSC tests have ample measured
+   margin today, so migrating them is not required for this fix. Their fixed
+   sleeps remain temporally coupled to the implementation and could become
+   unsafe if terminal-app discovery becomes faster.
 
 ## Defect 1 — `cursor_position_parses_csi_r_reply`
 
@@ -99,7 +133,7 @@ in its own process, so `serial_test`'s in-process mutex does nothing across
 tests. This is already documented in the repository at
 `just/devops.just:1546`. The attribute should not be read as isolation.
 
-### `level1_osc_queries.rs` Is NOT Affected
+### `level1_osc_queries.rs` Is Not Currently Failing
 
 `level1_osc_queries.rs` uses the same `sleep(80ms)` pattern against the same
 100ms `DEFAULT_TIMEOUT`, so it appears to carry an identical defect. It does
@@ -116,26 +150,37 @@ Still passing at 260ms implies `D_osc > 160ms` — an order of magnitude more
 slack than the cursor path. `cursor_position()` performs no detection before
 writing its query; it goes straight to `open("/dev/tty")` and writes. It is the
 fastest test to reach its query and therefore the one with the least slack.
-The OSC tests are protected by being slow.
+The OSC tests currently have extra margin because this path is slow.
 
-**No change is required in `level1_osc_queries.rs`.**
+**No change is required in `level1_osc_queries.rs` for this fix.** This is not a
+claim that fixed sleeps are a durable synchronization contract; query-driven
+replies remain an appropriate follow-up if this path is changed.
 
 ### Proposed Fix
 
 Reply when the query is *observed* rather than after a fixed sleep. The
-repository already has the correct helper — `drive_probe` / `OscAnswer` in
+repository already has the correct control flow in `drive_probe` /
+`OscAnswer` in
 `biscuit-terminal/lib/tests/common/pty.rs` — used by
 `level1_terminal_osc_cache.rs`. It reads the master stream, writes each answer
 once when its query first appears, and returns when a marker is seen.
 
-All three tests in `level1_cursor.rs` route through one local helper. Test 1
-needs no reply to make its assertion, but sharing the helper makes its drain
-deterministic too: it currently asserts against whatever bytes happened to
-arrive before a second fixed sleep elapsed.
+Before sharing it with the cursor tests, rename `OscAnswer` to a
+protocol-neutral `ProbeAnswer` and update its OSC-specific documentation. This
+is a direct generalization of an existing one-shot query/reply abstraction, not
+a second PTY driver.
 
-Post-fix margin is the `drive_probe` poll interval (10ms) out of the probe's
-100ms budget — roughly 90ms of slack, and no longer a function of process
-spawn time at all.
+All three tests in `level1_cursor.rs` route through one local helper. The helper
+answers only after observing `ESC[6n`, then continues draining until the
+probe's result line is present. Test 1 does not need a valid CPR to prove query
+emission, but it should still send one and wait for `cursor_position=...` so the
+probe exits cleanly rather than being abandoned immediately after its query is
+seen.
+
+The nominal detection delay is the `drive_probe` poll interval (10ms), leaving
+most of the probe's 100ms budget available. Scheduler wake-up latency and the
+reply write still consume part of that budget, so the design must not claim a
+hard 90ms margin. Process spawn latency is removed from the response timing.
 
 ## Defect 2 — Spurious `LEAK-FAIL` on the prose unit test
 
@@ -165,10 +210,11 @@ The only `Command::new` reachable from the prose module is `find_git_root` in
 code block contains no links, and `Command::output()` pipes stdout/stderr and
 waits, so even if reached it could not hold the test's pipes.
 
-The observation of EOF is performed by nextest's own reader task. On three
-saturated cores that task may simply not be polled within 100ms. It lands on
-whichever test exits fastest, because its exit and its pipe drain fall in the
-same scheduling burst.
+Nextest waits for the test process's stdout and stderr handles to close after
+the process exits. Because this test's reachable path creates no descendant
+that can inherit those handles, the result is inconsistent with a genuine leak
+originating in the test. Delayed output-handle observation under contention is
+therefore the leading explanation, not a proven root cause.
 
 This matches five precedents already documented in `.config/nextest.toml`:
 `browser_`, `preflight_graph_*`, `worktree`, `biscuit-speaks-cli`, and
@@ -182,27 +228,35 @@ A scoped `leak-timeout` grace window, following the established pattern, in
 
 ```toml
 [[profile.default.overrides]]
+platform = { host = 'cfg(target_os = "macos")' }
 filter = 'package(biscuit-terminal) & kind(lib)'
 leak-timeout = { period = "1s", result = "fail" }
 ```
 
-`kind(lib)` was verified to select exactly the 1851-test lib unit binary and
-zero integration binaries, so the strict 100ms window stays in force for the
-PTY-spawning integration tests where a real leak is plausible.
+Use the equivalent block under `profile.ci`. Place both blocks after the
+existing leak-timeout exceptions. Nextest applies the first matching override
+for each setting, so this ordering preserves the existing 5s `browser_` grace
+for any matching library test.
+
+`kind(lib)` was verified to select the library unit-test binary and zero
+integration binaries. The exact test count is feature- and tier-dependent and
+is not part of the contract. The strict 100ms window stays in force for the
+PTY-spawning integration tests, and for all `biscuit-terminal` tests on Linux
+and Windows.
 
 `result = "fail"` is retained deliberately. Downgrading to a warning would hide
 genuine leaks; 1s only absorbs teardown and scheduling lag.
 
-Scoping to the single test name was rejected: the race lands on whichever test
-exits fastest, so a name-scoped override relocates the symptom rather than
-removing it.
+Scoping to the single test name was rejected because the evidence points to
+test-binary output-handle observation rather than behavior unique to that test.
+A name-scoped exception would encode the observed victim without addressing
+the inferred failure domain.
 
 ## Reproduction Limits
 
-Neither defect reproduces on a 16-core host, and this is expected rather than
-suspicious. Load can be added; cores cannot be removed. macOS still preempts a
-spinning thread instantly for a timer-woken one when idle cores exist, so the
-scarcity is structural, not load-based.
+Neither defect reproduces on a 16-core host. Added spin load did not reproduce
+the scheduling scarcity of the 3-core runner while idle cores remained
+available, so local load generation is not an equivalent environment.
 
 Attempts made:
 
@@ -211,33 +265,42 @@ Attempts made:
 - lib unit tier, 8 runs at `-j16` under 48-way spin load, `--retries 0` —
   zero `LEAK` lines
 
-The margin sweep replaces the repro: a 26ms margin against a 100ms deadline is
-demonstrably unsafe on a 3-core runner whether or not it can be triggered on a
-16-core one.
+For the cursor defect, the margin sweep replaces the local repro: a 26ms margin
+against a 100ms deadline is demonstrably unsafe on a 3-core runner whether or
+not it can be triggered on a 16-core one. The `LEAK-FAIL` explanation remains
+an evidence-backed inference and requires confirmation on the macOS CI runner.
 
 ## Acceptance Criteria
 
 1. `level1_cursor.rs` contains no fixed sleep between spawning the probe and
    writing the manufactured CPR reply; the reply is written in response to
    observing `ESC[6n` in the master stream.
-2. Raising the pre-reply delay no longer has a cliff below the probe's own
-   deadline — the margin is a function of the poll interval, not of
-   `Session::spawn` latency.
-3. The three `level1_cursor` tests pass, and the full `biscuit-terminal` suite
-   (2942 tests) stays green.
-4. The cursor tests remain non-vacuous: substituting a non-CPR reply makes
+2. `OscAnswer` is renamed to a protocol-neutral type, and the helper's docs and
+   all existing call sites describe both OSC and CPR use accurately.
+3. Each cursor test drains through its probe result marker, demonstrating that
+   the child completed; merely observing `ESC[6n` is not sufficient.
+4. The query-to-reply delay is independent of `Session::spawn` latency. No
+   acceptance claim depends on an exact 90ms margin or assumes prompt thread
+   wake-up.
+5. The three `level1_cursor` tests pass, and the full `biscuit-terminal` suite
+   stays green; test counts are reported diagnostically rather than hard-coded.
+6. The cursor tests remain non-vacuous: substituting a non-CPR reply makes
    `cursor_position_parses_csi_r_reply` fail with `cursor_position=None` —
    the exact CI symptom — rather than passing.
-5. `.config/nextest.toml` parses under both `profile.default` and `profile.ci`,
-   and the new filter resolves to the lib unit binary only.
-6. `biscuit-terminal / test (macos-latest)` reports neither failure. Judge by
+7. `.config/nextest.toml` parses under both `profile.default` and `profile.ci`.
+   On a macOS host, the new filter resolves to the library unit-test binary only
+   and yields 1s, existing `browser_` matches retain 5s through override
+   precedence, integration binaries retain 100ms, and Linux/Windows retain
+   100ms.
+8. `biscuit-terminal / test (macos-latest)` reports neither failure. Judge by
    diffing the failure set against the `main` baseline, not by "is it green" —
    the repository carries pre-existing red jobs.
 
 ## Non-goals
 
-- **Rewriting `level1_osc_queries.rs`.** Measured to have >160ms of margin.
-  Changing it would be churn against a defect it does not have.
+- **Rewriting `level1_osc_queries.rs`.** Measured to have >160ms of margin in
+  the current implementation. Its fixed sleeps remain known timing debt, but
+  migrating them is not required to resolve the observed failures.
 - **Changing `cursor_position()`'s 100ms default.** The library timeout is a
   product decision about how long to make a user wait on an unresponsive
   terminal. The test must fit the contract, not the reverse.
