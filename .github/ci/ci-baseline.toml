@@ -71,26 +71,6 @@ source_run = "30323254931"
 expiry = "2026-10-31"
 
 [[failure]]
-area = "queue"
-environment = "windows-latest"
-tier = "L1"
-shard = "1/1"
-owner = "@yankeeinlondon"
-reason = "migrated from baseline-failures.txt, unverified"
-source_run = "30323254931"
-expiry = "2026-10-31"
-
-[[failure]]
-area = "renderable"
-environment = "windows-latest"
-tier = "L1"
-shard = "1/1"
-owner = "@yankeeinlondon"
-reason = "migrated from baseline-failures.txt, unverified"
-source_run = "30323254931"
-expiry = "2026-10-31"
-
-[[failure]]
 area = "sniff"
 environment = "windows-latest"
 tier = "L1"
@@ -159,49 +139,6 @@ expiry = "2026-10-31"
 # ---------------------------------------------------------------------------
 
 [[failure]]
-area = "darkmatter"
-environment = "ubuntu-latest"
-tier = "L1"
-shard = "1/4"
-owner = "@yankeeinlondon"
-reason = "migrated from baseline-failures.txt, unverified"
-source_run = "30323254931"
-expiry = "2026-10-31"
-
-[[failure]]
-area = "darkmatter"
-environment = "ubuntu-latest"
-tier = "L1"
-shard = "2/4"
-owner = "@yankeeinlondon"
-reason = "migrated from baseline-failures.txt, unverified"
-source_run = "30323254931"
-expiry = "2026-10-31"
-
-# Listed in the old file, but shard 3/4 PASSES in run 30323254931. Carried
-# across unverified; the verdict will report `baseline-now-passing` and block
-# until it is removed.
-[[failure]]
-area = "darkmatter"
-environment = "ubuntu-latest"
-tier = "L1"
-shard = "3/4"
-owner = "@yankeeinlondon"
-reason = "migrated from baseline-failures.txt, unverified — measured PASSING in run 30323254931"
-source_run = "30323254931"
-expiry = "2026-10-31"
-
-[[failure]]
-area = "darkmatter"
-environment = "ubuntu-latest"
-tier = "L1"
-shard = "4/4"
-owner = "@yankeeinlondon"
-reason = "migrated from baseline-failures.txt, unverified"
-source_run = "30323254931"
-expiry = "2026-10-31"
-
-[[failure]]
 area = "sniff"
 environment = "ubuntu-latest"
 tier = "L1"
@@ -227,19 +164,6 @@ expiry = "2026-10-31"
 # `lint` emits no JUnit. Its cell comes from the `status-<area>-lint` artifact
 # uploaded by the lint job, which is why it can be baselined at all.
 # ---------------------------------------------------------------------------
-
-# KNOWN STALE — lint PASSES for this area in run 30323254931. Carried across
-# rather than dropped, per the migration rule; expect `baseline-now-passing`.
-# KNOWN STALE — lint PASSES for this area in run 30323254931.
-[[failure]]
-area = "homelab"
-environment = "ubuntu-latest"
-tier = "lint"
-shard = "1/1"
-owner = "@yankeeinlondon"
-reason = "migrated from baseline-failures.txt, unverified"
-source_run = "30323254931"
-expiry = "2026-10-31"
 
 # ---------------------------------------------------------------------------
 # Specialized workflows — NOT YET WIRED
