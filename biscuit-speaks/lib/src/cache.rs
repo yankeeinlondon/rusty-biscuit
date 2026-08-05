@@ -5,7 +5,8 @@
 //!
 //! ## Cache Location
 //!
-//! The cache file is stored at `~/.biscuit-speaks-cache.json`.
+//! The cache file is stored at `~/.biscuit-speaks-cache.json`, unless
+//! `BISCUIT_SPEAKS_CACHE` names a different file. See [`cache_file_path`].
 //!
 //! ## Atomicity
 //!
@@ -21,9 +22,10 @@
 //! Use [`bust_host_capability_cache`] to manually invalidate the cache
 //! when new voices are installed on the system.
 
+use std::ffi::OsString;
 use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -39,6 +41,9 @@ pub const CACHE_SCHEMA_VERSION: u32 = 1;
 /// Default cache file name.
 const CACHE_FILE_NAME: &str = ".biscuit-speaks-cache.json";
 
+/// Environment variable naming an alternate cache file.
+const CACHE_PATH_ENV: &str = "BISCUIT_SPEAKS_CACHE";
+
 /// Wrapper struct for the cache file that includes schema versioning.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CacheEnvelope {
@@ -50,9 +55,31 @@ struct CacheEnvelope {
 
 /// Get the path to the cache file.
 ///
-/// Returns `None` if the home directory cannot be determined.
+/// ## Environment Variables
+///
+/// `BISCUIT_SPEAKS_CACHE` names the cache **file** — not its directory — and
+/// takes priority over the home-directory default. Its parent directory must
+/// already exist; writes are not given one. An empty value is treated as unset.
+///
+/// It is inherited by child processes, which is what lets a caller confine a
+/// re-spawned `so-you-say` (see `--background`) to the same relocated cache.
+///
+/// ## Returns
+///
+/// `None` if no override is set and the home directory cannot be determined.
 fn cache_file_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|home| home.join(CACHE_FILE_NAME))
+    resolve_cache_path(std::env::var_os(CACHE_PATH_ENV))
+}
+
+/// Apply the override rule to an already-read environment value.
+///
+/// Split from [`cache_file_path`] so the precedence is testable without
+/// mutating process-global environment state.
+fn resolve_cache_path(override_value: Option<OsString>) -> Option<PathBuf> {
+    match override_value {
+        Some(raw) if !raw.is_empty() => Some(PathBuf::from(raw)),
+        _ => dirs::home_dir().map(|home| home.join(CACHE_FILE_NAME)),
+    }
 }
 
 /// Read TTS capabilities from the cache file.
@@ -78,9 +105,14 @@ pub fn read_from_cache() -> Result<HostTtsCapabilities, TtsError> {
         message: "Could not determine home directory".into(),
     })?;
 
+    read_cache_at(&path)
+}
+
+/// Read TTS capabilities from a specific cache file.
+fn read_cache_at(path: &Path) -> Result<HostTtsCapabilities, TtsError> {
     let path_str = path.display().to_string();
 
-    let contents = fs::read_to_string(&path).map_err(|e| TtsError::CacheReadError {
+    let contents = fs::read_to_string(path).map_err(|e| TtsError::CacheReadError {
         path: path_str.clone(),
         message: e.to_string(),
     })?;
@@ -144,10 +176,20 @@ pub fn update_provider_in_cache(
         message: "Could not determine home directory".into(),
     })?;
 
+    update_provider_at(&path, provider, voices, available_voices)
+}
+
+/// Update a single provider's capabilities in a specific cache file.
+fn update_provider_at(
+    path: &Path,
+    provider: TtsProvider,
+    voices: Vec<Voice>,
+    available_voices: Vec<Voice>,
+) -> Result<(), TtsError> {
     let path_str = path.display().to_string();
 
     // Read existing cache or create empty one
-    let mut capabilities = read_from_cache().unwrap_or_default();
+    let mut capabilities = read_cache_at(path).unwrap_or_default();
 
     // Remove existing entry for this provider (if any)
     capabilities
@@ -169,7 +211,7 @@ pub fn update_provider_in_cache(
         .unwrap_or(0);
 
     // Write atomically using temp file + rename
-    write_cache_atomically(&path, &capabilities).map_err(|e| TtsError::CacheWriteError {
+    write_cache_atomically(path, &capabilities).map_err(|e| TtsError::CacheWriteError {
         path: path_str,
         message: e.to_string(),
     })?;
@@ -198,12 +240,15 @@ pub fn bust_host_capability_cache() -> Result<(), TtsError> {
         message: "Could not determine home directory".into(),
     })?;
 
-    let path_str = path.display().to_string();
+    bust_cache_at(&path)
+}
 
+/// Delete a specific cache file, treating an already-absent file as success.
+fn bust_cache_at(path: &Path) -> Result<(), TtsError> {
     // Only return error if removal fails for a reason other than "file not found"
     if path.exists() {
-        fs::remove_file(&path).map_err(|e| TtsError::CacheWriteError {
-            path: path_str,
+        fs::remove_file(path).map_err(|e| TtsError::CacheWriteError {
+            path: path.display().to_string(),
             message: format!("Failed to remove cache file: {}", e),
         })?;
     }
@@ -213,7 +258,7 @@ pub fn bust_host_capability_cache() -> Result<(), TtsError> {
 
 /// Write the cache atomically using temp file + rename pattern.
 fn write_cache_atomically(
-    path: &PathBuf,
+    path: &Path,
     capabilities: &HostTtsCapabilities,
 ) -> Result<(), std::io::Error> {
     let envelope = CacheEnvelope {
@@ -286,6 +331,16 @@ pub async fn populate_cache_for_provider<P: TtsVoiceInventory>(
     update_provider_in_cache(provider_type, voices, vec![])
 }
 
+/// Populate a specific cache file for a single provider.
+async fn populate_provider_at<P: TtsVoiceInventory>(
+    path: &Path,
+    provider: &P,
+    provider_type: TtsProvider,
+) -> Result<(), TtsError> {
+    let voices = provider.list_voices().await?;
+    update_provider_at(path, provider_type, voices, vec![])
+}
+
 /// Populate the cache for all available TTS providers.
 ///
 /// This function detects which TTS providers are available on the system
@@ -307,6 +362,16 @@ pub async fn populate_cache_for_provider<P: TtsVoiceInventory>(
 /// populate_cache_for_all_providers().await?;
 /// ```
 pub async fn populate_cache_for_all_providers() -> Result<(), TtsError> {
+    let path = cache_file_path().ok_or_else(|| TtsError::CacheWriteError {
+        path: "~/.biscuit-speaks-cache.json".into(),
+        message: "Could not determine home directory".into(),
+    })?;
+
+    populate_all_at(&path).await
+}
+
+/// Populate a specific cache file from every available TTS provider.
+async fn populate_all_at(path: &Path) -> Result<(), TtsError> {
     let installed = InstalledTtsClients::new();
 
     // Track results for reporting
@@ -321,7 +386,7 @@ pub async fn populate_cache_for_all_providers() -> Result<(), TtsError> {
     if installed.is_installed(TtsClient::Say) {
         let provider = SayProvider;
         let provider_type = TtsProvider::Host(crate::types::HostTtsProvider::Say);
-        match populate_cache_for_provider(&provider, provider_type).await {
+        match populate_provider_at(path, &provider, provider_type).await {
             Ok(()) => {
                 tracing::info!(provider = "say", "Cached voice data");
                 any_success = true;
@@ -337,7 +402,7 @@ pub async fn populate_cache_for_all_providers() -> Result<(), TtsError> {
     if installed.is_installed(TtsClient::Espeak) || installed.is_installed(TtsClient::EspeakNg) {
         let provider = ESpeakProvider::new();
         let provider_type = TtsProvider::Host(crate::types::HostTtsProvider::ESpeak);
-        match populate_cache_for_provider(&provider, provider_type).await {
+        match populate_provider_at(path, &provider, provider_type).await {
             Ok(()) => {
                 tracing::info!(provider = "espeak", "Cached voice data");
                 any_success = true;
@@ -353,7 +418,7 @@ pub async fn populate_cache_for_all_providers() -> Result<(), TtsError> {
     if installed.is_installed(TtsClient::Echogarden) {
         let provider = EchogardenProvider::new();
         let provider_type = TtsProvider::Host(crate::types::HostTtsProvider::EchoGarden);
-        match populate_cache_for_provider(&provider, provider_type).await {
+        match populate_provider_at(path, &provider, provider_type).await {
             Ok(()) => {
                 tracing::info!(provider = "echogarden", "Cached voice data");
                 any_success = true;
@@ -369,7 +434,7 @@ pub async fn populate_cache_for_all_providers() -> Result<(), TtsError> {
     if installed.is_installed(TtsClient::GttsCli) {
         let provider = GttsProvider::new();
         let provider_type = TtsProvider::Host(crate::types::HostTtsProvider::Gtts);
-        match populate_cache_for_provider(&provider, provider_type).await {
+        match populate_provider_at(path, &provider, provider_type).await {
             Ok(()) => {
                 tracing::info!(provider = "gtts", "Cached voice data");
                 any_success = true;
@@ -385,7 +450,7 @@ pub async fn populate_cache_for_all_providers() -> Result<(), TtsError> {
     if installed.is_installed(TtsClient::KokoroTts) {
         let provider = KokoroTtsProvider::new();
         let provider_type = TtsProvider::Host(crate::types::HostTtsProvider::KokoroTts);
-        match populate_cache_for_provider(&provider, provider_type).await {
+        match populate_provider_at(path, &provider, provider_type).await {
             Ok(()) => {
                 tracing::info!(provider = "kokoro-tts", "Cached voice data");
                 any_success = true;
@@ -402,7 +467,7 @@ pub async fn populate_cache_for_all_providers() -> Result<(), TtsError> {
     if installed.is_installed(TtsClient::WindowsSapi) {
         let provider = SapiProvider::new();
         let provider_type = TtsProvider::Host(crate::types::HostTtsProvider::Sapi);
-        match populate_cache_for_provider(&provider, provider_type).await {
+        match populate_provider_at(path, &provider, provider_type).await {
             Ok(()) => {
                 tracing::info!(provider = "sapi", "Cached voice data");
                 any_success = true;
@@ -419,7 +484,7 @@ pub async fn populate_cache_for_all_providers() -> Result<(), TtsError> {
         && let Ok(provider) = ElevenLabsProvider::new()
     {
         let provider_type = TtsProvider::Cloud(crate::types::CloudTtsProvider::ElevenLabs);
-        match populate_cache_for_provider(&provider, provider_type).await {
+        match populate_provider_at(path, &provider, provider_type).await {
             Ok(()) => {
                 tracing::info!(provider = "elevenlabs", "Cached voice data");
                 any_success = true;
@@ -436,7 +501,7 @@ pub async fn populate_cache_for_all_providers() -> Result<(), TtsError> {
     } else if errors.is_empty() {
         // No providers were available to query
         Err(TtsError::CacheWriteError {
-            path: "~/.biscuit-speaks-cache.json".into(),
+            path: path.display().to_string(),
             message: "No TTS providers available to populate cache".into(),
         })
     } else {
@@ -485,19 +550,48 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_cache_path_override_wins_over_home() {
+        let dir = TempDir::new().unwrap();
+        let override_path = dir.path().join("relocated.json");
+
+        let resolved = resolve_cache_path(Some(override_path.clone().into_os_string()))
+            .expect("An explicit override needs no home directory");
+
+        assert_eq!(
+            resolved, override_path,
+            "BISCUIT_SPEAKS_CACHE should name the cache file verbatim"
+        );
+    }
+
+    #[test]
+    fn test_cache_path_falls_back_when_override_absent_or_empty() {
+        let default = resolve_cache_path(None);
+        assert_eq!(
+            resolve_cache_path(Some(OsString::new())),
+            default,
+            "An empty override should be treated as unset, not as an empty path"
+        );
+        assert!(
+            default.is_some_and(|p| p.ends_with(CACHE_FILE_NAME)),
+            "The fallback should be the home-directory default"
+        );
+    }
+
     // ========================================================================
     // read_from_cache tests
     // ========================================================================
 
     #[test]
     fn test_read_from_cache_file_not_found() {
-        // Reading from a non-existent cache should return an error
-        // We can't easily test this without modifying the home directory,
-        // so we just verify the error type exists
-        let result = read_from_cache();
-        // Result depends on whether cache exists on this system
-        // Just verify the function runs without panic
-        let _ = result;
+        let dir = TempDir::new().unwrap();
+        let cache_path = dir.path().join(CACHE_FILE_NAME);
+
+        let result = read_cache_at(&cache_path);
+        assert!(
+            matches!(result, Err(TtsError::CacheReadError { .. })),
+            "Reading an absent cache should be a CacheReadError, got {result:?}"
+        );
     }
 
     #[test]
@@ -505,10 +599,14 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let cache_path = create_test_cache(&dir, "not valid json");
 
-        // We can't easily inject the path, so we test the JSON parsing logic
-        let contents = fs::read_to_string(&cache_path).unwrap();
-        let result: Result<CacheEnvelope, _> = serde_json::from_str(&contents);
-        assert!(result.is_err(), "Invalid JSON should fail to parse");
+        let result = read_cache_at(&cache_path);
+        let Err(TtsError::CacheReadError { message, .. }) = result else {
+            panic!("Invalid JSON should be a CacheReadError, got {result:?}");
+        };
+        assert!(
+            message.contains("JSON parse error"),
+            "Error should name the parse failure, got {message}"
+        );
     }
 
     #[test]
@@ -523,12 +621,13 @@ mod tests {
         }"#;
         let cache_path = create_test_cache(&dir, content);
 
-        // Parse the envelope to verify schema version detection works
-        let contents = fs::read_to_string(&cache_path).unwrap();
-        let envelope: CacheEnvelope = serde_json::from_str(&contents).unwrap();
-        assert_ne!(
-            envelope.schema_version, CACHE_SCHEMA_VERSION,
-            "Schema versions should differ"
+        let result = read_cache_at(&cache_path);
+        let Err(TtsError::CacheReadError { message, .. }) = result else {
+            panic!("A future schema version should be rejected, got {result:?}");
+        };
+        assert!(
+            message.contains("schema version mismatch"),
+            "Error should name the version mismatch, got {message}"
         );
     }
 
@@ -658,14 +757,11 @@ mod tests {
     #[test]
     fn test_bust_cache_removes_file() {
         let dir = TempDir::new().unwrap();
-        let cache_path = dir.path().join(CACHE_FILE_NAME);
-
-        // Create a fake cache file
-        fs::write(&cache_path, "{}").expect("Failed to create test file");
+        let cache_path = create_test_cache(&dir, "{}");
         assert!(cache_path.exists(), "Cache file should exist before bust");
 
-        // Remove it
-        fs::remove_file(&cache_path).expect("Failed to remove cache file");
+        bust_cache_at(&cache_path).expect("Busting an existing cache should succeed");
+
         assert!(
             !cache_path.exists(),
             "Cache file should not exist after bust"
@@ -676,14 +772,9 @@ mod tests {
     fn test_bust_cache_no_error_if_missing() {
         let dir = TempDir::new().unwrap();
         let cache_path = dir.path().join(CACHE_FILE_NAME);
-
-        // File doesn't exist - bust should succeed
         assert!(!cache_path.exists());
-        // The bust logic checks exists() before removing
-        if cache_path.exists() {
-            fs::remove_file(&cache_path).expect("Failed to remove");
-        }
-        // No error means success
+
+        bust_cache_at(&cache_path).expect("Busting an absent cache should succeed");
     }
 
     // ========================================================================
@@ -790,9 +881,7 @@ mod tests {
         write_cache_atomically(&cache_path, &capabilities).unwrap();
 
         // Read back
-        let contents = fs::read_to_string(&cache_path).unwrap();
-        let envelope: CacheEnvelope = serde_json::from_str(&contents).unwrap();
-        let loaded = envelope.capabilities;
+        let loaded = read_cache_at(&cache_path).expect("Round-trip read should succeed");
 
         // Verify
         assert_eq!(loaded.providers.len(), 2);
@@ -916,25 +1005,22 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_populate_cache_for_provider_success() {
-        use super::populate_cache_for_provider;
-
-        // Clean up any existing cache first
-        let _ = bust_host_capability_cache();
+        let dir = TempDir::new().unwrap();
+        let cache_path = dir.path().join(CACHE_FILE_NAME);
 
         let voices = vec![
             Voice::new("TestVoice1").with_gender(Gender::Female),
             Voice::new("TestVoice2").with_gender(Gender::Male),
         ];
         let provider = MockVoiceProvider::new(voices);
-        let provider_type = TtsProvider::Host(HostTtsProvider::Piper); // Use Piper as unlikely to conflict
+        let provider_type = TtsProvider::Host(HostTtsProvider::Piper);
 
-        let result = populate_cache_for_provider(&provider, provider_type).await;
-        assert!(result.is_ok(), "populate_cache_for_provider should succeed");
+        let result = populate_provider_at(&cache_path, &provider, provider_type).await;
+        assert!(result.is_ok(), "populate_provider_at should succeed");
 
         // Verify the cache was updated
-        let cache = read_from_cache().unwrap();
+        let cache = read_cache_at(&cache_path).unwrap();
         let piper_cap = cache
             .get_provider(&TtsProvider::Host(HostTtsProvider::Piper))
             .expect("Piper should be in cache");
@@ -942,9 +1028,6 @@ mod tests {
         assert_eq!(piper_cap.voices.len(), 2);
         assert_eq!(piper_cap.voices[0].name, "TestVoice1");
         assert_eq!(piper_cap.voices[1].name, "TestVoice2");
-
-        // Clean up
-        let _ = bust_host_capability_cache();
     }
 
     #[tokio::test]
@@ -966,19 +1049,16 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_populate_cache_for_provider_updates_existing() {
-        use super::populate_cache_for_provider;
-
-        // Clean up first
-        let _ = bust_host_capability_cache();
+        let dir = TempDir::new().unwrap();
+        let cache_path = dir.path().join(CACHE_FILE_NAME);
 
         // First populate with some voices
         let initial_voices = vec![Voice::new("OldVoice")];
         let provider1 = MockVoiceProvider::new(initial_voices);
         let provider_type = TtsProvider::Host(HostTtsProvider::Festival);
 
-        populate_cache_for_provider(&provider1, provider_type)
+        populate_provider_at(&cache_path, &provider1, provider_type)
             .await
             .unwrap();
 
@@ -986,12 +1066,12 @@ mod tests {
         let new_voices = vec![Voice::new("NewVoice1"), Voice::new("NewVoice2")];
         let provider2 = MockVoiceProvider::new(new_voices);
 
-        populate_cache_for_provider(&provider2, provider_type)
+        populate_provider_at(&cache_path, &provider2, provider_type)
             .await
             .unwrap();
 
         // Verify the cache was updated (not appended)
-        let cache = read_from_cache().unwrap();
+        let cache = read_cache_at(&cache_path).unwrap();
         let festival_cap = cache
             .get_provider(&TtsProvider::Host(HostTtsProvider::Festival))
             .expect("Festival should be in cache");
@@ -1003,9 +1083,6 @@ mod tests {
         );
         assert_eq!(festival_cap.voices[0].name, "NewVoice1");
         assert_eq!(festival_cap.voices[1].name, "NewVoice2");
-
-        // Clean up
-        let _ = bust_host_capability_cache();
     }
 
     // ========================================================================
@@ -1018,11 +1095,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_populate_cache_for_all_providers_runs_without_panic() {
-        use super::populate_cache_for_all_providers;
+        let dir = TempDir::new().unwrap();
+        let cache_path = dir.path().join(CACHE_FILE_NAME);
 
         // This test just verifies the function runs without panicking.
         // The actual result depends on which providers are installed on the system.
-        let _ = populate_cache_for_all_providers().await;
+        let _ = populate_all_at(&cache_path).await;
 
         // If any providers were available, the cache should exist
         // We don't assert on this since it depends on the test environment

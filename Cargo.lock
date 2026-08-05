@@ -1348,7 +1348,6 @@ dependencies = [
  "schematic-schema",
  "serde",
  "serde_json",
- "serial_test",
  "sniff",
  "tempfile",
  "thiserror 2.0.18",
@@ -1369,6 +1368,7 @@ dependencies = [
  "owo-colors",
  "sniff",
  "strum 0.28.0",
+ "tempfile",
  "tokio",
 ]
 
