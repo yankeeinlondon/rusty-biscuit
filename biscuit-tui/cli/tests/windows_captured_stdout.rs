@@ -288,7 +288,7 @@ fn captured_stdout_receives_only_value_no_tui_bytes() {
     // Spawn `question` with stdout captured to a pipe (the `FOO=$(question ...)`
     // shape) while stderr/stdin stay attached to the console established above, so
     // the console renders the prompt and our injected key event reaches it.
-    let mut child = Command::new(env!("CARGO_BIN_EXE_question"))
+    let mut child = Command::new(biscuit_test_harness::bin_exe!("question"))
         .args(["choose-one", "Red", "Green", "Blue"])
         .stdin(Stdio::inherit())
         .stdout(Stdio::piped())

@@ -127,7 +127,7 @@ fn ctrl_c_terminates_wrapped_child_on_windows() {
     path_entries.extend(std::env::split_paths(&system_path));
     let augmented = std::env::join_paths(path_entries).expect("join_paths");
 
-    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let claudine = biscuit_test_harness::bin_exe!("claudine");
 
     // Spawn the wrapper in its OWN process group so the console event we send
     // targets only the wrapper subtree, never this test runner. Anchor CWD to

@@ -133,7 +133,7 @@ fn run_compose_in_tmux(staged: &Staged, done_marker: &str, extra_claudine_args: 
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
 
-    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let claudine = common::claudine_bin();
     let sentinel = format!("L2_AF_DONE_{seq}");
     let env_prefix = format!(
         "NO_COLOR='1' HOME='{home}' PATH='{path}' ",

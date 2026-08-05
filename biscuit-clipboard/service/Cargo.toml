@@ -26,6 +26,9 @@ tower = "0.5"
 libc = "0.2"
 
 [dev-dependencies]
+# `bin_exe!`: resolves the `clipper` path at run time so the e2e test survives
+# execution from a relocated nextest archive (the wsl2 leg).
+biscuit-test-harness = { path = "../../biscuit-test-harness" }
 axum-test = "16"
 tempfile = "3"
 tower = "0.5"

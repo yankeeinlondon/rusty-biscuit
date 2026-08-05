@@ -310,6 +310,7 @@ AppleScript state).
 | `cleanup_stale_terminal_harness_resources()` | Best-effort tagged-resource sweep. |
 | `detect_shell()` | POSIX shell pick (`bash` → `sh` → `$SHELL`). |
 | `cargo_bin_dir(name)` | Locate a built cargo binary's directory for `PATH` augmentation. |
+| `bin_exe!("name")` | `PathBuf` of a workspace binary, resolved at run time so an archived run (the `wsl2-ubuntu` leg) finds it. Never spawn `env!("CARGO_BIN_EXE_…")` directly. |
 | `apply_color_forcing_env(&mut Command)` | Set `FORCE_COLOR`/`CLICOLOR_FORCE`/`TERM`/`COLORTERM`, clear `NO_COLOR`. |
 | `wait_for_prompt(&mut harness)` | Poll `capture()` until `$`/`#`/`%` (5 s cap). |
 | `run_with_timeout` / `run_with_stdin_timeout` | Wall-clock timeout with pipe-deadlock-safe draining. |

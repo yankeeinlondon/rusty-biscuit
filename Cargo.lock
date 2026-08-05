@@ -1131,6 +1131,7 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "biscuit-clipboard",
+ "biscuit-test-harness",
  "clap 4.6.1",
  "dirs",
  "futures-util",
@@ -1150,6 +1151,7 @@ dependencies = [
  "axum-test 16.4.1",
  "base64 0.22.1",
  "biscuit-clipboard",
+ "biscuit-test-harness",
  "chrono",
  "clap 4.6.1",
  "dirs",
@@ -1348,7 +1350,6 @@ dependencies = [
  "schematic-schema",
  "serde",
  "serde_json",
- "serial_test",
  "sniff",
  "tempfile",
  "thiserror 2.0.18",
@@ -1362,6 +1363,7 @@ name = "biscuit-speaks-cli"
 version = "0.1.0"
 dependencies = [
  "biscuit-speaks",
+ "biscuit-test-harness",
  "clap 4.6.1",
  "clap_complete",
  "darkmatter",
@@ -1369,6 +1371,7 @@ dependencies = [
  "owo-colors",
  "sniff",
  "strum 0.28.0",
+ "tempfile",
  "tokio",
 ]
 
@@ -11530,6 +11533,7 @@ name = "schematic-gen"
 version = "0.1.0"
 dependencies = [
  "biscuit-file",
+ "biscuit-test-harness",
  "clap 4.6.1",
  "colored",
  "indexmap 2.14.0",
@@ -14332,13 +14336,13 @@ name = "tree-hugger-cli"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
+ "biscuit-file",
  "biscuit-terminal",
  "biscuit-test-harness",
  "clap 4.6.1",
  "clap_complete",
  "ignore",
  "owo-colors",
- "percent-encoding",
  "predicates",
  "serde",
  "serde_json",
@@ -14346,6 +14350,7 @@ dependencies = [
  "tempfile",
  "test-toolkit",
  "tree-hugger",
+ "url",
 ]
 
 [[package]]

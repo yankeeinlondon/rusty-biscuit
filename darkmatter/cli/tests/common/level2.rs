@@ -3,8 +3,9 @@
 use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
-use biscuit_test_harness::{CapturedFrame, TerminalHarness, strip_ansi};
+use biscuit_test_harness::{CapturedFrame, TerminalHarness, bin_exe, strip_ansi};
 use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
@@ -33,14 +34,17 @@ pub static SHARED_TMUX_HARNESS: SharedHarness<TmuxHarness> = SharedHarness::new(
 static SENTINEL_COUNTER: AtomicU32 = AtomicU32::new(0);
 static TMUX_SENTINEL_COUNTER: AtomicU32 = AtomicU32::new(0);
 
-/// Absolute path to the `md` binary built for *this* workspace, injected by
-/// Cargo at compile time. Using it instead of a bare `md` keeps Level 2 tests
-/// from silently passing against a stale `md` installed on the host `PATH`
-/// (e.g. `~/.cargo/bin/md`) while the code under review still fails.
-pub const MD_BIN: &str = env!("CARGO_BIN_EXE_md");
+/// Absolute path to the `md` binary built for *this* workspace. Using it
+/// instead of a bare `md` keeps Level 2 tests from silently passing against a
+/// stale `md` installed on the host `PATH` (e.g. `~/.cargo/bin/md`) while the
+/// code under review still fails.
+pub fn md_bin() -> &'static Path {
+    static BIN: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    BIN.get_or_init(|| bin_exe!("md"))
+}
 
 /// Absolute path to a `md` shim (under the system temp dir) that points at
-/// [`MD_BIN`]. Tests invoke this instead of `MD_BIN` directly because the built
+/// [`md_bin`]. Tests invoke this instead of [`md_bin`] directly because the built
 /// binary lives under `…/rusty-biscuit/…/target/debug/md`, whose path contains
 /// the substring `rust`. Embedding that path in the shell command would put
 /// `rust` into the captured command echo, where `find(|l| l.contains("rust"))`
@@ -70,7 +74,7 @@ pub fn md_shim() -> &'static str {
         let link = dir.join("md");
         // Idempotent across reruns within the same pid: replace any stale link.
         let _ = fs::remove_file(&link);
-        link_or_copy(std::path::Path::new(MD_BIN), &link).expect("create md shim");
+        link_or_copy(md_bin(), &link).expect("create md shim");
         // Fail fast if the shim does not actually point at the Cargo-built
         // binary. This catches environment-specific issues (broken link,
         // stale temp dir, permission problems) before the Level 2 pane
@@ -80,15 +84,14 @@ pub fn md_shim() -> &'static str {
     })
 }
 
-/// Verifies that the shim at `link` resolves to [`MD_BIN`] (the
-/// `CARGO_BIN_EXE_md` path baked in at compile time). Called once per
+/// Verifies that the shim at `link` resolves to [`md_bin`]. Called once per
 /// process from [`md_shim`]; failures abort the test binary so the
 /// suite cannot silently pass against a host-installed `md`.
 ///
 /// Uses [`is_same_binary`] so the check works regardless of whether the
 /// shim was created as a symlink, a hard link, or a copy (review-3 finding).
-pub fn assert_shim_resolves_to_built(link: &std::path::Path) {
-    let built = std::path::Path::new(MD_BIN);
+pub fn assert_shim_resolves_to_built(link: &Path) {
+    let built = md_bin();
     if !is_same_binary(link, built) {
         panic!(
             "md shim {} did not resolve to the Cargo-built binary {};\

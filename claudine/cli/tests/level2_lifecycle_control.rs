@@ -423,7 +423,7 @@ fn run_provider_in_tmux_for(staged: &Staged, provider_flag: &str, done_marker: &
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
 
-    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let claudine = common::claudine_bin();
     let sentinel = format!("L2_CTL_DONE_{seq}");
     let env_prefix = format!(
         "NO_COLOR='1' HOME='{home}' PATH='{path}'{rendezvous} ",
@@ -506,7 +506,7 @@ fn run_provider_with_ambient_env(
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
 
-    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let claudine = common::claudine_bin();
     let sentinel = format!("L2_CTL_DONE_{seq}");
     let mut env_prefix = format!(
         "NO_COLOR='1' HOME='{home}' PATH='{path}' ",
@@ -568,7 +568,7 @@ fn run_proxy_in_tmux_with_set(staged: &Staged, setters: &str, done_marker: &str)
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
 
-    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let claudine = common::claudine_bin();
     let sentinel = format!("L2_CTL_DONE_{seq}");
     let env_prefix = format!(
         "NO_COLOR='1' HOME='{home}' PATH='{path}' ",
@@ -690,7 +690,7 @@ fn run_compose_await_exit_redirected(
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
 
-    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let claudine = common::claudine_bin();
     let sentinel = format!("L2_CTL_EXIT_{seq}");
     let env_prefix = format!(
         "NO_COLOR='1' MODEL='' HOME='{home}' PATH='{path}' ",
@@ -3503,7 +3503,7 @@ fn run_compose_settle(staged: &Staged, marker: &str, expected: usize) -> String 
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
 
-    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let claudine = common::claudine_bin();
     let sentinel = format!("L2_CTL_SETTLE_{seq}");
     let env_prefix = format!(
         "NO_COLOR='1' HOME='{home}' PATH='{path}' ",
@@ -4642,7 +4642,7 @@ fn run_until_settled_with_params(
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
 
-    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let claudine = common::claudine_bin();
     let sentinel = format!("L2_EQUIV_DONE_{seq}");
     let env_prefix = format!(
         "NO_COLOR='1' HOME='{home}' PATH='{path}' ",
@@ -5167,7 +5167,7 @@ fn run_in_tmux_until_exit(staged: &Staged) -> String {
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
 
-    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let claudine = common::claudine_bin();
     let sentinel = format!("L2_CTL_EXIT_{seq}");
     let cmd = format!(
         "cd {ws} && NO_COLOR='1' HOME='{home}' PATH='{path}' {claudine} compose --goose {md} ; echo {sentinel}",
@@ -6048,7 +6048,7 @@ fn run_capturing_stdout(staged: &Staged, done_marker: &str) -> (String, String) 
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
 
-    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let claudine = common::claudine_bin();
     let sentinel = format!("L2_OUT_DONE_{seq}");
     let stdout_path = staged.workspace.path().join("stdout.txt");
     let cmd = format!(
@@ -6195,7 +6195,7 @@ fn run_sequence_until_target_runs(staged: &Staged, expected_runs: usize) -> Stri
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
 
-    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let claudine = common::claudine_bin();
     let sentinel = format!("L2_SEQ_DONE_{seq}");
     let cmd = format!(
         "cd {ws} && NO_COLOR='1' HOME='{home}' PATH='{path}' {claudine} sequence --goose {md} ; echo {sentinel}",
@@ -6277,7 +6277,7 @@ fn run_sequence_until_settled(staged: &Staged, expected_lines: usize) -> String 
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
 
-    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let claudine = common::claudine_bin();
     let sentinel = format!("L2_SEQSET_DONE_{seq}");
     let cmd = format!(
         "cd {ws} && NO_COLOR='1' HOME='{home}' PATH='{path}' {claudine} sequence --goose {md} ; echo {sentinel}",
@@ -6484,7 +6484,7 @@ fn run_inline_compose_await_exit(staged: &Staged) -> String {
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
 
-    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let claudine = common::claudine_bin();
     let sentinel = format!("L2_INLINE_DONE_{seq}");
     let env_prefix = format!(
         "NO_COLOR='1' HOME='{home}' PATH='{path}' ",
@@ -7653,7 +7653,7 @@ fn run_diagnostic_route(route: DiagnosticRoute, fixture: &DiagnosticFixture) -> 
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
 
-    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let claudine = common::claudine_bin();
     // `%s` keeps the literal token off the echoed command line's own `=<digits>`
     // shape, so the parse below cannot mistake the command for its output.
     let exit_token = format!("L2DIAGEXIT_{seq}");
@@ -8043,7 +8043,7 @@ fn run_initialize_ordering_route(route: DiagnosticRoute, target_doc: &str) -> Or
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
 
-    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let claudine = common::claudine_bin();
     let exit_token = format!("L2INITEXIT_{seq}");
     let cmd = format!(
         "cd {ws} && NO_COLOR='1' MODEL='' HOME='{home}' PATH='{path}' \
@@ -8397,7 +8397,7 @@ fn run_wrapper_in_tmux(staged: &Staged, done_marker: &str) -> String {
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
 
-    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let claudine = common::claudine_bin();
     let sentinel = format!("L2_CTL_DONE_{seq}");
     let cmd = format!(
         "cd {ws} && NO_COLOR='1' HOME='{home}' PATH='{path}' \

@@ -264,7 +264,7 @@ fn level3_sequence_ctrl_c_fans_out_to_parallel_children() {
     // both "the shell regained control" and "the exit code was 130". It is
     // printed if and only if claudine exited.
     let sentinel = format!("L3SEQ_{}", SEQ.fetch_add(1, Ordering::Relaxed));
-    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let claudine = common::claudine_bin();
     let cmd = format!(
         "{claudine} sequence --goose --yolo {md} ; echo {sentinel}rc=$?",
         md = md_file.display(),

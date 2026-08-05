@@ -16,6 +16,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
+use biscuit_test_harness::bin_exe;
+
 /// Per-process tmux socket path. Lives under `std::env::temp_dir()` in a
 /// directory created with mode 0700 so tmux does not refuse it as unsafe
 /// (which happens when the shared `/tmp/tmux-$UID` directory is left
@@ -54,9 +56,9 @@ fn tmux_available() -> bool {
         .unwrap_or(false)
 }
 
-/// Path to the `schematic-gen` binary under test (provided by Cargo).
+/// Path to the `schematic-gen` binary under test.
 fn schematic_gen_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_schematic-gen"))
+    bin_exe!("schematic-gen")
 }
 
 /// Returns a unique tmux session name so concurrent test runs do not

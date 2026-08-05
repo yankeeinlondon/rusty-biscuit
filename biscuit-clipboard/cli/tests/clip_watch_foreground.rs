@@ -8,6 +8,8 @@
 
 use std::process::Command;
 
+use biscuit_test_harness::bin_exe;
+
 #[test]
 fn watch_foreground_refuses_when_service_pid_alive() {
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -16,8 +18,7 @@ fn watch_foreground_refuses_when_service_pid_alive() {
     let our_pid = std::process::id();
     std::fs::write(runtime.join("clipper.pid"), format!("{our_pid}")).unwrap();
 
-    // Resolve the path of the `clip` binary built by cargo.
-    let exe = env!("CARGO_BIN_EXE_clip");
+    let exe = bin_exe!("clip");
 
     let output = Command::new(exe)
         .arg("watch")

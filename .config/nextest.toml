@@ -43,6 +43,17 @@ slow-timeout = { period = "5s", terminate-after = 6 }
 # clean tests are not slowed — only an actual leak waits the window out. To
 # downgrade leaks back to a non-fatal warning, drop `result = "fail"`.
 leak-timeout = { period = "100ms", result = "fail" }
+# `cargo nextest archive` carries test binaries and non-test *bin* targets;
+# examples are built but never archived. biscuit-terminal's PTY tests spawn the
+# `discovery_probe` example, so without this they fail in the only environment
+# that runs from an archive — the `wsl2-ubuntu` leg — with "discovery_probe
+# example not found". Both layouts are listed because the CI archive builds with
+# an explicit `--target` (triple subdirectory) while local builds do not;
+# `on-missing = "ignore"` keeps whichever one does not apply silent.
+archive.include = [
+    { path = "debug/examples/discovery_probe", relative-to = "target", on-missing = "ignore" },
+    { path = "x86_64-unknown-linux-gnu/debug/examples/discovery_probe", relative-to = "target", on-missing = "ignore" },
+]
 
 [[profile.default.overrides]]
 platform = { host = "cfg(windows)" }
@@ -240,6 +251,29 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 filter = 'package(claudine-cli) & binary(characterization_error_routes)'
 leak-timeout = { period = "1s", result = "fail" }
 
+# biscuit-terminal's lib unit tier renders through `Terminal::new_optimistic`,
+# a plain struct literal, so these tests perform no capability discovery and
+# spawn no child that could inherit the test process's output handles. On the
+# 3-core macOS runner one of them nonetheless drew a LEAK-FAIL while exiting
+# code 0 with every assertion passing
+# (`components::prose::tests::standalone_code_block_emits_no_restoration_escape`,
+# a pure string comparison). With no descendant able to hold those handles, the
+# leading explanation is delayed observation of their closure under contention —
+# an inference, not a proven mechanism, so the grace stays small and scoped.
+#
+# Restricted to macOS because that is the only host where it has been observed;
+# Linux and Windows keep the strict 100ms window, as do biscuit-terminal's
+# integration binaries, which do spawn real PTY children.
+#
+# MUST stay below the `browser_` override above. nextest applies the FIRST
+# matching override per setting, and `test(/browser_/)` is a substring match
+# that also catches this binary's `test_browser_renderable_*` unit tests — put
+# this block first and it would silently downgrade their 5s grace to 1s.
+[[profile.default.overrides]]
+platform = { host = 'cfg(target_os = "macos")' }
+filter = 'package(biscuit-terminal) & kind(lib)'
+leak-timeout = { period = "1s", result = "fail" }
+
 [profile.ci]
 # Deterministic L1 failures must run exactly ONCE (D6). Blanket retries would run
 # a compile/assertion/timeout failure up to 4× before reporting the same result —
@@ -377,4 +411,14 @@ leak-timeout = { period = "1s", result = "fail" }
 # grace applies; `result = "fail"` still catches a genuine leak.
 [[profile.ci.overrides]]
 filter = 'package(claudine-cli) & binary(characterization_error_routes)'
+leak-timeout = { period = "1s", result = "fail" }
+
+# See the default-profile note: biscuit-terminal's no-subprocess lib unit tier
+# drew a LEAK-FAIL on the macOS runner, which is where this was observed. Same
+# 1s grace, same macOS-only scope, and the same ordering requirement — it must
+# stay below the `browser_` override so those `test_browser_*` lib tests keep
+# their 5s window under nextest's first-match-wins precedence.
+[[profile.ci.overrides]]
+platform = { host = 'cfg(target_os = "macos")' }
+filter = 'package(biscuit-terminal) & kind(lib)'
 leak-timeout = { period = "1s", result = "fail" }
