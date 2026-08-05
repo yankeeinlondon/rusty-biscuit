@@ -20,13 +20,24 @@ GLOBAL_PATHS = {
     ".github/workflows/_area-ci.yml",
     ".github/workflows/_wsl-ci.yml",
     ".github/workflows/ci.yml",
-    "Cargo.lock",
     "Cargo.toml",
     "justfile",
     "rust-toolchain.toml",
     "scripts/ci/affected_scope.py",
 }
 GLOBAL_PREFIXES = (".cargo/", ".github/actions/", "just/")
+
+# Deliberately NOT in GLOBAL_PATHS. Every dependency add or removal rewrites the
+# lockfile, so treating the filename as global escalated the most routine change
+# in the repo to a full-workspace run: measured on PR #39, dropping one
+# dev-dependency from one crate scheduled every area on every OS.
+#
+# The lockfile is the one global path whose blast radius is *derivable* — it
+# names the resolved graph, so the packages a change can reach can be read out
+# of the diff rather than assumed to be all of them. `Cargo.toml` stays global:
+# it carries workspace membership and shared dependency tables whose effects are
+# not recoverable from the file alone.
+LOCKFILE_PATH = "Cargo.lock"
 
 # Bootstrap-preflight breadth (D3). A global CI/tooling change validates every
 # runner OS before fan-out; a package-local change validates only the scope host
@@ -535,6 +546,107 @@ def global_trigger(files: list[str]) -> str | None:
     return None
 
 
+def parse_lockfile(text: str) -> dict[tuple[str, str], frozenset[str]] | None:
+    """Read `Cargo.lock` into `{(name, version): dependency crate names}`.
+
+    Hand-parsed rather than run through a TOML library: the lockfile grammar is
+    a fixed shape Cargo emits, and this runs before any dependency is available
+    to install. Returns `None` when nothing parsed, which callers must treat as
+    "undecidable" rather than "no dependencies changed".
+
+    Dependency entries are reduced to the crate name, dropping the version and
+    source that Cargo appends when a name is ambiguous. That merges two major
+    versions of one crate into a single node, which over-approximates the
+    impacted set — the safe direction.
+    """
+    entries: dict[tuple[str, str], frozenset[str]] = {}
+    name: str | None = None
+    version: str | None = None
+    dependencies: set[str] = set()
+    in_dependencies = False
+
+    def flush() -> None:
+        nonlocal name, version, dependencies
+        if name is not None and version is not None:
+            entries[(name, version)] = frozenset(dependencies)
+        name = None
+        version = None
+        dependencies = set()
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+
+        if line.startswith("["):
+            flush()
+            in_dependencies = False
+            continue
+
+        if in_dependencies:
+            if line.startswith("]"):
+                in_dependencies = False
+                continue
+            candidate = line.rstrip(",").strip('"').strip()
+            if candidate:
+                dependencies.add(candidate.split()[0])
+            continue
+
+        if line.startswith("dependencies = ["):
+            # `dependencies = []` closes on its own line.
+            in_dependencies = not line.rstrip().endswith("]")
+            continue
+        if line.startswith("name = "):
+            name = line.split("=", 1)[1].strip().strip('"')
+        elif line.startswith("version = "):
+            version = line.split("=", 1)[1].strip().strip('"')
+
+    flush()
+    return entries or None
+
+
+def lockfile_impacted_names(
+    base_text: str | None, head_text: str | None, workspace_names: set[str]
+) -> set[str] | None:
+    """Workspace crates a lockfile change can reach, or `None` if undecidable.
+
+    `None` means the caller must fall back to full scope. That is the outcome
+    whenever the base revision's lockfile is unavailable or either side fails to
+    parse: an unreadable diff is not evidence that nothing changed.
+    """
+    if base_text is None or head_text is None:
+        return None
+
+    base = parse_lockfile(base_text)
+    head = parse_lockfile(head_text)
+    if base is None or head is None:
+        return None
+
+    changed = {
+        name
+        for (name, version) in set(base) | set(head)
+        if base.get((name, version)) != head.get((name, version))
+    }
+
+    # Reverse edges from BOTH revisions. A crate deleted outright has no
+    # dependents left in the head graph, but the packages that depended on it in
+    # the base are exactly the ones its removal affects.
+    dependents: dict[str, set[str]] = {}
+    for graph in (base, head):
+        for (name, _version), dependencies in graph.items():
+            for dependency in dependencies:
+                dependents.setdefault(dependency, set()).add(name)
+
+    impacted = set(changed)
+    pending = list(changed)
+    while pending:
+        current = pending.pop()
+        for dependent in dependents.get(current, ()):
+            if dependent not in impacted:
+                impacted.add(dependent)
+                pending.append(dependent)
+
+    return impacted & workspace_names
+
+
 def curated_areas(root: Path) -> list[str]:
     justfile = (root / "justfile").read_text(encoding="utf-8")
     match = re.search(r'^areas := "([^"]+)"$', justfile, re.MULTILINE)
@@ -611,6 +723,7 @@ def changed_package_ids(
     root: Path,
     packages: dict[str, dict[str, Any]],
     area_names: set[str],
+    lock_impacted: set[str] | None = None,
 ) -> tuple[set[str], set[str], bool]:
     directories = package_directories(root, packages)
     seeds: set[str] = set()
@@ -620,6 +733,15 @@ def changed_package_ids(
         normalized = raw_file.replace("\\", "/").removeprefix("./")
         if normalized in GLOBAL_PATHS or normalized.startswith(GLOBAL_PREFIXES):
             return set(packages), area_names, True
+
+        if normalized == LOCKFILE_PATH:
+            # Undecidable diff — no base lockfile, or one side did not parse.
+            if lock_impacted is None:
+                return set(packages), area_names, True
+            for package_id, package in packages.items():
+                if package["name"] in lock_impacted:
+                    seeds.add(package_id)
+            continue
 
         changed = PurePosixPath(normalized)
         matched_package = False
@@ -673,6 +795,7 @@ def calculate_scope(
     metadata: dict[str, Any],
     area_config: list[dict[str, Any]],
     force_all: bool = False,
+    base_lockfile: str | None = None,
 ) -> dict[str, Any]:
     packages = workspace_packages(metadata)
     area_names = {area["area"] for area in area_config}
@@ -682,8 +805,22 @@ def calculate_scope(
         affected_areas = area_names
         full_scope = True
     else:
+        lock_impacted = None
+        if any(
+            raw.replace("\\", "/").removeprefix("./") == LOCKFILE_PATH for raw in files
+        ):
+            head_lockfile = None
+            lock_path = root / LOCKFILE_PATH
+            if lock_path.is_file():
+                head_lockfile = lock_path.read_text(encoding="utf-8")
+            lock_impacted = lockfile_impacted_names(
+                base_lockfile,
+                head_lockfile,
+                {package["name"] for package in packages.values()},
+            )
+
         seeds, explicit_areas, full_scope = changed_package_ids(
-            files, root, packages, area_names
+            files, root, packages, area_names, lock_impacted
         )
         affected_ids = dependent_closure(seeds, metadata, packages)
         affected_areas = set(explicit_areas)
@@ -771,6 +908,13 @@ def classify_preflight(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--all", action="store_true", help="select the full workspace")
+    parser.add_argument(
+        "--base-lockfile",
+        help=(
+            "the base revision's Cargo.lock. Without it a lockfile change is "
+            "undecidable and selects the full workspace"
+        ),
+    )
     parser.add_argument("files", nargs="*", help="changed repository-relative paths")
     return parser.parse_args()
 
@@ -782,7 +926,15 @@ def main() -> None:
     metadata = load_metadata(ROOT)
     validate_ownership(metadata, ROOT, area_config)
     validate_no_shadow_workspaces(metadata, ROOT)
-    scope = calculate_scope(args.files, ROOT, metadata, area_config, args.all)
+    base_lockfile = None
+    if args.base_lockfile:
+        candidate = Path(args.base_lockfile)
+        if candidate.is_file():
+            base_lockfile = candidate.read_text(encoding="utf-8")
+
+    scope = calculate_scope(
+        args.files, ROOT, metadata, area_config, args.all, base_lockfile
+    )
     print(json.dumps(scope, separators=(",", ":")))
 
 
