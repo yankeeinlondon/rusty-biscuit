@@ -58,7 +58,6 @@ order must match the root `justfile` `areas :=` list.
 | `backends` | string[] | no | `[]` | L2 terminal backends this area's tests require. One of: `tmux`, `wezterm`, `kitty`, `apple-terminal`. |
 | `native` | object | no | `{}` | Map of runner OS → system packages needed to build/test (e.g. `{"ubuntu-latest": ["libasound2-dev"]}`). |
 | `node` | bool | no | `false` | Whether this area's canonical `just test` also drives a JavaScript suite, so the leg needs Node + pnpm. |
-| `canary` | bool | no | `false` | Whether this area is a global-change canary (Phase 4). |
 
 Supported environments: `ubuntu-latest`, `windows-latest`, `macos-latest`,
 `wsl2-ubuntu`. Supported runner OS values (for `check_os` and `native`):
@@ -365,21 +364,25 @@ A new requirement is therefore declared once and installed by one implementation
 Non-Debian Linux hosts need the apt name mapped to `dnf` / `pacman` / `apk` in
 that recipe's table.
 
-## Choosing canaries
+## Compile-check scope
 
-A global change runs the `canary` areas before the rest fan out, and a canary
-failure blocks that fan-out (D11). That only produces signal if the canary area
-is **otherwise green**: the canary must fail because the shared change broke it,
-not because the area already had failing tests. A red canary is worse than no
-canary, because it hides every other area's result behind a known failure.
+An area's `check_args` is narrowed at scope time to the packages the change can
+actually reach, so `cargo check --all-targets` covers the impacted subset rather
+than the area's full static list. Non-`-p` tokens are preserved verbatim —
+`sniff` and `messenger` carry `--features`, and dropping those would check a
+different configuration than the tests run under.
 
-Current set: `biscuit-hash` (pure Rust, fast) and `playa` (native dependencies).
+If no configured package is impacted the configured value stands. An empty `-p`
+list is not a narrower check: `cargo check --all-targets` with no `-p` checks the
+entire workspace.
 
-- `darkmatter` is the intended heavy/sharded canary and should be re-added once
-  its L1 suite is green.
-- Do **not** use `homelab` or `research` as canaries.
+There is no canary stage. It was removed after two failure modes, in order:
+gating the fan-out on it erased 20 areas' evidence for one unrelated failure,
+and then un-gating it left a `needs:` edge that still waited for *completion*, so
+a canary leg that could not get a runner stalled every area indefinitely — a
+worse outcome, because a stall leaves no failure to read. A sampled proxy earns
+its keep only when the real check is expensive; here it is `cargo check`.
 
-Keep the set small — it is a serial stage in front of everything else.
 
 ## Ownership completeness
 

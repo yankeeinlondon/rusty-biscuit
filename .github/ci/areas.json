@@ -1,8 +1,7 @@
 [
   {
     "area": "biscuit-hash",
-    "check_args": "-p biscuit-hash -p biscuit-hash-cli",
-    "canary": true
+    "check_args": "-p biscuit-hash -p biscuit-hash-cli"
   },
   {
     "area": "biscuit-location",
@@ -75,7 +74,6 @@
   {
     "area": "playa",
     "check_args": "-p playa -p playa-cli",
-    "canary": true,
     "native": {
       "ubuntu-latest": ["libasound2-dev", "libpulse-dev"]
     }
