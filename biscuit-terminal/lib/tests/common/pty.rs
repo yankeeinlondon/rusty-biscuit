@@ -144,15 +144,25 @@ pub fn try_read_available(session: &mut OsSession) -> String {
     buf
 }
 
-/// A one-shot OSC answer: when `query` first appears in the master stream,
-/// `reply` is written back into the PTY exactly once.
-pub struct OscAnswer {
+/// A one-shot manufactured terminal answer: when `query` first appears in the
+/// master stream, `reply` is written back into the PTY exactly once.
+///
+/// The type is protocol-neutral. `query` is whatever byte sequence the probe
+/// writes to `/dev/tty` — an OSC colour query (`ESC ] 11 ; ? BEL`) or the DSR
+/// cursor-position query (`ESC [ 6 n`) — and `reply` is the response a real
+/// terminal would send.
+///
+/// Answering on observation rather than after a fixed delay is what makes a
+/// probe test independent of process-start latency: `Session::spawn` returns
+/// well before the child has entered raw mode and emitted anything, so a timed
+/// reply spends most of the probe's response budget on startup.
+pub struct ProbeAnswer {
     pub query: &'static [u8],
     pub reply: &'static [u8],
     sent: bool,
 }
 
-impl OscAnswer {
+impl ProbeAnswer {
     pub fn new(query: &'static [u8], reply: &'static [u8]) -> Self {
         Self {
             query,
@@ -163,8 +173,12 @@ impl OscAnswer {
 }
 
 /// Drive a probe session: read the master stream, answer each pending
-/// [`OscAnswer`] once when its query first appears, and stop when the ASCII
+/// [`ProbeAnswer`] once when its query first appears, and stop when the ASCII
 /// `until` marker is seen in the collected bytes or `deadline` elapses.
+///
+/// `until` should be a marker the probe prints *after* the exchange completes,
+/// so the child has run to completion before the session is dropped. Observing
+/// the query alone only proves the probe asked, not that it finished.
 ///
 /// Returns the raw master bytes collected. Callers can both byte-count OSC
 /// query sequences (interleaved from `/dev/tty`) and parse the probe's
@@ -175,7 +189,7 @@ impl OscAnswer {
 /// Panics if `until` is never seen before `deadline`.
 pub fn drive_probe(
     session: &mut OsSession,
-    answers: &mut [OscAnswer],
+    answers: &mut [ProbeAnswer],
     until: &str,
     deadline: Duration,
 ) -> Vec<u8> {
