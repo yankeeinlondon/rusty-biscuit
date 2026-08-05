@@ -1943,3 +1943,107 @@ _doc package open="false":
     if [[ "{{ open }}" == "true" ]]; then
         open "../target/doc/{{ package }}/index.html"
     fi
+
+# ---------------------------------------------------------------------------
+# CI comparison
+# ---------------------------------------------------------------------------
+
+# `main` carries known-red cells, so "is the run green" is not a question this
+# repo can ask. The only decidable one is whether a branch fails something its
+# base does not, which needs both runs' `ci-results.json` side by side. Doing
+# that by hand — locate two runs, download two artifacts, diff two failure sets
+# — is the manual triage this recipe exists to delete.
+#
+# `ref` is a PR number or a branch name; it defaults to the current branch.
+#
+# Runs that scheduled no package area upload no `ci-results` artifact and are
+# skipped on both sides. That case is not rare: any change confined to
+# `.github/` or docs produces a fully green run with nothing in it, and
+# comparing against one would report every cell as not comparable.
+#
+# Exit 2 means the branch regressed. Exit 0 means it did not — NOT that CI is
+# green.
+#
+# Compare a branch's CI failures against main's (exit 2 = it regressed)
+ci-diff ref="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    target="{{ ref }}"
+    if [[ -z "${target}" ]]; then
+        target="$(git rev-parse --abbrev-ref HEAD)"
+    fi
+
+    # A PR number resolves to its head branch; anything else is one already.
+    if [[ "${target}" =~ ^[0-9]+$ ]]; then
+        branch="$(gh pr view "${target}" --json headRefName --jq .headRefName)"
+        echo -e "PR {{ bold }}#${target}{{ reset }} → branch {{ bold }}${branch}{{ reset }}"
+    else
+        branch="${target}"
+    fi
+
+    if [[ "${branch}" == "main" ]]; then
+        echo -e "{{ red }}Nothing to compare: {{ bold }}main{{ reset }}{{ red }} is the base.{{ reset }}" >&2
+        exit 1
+    fi
+
+    # Newest completed run for a branch that actually uploaded results.
+    #
+    # The artifact names are captured before matching rather than piped into
+    # `grep -q`. Under `pipefail` that pipeline reports the producer's SIGPIPE
+    # (141) whenever `grep` exits on an early match before `gh` has finished
+    # writing — so a match intermittently reads as a miss, depending on whether
+    # the run's artifact list happens to fit the pipe buffer.
+    latest_run_with_results() {
+        local for_branch="$1" id names
+        for id in $(gh run list --workflow ci.yml --branch "${for_branch}" \
+                        --status completed --limit 15 --json databaseId \
+                        --jq '.[].databaseId'); do
+            if ! names="$(gh api "repos/{owner}/{repo}/actions/runs/${id}/artifacts" \
+                              --jq '.artifacts[].name' 2>/dev/null)"; then
+                continue
+            fi
+            if grep -qx 'ci-results' <<<"${names}"; then
+                echo "${id}"
+                return 0
+            fi
+        done
+        return 1
+    }
+
+    echo -e "Locating runs…"
+    base_run="$(latest_run_with_results main)" || {
+        echo -e "{{ red }}No completed {{ bold }}main{{ reset }}{{ red }} run has a ci-results artifact.{{ reset }}" >&2
+        exit 1
+    }
+    head_run="$(latest_run_with_results "${branch}")" || {
+        echo -e "{{ red }}No completed run on {{ bold }}${branch}{{ reset }}{{ red }} has a ci-results artifact.{{ reset }}" >&2
+        echo -e "{{ dim }}A run that scheduled no package area uploads none.{{ reset }}" >&2
+        exit 1
+    }
+
+    workdir="$(mktemp -d)"
+    trap 'rm -rf "${workdir}"' EXIT
+
+    gh run download "${base_run}" -n ci-results -D "${workdir}/base" >/dev/null
+    gh run download "${head_run}" -n ci-results -D "${workdir}/head" >/dev/null
+
+    # Same flags CI builds it with; --no-default-features keeps this off gix,
+    # duckdb, and the terminal renderer.
+    cargo build --release --quiet --manifest-path scripts/Cargo.toml \
+        --no-default-features --bin ci-rollup
+
+    echo -e "base {{ bold }}main{{ reset }} run ${base_run} $(gh run view "${base_run}" --json createdAt --jq .createdAt)"
+    echo -e "head {{ bold }}${branch}{{ reset }} run ${head_run} $(gh run view "${head_run}" --json createdAt --jq .createdAt)"
+
+    status=0
+    ./scripts/target/release/ci-rollup compare \
+        --base "${workdir}/base/ci-results.json" \
+        --head "${workdir}/head/ci-results.json" || status=$?
+
+    if [[ "${status}" -eq 2 ]]; then
+        echo -e "{{ red }}❌ {{ bold }}${branch}{{ reset }}{{ red }} fails something main does not.{{ reset }}"
+    elif [[ "${status}" -eq 0 ]]; then
+        echo -e "{{ green }}✅ {{ bold }}${branch}{{ reset }}{{ green }} adds no failure main does not already have.{{ reset }}"
+    fi
+    exit "${status}"

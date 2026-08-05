@@ -2114,3 +2114,124 @@ fn passing_evidence_for_an_unscheduled_cell_renders_pass_and_blocks() {
     let findings = verdict(&rollup_of(cells, &["ghost"]), &Baseline::default(), None);
     assert!(blocks_with_rule(&findings, "cell-unscheduled-evidence"));
 }
+
+// ---------------------------------------------------------------------------
+// compare
+// ---------------------------------------------------------------------------
+
+fn compare_cell(area: &str, state: CellState, failed: &[&str]) -> Cell {
+    Cell {
+        key: CellKey {
+            area: area.to_owned(),
+            environment: "ubuntu-latest".to_owned(),
+            tier: Tier::L1,
+        },
+        state,
+        counts: Counts::default(),
+        scheduled: state != CellState::NotScheduled,
+        missing_shards: Vec::new(),
+        skipped_tests: Vec::new(),
+        failed_tests: failed.iter().map(|t| (*t).to_owned()).collect(),
+        skip_evidence_degraded: false,
+        declared_gap: None,
+        reasons: Vec::new(),
+        records: Vec::new(),
+    }
+}
+
+fn compare_rollup(cells: Vec<Cell>) -> Rollup {
+    Rollup {
+        schema_version: SCHEMA_VERSION,
+        run_id: None,
+        scope: Vec::new(),
+        scope_degraded: false,
+        records: Vec::new(),
+        cells,
+    }
+}
+
+#[test]
+fn a_failure_absent_from_the_base_is_a_regression() {
+    let base = compare_rollup(vec![compare_cell("sniff", CellState::Fail, &["a"])]);
+    let head = compare_rollup(vec![compare_cell("sniff", CellState::Fail, &["a", "b"])]);
+
+    let result = compare(&base, &head);
+
+    assert!(result.regressed());
+    assert_eq!(result.changed.len(), 1);
+    assert_eq!(result.changed[0].new_failures, vec!["b".to_owned()]);
+    assert_eq!(result.changed[0].shared_failures, 1);
+}
+
+#[test]
+fn an_identical_failure_set_is_not_a_regression() {
+    let base = compare_rollup(vec![compare_cell("sniff", CellState::Fail, &["a", "b"])]);
+    let head = compare_rollup(vec![compare_cell("sniff", CellState::Fail, &["b", "a"])]);
+
+    let result = compare(&base, &head);
+
+    assert!(!result.regressed());
+    assert_eq!(result.unchanged, 1);
+    assert!(result.changed.is_empty());
+}
+
+#[test]
+fn dropping_a_failure_is_reported_without_blocking() {
+    let base = compare_rollup(vec![compare_cell("sniff", CellState::Fail, &["a", "b"])]);
+    let head = compare_rollup(vec![compare_cell("sniff", CellState::Pass, &[])]);
+
+    let result = compare(&base, &head);
+
+    assert!(!result.regressed());
+    assert_eq!(result.changed.len(), 1);
+    assert_eq!(result.changed[0].fixed_failures.len(), 2);
+}
+
+/// `MISSING` and `POLICY GAP` carry no `failed_tests`, so a cell that stops
+/// reporting names no test. Identity comparison alone would score it unchanged.
+#[rstest]
+#[case(CellState::Missing)]
+#[case(CellState::PolicyGap)]
+fn a_cell_that_starts_blocking_regresses_without_naming_a_test(#[case] head_state: CellState) {
+    let base = compare_rollup(vec![compare_cell("sniff", CellState::Pass, &[])]);
+    let head = compare_rollup(vec![compare_cell("sniff", head_state, &[])]);
+
+    let result = compare(&base, &head);
+
+    assert!(result.regressed());
+    assert!(result.changed[0].new_failures.is_empty());
+}
+
+/// A branch routinely schedules a narrower scope than `main`. Counting a cell
+/// only one side ran would credit or blame it for work that was never measured.
+#[rstest]
+#[case(CellState::NotScheduled, CellState::Fail, "not scheduled on base")]
+#[case(CellState::Fail, CellState::NotScheduled, "not scheduled on head")]
+#[case(CellState::NotScheduled, CellState::NotScheduled, "not scheduled on either side")]
+fn a_cell_missing_from_one_side_is_not_comparable(
+    #[case] base_state: CellState,
+    #[case] head_state: CellState,
+    #[case] expected: &str,
+) {
+    let base = compare_rollup(vec![compare_cell("sniff", base_state, &["a"])]);
+    let head = compare_rollup(vec![compare_cell("sniff", head_state, &["a"])]);
+
+    let result = compare(&base, &head);
+
+    assert!(!result.regressed());
+    assert_eq!(result.incomparable.len(), 1, "exactly one entry per cell");
+    assert_eq!(result.incomparable[0].reason, expected);
+    assert!(result.changed.is_empty());
+    assert_eq!(result.unchanged, 0);
+}
+
+#[test]
+fn a_cell_present_in_only_one_document_is_not_comparable() {
+    let base = compare_rollup(vec![compare_cell("sniff", CellState::Fail, &["a"])]);
+    let head = compare_rollup(vec![compare_cell("queue", CellState::Fail, &["b"])]);
+
+    let result = compare(&base, &head);
+
+    assert!(!result.regressed());
+    assert_eq!(result.incomparable.len(), 2);
+}
