@@ -2171,6 +2171,248 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 }
 
 // ---------------------------------------------------------------------------
+// Compare: is this branch worse than its base?
+// ---------------------------------------------------------------------------
+
+/// A cell observed in both runs, with the failure identities that moved.
+#[derive(Clone, Debug)]
+struct CellDelta {
+    key: CellKey,
+    base_state: CellState,
+    head_state: CellState,
+    /// Failing on head, not on base.
+    new_failures: Vec<String>,
+    /// Failing on base, not on head.
+    fixed_failures: Vec<String>,
+    /// Failing on both.
+    shared_failures: usize,
+}
+
+impl CellDelta {
+    /// Whether this cell got worse.
+    ///
+    /// A state that starts blocking is a regression even with no named test:
+    /// `MISSING` and `POLICY GAP` carry no `failed_tests`, so identity-set
+    /// comparison alone would score a cell that stopped reporting as unchanged.
+    fn regressed(&self) -> bool {
+        !self.new_failures.is_empty() || (self.head_state.blocks() && !self.base_state.blocks())
+    }
+
+    fn changed(&self) -> bool {
+        self.regressed() || !self.fixed_failures.is_empty() || self.base_state != self.head_state
+    }
+}
+
+/// A cell that carries no comparable evidence, and why.
+///
+/// Kept as data rather than dropped: a PR that schedules a narrower scope than
+/// its base is the normal case, and silently omitting those cells would read as
+/// "no difference" when the truth is "not measured".
+#[derive(Clone, Debug)]
+struct Incomparable {
+    key: CellKey,
+    reason: String,
+}
+
+#[derive(Debug, Default)]
+struct Comparison {
+    changed: Vec<CellDelta>,
+    unchanged: usize,
+    incomparable: Vec<Incomparable>,
+}
+
+impl Comparison {
+    fn regressed(&self) -> bool {
+        self.changed.iter().any(CellDelta::regressed)
+    }
+}
+
+/// Compare two result documents cell by cell.
+///
+/// Comparison is keyed on `{area, environment, tier}` and on test *identity*,
+/// never on shard: shards repartition as the test count moves, so a
+/// shard-keyed diff reports churn as change. Aggregating to the cell first is
+/// what makes the result stable across repartitioning.
+fn compare(base: &Rollup, head: &Rollup) -> Comparison {
+    let base_cells: BTreeMap<&CellKey, &Cell> =
+        base.cells.iter().map(|cell| (&cell.key, cell)).collect();
+    let head_cells: BTreeMap<&CellKey, &Cell> =
+        head.cells.iter().map(|cell| (&cell.key, cell)).collect();
+
+    let mut result = Comparison::default();
+    let keys: BTreeSet<&CellKey> = base_cells.keys().chain(head_cells.keys()).copied().collect();
+
+    for key in keys {
+        let (base_cell, head_cell) = match (base_cells.get(key), head_cells.get(key)) {
+            (Some(b), Some(h)) => (*b, *h),
+            (None, Some(_)) => {
+                result.incomparable.push(Incomparable {
+                    key: key.clone(),
+                    reason: "absent from the base run".into(),
+                });
+                continue;
+            }
+            (Some(_), None) => {
+                result.incomparable.push(Incomparable {
+                    key: key.clone(),
+                    reason: "absent from the head run".into(),
+                });
+                continue;
+            }
+            (None, None) => continue,
+        };
+
+        let unscheduled = match (
+            base_cell.state == CellState::NotScheduled,
+            head_cell.state == CellState::NotScheduled,
+        ) {
+            (true, true) => Some("not scheduled on either side"),
+            (true, false) => Some("not scheduled on base"),
+            (false, true) => Some("not scheduled on head"),
+            (false, false) => None,
+        };
+        if let Some(reason) = unscheduled {
+            result.incomparable.push(Incomparable {
+                key: key.clone(),
+                reason: reason.to_owned(),
+            });
+            continue;
+        }
+
+        let base_failures: BTreeSet<&str> =
+            base_cell.failed_tests.iter().map(String::as_str).collect();
+        let head_failures: BTreeSet<&str> =
+            head_cell.failed_tests.iter().map(String::as_str).collect();
+
+        let delta = CellDelta {
+            key: key.clone(),
+            base_state: base_cell.state,
+            head_state: head_cell.state,
+            new_failures: head_failures
+                .difference(&base_failures)
+                .map(|t| (*t).to_owned())
+                .collect(),
+            fixed_failures: base_failures
+                .difference(&head_failures)
+                .map(|t| (*t).to_owned())
+                .collect(),
+            shared_failures: base_failures.intersection(&head_failures).count(),
+        };
+
+        if delta.changed() {
+            result.changed.push(delta);
+        } else {
+            result.unchanged += 1;
+        }
+    }
+
+    result
+}
+
+fn render_comparison(comparison: &Comparison, base: &Rollup, head: &Rollup) -> String {
+    let mut out = String::new();
+    let describe = |rollup: &Rollup| match &rollup.run_id {
+        Some(id) => format!("run {id}"),
+        None => "unidentified run".to_owned(),
+    };
+
+    out.push_str("\n## CI comparison\n\n");
+    out.push_str(&format!(
+        "base: {} · head: {}\n\n",
+        describe(base),
+        describe(head)
+    ));
+
+    if comparison.regressed() {
+        out.push_str("**REGRESSED** — the head run fails something its base does not.\n\n");
+    } else {
+        out.push_str(
+            "**CLEAR** — the head run introduces no failure absent from its base.\n\n",
+        );
+    }
+
+    let new_failures: Vec<_> = comparison
+        .changed
+        .iter()
+        .flat_map(|d| d.new_failures.iter().map(move |t| (&d.key, t)))
+        .collect();
+    if !new_failures.is_empty() {
+        out.push_str(&format!("### New failures ({})\n\n", new_failures.len()));
+        out.push_str("| cell | test |\n|---|---|\n");
+        for (key, test) in &new_failures {
+            out.push_str(&format!("| `{key}` | `{test}` |\n"));
+        }
+        out.push('\n');
+    }
+
+    let state_regressions: Vec<_> = comparison
+        .changed
+        .iter()
+        .filter(|d| d.head_state.blocks() && !d.base_state.blocks())
+        .collect();
+    if !state_regressions.is_empty() {
+        out.push_str(&format!(
+            "### Cell state regressions ({})\n\n",
+            state_regressions.len()
+        ));
+        out.push_str("| cell | base | head |\n|---|---|---|\n");
+        for delta in &state_regressions {
+            out.push_str(&format!(
+                "| `{}` | {} | {} |\n",
+                delta.key, delta.base_state, delta.head_state
+            ));
+        }
+        out.push('\n');
+    }
+
+    // Per-cell counts, not identities. The fixed set is routinely in the
+    // hundreds when the base is even slightly stale, and every row of it is
+    // something the reader is NOT being asked to act on.
+    let fixed_total: usize = comparison.changed.iter().map(|d| d.fixed_failures.len()).sum();
+    if fixed_total > 0 {
+        out.push_str(&format!("### No longer failing ({fixed_total})\n\n"));
+        out.push_str("| cell | count |\n|---|---|\n");
+        for delta in comparison.changed.iter().filter(|d| !d.fixed_failures.is_empty()) {
+            out.push_str(&format!(
+                "| `{}` | {} |\n",
+                delta.key,
+                delta.fixed_failures.len()
+            ));
+        }
+        out.push_str(
+            "\nAttributable to the head branch only if the base is its merge-base. A base older than the branch also credits it with everything `main` fixed in between.\n\n",
+        );
+    }
+
+    let carried: usize = comparison.changed.iter().map(|d| d.shared_failures).sum();
+    if carried > 0 {
+        out.push_str(&format!(
+            "Pre-existing failures carried by changed cells: {carried} (unchanged, not this branch's).\n\n"
+        ));
+    }
+
+    if !comparison.incomparable.is_empty() {
+        out.push_str(&format!(
+            "### Not comparable ({})\n\n",
+            comparison.incomparable.len()
+        ));
+        out.push_str("These cells produced evidence on only one side, usually because the two runs scheduled different scopes. They are neither new nor fixed.\n\n");
+        out.push_str("| cell | reason |\n|---|---|\n");
+        for entry in &comparison.incomparable {
+            out.push_str(&format!("| `{}` | {} |\n", entry.key, entry.reason));
+        }
+        out.push('\n');
+    }
+
+    out.push_str(&format!(
+        "{} cell(s) identical between the two runs.\n",
+        comparison.unchanged
+    ));
+
+    out
+}
+
+// ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
 
@@ -2180,6 +2422,7 @@ ci-rollup — package-area × environment × tier CI rollup and merge verdict
 USAGE:
   ci-rollup rollup  --artifacts <dir> [options]
   ci-rollup verdict --results <file> --baseline <file> [options]
+  ci-rollup compare --base <file> --head <file> [options]
 
 ROLLUP OPTIONS:
   --artifacts <dir>              root holding the downloaded per-job artifacts
@@ -2207,10 +2450,19 @@ VERDICT OPTIONS:
   --summary <file>               append Markdown (default $GITHUB_STEP_SUMMARY)
   --today <YYYY-MM-DD>           override today's date for expiry evaluation
 
+COMPARE OPTIONS:
+  --base <file>                  result document to compare against (usually main)
+  --head <file>                  result document under judgement (the branch)
+  --summary <file>               append Markdown (default $GITHUB_STEP_SUMMARY)
+
+  Answers `is this branch worse than its base`, which is the only question a
+  repo with known-red cells can ask of a run. Cells scheduled on one side only
+  are reported as not comparable rather than counted either way.
+
 EXIT CODES:
   0  clear
   1  tool error (bad usage, unreadable input)
-  2  blocked
+  2  blocked (verdict), or the head run regressed against its base (compare)
 ";
 
 fn main() {
@@ -2286,6 +2538,7 @@ fn run() -> Result<i32> {
     match command.as_str() {
         "rollup" => cmd_rollup(&args),
         "verdict" => cmd_verdict(&args),
+        "compare" => cmd_compare(&args),
         "--help" | "-h" | "help" | "" => {
             println!("{USAGE}");
             Ok(0)
@@ -2387,6 +2640,37 @@ fn cmd_verdict(args: &Args) -> Result<i32> {
     print!("{markdown}");
 
     Ok(if blocked { EXIT_BLOCKED } else { 0 })
+}
+
+fn cmd_compare(args: &Args) -> Result<i32> {
+    let base = load_rollup(Path::new(args.required("base")?))?;
+    let head = load_rollup(Path::new(args.required("head")?))?;
+
+    let comparison = compare(&base, &head);
+    let markdown = render_comparison(&comparison, &base, &head);
+    append_summary(args, &markdown)?;
+    print!("{markdown}");
+
+    Ok(if comparison.regressed() {
+        EXIT_BLOCKED
+    } else {
+        0
+    })
+}
+
+fn load_rollup(path: &Path) -> Result<Rollup> {
+    let text = fs::read_to_string(path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    let rollup: Rollup = serde_json::from_str(&text)
+        .with_context(|| format!("invalid result document {}", path.display()))?;
+    if rollup.schema_version > SCHEMA_VERSION {
+        bail!(
+            "result schema_version {} in {} is newer than this tool understands ({SCHEMA_VERSION})",
+            rollup.schema_version,
+            path.display()
+        );
+    }
+    Ok(rollup)
 }
 
 fn tier_environments(args: &Args, name: &str) -> Vec<String> {
