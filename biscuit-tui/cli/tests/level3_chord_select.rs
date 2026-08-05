@@ -119,7 +119,8 @@ fn chord_selects(
     // line. `question` renders its TUI to stderr (still a tty), so the headless
     // guard — which only trips when BOTH stdout and stderr are piped — lets the
     // prompt run while stdout is captured into `$out`.
-    let bin = env!("CARGO_BIN_EXE_question");
+    let bin_path = biscuit_test_harness::bin_exe!("question");
+    let bin = bin_path.display();
     let mut cmd = format!("out=$({bin} {subcommand}");
     for opt in options {
         cmd.push(' ');

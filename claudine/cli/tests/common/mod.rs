@@ -27,6 +27,21 @@ fn ensure_test_tracing_initialized() {
 #[allow(unused_imports)]
 pub use test_toolkit::init_test_tracing;
 
+/// Absolute path to the `claudine` binary built for this test binary.
+///
+/// Resolved at run time rather than with `env!`, so a suite executed from a
+/// relocated `cargo nextest archive` (the `wsl2-ubuntu` leg) still finds the
+/// binary — see [`biscuit_test_harness::bin_exe`]. Returned as `&str` because
+/// most call sites interpolate it into a shell command line.
+pub fn claudine_bin() -> &'static str {
+    static BIN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    BIN.get_or_init(|| {
+        biscuit_test_harness::bin_exe!("claudine")
+            .to_string_lossy()
+            .into_owned()
+    })
+}
+
 pub struct TestWorkspace {
     root: PathBuf,
 }

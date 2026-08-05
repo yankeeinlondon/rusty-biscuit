@@ -178,7 +178,7 @@ fn sequence_ctrl_c_fans_out_to_parallel_children_on_windows() {
         std::env::var("PATH").unwrap_or_default()
     );
 
-    let mut claudine = Command::new(env!("CARGO_BIN_EXE_claudine"))
+    let mut claudine = Command::new(common::claudine_bin())
         .args(["sequence", "--goose", "--yolo"])
         .arg(&md_file)
         .current_dir(workspace.path())

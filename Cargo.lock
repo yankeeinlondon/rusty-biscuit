@@ -1131,6 +1131,7 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "biscuit-clipboard",
+ "biscuit-test-harness",
  "clap 4.6.1",
  "dirs",
  "futures-util",
@@ -1150,6 +1151,7 @@ dependencies = [
  "axum-test 16.4.1",
  "base64 0.22.1",
  "biscuit-clipboard",
+ "biscuit-test-harness",
  "chrono",
  "clap 4.6.1",
  "dirs",
@@ -1362,6 +1364,7 @@ name = "biscuit-speaks-cli"
 version = "0.1.0"
 dependencies = [
  "biscuit-speaks",
+ "biscuit-test-harness",
  "clap 4.6.1",
  "clap_complete",
  "darkmatter",
@@ -11530,6 +11533,7 @@ name = "schematic-gen"
 version = "0.1.0"
 dependencies = [
  "biscuit-file",
+ "biscuit-test-harness",
  "clap 4.6.1",
  "colored",
  "indexmap 2.14.0",

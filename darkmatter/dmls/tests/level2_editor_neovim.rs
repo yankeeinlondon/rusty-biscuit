@@ -146,7 +146,7 @@ fn run_probe(mode: &str, root: &Path) -> ProbeReport {
     let output = Command::new("nvim")
         .args(["--clean", "--headless", "-l"])
         .arg(&probe)
-        .env("DMLS_L2_BIN", env!("CARGO_BIN_EXE_dmls"))
+        .env("DMLS_L2_BIN", biscuit_test_harness::bin_exe!("dmls"))
         .env("DMLS_L2_ROOT", root)
         .env("DMLS_L2_MODE", mode)
         .output()
@@ -384,7 +384,10 @@ fn level2_neovim_tmux_renders_recipe_colors_and_repaints() {
 
     let init = fs::read_to_string(fixture_path("init.lua"))
         .unwrap()
-        .replace("__DMLS_BIN__", env!("CARGO_BIN_EXE_dmls"))
+        .replace(
+            "__DMLS_BIN__",
+            &biscuit_test_harness::bin_exe!("dmls").to_string_lossy(),
+        )
         .replace("__ROOT__", &root.to_string_lossy());
     let init_path = root.join("init.lua");
     fs::write(&init_path, init).unwrap();

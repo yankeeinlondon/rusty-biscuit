@@ -62,7 +62,7 @@ exit 0
     let md_file = workspace.path().join("prompt.md");
     fs::write(&md_file, "# perf body\n").unwrap();
 
-    let bin = env!("CARGO_BIN_EXE_claudine");
+    let bin = common::claudine_bin();
     let mut cmd = Command::new(bin);
     cmd.env("NO_COLOR", "1")
         .env("HOME", workspace.path())

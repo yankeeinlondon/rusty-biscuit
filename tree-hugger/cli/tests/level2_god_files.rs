@@ -31,10 +31,16 @@ use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serial_test::serial;
 use test_toolkit::{Backend, Level, require_level};
 
-/// Absolute path to the built `hug` binary, injected by cargo for this crate's
-/// integration tests. Driving the real binary keeps the test honest about the
-/// production rendering path.
-const HUG: &str = env!("CARGO_BIN_EXE_hug");
+/// Absolute path to the built `hug` binary. Driving the real binary keeps the
+/// test honest about the production rendering path.
+fn hug() -> &'static str {
+    static BIN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    BIN.get_or_init(|| {
+        biscuit_test_harness::bin_exe!("hug")
+            .to_string_lossy()
+            .into_owned()
+    })
+}
 
 static SHARED_WEZTERM: SharedHarness<WezTermHarness> = SharedHarness::new();
 static SHARED_KITTY: SharedHarness<KittyHarness> = SharedHarness::new();
@@ -80,7 +86,7 @@ fn run_god_files<H: TerminalHarness>(harness: &mut H, dir: &Path) -> CapturedFra
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
 
-    let cmd = format!("{HUG} god-files {}", dir.display());
+    let cmd = format!("{} god-files {}", hug(), dir.display());
     harness
         .send_command_with_env(&cmd, &[("CLICOLOR_FORCE", "1")])
         .expect("send_command_with_env failed");

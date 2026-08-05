@@ -6,6 +6,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+use biscuit_test_harness::bin_exe;
+
 /// The real claudine package-area root.
 fn real_area() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -95,7 +97,7 @@ fn run_gen(area: &Path, args: &[&str]) -> Output {
 /// Runs the built binary with extra environment variables (for color-mode
 /// coverage). `stdin` is closed and stdout is captured (non-TTY).
 fn run_gen_env(area: &Path, args: &[&str], envs: &[(&str, &str)]) -> Output {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_claudine-gen"));
+    let mut cmd = Command::new(bin_exe!("claudine-gen"));
     cmd.arg("--area").arg(area).args(args);
     // Neutralize any ambient color-forcing so the base case is deterministic.
     cmd.env_remove("FORCE_COLOR")

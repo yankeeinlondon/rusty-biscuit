@@ -20,6 +20,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use biscuit_test_harness::bin_exe;
 use serde_json::{Value, json};
 
 /// Frames a JSON-RPC message with the LSP `Content-Length` header.
@@ -65,7 +66,7 @@ fn await_response(reader: &mut impl BufRead, id: i64) -> Option<Value> {
 
 #[test]
 fn native_binary_speaks_lsp_over_stdio() {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_dmls"))
+    let mut child = Command::new(bin_exe!("dmls"))
         // `--stdio` is a no-op the binary accepts for editor compatibility.
         .arg("--stdio")
         .stdin(Stdio::piped())

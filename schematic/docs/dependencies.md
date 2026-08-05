@@ -108,6 +108,12 @@
 
     _Tags: testing, filesystem, cleanup_
 
+- [biscuit-test-harness](../../biscuit-test-harness) _v0.1.0_
+
+    _Workspace test harness; `terminal_capture.rs` uses its `bin_exe!` macro to locate the `schematic-gen` binary at run time._
+
+    _Tags: workspace, testing_
+
 - [toml](https://github.com/toml-rs/toml) _v0.8_ [📄](https://docs.rs/toml)
 
     _Native Rust encoder and decoder of TOML-formatted files with serde integration._

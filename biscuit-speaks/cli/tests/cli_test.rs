@@ -1,14 +1,15 @@
 use std::io::Write;
 use std::process::{Command, Output, Stdio};
 
+use biscuit_test_harness::bin_exe;
+
 /// Invoke the pre-built `so-you-say` binary directly.
 ///
-/// Cargo sets `CARGO_BIN_EXE_<bin-name>` for integration tests, pointing at the
-/// already-compiled binary. Spawning it directly avoids `cargo run`, whose
-/// per-invocation build-lock contention under parallel test execution makes
-/// these assertions flaky (slow waits, interleaved cargo progress on stdout).
+/// Spawning it directly avoids `cargo run`, whose per-invocation build-lock
+/// contention under parallel test execution makes these assertions flaky (slow
+/// waits, interleaved cargo progress on stdout).
 fn cli() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_so-you-say"))
+    Command::new(bin_exe!("so-you-say"))
 }
 
 /// Assert the CLI accepted an invocation and carried it through to the TTS stack.
