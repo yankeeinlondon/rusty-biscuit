@@ -37,7 +37,8 @@ backend links ALSA and PulseAudio, so those development libraries must be presen
 before the build.
 
 > **Linux prerequisites**: `just init` at the repo root installs these for you,
-> from the `native` declaration in `.github/ci/areas.json`. To install them by
+> from the `native` declaration in `playa/lib/Cargo.toml`'s
+> `[package.metadata.ci.native]`. To install them by
 > hand:
 >
 > ```sh

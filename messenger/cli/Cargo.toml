@@ -38,3 +38,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tempfile = "3.15"
 serial_test = "3"
 insta = "1.47"
+
+# CI exclusion: promoted together with the messenger library.
+[package.metadata.ci]
+gates = false
+exclusion-class = "promotion-pending"
+owner = "@yankeeinlondon"
+reason = "covered only by the bespoke messenger-desktop specialized job, like the messenger library. Promotion is blocked on the canonical just recipe set — messenger/ defines only test and lint."
+expiry = "2026-10-31"

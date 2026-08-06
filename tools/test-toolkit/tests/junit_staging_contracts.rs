@@ -28,14 +28,12 @@ use std::process::{Command, Output};
 use tempfile::TempDir;
 
 /// The manifest keys, in the order the rollup expects to find them.
-const MANIFEST_KEYS: [&str; 9] = [
+const MANIFEST_KEYS: [&str; 7] = [
     "tier",
     "package",
     "xml",
     "exit_code",
-    "area",
     "environment",
-    "shard",
     "duration_s",
     "report_present",
 ];
@@ -387,22 +385,19 @@ fn first_package_failure_still_runs_and_stages_the_rest() {
     );
 }
 
-/// Sharded runs are separate jobs writing separate staging trees, so shard
-/// identity has to travel in the manifest rather than in the file name.
+/// The environment identity is stamped from `BISCUIT_CI_ENVIRONMENT`; the
+/// package identity comes from the recipe argument itself, so it always
+/// travels with the record.
 #[test]
-fn sharded_run_records_shard_identity() {
+fn the_environment_identity_is_stamped_from_ci_env() {
     let fixture = Fixture::new();
     let output = fixture.run_test(
-        &[
-            ("BISCUIT_CI_AREA", "stage-fixture"),
-            ("BISCUIT_CI_ENVIRONMENT", "ubuntu-latest"),
-            ("BISCUIT_CI_SHARD", "1/2"),
-        ],
-        &["--partition", "count:1/2"],
+        &[("BISCUIT_CI_ENVIRONMENT", "ubuntu-latest")],
+        &[],
     );
     assert!(
         output.status.success(),
-        "sharded fixture run should pass:\n{}",
+        "fixture run should pass:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -410,14 +405,14 @@ fn sharded_run_records_shard_identity() {
     assert_eq!(records.len(), 2);
     for record in &records {
         assert_schema(record);
-        assert_eq!(record.string("shard"), "1/2");
-        assert_eq!(record.string("area"), "stage-fixture");
         assert_eq!(record.string("environment"), "ubuntu-latest");
         assert_eq!(record.raw("report_present"), "true");
     }
 }
 
-/// The CI identity fields are reported, never invented: unset means `""`.
+/// The CI identity field is reported, never invented: an unset environment
+/// means `""` (local dev), and the package half always comes from the recipe
+/// argument.
 #[test]
 fn absent_ci_identity_is_empty_not_invented() {
     let fixture = Fixture::new();
@@ -425,9 +420,7 @@ fn absent_ci_identity_is_empty_not_invented() {
     assert!(output.status.success());
 
     for record in &fixture.manifest_records() {
-        assert_eq!(record.raw("area"), "\"\"");
         assert_eq!(record.raw("environment"), "\"\"");
-        assert_eq!(record.raw("shard"), "\"\"");
     }
 }
 

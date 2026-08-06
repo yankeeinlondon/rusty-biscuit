@@ -5,7 +5,7 @@ name: messenger-desktop-tests
 # macOS to ensure helper election, fallback, and platform-specific edge cases
 # remain green on every supported OS.
 #
-# `messenger` is a non-gating area (`ci: false` in `.github/ci/areas.json`), so
+# `messenger` is a non-gating package (`gates = false` in its manifest), so
 # this workflow IS its CI ownership. Orchestrated by `ci.yml` when a messenger
 # package is in the affected scope (D12); no longer self-triggers on pushes/PRs.
 # Also dispatchable manually.

@@ -115,3 +115,11 @@ rendezvous-core = { path = "../rendezvous/core", features = ["test-support"] }
 # that test contract on every platform; the Windows-GNU recipe supplies the
 # large-COFF-object flags its unity build requires.
 rendezvous-daemon = { path = "../rendezvous/daemon" }
+
+# CI policy: claudine-cli owns the area's L2 (PTY/tmux) tier tests. Its tests
+# need inert AI-provider CLI stubs for provider discovery, and the darkmatter
+# `md` binary built into the workspace target dir (inline_compose_hash).
+[package.metadata.ci.tests]
+tiers = ["L1", "L2"]
+l2-backends = ["tmux", "wezterm"]
+runner-tools = ["ai-provider-stubs", "darkmatter-md-fixture", "l2-parallel-self-spawn"]

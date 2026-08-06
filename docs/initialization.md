@@ -48,8 +48,8 @@ Windows-specific behavior of the recipe itself:
   2022 Build Tools* with the C++ workload via winget (or the
   `vs_BuildTools.exe` bootstrapper when winget is unavailable). This is a
   multi-GB install and prompts for administrator approval.
-- **jq** (used to read `.github/ci/areas.json`) is installed via winget when
-  absent; when no area declares Windows native packages the check is skipped.
+- **jq** (used to read package native declarations from `cargo metadata`)
+  is installed via winget when absent.
 - **Node.js 22+** (for GitNexus) is not auto-installed; the recipe prints the
   `winget install OpenJS.NodeJS.LTS` remediation and stops.
 

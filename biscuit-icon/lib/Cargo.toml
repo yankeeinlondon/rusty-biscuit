@@ -29,3 +29,7 @@ biscuit-terminal = { path = "../../biscuit-terminal/lib" }
 wiremock = "0.6"
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }
+
+# CI policy: L1 runs with the `image` feature.
+[package.metadata.ci.tests]
+features = ["image"]

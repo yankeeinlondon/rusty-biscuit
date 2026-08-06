@@ -118,7 +118,8 @@ never be demanded by CI and contributes no execution evidence.
 
 `Backend::as_str()` returns the stable identifier — `tmux`, `wezterm`, `kitty`,
 `apple-terminal` — shared verbatim with `scripts/ci/affected_scope.py`'s
-`KNOWN_L2_BACKENDS` and the `backends` arrays in `.github/ci/areas.json`.
+`KNOWN_L2_BACKENDS` and the `l2-backends` arrays in each package's
+`[package.metadata.ci.tests]`.
 `Backend::label()` is the separate human-readable name used in diagnostics, so
 rewording a skip message cannot break a CI policy file.
 

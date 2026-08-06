@@ -14,7 +14,8 @@ configuration.
 | Windows | Windows SDK bindings | `windows` crate | none — no system package |
 
 The Linux packages are declared once, by the `native` policy in
-`.github/ci/areas.json` (`{"ubuntu-latest": ["libasound2-dev", "libpulse-dev"]}`),
+`playa/lib/Cargo.toml`'s `[package.metadata.ci.native]`
+(`{"ubuntu-latest": ["libasound2-dev", "libpulse-dev"]}`),
 and installed from there by one implementation — the root `justfile`'s
 `_ensure-native-libs`, which probes each declared library with pkg-config and
 installs only what is missing, translating the apt names to `dnf` / `pacman` /

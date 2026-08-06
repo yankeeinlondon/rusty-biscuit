@@ -101,3 +101,7 @@ wiremock = "0.6"
 [[bench]]
 name = "perf"
 harness = false
+
+# CI policy: the L1 suite runs with the `remote` feature (network probes).
+[package.metadata.ci.tests]
+features = ["remote"]

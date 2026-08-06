@@ -91,9 +91,9 @@ while every other backend still skips cleanly. It is a comma-separated,
 case-insensitive list of the stable identifiers `tmux`, `wezterm`, `kitty`,
 `apple-terminal` — matched **exactly**, so `wez` and `tmux2` are errors rather
 than near-misses. Unset or all-whitespace means "no backend is required" and
-every gate keeps its skip behavior. The same vocabulary appears in
-`.github/ci/areas.json` and `scripts/ci/affected_scope.py`, and CI passes it
-through unmodified.
+every gate keeps its skip behavior. The same vocabulary appears in each
+package's `[package.metadata.ci.tests]` `l2-backends` and
+`scripts/ci/affected_scope.py`, and CI passes it through unmodified.
 
 ```bash
 BISCUIT_TEST_REQUIRED_BACKENDS=tmux just test-l2        # tmux fatal, GUI backends skip
@@ -196,11 +196,11 @@ Before running any final build, test, or lint gate:
    selector when the repository provides a narrower supported recipe.
 4. Report the selected scope and commands with the gate results.
 
-For durable native CI, register curated package-area policy in
-`.github/ci/areas.json`. The dependency-aware `.github/workflows/ci.yml`
+For durable native CI, declare package policy in the package's own
+`[package.metadata.ci]`. The dependency-aware `.github/workflows/ci.yml`
 caller calculates changed workspace packages plus their reverse Cargo
-dependencies, maps them to that policy, and fans the resulting matrix into
-`.github/workflows/_area-ci.yml`. A bootstrap `preflight` job gates that fan-out
+dependencies, reads that policy, and fans the resulting matrix into
+`.github/workflows/_package-ci.yml`. A bootstrap `preflight` job gates that fan-out
 (`needs: [scope, preflight]`). Within each area, `check`, `lint` (build +
 clippy), and `test` (L1 shards) are independent gates; only the expensive
 `l2`/`browser` tiers stage behind `test`. Lint does not gate L1 — one clippy hint

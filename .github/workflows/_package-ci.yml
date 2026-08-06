@@ -1,0 +1,751 @@
+name: package-ci
+
+# Reusable CI building block for a single Cargo package.
+#
+# The dependency-aware `ci.yml` matrix calls this via `workflow_call`, once per
+# gating impacted package, so platform behavior stays uniform across the
+# monorepo. The package is the unit of selection, execution, and result
+# identity: no result-producing job here covers more than one Cargo package.
+#
+# `environment` is NOT `os`. Windows, macOS, and Linux are operating systems;
+# WSL2 is a distinct supported Linux environment that a Windows runner HOSTS.
+# Every result identity — artifact name, JUnit manifest record, rollup cell — is
+# keyed by {package, environment, tier}. Only `runs-on` and the native-package
+# lookup are keyed by runner OS. `native-environments` may therefore be fed
+# straight into a `runs-on` matrix (those three environment names ARE runner
+# labels); `wsl2-ubuntu` is hoisted into the separate `_wsl-ci.yml` reusable
+# workflow precisely so it can never reach that matrix and silently take the
+# Windows branch for dependency installation, paths, shells, caching, or
+# artifact collection.
+#
+# Policy this encodes: the canonical per-package recipes (`_test`, `_test_l2`,
+# `_test_browser`, `_lint`) on every applicable environment; `check`, `lint`,
+# and `test` are independent gates with `l2`/`browser` staged behind `test`;
+# no sharding anywhere (compilation is ~85% of a shard and every shard pays it
+# in full — see fixes/2026-08-06-cicd/spec.md § Sharding). Cargo artifacts are
+# cached by `Swatinem/rust-cache` only, keyed per package — see
+# docs/kache-strategy.md for why the kache rustc-wrapper was removed from CI.
+#
+# Every building job first runs `just _ensure-native-libs <packages...>` — the
+# same recipe `just init` runs on a developer host — with the union of the
+# `native` requirements across this package's dependency closure, as computed
+# by the scope job from `[package.metadata.ci.native]` declarations.
+
+on:
+  workflow_call:
+    inputs:
+      package:
+        description: "Cargo package name; the unit of selection, execution, and result identity (e.g. darkmatter-cli)."
+        type: string
+        required: true
+      check-args:
+        description: "Args for the compile-check `cargo check --all-targets` (e.g. '-p sniff --features remote')."
+        type: string
+        required: true
+      test-args:
+        description: "Extra args forwarded to the canonical tier recipes (the package's declared feature flags, e.g. '--features remote' or '--all-features')."
+        type: string
+        default: ""
+      l1-include-slow:
+        description: "Keep `slow_` tests inside the L1 selection (darkmatter's declared L1 contract)."
+        type: boolean
+        default: false
+      native-environments:
+        description: "JSON array of NATIVE environments that run the full L1 suite. Each value is also its own runner label; wsl2-ubuntu is deliberately excluded."
+        type: string
+        default: '["ubuntu-latest", "windows-latest", "macos-latest"]'
+      check-os:
+        description: "JSON array of runner OSes that only compile-check. A compile-check emits no test results, so it has no environment identity."
+        type: string
+        default: '["windows-latest"]'
+      l2-environments:
+        description: "JSON array of environments where an L2 backend is provisioned. Empty when the package owns no L2 tests."
+        type: string
+        default: '[]'
+      browser-environments:
+        description: "JSON array of environments where a headless browser is provisioned. Empty when the package owns no browser tests."
+        type: string
+        default: '[]'
+      backends:
+        description: "JSON array of L2 terminal backends this package's tests declare, used to report per-backend coverage."
+        type: string
+        default: '[]'
+      runner-tools:
+        description: "JSON array from the closed runner-tool vocabulary: ai-provider-stubs, darkmatter-md-fixture, node-22, pnpm-10, l2-parallel-self-spawn."
+        type: string
+        default: '[]'
+      companion-suites:
+        description: "JSON array of non-Cargo suites this package owns (closed vocabulary: homelab-frontend)."
+        type: string
+        default: '[]'
+      node-environments:
+        description: "JSON array of environments where Node + pnpm are provisioned for a declared companion suite. Empty when the package declares none."
+        type: string
+        default: '[]'
+      native:
+        description: "JSON map of runner OS -> system packages, the union of `native` requirements across this package's dependency closure."
+        type: string
+        default: '{}'
+      wsl:
+        description: "Run the canonical L1 suite inside a WSL2 Ubuntu guest (environment `wsl2-ubuntu`)."
+        type: boolean
+        default: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # The repository tracks no rustc wrapper; cleared explicitly so a stray
+  # environment value cannot silently intercept a package's builds.
+  RUSTC_WRAPPER: ""
+  # Force TrueColor on headless runners so styled output matches local dev.
+  COLORTERM: truecolor
+  # Explicitly select the CI nextest profile (D6) — every `cargo nextest` in the
+  # canonical recipes honors this and logs "nextest profile: ci". No reliance on
+  # implicit environment detection.
+  NEXTEST_PROFILE: ci
+
+jobs:
+  # Warning-drift gate. What survives of the old "macOS floor" is
+  # `--all-targets`: benches and examples are compiled here and nowhere else,
+  # because the test leg builds only lib/bins/tests.
+  #
+  # It deliberately does NOT carry `RUSTFLAGS: -D warnings`. This gate answers
+  # "does it COMPILE on this environment", and promoting warnings destroyed that
+  # distinction three ways:
+  #
+  #   1. It lied. Dead code reported as `error: could not compile <crate>` when
+  #      the crate compiled perfectly well.
+  #   2. It blamed the wrong package. `playa`'s Windows leg went red for dead
+  #      code in `biscuit-terminal`, compiled as a dependency.
+  #   3. It had no local reproduction. `just check` sets no RUSTFLAGS, so no
+  #      canonical recipe could reproduce the failure.
+  #
+  # Platform-conditional dead code is the normal shape of cross-platform Rust.
+  # `lint` still denies warnings, through clippy inside `_lint`, so `just lint`
+  # enforces the same bar off CI.
+  check:
+    name: check (${{ inputs.package }} on ${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.check-os) }}
+    runs-on: ${{ matrix.os }}
+    # 45, not 30 — shared by `check`, `test`, and `lint` below.
+    #
+    # Measured on run 30562649123: completing cells for the heaviest packages
+    # cluster at 19-29 minutes. The old 30-minute ceiling sat inside the normal
+    # distribution rather than above it, and GitHub reports a timed-out step as
+    # `cancelled`, so the rollup recorded MISSING evidence rather than a
+    # timeout — indistinguishable, from the rollup's side, from a leg that
+    # never ran.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install just
+        uses: extractions/setup-just@v2
+      - name: Install native prerequisites
+        shell: bash
+        env:
+          NATIVE: ${{ inputs.native }}
+          RUNNER_KEY: ${{ matrix.os }}
+        run: |
+          set -euo pipefail
+          packages="$(jq -r --arg k "$RUNNER_KEY" '.[$k] // [] | join(" ")' <<<"$NATIVE")"
+          if [ -n "$packages" ]; then
+            # Explicit list: the dependency-closure union computed by the scope
+            # job. No argument would install EVERY package's libraries.
+            just _ensure-native-libs $packages
+          fi
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: package-ci-${{ inputs.package }}-check-${{ matrix.os }}
+      - name: cargo check --all-targets
+        run: cargo check --all-targets ${{ inputs.check-args }}
+      # Producer status. This job stages no JUnit, so the status artifact is
+      # the ONLY evidence it ran and how it concluded — which is what lets a
+      # compile-check become a rollup cell that can be baselined and can still
+      # block. `always()`, so a FAILED job still reports itself; a job that
+      # reports nothing is MISSING, never a pass.
+      - name: Record producer status
+        if: ${{ always() }}
+        shell: bash
+        env:
+          PACKAGE: ${{ inputs.package }}
+          JOB: check
+          ENVIRONMENT: ${{ matrix.os }}
+          RESULT: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/status"
+          printf '{"package":"%s","job":"%s","environment":"%s","result":"%s"}\n' \
+            "$PACKAGE" "$JOB" "$ENVIRONMENT" "$RESULT" \
+            >"$RUNNER_TEMP/status/status.json"
+      - name: Upload producer status
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: status-${{ inputs.package }}-check-${{ matrix.os }}
+          path: ${{ runner.temp }}/status
+
+  # Full L1 suite for one package on every native environment. No sharding:
+  # compiling the test binaries is ~85% of a shard and every shard pays it in
+  # full, so partitioning cost ~3.2x the compute to save ~2.4 minutes
+  # (fixes/2026-08-06-cicd/spec.md § Sharding).
+  test:
+    name: test (${{ inputs.package }} on ${{ matrix.environment }})
+    # Deliberately depends on nothing. Lint is a parallel gate, not a
+    # prerequisite: a clippy hint in one package must not delete another
+    # package's L1 evidence. Nor does this job export RUSTFLAGS=-D warnings,
+    # which re-coupled them through the back door by failing the test build on
+    # any plain rustc warning. Every leg is blocking — a red one is a red run,
+    # and known-red legs belong in the results baseline, never in a mechanism
+    # that erases them from the verdict.
+    strategy:
+      fail-fast: false
+      matrix:
+        # Sound ONLY because every native environment name is also its own runner
+        # label. `wsl2-ubuntu` is not, and never enters this matrix — it has its
+        # own workflow (see the `wsl` job below).
+        environment: ${{ fromJSON(inputs.native-environments) }}
+    runs-on: ${{ matrix.environment }}
+    timeout-minutes: 45
+    env:
+      # Result identity. The shared `just` recipes stamp this into the
+      # per-invocation JUnit manifest so a rollup cell traces back to
+      # {package, environment, tier} without parsing a display name — which
+      # for a skipped matrix leg is not merely unstable but unresolvable. The
+      # package half of the identity is the recipe argument itself.
+      BISCUIT_CI_ENVIRONMENT: ${{ matrix.environment }}
+      # The package's declared L1 contract (`l1-include-slow` in
+      # `[package.metadata.ci.tests]`); `_tier_filter` owns the filter strings.
+      BISCUIT_L1_INCLUDE_SLOW: ${{ inputs.l1-include-slow && '1' || '' }}
+      # A PROVISIONED capability hard-fails when missing, an INAPPLICABLE one
+      # skips cleanly. Set only on the legs that provision pnpm, so on those
+      # legs a missing pnpm is a provisioning failure the recipe must not
+      # swallow, while every other leg (and every developer host) skips loudly
+      # and exits 0.
+      BISCUIT_FRONTEND_REQUIRED: ${{ contains(fromJSON(inputs.node-environments), matrix.environment) && '1' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install just
+        uses: extractions/setup-just@v2
+      - name: Install native prerequisites
+        shell: bash
+        env:
+          NATIVE: ${{ inputs.native }}
+          RUNNER_KEY: ${{ matrix.environment }}
+        run: |
+          set -euo pipefail
+          packages="$(jq -r --arg k "$RUNNER_KEY" '.[$k] // [] | join(" ")' <<<"$NATIVE")"
+          if [ -n "$packages" ]; then
+            just _ensure-native-libs $packages
+          fi
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: package-ci-${{ inputs.package }}-test-${{ matrix.environment }}
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+      # Runner tools are a CLOSED vocabulary, implemented here — not an
+      # arbitrary command surface. Each entry preserves a package-specific
+      # behavior that used to be embedded in an area-level recipe.
+      - name: Install AI-provider CLI stubs
+        if: ${{ contains(fromJSON(inputs.runner-tools), 'ai-provider-stubs') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          stubdir="$RUNNER_TEMP/ai-cli-stubs"
+          mkdir -p "$stubdir"
+          for bin in claude opencode roo gemini aider codex goose kimi qwen; do
+            if [ "${{ runner.os }}" = "Windows" ]; then
+              printf '@echo off\r\nexit /b 0\r\n' >"$stubdir/$bin.cmd"
+            else
+              printf '#!/usr/bin/env sh\nexit 0\n' >"$stubdir/$bin"
+              chmod +x "$stubdir/$bin"
+            fi
+          done
+          echo "$stubdir" >>"$GITHUB_PATH"
+      # claudine-cli's `inline_compose_hash` test shells out to darkmatter's
+      # `md`, resolved from the workspace target dir before PATH. CI builds only
+      # the package's own crates, so the fixture is built explicitly here —
+      # the same setup the claudine area recipe's `_ensure-md` dependency
+      # performed.
+      - name: Build the darkmatter md fixture
+        if: ${{ contains(fromJSON(inputs.runner-tools), 'darkmatter-md-fixture') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v md >/dev/null 2>&1 && [ ! -x target/debug/md ]; then
+            cargo build -q -p darkmatter-cli --bin md
+          fi
+      # Node + pnpm for a package whose declared companion suite is a
+      # JavaScript suite (today `homelab-frontend`, owned by `homelab-server`:
+      # Vue + Vitest + jsdom). Until this provisioning existed,
+      # `pnpm: command not found` killed the suite on EVERY runner while the
+      # rollup — which parses Rust JUnit only — rendered the area PASS
+      # 222/0/0 on three environments (measured, run 30427703024).
+      #
+      # Which environments qualify is DERIVED by `affected_scope.py` from the
+      # environment capability table; nothing here decides it.
+      - name: Set up pnpm
+        if: ${{ contains(fromJSON(inputs.node-environments), matrix.environment) }}
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Set up Node
+        if: ${{ contains(fromJSON(inputs.node-environments), matrix.environment) }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Runtime reachability, mirroring the L2 tier's `tmux -V`: a capability
+      # the package DECLARED must fail its own named provisioning step when it
+      # is not actually usable, rather than surface minutes later as a suite
+      # that "skipped" under a green cell.
+      - name: Verify the pnpm toolchain
+        if: ${{ contains(fromJSON(inputs.node-environments), matrix.environment) }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          pnpm --version
+      - name: L1 tests
+        id: l1
+        shell: bash
+        run: |
+          set -euo pipefail
+          # --no-fail-fast: run ALL of the package's tests so one slow or
+          # failing test cannot suppress the rest of the suite's evidence.
+          just _test "${{ inputs.package }}" --no-fail-fast ${{ inputs.test-args }}
+      # Companion suites are non-Cargo suites OWNED by this package. The step
+      # runs even when the Rust suite failed — one red crate cannot hide a red
+      # frontend, exactly as the old area recipe's combined status worked —
+      # and its outcome reaches the producer status below, so a green Rust
+      # JUnit report can never hide a failed or skipped companion suite.
+      - name: Companion suite homelab-frontend
+        id: companion
+        if: ${{ !cancelled() && contains(fromJSON(inputs.companion-suites), 'homelab-frontend') && contains(fromJSON(inputs.node-environments), matrix.environment) }}
+        shell: bash
+        run: cd homelab && just test-frontend
+      # Per-package/environment JUnit. The artifact name carries the
+      # ENVIRONMENT, not the runner label, so a WSL leg (which runs on
+      # windows-latest) can never collide with, or be merged into, the native
+      # Windows leg.
+      #
+      # The whole STAGING DIRECTORY, not `target/nextest/ci/test-results.xml`:
+      # that single path is overwritten by every nextest invocation. The
+      # staging tree carries one XML per invocation plus `manifest.jsonl`, and
+      # the manifest — not this artifact's name — is what gives each record
+      # its {package, environment, tier} identity.
+      - name: Upload L1 JUnit
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-${{ inputs.package }}-L1-${{ matrix.environment }}
+          path: target/nextest/ci-reports
+          if-no-files-found: ignore
+      # `L1`, not `test`: `ci-rollup` keys a status by TIER. A status naming a
+      # test tier explains a MISSING cell downstream of it; a status naming
+      # anything else becomes a cell in its own right. `test` would manufacture
+      # a phantom `<package>/<env>/test` cell beside the real L1 one and
+      # double-count the same failure.
+      - name: Record producer status
+        if: ${{ always() }}
+        shell: bash
+        env:
+          PACKAGE: ${{ inputs.package }}
+          JOB: L1
+          ENVIRONMENT: ${{ matrix.environment }}
+          RESULT: ${{ job.status }}
+          COMPANION: ${{ steps.companion.outcome }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/status"
+          if [ "$COMPANION" = "failure" ]; then
+            detail="companion suite homelab-frontend FAILED; the Rust JUnit report does not cover it"
+            printf '{"package":"%s","job":"%s","environment":"%s","result":"%s","detail":"%s"}\n' \
+              "$PACKAGE" "$JOB" "$ENVIRONMENT" "$RESULT" "$detail" \
+              >"$RUNNER_TEMP/status/status.json"
+          else
+            printf '{"package":"%s","job":"%s","environment":"%s","result":"%s"}\n' \
+              "$PACKAGE" "$JOB" "$ENVIRONMENT" "$RESULT" \
+              >"$RUNNER_TEMP/status/status.json"
+          fi
+      - name: Upload producer status
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: status-${{ inputs.package }}-L1-${{ matrix.environment }}
+          path: ${{ runner.temp }}/status
+
+  lint:
+    name: lint (${{ inputs.package }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      # `just/devops.just`'s `_lint` already passes `-D warnings` to clippy;
+      # this keeps the package's workspace dependencies held to the same bar
+      # while they are compiled for that clippy run.
+      RUSTFLAGS: "-D warnings"
+      # Same contract the `test` job carries, for the same capability: on the
+      # leg that provisions pnpm, a missing pnpm is a PROVISIONING FAILURE and
+      # `lint-frontend` must fail rather than self-skip.
+      BISCUIT_FRONTEND_REQUIRED: ${{ contains(fromJSON(inputs.node-environments), 'ubuntu-latest') && '1' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install just
+        uses: extractions/setup-just@v2
+      - name: Install native prerequisites
+        shell: bash
+        env:
+          NATIVE: ${{ inputs.native }}
+          RUNNER_KEY: ubuntu-latest
+        run: |
+          set -euo pipefail
+          packages="$(jq -r --arg k "$RUNNER_KEY" '.[$k] // [] | join(" ")' <<<"$NATIVE")"
+          if [ -n "$packages" ]; then
+            just _ensure-native-libs $packages
+          fi
+      # clippy + rustfmt come from rust-toolchain.toml (the single authority).
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: package-ci-${{ inputs.package }}-lint-ubuntu-latest
+      # A declared companion suite lints too (the homelab area recipe's `lint`
+      # ran `lint-frontend` after clippy), so this job needs the same toolchain
+      # the `test` job gets.
+      - name: Set up pnpm
+        if: ${{ contains(fromJSON(inputs.node-environments), 'ubuntu-latest') }}
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Set up Node
+        if: ${{ contains(fromJSON(inputs.node-environments), 'ubuntu-latest') }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify the pnpm toolchain
+        if: ${{ contains(fromJSON(inputs.node-environments), 'ubuntu-latest') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          pnpm --version
+      - name: Lint
+        id: clippy
+        run: just _lint "${{ inputs.package }}"
+      - name: Companion suite homelab-frontend lint
+        id: companion
+        if: ${{ !cancelled() && contains(fromJSON(inputs.companion-suites), 'homelab-frontend') && contains(fromJSON(inputs.node-environments), 'ubuntu-latest') }}
+        shell: bash
+        run: cd homelab && just lint-frontend
+      # `lint` emits no JUnit, so this artifact is the sole basis for its
+      # rollup cell — and the reason `ci-baseline.toml` can carry
+      # `tier = "lint"` entries at all.
+      - name: Record producer status
+        if: ${{ always() }}
+        shell: bash
+        env:
+          PACKAGE: ${{ inputs.package }}
+          JOB: lint
+          ENVIRONMENT: ubuntu-latest
+          RESULT: ${{ job.status }}
+          COMPANION: ${{ steps.companion.outcome }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/status"
+          if [ "$COMPANION" = "failure" ]; then
+            detail="companion suite homelab-frontend lint FAILED; clippy's result does not cover it"
+            printf '{"package":"%s","job":"%s","environment":"%s","result":"%s","detail":"%s"}\n' \
+              "$PACKAGE" "$JOB" "$ENVIRONMENT" "$RESULT" "$detail" \
+              >"$RUNNER_TEMP/status/status.json"
+          else
+            printf '{"package":"%s","job":"%s","environment":"%s","result":"%s"}\n' \
+              "$PACKAGE" "$JOB" "$ENVIRONMENT" "$RESULT" \
+              >"$RUNNER_TEMP/status/status.json"
+          fi
+      - name: Upload producer status
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: status-${{ inputs.package }}-lint
+          path: ${{ runner.temp }}/status
+
+  # L2 (real terminal), one leg per environment where a backend is provisioned.
+  # tmux/PTY is the ONLY backend headless CI can host (D8) and it installs on
+  # BOTH Linux (apt) and macOS (brew), so this is a matrix rather than a
+  # hardcoded ubuntu leg. WezTerm/Kitty/Apple Terminal require running INSIDE
+  # that GUI, so those tests skip cleanly here via require_level!. The "Report
+  # L2 backend coverage" step makes that skip VISIBLE rather than silent.
+  #
+  # We hard-require the provisioned backend by VERIFYING tmux is reachable
+  # rather than setting a global BISCUIT_TEST_LEVEL_REQUIRED, which would panic
+  # the GUI-backed tests this runner cannot host.
+  #
+  # Windows and wsl2-ubuntu are absent by construction: `l2-environments` is
+  # derived from package policy crossed with the environment capability table,
+  # so an L2 tier there is recorded as a POLICY GAP in the rollup instead of
+  # appearing as a green 0-run cell.
+  l2:
+    name: test-l2 (${{ inputs.package }} on ${{ matrix.environment }})
+    # Ordering only: this tier runs AFTER L1 for resource staging, but does not
+    # require L1 to have passed. A red L1 used to suppress this leg entirely,
+    # so the rollup recorded MISSING and one L1 failure erased the whole tier's
+    # evidence. Absence of evidence must never be a side effect of a failure
+    # elsewhere.
+    needs: test
+    if: ${{ !cancelled() && inputs.l2-environments != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: ${{ fromJSON(inputs.l2-environments) }}
+    runs-on: ${{ matrix.environment }}
+    timeout-minutes: 30
+    env:
+      BISCUIT_CI_ENVIRONMENT: ${{ matrix.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install just
+        uses: extractions/setup-just@v2
+      - name: Install native prerequisites
+        shell: bash
+        env:
+          NATIVE: ${{ inputs.native }}
+          RUNNER_KEY: ${{ matrix.environment }}
+        run: |
+          set -euo pipefail
+          packages="$(jq -r --arg k "$RUNNER_KEY" '.[$k] // [] | join(" ")' <<<"$NATIVE")"
+          if [ -n "$packages" ]; then
+            just _ensure-native-libs $packages
+          fi
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Provision and verify the tmux backend
+        shell: bash
+        env:
+          ENVIRONMENT: ${{ matrix.environment }}
+        run: |
+          set -euo pipefail
+          case "$ENVIRONMENT" in
+            ubuntu-latest)
+              sudo apt-get update && sudo apt-get install -y tmux
+              ;;
+            macos-latest)
+              brew list tmux >/dev/null 2>&1 || brew install tmux
+              ;;
+            *)
+              echo "no tmux provisioning path for environment '$ENVIRONMENT'" >&2
+              exit 1
+              ;;
+          esac
+          # Verify runtime reachability (D8): a broken tmux fails this named
+          # provisioning step — the hard-require for the one L2 backend CI hosts.
+          # `tmux -V` needs no server, no display, and no pane, so it takes no
+          # focus. CI must never steal focus.
+          tmux -V
+      - name: Report L2 backend coverage
+        shell: bash
+        env:
+          PACKAGE: ${{ inputs.package }}
+          ENVIRONMENT: ${{ matrix.environment }}
+          DECLARED_BACKENDS: ${{ inputs.backends }}
+        run: |
+          set -euo pipefail
+          # A backend that cannot exist here skips silently inside require_level!.
+          # Naming every declared backend and its status turns "0 run / N skipped"
+          # from an invisible non-event into a readable row.
+          {
+            echo "### L2 backends — ${PACKAGE} on ${ENVIRONMENT}"
+            echo ""
+            echo "| backend | status |"
+            echo "|---|---|"
+            while IFS= read -r backend; do
+              [ -n "$backend" ] || continue
+              if [ "$backend" = "tmux" ]; then
+                echo "| tmux | provisioned — its tests MUST execute |"
+              elif [ "$backend" = "apple-terminal" ] && [ "$ENVIRONMENT" = "macos-latest" ]; then
+                echo "| apple-terminal | unavailable — \`available()\` returns false when CI=1; its tests skip |"
+              else
+                echo "| ${backend} | unavailable — needs a live GUI session; its tests skip |"
+              fi
+            done < <(printf '%s' "$DECLARED_BACKENDS" | jq -r '.[]?')
+          } >>"$GITHUB_STEP_SUMMARY"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: package-ci-${{ inputs.package }}-test-${{ matrix.environment }}
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+      - name: L2 tests
+        shell: bash
+        env:
+          RUNNER_TOOLS: ${{ inputs.runner-tools }}
+        run: |
+          set -euo pipefail
+          # `l2-parallel-self-spawn`: the package's L2 suite is dominated by
+          # self-isolating tests (each spawns its own tmux session / PTY), so
+          # it runs in `_test_l2`'s parallel self-spawn mode rather than the
+          # shared-pane `-j 1` path. Preserves the claudine area recipe's
+          # measured `min(cores, 8)` setting.
+          if [ "$(jq -r 'contains(["l2-parallel-self-spawn"])' <<<"$RUNNER_TOOLS")" = "true" ]; then
+            cores="$(getconf _NPROCESSORS_ONLN 2>/dev/null \
+                || sysctl -n hw.ncpu 2>/dev/null \
+                || nproc 2>/dev/null \
+                || echo 4)"
+            export BISCUIT_L2_THREADS=$(( cores < 8 ? cores : 8 ))
+          fi
+          just _test_l2 "${{ inputs.package }}" ${{ inputs.test-args }}
+      # The staging directory, so the manifest travels with the reports. See
+      # the L1 upload for why the single overwritten file is not enough.
+      - name: Upload L2 JUnit
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-${{ inputs.package }}-L2-${{ matrix.environment }}
+          path: target/nextest/ci-reports
+          if-no-files-found: ignore
+      - name: Record producer status
+        if: ${{ always() }}
+        shell: bash
+        env:
+          PACKAGE: ${{ inputs.package }}
+          JOB: L2
+          ENVIRONMENT: ${{ matrix.environment }}
+          RESULT: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/status"
+          printf '{"package":"%s","job":"%s","environment":"%s","result":"%s"}\n' \
+            "$PACKAGE" "$JOB" "$ENVIRONMENT" "$RESULT" \
+            >"$RUNNER_TEMP/status/status.json"
+      - name: Upload producer status
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: status-${{ inputs.package }}-L2-${{ matrix.environment }}
+          path: ${{ runner.temp }}/status
+
+  browser:
+    name: test-browser (${{ inputs.package }})
+    # Ordering only: this tier runs AFTER L1 for resource staging, but does not
+    # require L1 to have passed. A red L1 used to suppress this leg entirely,
+    # so the rollup recorded MISSING and one L1 failure erased the whole tier's
+    # evidence. Absence of evidence must never be a side effect of a failure
+    # elsewhere.
+    needs: test
+    if: ${{ !cancelled() && inputs.browser-environments != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: ${{ fromJSON(inputs.browser-environments) }}
+    runs-on: ${{ matrix.environment }}
+    timeout-minutes: 30
+    env:
+      BISCUIT_BROWSER_REQUIRED: "1"
+      BISCUIT_CI_ENVIRONMENT: ${{ matrix.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install just
+        uses: extractions/setup-just@v2
+      - name: Install native prerequisites
+        shell: bash
+        env:
+          NATIVE: ${{ inputs.native }}
+          RUNNER_KEY: ${{ matrix.environment }}
+        run: |
+          set -euo pipefail
+          packages="$(jq -r --arg k "$RUNNER_KEY" '.[$k] // [] | join(" ")' <<<"$NATIVE")"
+          if [ -n "$packages" ]; then
+            just _ensure-native-libs $packages
+          fi
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: package-ci-${{ inputs.package }}-test-${{ matrix.environment }}
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+      - name: Browser tests
+        run: just _test_browser "${{ inputs.package }}" ${{ inputs.test-args }}
+      # The staging directory, so the manifest travels with the reports. See
+      # the L1 upload for why the single overwritten file is not enough.
+      - name: Upload browser JUnit
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-${{ inputs.package }}-browser-${{ matrix.environment }}
+          path: target/nextest/ci-reports
+          if-no-files-found: ignore
+      - name: Record producer status
+        if: ${{ always() }}
+        shell: bash
+        env:
+          PACKAGE: ${{ inputs.package }}
+          JOB: browser
+          ENVIRONMENT: ${{ matrix.environment }}
+          RESULT: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/status"
+          printf '{"package":"%s","job":"%s","environment":"%s","result":"%s"}\n' \
+            "$PACKAGE" "$JOB" "$ENVIRONMENT" "$RESULT" \
+            >"$RUNNER_TEMP/status/status.json"
+      - name: Upload producer status
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: status-${{ inputs.package }}-browser-${{ matrix.environment }}
+          path: ${{ runner.temp }}/status
+
+  # WSL2 is a supported Linux environment, not a runner label. Delegating to a
+  # dedicated reusable workflow is the whole point: that job runs on
+  # `windows-latest` and executes through `wsl-bash`, so if it shared the
+  # matrix above, every `runner.os == 'Windows'` branch — native package
+  # installation, path handling, shell selection, cache keys, artifact names —
+  # would silently apply to a Linux guest.
+  wsl:
+    name: wsl2 (${{ inputs.package }})
+    # Ordering only: this tier runs AFTER L1 for resource staging, but does not
+    # require L1 to have passed. A red L1 used to suppress this leg entirely,
+    # so the rollup recorded MISSING and one L1 failure erased the whole tier's
+    # evidence. Absence of evidence must never be a side effect of a failure
+    # elsewhere.
+    needs: test
+    if: ${{ !cancelled() && inputs.wsl }}
+    uses: ./.github/workflows/_wsl-ci.yml
+    with:
+      package: ${{ inputs.package }}
+      check-args: ${{ inputs.check-args }}
+      test-args: ${{ inputs.test-args }}
+      native: ${{ inputs.native }}
+    secrets: inherit
+
+  # THERE IS NO `classify` JOB HERE ANY MORE (retired D15 — see ci.yml's
+  # `ci-verdict`). Every producer job uploads an explicit `status-<package>-<job>`
+  # artifact, which carries the same fact per {package, environment, tier}.

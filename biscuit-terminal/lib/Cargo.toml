@@ -100,3 +100,10 @@ harness = false
 [[bench]]
 name = "render_tree"
 harness = false
+
+# CI policy: L1 runs with the `image` feature; biscuit-terminal owns L2
+# (real-terminal) and browser (headless) tier tests.
+[package.metadata.ci.tests]
+tiers = ["L1", "L2", "browser"]
+l2-backends = ["tmux", "wezterm", "kitty", "apple-terminal"]
+features = ["image"]

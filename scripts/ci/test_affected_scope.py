@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Tests for dependency-aware CI scope calculation."""
+"""Tests for dependency-aware, package-keyed CI scope calculation."""
 
 from __future__ import annotations
 
-import re
 import tempfile
 import unittest
 from datetime import date
@@ -11,49 +10,45 @@ from pathlib import Path
 
 from affected_scope import (
     calculate_scope,
-    scoped_check_args,
     lockfile_impacted_names,
     parse_lockfile,
-    environment_policy,
-    validate_area_schema,
+    matrix_record,
+    capability,
+    load_environments,
+    package_ci_policy,
+    validate_package_ci,
     validate_no_shadow_workspaces,
-    validate_ownership,
+    ENVIRONMENTS_CONFIG,
 )
 
 # Pinned so an expiry test asserts the rule, not today's date.
 TODAY = date(2026, 7, 27)
 
 
-def excluded(area: str, **overrides: object) -> dict[str, object]:
-    """A minimal, valid `"ci": false` record; overrides drop or replace fields."""
-    record: dict[str, object] = {
-        "area": area,
-        "ci": False,
-        "reason": "a stub",
-        "owner": "@yankeeinlondon",
-        "exclusion_class": "time-bounded",
-        "expiry": "2027-01-31",
-    }
-    record.update(overrides)
-    return {key: value for key, value in record.items() if value is not None}
-
-
-def package(root: Path, name: str, relative_manifest: str) -> dict[str, object]:
+def package(root: Path, name: str, relative_manifest: str, ci: object | None = None) -> dict[str, object]:
+    metadata: dict[str, object] = {}
+    if ci is not None:
+        metadata["ci"] = ci
     return {
         "id": name,
         "name": name,
-        "manifest_path": str(root / relative_manifest),
+        "manifest_path": str((root / relative_manifest).resolve()),
+        "metadata": metadata or None,
     }
+
+
+def ci_policy(**fields: object) -> dict[str, object]:
+    policy: dict[str, object] = {}
+    for key, value in fields.items():
+        policy[key.replace("_", "-")] = value
+    return policy
 
 
 class AffectedScopeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
-        self.area_config = [
-            {"area": "alpha", "check_args": "-p alpha-core"},
-            {"area": "beta", "check_args": "-p beta-app"},
-        ]
+        # alpha-core depends on shared; beta-app depends on alpha-core.
         packages = [
             package(self.root, "alpha-core", "alpha/lib/Cargo.toml"),
             package(self.root, "beta-app", "beta/app/Cargo.toml"),
@@ -64,113 +59,75 @@ class AffectedScopeTests(unittest.TestCase):
             "packages": packages,
             "resolve": {
                 "nodes": [
-                    {"id": "alpha-core", "deps": [{"pkg": "shared-tests"}]},
-                    {"id": "beta-app", "deps": [{"pkg": "alpha-core"}]},
+                    {"id": "alpha-core", "deps": [{"pkg": "shared-tests", "dep_kinds": [{"kind": None}]}]},
+                    {"id": "beta-app", "deps": [{"pkg": "alpha-core", "dep_kinds": [{"kind": None}]}]},
                     {"id": "shared-tests", "deps": []},
                 ]
             },
         }
+        self.policy = package_ci_policy(
+            workspace_packages_from(self.metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
 
-    def test_source_change_includes_transitive_downstream_area(self) -> None:
-        scope = calculate_scope(
-            ["alpha/lib/src/lib.rs"],
+    def scope(self, files: list[str], **kwargs: object) -> dict[str, object]:
+        return calculate_scope(
+            files,
             self.root,
             self.metadata,
-            self.area_config,
+            environments_for_tests(),
+            self.policy,
+            **kwargs,  # type: ignore[arg-type]
         )
-        self.assertEqual(["alpha", "beta"], [area["area"] for area in scope["areas"]])
+
+    def test_source_change_includes_transitive_downstream_packages(self) -> None:
+        scope = self.scope(["alpha/lib/src/lib.rs"])
         self.assertEqual(["alpha-core", "beta-app"], scope["packages"])
 
-    def test_shared_test_change_includes_consuming_areas(self) -> None:
-        scope = calculate_scope(
-            ["tools/shared-tests/src/lib.rs"],
-            self.root,
-            self.metadata,
-            self.area_config,
-        )
-        self.assertEqual(["alpha", "beta"], [area["area"] for area in scope["areas"]])
+    def test_shared_dependency_change_includes_its_consumers(self) -> None:
+        scope = self.scope(["tools/shared-tests/src/lib.rs"])
         self.assertEqual(
             ["alpha-core", "beta-app", "shared-tests"], scope["packages"]
         )
 
-    def test_area_level_change_selects_packages_owned_by_area(self) -> None:
-        scope = calculate_scope(
-            ["alpha/justfile"],
-            self.root,
-            self.metadata,
-            self.area_config,
-        )
-        self.assertEqual(["alpha", "beta"], [area["area"] for area in scope["areas"]])
-
     def test_unrelated_documentation_change_has_empty_scope(self) -> None:
-        scope = calculate_scope(
-            ["docs/architecture.md"],
-            self.root,
-            self.metadata,
-            self.area_config,
-        )
-        self.assertEqual([], scope["areas"])
+        scope = self.scope(["docs/architecture.md"])
         self.assertEqual([], scope["packages"])
+        self.assertEqual([], scope["matrix"])
 
-    def test_force_all_selects_every_package_and_area(self) -> None:
-        scope = calculate_scope(
-            [],
-            self.root,
-            self.metadata,
-            self.area_config,
-            force_all=True,
-        )
+    def test_force_all_selects_every_package(self) -> None:
+        scope = self.scope([], force_all=True)
         self.assertTrue(scope["full_scope"])
-        self.assertEqual(["alpha", "beta"], [area["area"] for area in scope["areas"]])
         self.assertEqual(
             ["alpha-core", "beta-app", "shared-tests"], scope["packages"]
         )
 
     def test_global_test_configuration_selects_full_scope(self) -> None:
-        scope = calculate_scope(
-            [".config/nextest.toml"],
-            self.root,
-            self.metadata,
-            self.area_config,
-        )
+        scope = self.scope([".config/nextest.toml"])
         self.assertTrue(scope["full_scope"])
-        self.assertEqual(["alpha", "beta"], [area["area"] for area in scope["areas"]])
 
-    def test_windows_path_separators_select_owning_area(self) -> None:
-        scope = calculate_scope(
-            [r"alpha\lib\src\lib.rs"],
-            self.root,
-            self.metadata,
-            self.area_config,
-        )
-        self.assertEqual(["alpha", "beta"], [area["area"] for area in scope["areas"]])
-        self.assertEqual("package", scope["change_class"])
+    def test_wsl_workflow_change_selects_full_scope(self) -> None:
+        # `_wsl-ci.yml` is shared by every package that declares wsl2-ubuntu, so
+        # a change to it has the same blast radius as `_package-ci.yml`.
+        scope = self.scope([".github/workflows/_wsl-ci.yml"])
+        self.assertTrue(scope["full_scope"])
 
-    def test_package_local_change_derives_area_preflight_os(self) -> None:
-        scope = calculate_scope(
-            ["alpha/lib/src/lib.rs"],
-            self.root,
-            self.metadata,
-            self.area_config,
-        )
+    def test_package_local_change_derives_three_runner_preflight(self) -> None:
+        scope = self.scope(["alpha/lib/src/lib.rs"])
         self.assertEqual("package", scope["change_class"])
-        # Scope host plus the runner OS hosting each of the areas' default
-        # environments. macOS is now one of them: it runs the real suite, so a
-        # package-local change must prove macOS can bootstrap.
+        # Scope host plus the runner OS hosting each of the three native
+        # environments (the fourth, wsl2-ubuntu, is hosted by windows-latest).
         self.assertEqual(
             ["macos-latest", "ubuntu-latest", "windows-latest"], scope["preflight_os"]
         )
 
     def test_global_change_runs_three_os_preflight(self) -> None:
-        scope = calculate_scope(
-            [".config/nextest.toml"],
-            self.root,
-            self.metadata,
-            self.area_config,
-        )
+        scope = self.scope([".config/nextest.toml"])
         self.assertEqual("full", scope["change_class"])
         self.assertEqual(
             ["macos-latest", "ubuntu-latest", "windows-latest"],
@@ -178,771 +135,546 @@ class AffectedScopeTests(unittest.TestCase):
         )
         self.assertIn(".config/nextest.toml", scope["preflight_reason"])
 
-    def test_wsl_workflow_change_selects_full_scope(self) -> None:
-        # `_wsl-ci.yml` is shared by every area that declares `wsl2-ubuntu`, so a
-        # change to it has the same blast radius as `_area-ci.yml`.
-        scope = calculate_scope(
-            [".github/workflows/_wsl-ci.yml"],
-            self.root,
-            self.metadata,
-            self.area_config,
-        )
-        self.assertTrue(scope["full_scope"])
-        self.assertEqual("full", scope["change_class"])
-
     def test_documentation_only_change_uses_scope_host_preflight(self) -> None:
-        scope = calculate_scope(
-            ["docs/architecture.md"],
-            self.root,
-            self.metadata,
-            self.area_config,
-        )
+        scope = self.scope(["docs/architecture.md"])
         self.assertEqual("documentation", scope["change_class"])
         self.assertEqual(["ubuntu-latest"], scope["preflight_os"])
 
 
-class AreaSchemaTests(unittest.TestCase):
-    def test_valid_capability_policy_passes(self) -> None:
-        validate_area_schema(
-            [
-                {
-                    "area": "alpha",
-                    "check_args": "-p alpha",
-                    "backends": ["tmux", "wezterm"],
-                    "native": {"ubuntu-latest": ["libasound2-dev"]},
-                }
-            ]
-        )
-
-    def test_missing_required_field_is_rejected(self) -> None:
-        # `area` is the only unconditionally required field; `check_args` and
-        # `reason` are required by the `ci` flag and covered in OwnershipTests.
-        with self.assertRaisesRegex(RuntimeError, "missing required"):
-            validate_area_schema([{"check_args": "-p alpha"}])
-
-    def test_unknown_field_is_rejected(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "unknown field"):
-            validate_area_schema([{"area": "alpha", "check_args": "-p alpha", "l3": True}])
-
-    def test_retired_full_os_field_is_rejected_by_name(self) -> None:
-        # `full_os` named a RUNNER OS list. WSL2 is an environment a Windows
-        # runner hosts, not a runner label, so the field was renamed rather than
-        # widened — and a stale record must say so instead of landing in a
-        # generic unknown-field list.
-        with self.assertRaisesRegex(RuntimeError, "retired field 'full_os'.*environments"):
-            validate_area_schema(
-                [{"area": "alpha", "check_args": "-p alpha", "full_os": ["ubuntu-latest"]}],
-                today=TODAY,
-            )
-
-    def test_retired_soft_os_field_is_rejected_by_name(self) -> None:
-        # `soft_os` drove `continue-on-error`, which removed a leg from the run's
-        # verdict. A record carrying it must fail loudly rather than be silently
-        # ignored, and the message must say what replaces it.
-        with self.assertRaisesRegex(RuntimeError, "retired field 'soft_os'.*baseline"):
-            validate_area_schema(
-                [{"area": "alpha", "check_args": "-p alpha", "soft_os": []}]
-            )
-
-    def test_unsupported_environment_is_rejected(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "unsupported environment"):
-            validate_area_schema(
-                [
-                    {
-                        "area": "alpha",
-                        "check_args": "-p alpha",
-                        "environments": ["freebsd-latest"],
-                    }
-                ],
-                today=TODAY,
-            )
-
-    def test_unsupported_runner_os_is_rejected(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "unsupported runner OS"):
-            validate_area_schema(
-                [{"area": "alpha", "check_args": "-p alpha", "check_os": ["freebsd-latest"]}],
-                today=TODAY,
-            )
-
-    def test_wsl_is_an_environment_but_never_a_check_runner_or_native_key(self) -> None:
-        # `check_os` and `native` are keyed by RUNNER OS: a compile-check emits
-        # no results, and a WSL2 guest IS Linux, so `_ensure-native-libs` reads
-        # the `ubuntu-latest` package list from inside the guest.
-        validate_area_schema(
-            [
-                {
-                    "area": "alpha",
-                    "check_args": "-p alpha",
-                    "environments": ["ubuntu-latest", "wsl2-ubuntu"],
-                }
-            ],
-            today=TODAY,
-        )
-        with self.assertRaisesRegex(RuntimeError, "'check_os' names unsupported runner OS"):
-            validate_area_schema(
-                [{"area": "alpha", "check_args": "-p alpha", "check_os": ["wsl2-ubuntu"]}],
-                today=TODAY,
-            )
-        with self.assertRaisesRegex(RuntimeError, "'native' names unsupported OS"):
-            validate_area_schema(
-                [
-                    {
-                        "area": "alpha",
-                        "check_args": "-p alpha",
-                        "native": {"wsl2-ubuntu": ["libdbus-1-dev"]},
-                    }
-                ],
-                today=TODAY,
-            )
-
-    def test_unknown_backend_is_rejected(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "unknown L2 backend"):
-            validate_area_schema(
-                [{"area": "alpha", "check_args": "-p alpha", "backends": ["ghostty"]}]
-            )
-
-    def test_native_must_be_os_to_packages_map(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "native"):
-            validate_area_schema(
-                [{"area": "alpha", "check_args": "-p alpha", "native": ["libasound2-dev"]}]
-            )
-
-    def test_non_boolean_flag_is_rejected(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "must be a boolean"):
-            validate_area_schema([{"area": "alpha", "check_args": "-p alpha", "l2": "yes"}])
-
-    def test_non_boolean_node_flag_is_rejected(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "'node' must be a boolean"):
-            validate_area_schema([{"area": "alpha", "check_args": "-p alpha", "node": "yes"}])
-
-    def test_declared_node_capability_passes(self) -> None:
-        validate_area_schema(
-            [{"area": "alpha", "check_args": "-p alpha", "node": True}], today=TODAY
-        )
-
-    def test_node_capability_no_environment_can_host_is_rejected(self) -> None:
-        # The failure mode the flag exists to prevent: `node_environments`
-        # resolves empty, the recipe self-skips on every leg, and the area
-        # reports PASS having run none of its JavaScript tests.
-        with self.assertRaisesRegex(RuntimeError, r'"node": true.*none of which provisions pnpm'):
-            validate_area_schema(
-                [
-                    {
-                        "area": "alpha",
-                        "check_args": "-p alpha",
-                        "node": True,
-                        "environments": ["windows-latest", "macos-latest"],
-                    }
-                ],
-                today=TODAY,
-            )
-
-
-class EnvironmentPolicyTests(unittest.TestCase):
-    """`environment` is not `os`, and the split must survive into the workflow."""
-
-    def test_native_environments_are_the_ones_that_are_runner_labels(self) -> None:
-        policy = environment_policy(
-            {
-                "area": "alpha",
-                "environments": [
-                    "ubuntu-latest",
-                    "windows-latest",
-                    "macos-latest",
-                    "wsl2-ubuntu",
-                ],
-            }
-        )
-        # `wsl2-ubuntu` must never reach a `runs-on` matrix: that job runs on
-        # windows-latest and executes through wsl-bash, so it would take every
-        # `runner.os == 'Windows'` branch while testing Linux code.
-        self.assertEqual(
-            ["ubuntu-latest", "windows-latest", "macos-latest"],
-            policy["native_environments"],
-        )
-        self.assertTrue(policy["wsl"])
-
-    def test_wsl_runs_by_default(self) -> None:
-        # WSL2 is a supported environment, not an opt-in extra: a green Linux leg
-        # says nothing about the 9p boundary, WSLg capability probes, or NAT'd
-        # networking that real WSL users hit.
-        self.assertTrue(environment_policy({"area": "alpha"})["wsl"])
-
-    def test_wsl_can_be_declined_per_area(self) -> None:
-        policy = environment_policy(
-            {"area": "alpha", "environments": ["ubuntu-latest", "windows-latest"]}
-        )
-        self.assertFalse(policy["wsl"])
-
-    def test_wsl_never_becomes_a_runner_label(self) -> None:
-        # A WSL job runs ON windows-latest and executes through wsl-bash. If
-        # `wsl2-ubuntu` reached `runs-on`, every Windows-branch step — native
-        # packages, paths, shells, cache keys — would apply to a Linux guest.
-        policy = environment_policy({"area": "alpha"})
-        self.assertNotIn("wsl2-ubuntu", policy["native_environments"])
-
-    def test_default_environments_include_macos(self) -> None:
-        # The macOS = compile-check-only decision was justified by "runner
-        # minutes bill ~10x". The repo is public, so that is void.
-        self.assertIn("macos-latest", environment_policy({"area": "alpha"})["native_environments"])
-
-    def test_l2_environments_are_only_those_with_a_provisionable_backend(self) -> None:
-        policy = environment_policy({"area": "alpha", "l2": True})
-        # tmux installs on Linux (apt) and macOS (brew) and is the only backend
-        # headless CI can host. Windows has no tmux port.
-        self.assertEqual(["ubuntu-latest", "macos-latest"], policy["l2_environments"])
-
-    def test_an_area_without_l2_tests_schedules_no_l2_leg(self) -> None:
-        self.assertEqual([], environment_policy({"area": "alpha"})["l2_environments"])
-
-    def test_wsl_never_appears_as_an_l2_environment(self) -> None:
-        policy = environment_policy(
-            {"area": "alpha", "l2": True, "environments": ["ubuntu-latest", "wsl2-ubuntu"]}
-        )
-        # The WSL leg runs from a nextest archive, which carries no broker binary
-        # and hosts no tmux server.
-        self.assertEqual(["ubuntu-latest"], policy["l2_environments"])
-
-    def test_an_area_without_a_javascript_suite_provisions_no_node(self) -> None:
-        self.assertEqual([], environment_policy({"area": "alpha"})["node_environments"])
-
-    def test_node_is_provisioned_on_linux_only(self) -> None:
-        # Not a reduction of tests within an area: the recipe is identical on
-        # every environment and self-gates on the capability. The suite is jsdom
-        # with no native dependency, so the other three legs would exercise
-        # identical code paths for three more toolchain installs — the same
-        # reasoning that already makes `lint` Linux-only.
-        policy = environment_policy({"area": "alpha", "node": True})
-        self.assertEqual(["ubuntu-latest"], policy["node_environments"])
-
-    def test_wsl_never_appears_as_a_node_environment(self) -> None:
-        # The WSL leg runs `just test` from a prebuilt nextest archive inside a
-        # guest with no Node toolchain; the recipe skips there loudly.
-        policy = environment_policy(
-            {"area": "alpha", "node": True, "environments": ["ubuntu-latest", "wsl2-ubuntu"]}
-        )
-        self.assertEqual(["ubuntu-latest"], policy["node_environments"])
-
-    def test_wsl_preflights_on_the_runner_that_hosts_it(self) -> None:
-        root = Path(tempfile.mkdtemp())
-        packages = [
-            {"id": "alpha-core", "name": "alpha-core", "manifest_path": str(root / "alpha/lib/Cargo.toml")}
-        ]
-        metadata = {
-            "workspace_members": ["alpha-core"],
-            "packages": packages,
-            "resolve": {"nodes": [{"id": "alpha-core", "deps": []}]},
-        }
-        scope = calculate_scope(
-            ["alpha/lib/src/lib.rs"],
-            root,
-            metadata,
-            [
-                {
-                    "area": "alpha",
-                    "check_args": "-p alpha-core",
-                    "environments": ["ubuntu-latest", "wsl2-ubuntu"],
-                }
-            ],
-        )
-        # Preflight runs on runner labels; `wsl2-ubuntu` resolves to its host.
-        self.assertEqual(["ubuntu-latest", "windows-latest"], scope["preflight_os"])
-        self.assertTrue(scope["areas"][0]["wsl"])
-        self.assertEqual(["ubuntu-latest"], scope["areas"][0]["native_environments"])
-
-
-class ExclusionPolicyTests(unittest.TestCase):
-    """A `"ci": false` record must be owned and time-bounded (plan 3.5)."""
-
-    def test_a_fully_declared_exclusion_passes(self) -> None:
-        validate_area_schema([excluded("tabby")], today=TODAY)
-
-    def test_exclusion_without_an_owner_is_rejected(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "must give a non-empty 'owner'"):
-            validate_area_schema([excluded("tabby", owner=None)], today=TODAY)
-
-    def test_exclusion_without_a_class_is_rejected(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "must give an 'exclusion_class'"):
-            validate_area_schema([excluded("tabby", exclusion_class=None)], today=TODAY)
-
-    def test_unknown_exclusion_class_is_rejected(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "must give an 'exclusion_class'"):
-            validate_area_schema([excluded("tabby", exclusion_class="someday")], today=TODAY)
-
-    def test_backlog_exclusion_without_an_expiry_is_rejected(self) -> None:
-        # An exclusion with no end date is a permanent one wearing a temporary
-        # label, which is exactly how the current 10 records accumulated.
-        with self.assertRaisesRegex(RuntimeError, "must give an 'expiry'"):
-            validate_area_schema([excluded("tabby", expiry=None)], today=TODAY)
-
-    def test_lapsed_expiry_fails_loudly(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "expired on 2026-07-26"):
-            validate_area_schema([excluded("tabby", expiry="2026-07-26")], today=TODAY)
-
-    def test_expiry_on_the_boundary_day_is_still_valid(self) -> None:
-        validate_area_schema([excluded("tabby", expiry="2026-07-27")], today=TODAY)
-
-    def test_malformed_expiry_is_rejected(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "must be an ISO date"):
-            validate_area_schema([excluded("tabby", expiry="soon")], today=TODAY)
-
-    def test_capability_exclusion_is_permanent_and_takes_no_expiry(self) -> None:
-        # `homelab` is the reference case: physical IoT hardware CI cannot host.
-        # Nothing is going to change that, so a date would be theatre.
-        validate_area_schema(
-            [excluded("homelab", exclusion_class="capability", expiry=None)], today=TODAY
-        )
-        with self.assertRaisesRegex(RuntimeError, "permanent; drop 'expiry'"):
-            validate_area_schema(
-                [excluded("homelab", exclusion_class="capability")], today=TODAY
-            )
-
-
-class PolicyGapTests(unittest.TestCase):
-    """A tier with tests and no provisionable backend is a gap, never a green skip."""
-
-    def gap(self, **overrides: object) -> dict[str, object]:
-        record: dict[str, object] = {
-            "tier": "L2",
-            "environments": ["windows-latest"],
-            "reason": "tmux has no Windows port",
-            "owner": "@yankeeinlondon",
-            "expiry": "2027-01-31",
-        }
-        record.update(overrides)
-        return {key: value for key, value in record.items() if value is not None}
-
-    def l2_area(self, **overrides: object) -> dict[str, object]:
-        # Both unprovisioned environments must be declared: Windows has no tmux
-        # port at all, and the WSL2 leg runs a prebuilt archive with no broker
-        # binary and no terminal server. Different causes, same obligation.
-        record: dict[str, object] = {
-            "area": "alpha",
-            "check_args": "-p alpha",
-            "l2": True,
-            "backends": ["tmux"],
-            "policy_gaps": [
-                self.gap(),
-                self.gap(
-                    environments=["wsl2-ubuntu"],
-                    reason="archive run carries no broker and hosts no terminal server",
-                ),
-            ],
-        }
-        record.update(overrides)
-        return record
-
-    def test_declared_gap_passes(self) -> None:
-        validate_area_schema([self.l2_area()], today=TODAY)
-
-    def test_l2_area_without_a_wsl_gap_is_rejected(self) -> None:
-        # WSL2 runs the L1 suite, so an L2 tier is scheduled there too. Declaring
-        # only the Windows gap leaves WSL2 exiting 0 having executed nothing.
-        with self.assertRaisesRegex(RuntimeError, r"wsl2-ubuntu.*no L2 backend"):
-            validate_area_schema([self.l2_area(policy_gaps=[self.gap()])], today=TODAY)
-
-    def test_l2_area_without_a_windows_gap_is_rejected(self) -> None:
-        # Windows runs the L1 suite, so an L2 tier IS scheduled there and exits 0
-        # having executed nothing. That must read as POLICY GAP, not as a pass.
-        with self.assertRaisesRegex(RuntimeError, r"no L2 backend.*POLICY GAP"):
-            validate_area_schema([self.l2_area(policy_gaps=[])], today=TODAY)
-
-    def test_an_area_that_never_runs_on_windows_needs_no_gap(self) -> None:
-        validate_area_schema(
-            [
-                self.l2_area(
-                    environments=["ubuntu-latest", "macos-latest"], policy_gaps=[]
-                )
-            ],
-            today=TODAY,
-        )
-
-    def test_gap_missing_an_owner_is_rejected(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "missing required field\\(s\\): \\['owner'\\]"):
-            validate_area_schema(
-                [self.l2_area(policy_gaps=[self.gap(owner=None)])], today=TODAY
-            )
-
-    def test_gap_with_a_blank_owner_is_rejected(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "must give a non-empty 'owner'"):
-            validate_area_schema(
-                [self.l2_area(policy_gaps=[self.gap(owner="   ")])], today=TODAY
-            )
-
-    def test_lapsed_gap_expiry_fails_loudly(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "expired on 2026-07-26"):
-            validate_area_schema(
-                [self.l2_area(policy_gaps=[self.gap(expiry="2026-07-26")])], today=TODAY
-            )
-
-    def test_gap_for_an_environment_the_area_never_runs_is_rejected(self) -> None:
-        # A gap describes a scheduled cell that cannot execute. Declaring one for
-        # an unscheduled environment manufactures a row nothing produces.
-        with self.assertRaisesRegex(RuntimeError, "environment\\(s\\) the area does not run"):
-            validate_area_schema(
-                [
-                    self.l2_area(
-                        environments=["ubuntu-latest", "macos-latest"],
-                        policy_gaps=[self.gap()],
-                    )
-                ],
-                today=TODAY,
-            )
-
-    def test_unknown_tier_is_rejected(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "unknown tier"):
-            validate_area_schema(
-                [self.l2_area(policy_gaps=[self.gap(tier="L4")])], today=TODAY
-            )
-
-    def test_unsupported_gap_environment_is_rejected(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "unsupported environment"):
-            validate_area_schema(
-                [self.l2_area(policy_gaps=[self.gap(environments=["freebsd-latest"])])],
-                today=TODAY,
-            )
-
-    def test_gap_with_an_unknown_field_is_rejected(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "unknown field"):
-            validate_area_schema(
-                [self.l2_area(policy_gaps=[{**self.gap(), "backend": "tmux"}])],
-                today=TODAY,
-            )
-
-
-class LiveAreaConfigTests(unittest.TestCase):
-    """The checked-in `areas.json` must satisfy every rule above."""
-
-    def setUp(self) -> None:
-        import json
-
-        config = Path(__file__).resolve().parents[2] / ".github" / "ci" / "areas.json"
-        with config.open(encoding="utf-8") as handle:
-            self.areas = json.load(handle)
-
-    def test_checked_in_policy_validates(self) -> None:
-        validate_area_schema(self.areas, today=TODAY)
-
-    def test_every_l2_area_declares_its_backends(self) -> None:
-        for area in self.areas:
-            if area.get("l2"):
-                self.assertTrue(
-                    area.get("backends"),
-                    f"{area['area']} sets l2 but declares no backends",
-                )
-
-    def test_an_area_whose_justfile_drives_pnpm_declares_the_node_capability(self) -> None:
-        # Drift guard for the defect this capability was added to close. An area
-        # whose canonical recipes shell out to pnpm, with nothing declaring it,
-        # gets pnpm on no runner: `homelab`'s `just test` died on `pnpm: command
-        # not found` after every Rust package passed, so its 22 frontend tests
-        # had never once executed in CI. Declaration and usage must agree in
-        # BOTH directions — an undeclared user is a silent gap, and a declared
-        # non-user pays for a toolchain install that gates nothing.
-        root = Path(__file__).resolve().parents[2]
-        for area in self.areas:
-            justfile = root / area["area"] / "justfile"
-            if not justfile.exists():
-                continue
-            recipes = "\n".join(
-                line
-                for line in justfile.read_text(encoding="utf-8").splitlines()
-                if not line.lstrip().startswith("#")
-            )
-            drives_pnpm = re.search(r"\bpnpm\b", recipes) is not None
-            self.assertEqual(
-                drives_pnpm,
-                bool(area.get("node", False)),
-                f"{area['area']}: its justfile invokes pnpm ({drives_pnpm}) but its declared "
-                f"\"node\" capability is {bool(area.get('node', False))}",
-            )
-
-    def test_every_exclusion_is_owned(self) -> None:
-        excluded_areas = [area for area in self.areas if area.get("ci") is False]
-        self.assertEqual(10, len(excluded_areas))
-        for area in excluded_areas:
-            self.assertTrue(area.get("owner"), f"{area['area']} exclusion has no owner")
-            # The audit found no capability-based exclusion among the ten; every
-            # one is backlog, so every one carries a date.
-            self.assertNotEqual("capability", area.get("exclusion_class"))
-            self.assertTrue(area.get("expiry"), f"{area['area']} exclusion has no expiry")
-
-
-class OwnershipTests(unittest.TestCase):
-    """Every package's directory must map to a declared area (gating or not)."""
+class ClosureTests(unittest.TestCase):
+    """R2: narrowing the fan-out must never narrow the dependency closure."""
 
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
-        self.area_config = [
-            {"area": "alpha", "check_args": "-p alpha-core", "ci": True},
-            {"area": "tools", "reason": "test infrastructure", "ci": False},
-        ]
-
-        def package(name: str, relative_manifest: str) -> dict[str, object]:
-            return {"id": name, "name": name, "manifest_path": str(self.root / relative_manifest)}
-
+        # biscuit-speaks -> [playa (optional), espeak]; its dependents are the
+        # real claudine/research closure from the repo.
         packages = [
-            package("alpha-core", "alpha/lib/Cargo.toml"),
-            package("shared-tests", "tools/shared-tests/Cargo.toml"),
+            package(self.root, "biscuit-speaks", "biscuit-speaks/lib/Cargo.toml"),
+            package(self.root, "biscuit-speaks-cli", "biscuit-speaks/cli/Cargo.toml"),
+            package(self.root, "claudine", "claudine/lib/Cargo.toml"),
+            package(self.root, "claudine-cli", "claudine/cli/Cargo.toml"),
+            package(self.root, "claudine-contract", "claudine/contract/Cargo.toml"),
+            package(self.root, "research", "research/lib/Cargo.toml"),
+            package(self.root, "research-cli", "research/cli/Cargo.toml"),
         ]
-        self.metadata = {
-            "workspace_members": [p["id"] for p in packages],
-            "packages": packages,
-            "resolve": {"nodes": []},
-        }
-
-    def tearDown(self) -> None:
-        self.temporary_directory.cleanup()
-
-    def test_gating_and_non_gating_areas_both_confer_ownership(self) -> None:
-        validate_ownership(self.metadata, self.root, self.area_config)
-
-    def test_package_under_no_declared_area_fails_by_name(self) -> None:
-        self.metadata["packages"].append(
-            {"id": "orphan", "name": "orphan", "manifest_path": str(self.root / "beta/app/Cargo.toml")}
-        )
-        self.metadata["workspace_members"].append("orphan")
-        with self.assertRaisesRegex(RuntimeError, "fall under no declared area.*orphan"):
-            validate_ownership(self.metadata, self.root, self.area_config)
-
-    def test_gating_area_must_define_check_args(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "must define 'check_args'"):
-            validate_area_schema([{"area": "alpha"}])
-
-    def test_non_gating_area_must_give_a_reason(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "must give a non-empty 'reason'"):
-            validate_area_schema([{"area": "tabby", "ci": False}], today=TODAY)
-
-    def test_non_gating_area_needs_no_check_args(self) -> None:
-        validate_area_schema([excluded("tabby")], today=TODAY)
-
-
-class ShadowWorkspaceTests(unittest.TestCase):
-    """A nested `[workspace]` must not re-declare a root workspace member."""
-
-    def setUp(self) -> None:
-        self.temporary_directory = tempfile.TemporaryDirectory()
-        self.root = Path(self.temporary_directory.name)
-        (self.root / "alpha" / "lib").mkdir(parents=True)
-        (self.root / "standalone").mkdir()
-        packages = [
-            {
-                "id": "alpha-core",
-                "name": "alpha-core",
-                "manifest_path": str(self.root / "alpha" / "lib" / "Cargo.toml"),
-            }
-        ]
-        self.metadata = {
-            "workspace_members": ["alpha-core"],
-            "packages": packages,
-            "resolve": {"nodes": []},
-        }
-
-    def tearDown(self) -> None:
-        self.temporary_directory.cleanup()
-
-    def test_no_nested_workspace_passes(self) -> None:
-        validate_no_shadow_workspaces(self.metadata, self.root)
-
-    def test_nested_workspace_over_a_root_member_fails_by_path(self) -> None:
-        (self.root / "alpha" / "Cargo.toml").write_text('[workspace]\nmembers = ["lib"]\n')
-        with self.assertRaisesRegex(RuntimeError, r"shadow root workspace members.*alpha/Cargo.toml"):
-            validate_no_shadow_workspaces(self.metadata, self.root)
-
-    def test_genuinely_standalone_workspace_is_allowed(self) -> None:
-        # `scripts/` declares its own workspace and owns no root member, so it
-        # is a real separate workspace rather than a shadow.
-        (self.root / "standalone" / "Cargo.toml").write_text('[workspace]\nmembers = ["x"]\n')
-        validate_no_shadow_workspaces(self.metadata, self.root)
-
-
-def lockfile(entries: dict[str, tuple[str, list[str]]]) -> str:
-    """Render `{name: (version, [deps])}` as Cargo.lock text."""
-    blocks = ['version = 4\n']
-    for name, (version, dependencies) in entries.items():
-        block = f'[[package]]\nname = "{name}"\nversion = "{version}"\n'
-        if dependencies:
-            rendered = "".join(f'    "{dep}",\n' for dep in dependencies)
-            block += f"dependencies = [\n{rendered}]\n"
-        else:
-            block += "dependencies = []\n"
-        blocks.append(block)
-    return "\n".join(blocks)
-
-
-class LockfileScopeTests(unittest.TestCase):
-    """`Cargo.lock` is scoped from its diff rather than escalated (PR #39)."""
-
-    WORKSPACE = {"alpha-core", "beta-app", "shared-tests"}
-
-    def test_a_dropped_dependency_impacts_only_its_dependents(self) -> None:
-        base = lockfile(
-            {
-                "alpha-core": ("0.1.0", ["serial_test", "shared-tests"]),
-                "beta-app": ("0.1.0", ["alpha-core"]),
-                "shared-tests": ("0.1.0", []),
-                "serial_test": ("3.0.0", []),
-            }
-        )
-        head = lockfile(
-            {
-                "alpha-core": ("0.1.0", ["shared-tests"]),
-                "beta-app": ("0.1.0", ["alpha-core"]),
-                "shared-tests": ("0.1.0", []),
-            }
-        )
-
-        impacted = lockfile_impacted_names(base, head, self.WORKSPACE)
-
-        self.assertEqual({"alpha-core", "beta-app"}, impacted)
-        self.assertNotIn(
-            "shared-tests", impacted, "a crate the change cannot reach stays out"
-        )
-
-    def test_an_unchanged_lockfile_impacts_nothing(self) -> None:
-        text = lockfile({"alpha-core": ("0.1.0", ["shared-tests"]),
-                         "shared-tests": ("0.1.0", [])})
-
-        self.assertEqual(set(), lockfile_impacted_names(text, text, self.WORKSPACE))
-
-    def test_a_transitive_bump_reaches_every_dependent(self) -> None:
-        base = lockfile(
-            {
-                "alpha-core": ("0.1.0", ["serde"]),
-                "beta-app": ("0.1.0", ["alpha-core"]),
-                "shared-tests": ("0.1.0", []),
-                "serde": ("1.0.0", []),
-            }
-        )
-        head = base.replace('version = "1.0.0"', 'version = "1.0.1"')
-
-        impacted = lockfile_impacted_names(base, head, self.WORKSPACE)
-
-        self.assertEqual({"alpha-core", "beta-app"}, impacted)
-
-    def test_an_unavailable_base_is_undecidable_not_empty(self) -> None:
-        head = lockfile({"alpha-core": ("0.1.0", [])})
-
-        self.assertIsNone(lockfile_impacted_names(None, head, self.WORKSPACE))
-
-    def test_an_unparseable_side_is_undecidable_not_empty(self) -> None:
-        head = lockfile({"alpha-core": ("0.1.0", [])})
-
-        self.assertIsNone(lockfile_impacted_names("", head, self.WORKSPACE))
-        self.assertIsNone(lockfile_impacted_names(head, "", self.WORKSPACE))
-
-    def test_parse_reduces_a_versioned_dependency_to_its_crate_name(self) -> None:
-        text = (
-            '[[package]]\nname = "alpha-core"\nversion = "0.1.0"\n'
-            'dependencies = [\n'
-            '    "serde 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",\n'
-            ']\n'
-        )
-
-        self.assertEqual(
-            {("alpha-core", "0.1.0"): frozenset({"serde"})}, parse_lockfile(text)
-        )
-
-
-class LockfileFullScopeFallbackTests(unittest.TestCase):
-    """Without a decidable diff the lockfile must still select everything."""
-
-    def setUp(self) -> None:
-        self.temporary_directory = tempfile.TemporaryDirectory()
-        self.root = Path(self.temporary_directory.name)
-        self.area_config = [
-            {"area": "alpha", "check_args": "-p alpha-core"},
-            {"area": "beta", "check_args": "-p beta-app"},
-        ]
-        packages = [
-            package(self.root, "alpha-core", "alpha/lib/Cargo.toml"),
-            package(self.root, "beta-app", "beta/app/Cargo.toml"),
-        ]
-        # Deliberately unrelated: `beta` appearing in a selection is then
-        # evidence of escalation rather than of legitimate reverse-dependency
-        # closure, which is the distinction these tests exist to draw.
         self.metadata = {
             "workspace_members": [item["id"] for item in packages],
             "packages": packages,
             "resolve": {
                 "nodes": [
-                    {"id": "alpha-core", "deps": []},
-                    {"id": "beta-app", "deps": []},
+                    {"id": "biscuit-speaks", "deps": []},
+                    {
+                        "id": "biscuit-speaks-cli",
+                        "deps": [{"pkg": "biscuit-speaks", "dep_kinds": [{"kind": None}]}],
+                    },
+                    {
+                        "id": "claudine",
+                        "deps": [{"pkg": "biscuit-speaks", "dep_kinds": [{"kind": None}]}],
+                    },
+                    {
+                        "id": "claudine-cli",
+                        "deps": [{"pkg": "claudine", "dep_kinds": [{"kind": None}]}],
+                    },
+                    {
+                        "id": "claudine-contract",
+                        "deps": [{"pkg": "claudine", "dep_kinds": [{"kind": None}]}],
+                    },
+                    {
+                        "id": "research",
+                        "deps": [{"pkg": "biscuit-speaks", "dep_kinds": [{"kind": None}]}],
+                    },
+                    {
+                        "id": "research-cli",
+                        "deps": [{"pkg": "research", "dep_kinds": [{"kind": None}]}],
+                    },
                 ]
             },
         }
+        self.policy = package_ci_policy(
+            workspace_packages_from(self.metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
 
-    def test_a_lockfile_change_without_a_base_selects_the_full_workspace(self) -> None:
-        (self.root / "Cargo.lock").write_text(
-            lockfile({"alpha-core": ("0.1.0", [])}), encoding="utf-8"
-        )
-
+    def test_biscuit_speaks_closure_is_exact(self) -> None:
         scope = calculate_scope(
-            ["Cargo.lock"], self.root, self.metadata, self.area_config
-        )
-
-        self.assertTrue(scope["full_scope"])
-        self.assertEqual(["alpha", "beta"], [area["area"] for area in scope["areas"]])
-
-    def test_a_decidable_lockfile_change_does_not_select_the_full_workspace(
-        self,
-    ) -> None:
-        base = lockfile(
-            {"alpha-core": ("0.1.0", ["serde"]), "beta-app": ("0.1.0", []),
-             "serde": ("1.0.0", [])}
-        )
-        head = lockfile(
-            {"alpha-core": ("0.1.0", []), "beta-app": ("0.1.0", [])}
-        )
-        (self.root / "Cargo.lock").write_text(head, encoding="utf-8")
-
-        scope = calculate_scope(
-            ["Cargo.lock"],
+            ["biscuit-speaks/lib/src/lib.rs"],
             self.root,
             self.metadata,
-            self.area_config,
-            False,
-            base,
+            environments_for_tests(),
+            self.policy,
+        )
+        self.assertEqual(
+            [
+                "biscuit-speaks",
+                "biscuit-speaks-cli",
+                "claudine",
+                "claudine-cli",
+                "claudine-contract",
+                "research",
+                "research-cli",
+            ],
+            scope["packages"],
         )
 
-        self.assertFalse(scope["full_scope"])
-        self.assertEqual(["alpha"], [area["area"] for area in scope["areas"]])
 
+class NativeClosureTests(unittest.TestCase):
+    """R5: native requirements are the union over the dependency closure."""
 
-class ScopedCheckArgsTests(unittest.TestCase):
-    """`check_args` covers the impacted packages, never the workspace."""
-
-    def test_only_impacted_packages_are_checked(self) -> None:
-        self.assertEqual(
-            "-p alpha-core",
-            scoped_check_args("-p alpha-core -p alpha-cli", {"alpha-core"}),
-        )
-
-    def test_non_package_flags_survive_narrowing(self) -> None:
-        self.assertEqual(
-            "-p sniff --features sniff/remote",
-            scoped_check_args(
-                "-p sniff -p sniff-cli --features sniff/remote", {"sniff"}
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        # consumer (declares no native) -> native-lib (declares ALSA).
+        packages = [
+            package(self.root, "consumer", "consumer/Cargo.toml"),
+            package(
+                self.root,
+                "native-lib",
+                "native-lib/Cargo.toml",
+                ci=ci_policy(native={"ubuntu-latest": ["libasound2-dev"]}),
             ),
+        ]
+        self.metadata = {
+            "workspace_members": [item["id"] for item in packages],
+            "packages": packages,
+            "resolve": {
+                "nodes": [
+                    {
+                        "id": "consumer",
+                        "deps": [{"pkg": "native-lib", "dep_kinds": [{"kind": None}]}],
+                    },
+                    {"id": "native-lib", "deps": []},
+                ]
+            },
+        }
+        self.policy = package_ci_policy(
+            workspace_packages_from(self.metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
         )
 
-    def test_an_unimpacted_area_keeps_its_configured_args(self) -> None:
-        # Never return an empty `-p` list: `cargo check --all-targets` with no
-        # `-p` checks the whole workspace, inverting the narrowing.
-        configured = "-p alpha-core -p alpha-cli"
-        self.assertEqual(configured, scoped_check_args(configured, {"unrelated"}))
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
 
-    def test_every_impacted_package_is_kept(self) -> None:
+    def test_a_dependent_job_receives_its_dependencies_native(self) -> None:
+        scope = calculate_scope(
+            ["consumer/src/lib.rs"],
+            self.root,
+            self.metadata,
+            environments_for_tests(),
+            self.policy,
+        )
+        matrix = {entry["package"]: entry for entry in scope["matrix"]}
+        self.assertIn("consumer", matrix)
         self.assertEqual(
-            "-p alpha-core -p alpha-cli",
-            scoped_check_args(
-                "-p alpha-core -p alpha-cli", {"alpha-core", "alpha-cli"}
-            ),
+            matrix["consumer"]["native"],
+            {"ubuntu-latest": ["libasound2-dev"]},
         )
+
+
+class PackagePolicyTests(unittest.TestCase):
+    RUNNER_LABELS = {"ubuntu-latest", "windows-latest", "macos-latest"}
+
+    def test_no_metadata_defaults_to_gating_l1(self) -> None:
+        packages = {"a": {"name": "a", "manifest_path": "/x/Cargo.toml", "metadata": None}}
+        policy = package_ci_policy(packages, self.RUNNER_LABELS, root=Path("/"), today=TODAY)
+        self.assertTrue(policy["a"]["gates"])
+        self.assertEqual(policy["a"]["tiers"], ["L1"])
+
+    def test_unknown_field_is_rejected(self) -> None:
+        with self.assertRaises(RuntimeError) as raised:
+            validate_package_ci(
+                "a",
+                {"gates": True, "nope": 1},
+                self.RUNNER_LABELS,
+                root=Path("/"),
+                today=TODAY,
+            )
+        self.assertIn("unknown field", str(raised.exception))
+
+    def test_exclusion_requires_owner_reason_class_and_expiry(self) -> None:
+        for missing in ("reason", "owner", "exclusion-class"):
+            with self.subTest(missing=missing):
+                ci = ci_policy(
+                    gates=False,
+                    reason="x",
+                    owner="@o",
+                    **{"exclusion-class": "promotion-pending", "expiry": "2027-01-31"},
+                )
+                ci.pop(missing.replace("_", "-"))
+                with self.assertRaises(RuntimeError):
+                    validate_package_ci("a", ci, self.RUNNER_LABELS, root=Path("/"), today=TODAY)
+
+    def test_an_expired_exclusion_fails(self) -> None:
+        ci = ci_policy(
+            gates=False,
+            reason="x",
+            owner="@o",
+            **{"exclusion-class": "promotion-pending", "expiry": "2026-01-01"},
+        )
+        with self.assertRaises(RuntimeError) as raised:
+            validate_package_ci("a", ci, self.RUNNER_LABELS, root=Path("/"), today=TODAY)
+        self.assertIn("expired", str(raised.exception))
+
+    def test_a_capability_exclusion_must_not_carry_expiry(self) -> None:
+        ci = ci_policy(
+            gates=False,
+            reason="physical hardware",
+            owner="@o",
+            **{"exclusion-class": "capability", "expiry": "2027-01-31"},
+        )
+        with self.assertRaises(RuntimeError) as raised:
+            validate_package_ci("a", ci, self.RUNNER_LABELS, root=Path("/"), today=TODAY)
+        self.assertIn("permanent", str(raised.exception))
+
+    def test_exclusion_governance_only_applies_to_non_gating(self) -> None:
+        ci = ci_policy(gates=True, owner="@o", reason="x")
+        with self.assertRaises(RuntimeError) as raised:
+            validate_package_ci("a", ci, self.RUNNER_LABELS, root=Path("/"), today=TODAY)
+        self.assertIn("exclusion field", str(raised.exception))
+
+    def test_l2_tier_requires_backends(self) -> None:
+        with self.assertRaises(RuntimeError):
+            validate_package_ci(
+                "a",
+                ci_policy(tests={"tiers": ["L1", "L2"]}),
+                self.RUNNER_LABELS,
+                root=Path("/"),
+                today=TODAY,
+            )
+
+    def test_l2_backends_without_l2_tier_is_rejected(self) -> None:
+        with self.assertRaises(RuntimeError):
+            validate_package_ci(
+                "a",
+                ci_policy(tests={"tiers": ["L1"], **{"l2-backends": ["tmux"]}}),
+                self.RUNNER_LABELS,
+                root=Path("/"),
+                today=TODAY,
+            )
+
+    def test_unknown_l2_backend_is_rejected(self) -> None:
+        with self.assertRaises(RuntimeError):
+            validate_package_ci(
+                "a",
+                ci_policy(tests={"tiers": ["L1", "L2"], **{"l2-backends": ["xterm"]}}),
+                self.RUNNER_LABELS,
+                root=Path("/"),
+                today=TODAY,
+            )
+
+    def test_unknown_tier_is_rejected(self) -> None:
+        with self.assertRaises(RuntimeError):
+            validate_package_ci(
+                "a",
+                ci_policy(tests={"tiers": ["L1", "L3"]}),
+                self.RUNNER_LABELS,
+                root=Path("/"),
+                today=TODAY,
+            )
+
+    def test_l1_is_always_present_when_tiers_declared(self) -> None:
+        with self.assertRaises(RuntimeError):
+            validate_package_ci(
+                "a",
+                ci_policy(tests={"tiers": ["L2"]}),
+                self.RUNNER_LABELS,
+                root=Path("/"),
+                today=TODAY,
+            )
+
+    def test_features_and_all_features_conflict(self) -> None:
+        with self.assertRaises(RuntimeError):
+            validate_package_ci(
+                "a",
+                ci_policy(tests={"features": ["x"], **{"all-features": True}}),
+                self.RUNNER_LABELS,
+                root=Path("/"),
+                today=TODAY,
+            )
+
+    def test_unknown_runner_tool_is_rejected(self) -> None:
+        with self.assertRaises(RuntimeError):
+            validate_package_ci(
+                "a",
+                ci_policy(tests={**{"runner-tools": ["arbitrary-script"]}}),
+                self.RUNNER_LABELS,
+                root=Path("/"),
+                today=TODAY,
+            )
+
+    def test_unknown_companion_suite_is_rejected(self) -> None:
+        with self.assertRaises(RuntimeError):
+            validate_package_ci(
+                "a",
+                ci_policy(tests={**{"companion-suites": ["mystery-suite"]}}),
+                self.RUNNER_LABELS,
+                root=Path("/"),
+                today=TODAY,
+            )
+
+    def test_unknown_native_os_is_rejected(self) -> None:
+        with self.assertRaises(RuntimeError):
+            validate_package_ci(
+                "a",
+                ci_policy(native={"fedora": ["foo"]}),
+                self.RUNNER_LABELS,
+                root=Path("/"),
+                today=TODAY,
+            )
+
+
+class MatrixRecordTests(unittest.TestCase):
+    def test_features_become_qualified_check_and_test_args(self) -> None:
+        record = matrix_record(
+            {
+                "package": "sniff-cli",
+                "tiers": ["L1", "L2"],
+                "l2_backends": ["tmux"],
+                "features": ["test-fixtures"],
+                "all_features": False,
+                "l1_include_slow": False,
+                "runner_tools": [],
+                "companion_suites": [],
+            },
+            native={},
+            environments=environments_for_tests(),
+        )
+        self.assertEqual(record["check_args"], "-p sniff-cli --features test-fixtures")
+        self.assertEqual(record["test_args"], "--features test-fixtures")
+        self.assertEqual(record["l2_environments"], ["ubuntu-latest", "macos-latest"])
+        self.assertEqual(record["browser_environments"], [])
+        self.assertEqual(record["node_environments"], [])
+        self.assertTrue(record["wsl"])
+
+    def test_all_features_propagates_consistently(self) -> None:
+        record = matrix_record(
+            {
+                "package": "biscuit-hash",
+                "tiers": ["L1"],
+                "l2_backends": [],
+                "features": [],
+                "all_features": True,
+                "l1_include_slow": False,
+                "runner_tools": [],
+                "companion_suites": [],
+            },
+            native={},
+            environments=environments_for_tests(),
+        )
+        self.assertEqual(record["check_args"], "-p biscuit-hash --all-features")
+        self.assertEqual(record["test_args"], "--all-features")
+
+    def test_browser_and_node_environments_are_capability_derived(self) -> None:
+        record = matrix_record(
+            {
+                "package": "biscuit-terminal",
+                "tiers": ["L1", "L2", "browser"],
+                "l2_backends": ["tmux"],
+                "features": [],
+                "all_features": False,
+                "l1_include_slow": False,
+                "runner_tools": [],
+                "companion_suites": [],
+            },
+            native={},
+            environments=environments_for_tests(),
+        )
+        self.assertEqual(record["browser_environments"], ["ubuntu-latest"])
+
+        record = matrix_record(
+            {
+                "package": "homelab-server",
+                "tiers": ["L1"],
+                "l2_backends": [],
+                "features": [],
+                "all_features": False,
+                "l1_include_slow": False,
+                "runner_tools": ["node-22", "pnpm-10"],
+                "companion_suites": ["homelab-frontend"],
+            },
+            native={},
+            environments=environments_for_tests(),
+        )
+        self.assertEqual(record["node_environments"], ["ubuntu-latest"])
+
+
+class EnvironmentsTests(unittest.TestCase):
+    def test_the_checked_in_table_parses_and_is_well_governed(self) -> None:
+        environments = load_environments(ENVIRONMENTS_CONFIG, today=TODAY)
+        names = [environment["name"] for environment in environments]
+        self.assertEqual(
+            names,
+            ["ubuntu-latest", "windows-latest", "macos-latest", "wsl2-ubuntu"],
+        )
+        # The two governed unavailabilities: Windows tmux and WSL2 tmux.
+        windows = next(e for e in environments if e["name"] == "windows-latest")
+        wsl = next(e for e in environments if e["name"] == "wsl2-ubuntu")
+        self.assertFalse(capability(windows, "tmux"))
+        self.assertFalse(capability(wsl, "tmux"))
+        self.assertTrue(capability(wsl, "archive_only"))
+
+    def test_a_missing_capability_is_rejected(self) -> None:
+        import json
+
+        from affected_scope import KNOWN_CAPABILITIES
+
+        doc = {
+            "schema_version": 1,
+            "environments": [
+                {
+                    "name": "x",
+                    "runner": "x",
+                    "native_key": "x",
+                    "capabilities": {key: True for key in KNOWN_CAPABILITIES if key != "tmux"},
+                }
+            ],
+        }
+        path = Path(tempfile.mkdtemp()) / "environments.json"
+        path.write_text(json.dumps(doc))
+        with self.assertRaises(RuntimeError) as raised:
+            load_environments(path, today=TODAY)
+        self.assertIn("missing", str(raised.exception))
+
+    def test_an_ungoverned_capability_expiry_fails(self) -> None:
+        import json
+
+        doc = {
+            "schema_version": 1,
+            "environments": [
+                {
+                    "name": "x",
+                    "runner": "x",
+                    "native_key": "x",
+                    "capabilities": {
+                        "tmux": {"available": False, "reason": "r", "owner": "@o", "expiry": "2026-01-01"},
+                        "headless_browser": True,
+                        "node_pnpm": True,
+                        "archive_only": False,
+                    },
+                }
+            ],
+        }
+        path = Path(tempfile.mkdtemp()) / "environments.json"
+        path.write_text(json.dumps(doc))
+        with self.assertRaises(RuntimeError):
+            load_environments(path, today=TODAY)
+
+
+class ShadowWorkspaceTests(unittest.TestCase):
+    def test_a_member_that_redecls_a_workspace_fails(self) -> None:
+        root = Path(tempfile.mkdtemp())
+        (root / "alpha").mkdir(parents=True)
+        # `alpha` is a root member whose OWN manifest redeclares a [workspace],
+        # so `cd alpha && cargo test` resolves a different target/lockfile than
+        # the root build — the shadow this guard exists to catch.
+        (root / "alpha" / "Cargo.toml").write_text(
+            "[package]\nname='alpha'\nversion='0.1.0'\n[workspace]\n"
+        )
+        alpha = package(root, "alpha", "alpha/Cargo.toml")
+        metadata = {"workspace_members": ["alpha"], "packages": [alpha], "resolve": {"nodes": []}}
+        with self.assertRaises(RuntimeError) as raised:
+            validate_no_shadow_workspaces(metadata, root)
+        self.assertIn("shadow", str(raised.exception))
+
+
+class LockfileScopeTests(unittest.TestCase):
+    def test_a_changed_dependency_reaches_its_dependents(self) -> None:
+        # `shared` depends on `alpha`: changing alpha reaches shared.
+        base = lockfile({"alpha": ("1", []), "shared": ("1", ["alpha"])})
+        head = lockfile({"alpha": ("2", []), "shared": ("1", ["alpha"])})
+        impacted = lockfile_impacted_names(base, head, {"alpha", "shared"})
+        self.assertEqual(impacted, {"alpha", "shared"})
+
+    def test_an_undecidable_diff_returns_none(self) -> None:
+        self.assertIsNone(lockfile_impacted_names(None, None, set()))
+
+
+def lockfile(entries: dict[str, tuple[str, list[str]]]) -> str:
+    lines = ["version = 3"]
+    for name, (version, dependencies) in entries.items():
+        lines.append(f"[[package]]\nname = \"{name}\"\nversion = \"{version}\"")
+        if dependencies:
+            rendered = ", ".join(f"\"{dep}\"" for dep in dependencies)
+            lines.append(f"dependencies = [\n {rendered},\n]")
+    return "\n".join(lines) + "\n"
+
+
+# --- helpers ---------------------------------------------------------------
+
+
+def environments_for_tests() -> list[dict[str, object]]:
+    return [
+        {
+            "name": "ubuntu-latest",
+            "runner": "ubuntu-latest",
+            "native_key": "ubuntu-latest",
+            "capabilities": {
+                "tmux": True,
+                "headless_browser": True,
+                "node_pnpm": True,
+                "archive_only": False,
+            },
+        },
+        {
+            "name": "windows-latest",
+            "runner": "windows-latest",
+            "native_key": "windows-latest",
+            "capabilities": {
+                "tmux": {
+                    "available": False,
+                    "reason": "no Windows port",
+                    "owner": "@yankeeinlondon",
+                    "expiry": "2027-01-31",
+                },
+                "headless_browser": False,
+                "node_pnpm": False,
+                "archive_only": False,
+            },
+        },
+        {
+            "name": "macos-latest",
+            "runner": "macos-latest",
+            "native_key": "macos-latest",
+            "capabilities": {
+                "tmux": True,
+                "headless_browser": False,
+                "node_pnpm": False,
+                "archive_only": False,
+            },
+        },
+        {
+            "name": "wsl2-ubuntu",
+            "runner": "windows-latest",
+            "native_key": "ubuntu-latest",
+            "capabilities": {
+                "tmux": {
+                    "available": False,
+                    "reason": "archive-only leg",
+                    "owner": "@yankeeinlondon",
+                    "expiry": "2026-12-31",
+                },
+                "headless_browser": False,
+                "node_pnpm": False,
+                "archive_only": True,
+            },
+        },
+    ]
+
+
+def workspace_packages_from(metadata: dict[str, object]) -> dict[str, dict[str, object]]:
+    members = set(metadata["workspace_members"])  # type: ignore[arg-type]
+    return {
+        package["id"]: package
+        for package in metadata["packages"]  # type: ignore[index]
+        if package["id"] in members
+    }
 
 
 if __name__ == "__main__":

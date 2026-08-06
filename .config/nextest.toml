@@ -66,6 +66,13 @@ test-group = 'claudine-windows-l1'
 filter = 'test(=compose_loop_rate_limit_pause_waits_then_continues)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
+# The CI/CD tier-contract tests shell out to `cargo nextest list`, which builds
+# the test binaries of an L2/browser-owning package to prove the declared tier
+# is non-vacuous. The build dominates and can exceed the default window.
+[[profile.default.overrides]]
+filter = 'test(/_is_non_vacuous/) + test(=an_undeclared_l2_tier_is_rejected)'
+slow-timeout = { period = "30s", terminate-after = 8 }
+
 # This sequence perf test drives a failing multi-step CLI run and may finish just
 # beyond the default 30s termination window on macOS debug builds.
 [[profile.default.overrides]]

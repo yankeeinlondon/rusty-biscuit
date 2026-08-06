@@ -1,8 +1,10 @@
 name: ci
 
 # Dependency-aware CI for pull requests and pushes to main. Changed workspace
-# packages are expanded through reverse Cargo dependencies and then mapped to
-# the curated package-area policy in `.github/ci/areas.json`.
+# packages are expanded through reverse Cargo dependencies and then fanned out
+# ONE JOB PER PACKAGE, with package policy read from each manifest's
+# `[package.metadata.ci]` and environment capabilities from
+# `.github/ci/environments.json`.
 #
 # `pull_request` carries NO `branches:` filter on purpose. Restricting it to
 # `main` meant a stacked pull request — one targeting another feature branch —
@@ -32,17 +34,20 @@ jobs:
     name: Determine affected scope
     runs-on: ubuntu-latest
     outputs:
-      area_matrix: ${{ steps.scope.outputs.area_matrix }}
-      has_areas: ${{ steps.scope.outputs.has_areas }}
-      packages: ${{ steps.scope.outputs.packages }}
+      package_matrix: ${{ steps.scope.outputs.package_matrix }}
       has_packages: ${{ steps.scope.outputs.has_packages }}
+      packages: ${{ steps.scope.outputs.packages }}
+      package_names: ${{ steps.scope.outputs.package_names }}
       full_scope: ${{ steps.scope.outputs.full_scope }}
       claudine: ${{ steps.scope.outputs.claudine }}
       darkmatter: ${{ steps.scope.outputs.darkmatter }}
+      sniff: ${{ steps.scope.outputs.sniff }}
+      biscuit_tui: ${{ steps.scope.outputs.biscuit_tui }}
+      playa: ${{ steps.scope.outputs.playa }}
       preflight_os: ${{ steps.scope.outputs.preflight_os }}
       preflight_reason: ${{ steps.scope.outputs.preflight_reason }}
       change_class: ${{ steps.scope.outputs.change_class }}
-      area_names: ${{ steps.scope.outputs.area_names }}
+      job_estimate: ${{ steps.scope.outputs.job_estimate }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -92,21 +97,30 @@ jobs:
           scope_json="$(python3 scripts/ci/affected_scope.py "${scope_args[@]}")"
           packages="$(jq -c '.packages' <<<"$scope_json")"
 
-          # Every selected area fans out directly. There is no canary stage:
-          # the compile check that gates each area's own tests is a cheaper and
-          # strictly better predictor than a sample of two other areas, and it
-          # cannot stall the fan-out because it runs inside it.
-          area_matrix="$(jq -c '{include: .areas}' <<<"$scope_json")"
+          # The full scope document is also the rollup's policy source: it
+          # carries every impacted package's resolved `[package.metadata.ci]`
+          # policy (gating and `gates = false` alike). Uploaded as an artifact
+          # so `ci-verdict` judges exactly what this run scheduled.
+          printf '%s' "$scope_json" > scope.json
+
+          # Every selected gating package fans out directly. There is no canary
+          # stage: the compile check that gates each package's own tests is a
+          # cheaper and strictly better predictor than a sample of two other
+          # packages, and it cannot stall the fan-out because it runs inside it.
+          package_matrix="$(jq -c '{include: .matrix}' <<<"$scope_json")"
 
           {
-            echo "area_matrix=$area_matrix"
+            echo "package_matrix=$package_matrix"
             echo "packages=$packages"
-            echo "has_areas=$(jq -r '.include | length > 0' <<<"$area_matrix")"
+            echo "package_names=$(jq -c '.packages' <<<"$scope_json")"
             echo "has_packages=$(jq -r '.packages | length > 0' <<<"$scope_json")"
             echo "full_scope=$(jq -r '.full_scope' <<<"$scope_json")"
-            echo "claudine=$(jq -r 'any(.areas[]; .area == "claudine")' <<<"$scope_json")"
-            echo "darkmatter=$(jq -r 'any(.areas[]; .area == "darkmatter")' <<<"$scope_json")"
-            echo "area_names=$(jq -c '[.areas[].area]' <<<"$scope_json")"
+            echo "claudine=$(jq -r '.flags.claudine' <<<"$scope_json")"
+            echo "darkmatter=$(jq -r '.flags.darkmatter' <<<"$scope_json")"
+            echo "sniff=$(jq -r '.flags.sniff' <<<"$scope_json")"
+            echo "biscuit_tui=$(jq -r '.flags."biscuit-tui"' <<<"$scope_json")"
+            echo "playa=$(jq -r '.flags.playa' <<<"$scope_json")"
+            echo "job_estimate=$(jq -r '.job_estimate' <<<"$scope_json")"
             echo "preflight_os=$(jq -c '.preflight_os' <<<"$scope_json")"
             echo "preflight_reason=$(jq -r '.preflight_reason' <<<"$scope_json")"
             echo "change_class=$(jq -r '.change_class' <<<"$scope_json")"
@@ -123,18 +137,28 @@ jobs:
             echo "| full scope | $(jq -r '.full_scope' <<<"$scope_json") |"
             echo "| reason | $(jq -r '.preflight_reason' <<<"$scope_json") |"
             echo "| preflight OS | $(jq -rc '.preflight_os | join(", ")' <<<"$scope_json") |"
-            echo "| affected areas | $(jq -rc 'if (.areas | length) > 0 then ([.areas[].area] | join(", ")) else "(none)" end' <<<"$scope_json") |"
             echo "| affected packages | $(jq -r '.packages | length' <<<"$scope_json") |"
+            echo "| gating packages (matrix) | $(jq -r '.matrix | length' <<<"$scope_json") |"
+            echo "| expanded job estimate | $(jq -r '.job_estimate' <<<"$scope_json") |"
             echo "| toolchain | $(grep '^channel' rust-toolchain.toml | cut -d'"' -f2) |"
           } >>"$GITHUB_STEP_SUMMARY"
+      # The policy artifact the rollup reads. Small, and retention is short:
+      # it describes one run's scope, nothing else.
+      - name: Upload the resolved package policy
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-scope
+          path: scope.json
+          retention-days: 3
+          if-no-files-found: error
 
   # Bootstrap preflight (D3). Verifies a clean runner can initialize the shared
   # toolchain, discover scope, and pass the canonical-recipe and scope-calc
-  # guards on every selected OS BEFORE any package area fans out. Matrix breadth
-  # scales with change class: a package-local change runs the scope host plus its
-  # areas' required OSes; a global CI/tooling change runs all three. Area jobs
-  # depend on this, so a broken bootstrap produces one actionable failure per
-  # selected OS instead of dozens of package failures.
+  # guards on every selected OS BEFORE any package fans out. Matrix breadth
+  # scales with change class: a package-local change runs the scope host plus
+  # the runner OSes its environments land on; a global CI/tooling change runs
+  # all three. Package jobs depend on this, so a broken bootstrap produces one
+  # actionable failure per selected OS instead of dozens of package failures.
   preflight:
     name: preflight (${{ matrix.os }})
     needs: scope
@@ -180,39 +204,42 @@ jobs:
       - name: Test affected-scope calculation
         run: python3 scripts/ci/test_affected_scope.py
 
-  area-ci:
-    name: ${{ matrix.area }}
+  package-ci:
+    name: ${{ matrix.package }}
     needs: [scope, preflight]
     # No stage sits in front of this. A sampled canary was tried and removed:
     # gating on it erased 20 areas' evidence for one unrelated failure, and
     # un-gating it left a `needs:` edge that stalled the whole fan-out whenever
-    # its scarcest leg could not get a runner. Each area now gates its own tests
-    # on its own compile check, inside `_area-ci.yml`, where the predictor is
-    # exact and cannot block anything it is unrelated to.
+    # its scarcest leg could not get a runner. Each package now gates its own
+    # tests on its own compile check, inside `_package-ci.yml`, where the
+    # predictor is exact and cannot block anything it is unrelated to.
     if: >-
       !cancelled() &&
-      needs.scope.outputs.has_areas == 'true'
+      needs.scope.outputs.has_packages == 'true'
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.scope.outputs.area_matrix) }}
-    uses: ./.github/workflows/_area-ci.yml
+      matrix: ${{ fromJSON(needs.scope.outputs.package_matrix) }}
+    uses: ./.github/workflows/_package-ci.yml
     with:
-      area: ${{ matrix.area }}
+      package: ${{ matrix.package }}
       check-args: ${{ matrix.check_args }}
+      test-args: ${{ matrix.test_args }}
+      l1-include-slow: ${{ matrix.l1_include_slow }}
       # `native_environments`, `l2_environments`, and `wsl` are DERIVED by
-      # `affected_scope.py` from the single `environments` policy field, so the
-      # reusable workflow receives pre-split, un-confusable inputs and cannot
-      # route `wsl2-ubuntu` into a `runs-on` matrix.
+      # `affected_scope.py` from package policy crossed with the environment
+      # capability table, so the reusable workflow receives pre-split,
+      # un-confusable inputs and cannot route `wsl2-ubuntu` into a `runs-on`
+      # matrix.
       native-environments: ${{ toJSON(matrix.native_environments) }}
       check-os: ${{ toJSON(matrix.check_os) }}
       l2-environments: ${{ toJSON(matrix.l2_environments) }}
+      browser-environments: ${{ toJSON(matrix.browser_environments) }}
       node-environments: ${{ toJSON(matrix.node_environments) }}
-      backends: ${{ toJSON(matrix.backends) }}
-      shards: ${{ toJSON(matrix.shards) }}
-      l2: ${{ matrix.l2 }}
-      browser: ${{ matrix.browser }}
+      backends: ${{ toJSON(matrix.l2_backends) }}
+      runner-tools: ${{ toJSON(matrix.runner_tools) }}
+      companion-suites: ${{ toJSON(matrix.companion_suites) }}
+      native: ${{ toJSON(matrix.native) }}
       wsl: ${{ matrix.wsl }}
-      ai-provider-stubs: ${{ matrix.ai_provider_stubs }}
     secrets: inherit
 
   affected-coverage:
@@ -230,8 +257,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: extractions/setup-just@v2
-      # No area scope here: a full-scope run instruments the whole workspace, so
-      # every area's declared libraries must be present before llvm-cov builds.
       - name: Install native prerequisites
         shell: bash
         run: just _ensure-native-libs
@@ -313,7 +338,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
-          shared-key: area-ci-darkmatter-test-ubuntu-latest
+          shared-key: package-ci-darkmatter-test-ubuntu-latest
       - run: cargo test -p darkmatter --lib terminal::tests::test_color_depth
 
   # Specialized runtime contracts (D12): orchestrated by the primary workflow,
@@ -325,8 +350,8 @@ jobs:
     needs: [scope, preflight]
     if: >-
       !cancelled() &&
-      (contains(fromJSON(needs.scope.outputs.area_names), 'claudine') ||
-       contains(fromJSON(needs.scope.outputs.area_names), 'sniff'))
+      (needs.scope.outputs.claudine == 'true' ||
+       needs.scope.outputs.sniff == 'true')
     uses: ./.github/workflows/rendezvous-tests.yml
     secrets: inherit
 
@@ -335,7 +360,7 @@ jobs:
     needs: [scope, preflight]
     if: >-
       !cancelled() &&
-      contains(fromJSON(needs.scope.outputs.area_names), 'biscuit-tui')
+      needs.scope.outputs.biscuit_tui == 'true'
     uses: ./.github/workflows/biscuit-tui-windows-captured-stdout.yml
     secrets: inherit
 
@@ -344,13 +369,13 @@ jobs:
     needs: [scope, preflight]
     if: >-
       !cancelled() &&
-      contains(fromJSON(needs.scope.outputs.area_names), 'playa')
+      needs.scope.outputs.playa == 'true'
     uses: ./.github/workflows/playa-windows.yml
     secrets: inherit
 
-  # `messenger` is an EXEMPT package with no curated area, so it never appears in
-  # `area_names`. Select it from the affected PACKAGE list instead — this
-  # workflow is messenger's entire CI ownership.
+  # `messenger` packages are EXEMPT (`gates = false`), so they never appear in
+  # the package matrix. Select them from the affected PACKAGE list instead —
+  # this workflow is messenger's entire CI ownership.
   messenger-desktop:
     name: messenger-desktop
     needs: [scope, preflight]
@@ -371,11 +396,11 @@ jobs:
   #
   #   1. `if: always()` — a failed or cancelled producer must not skip it.
   #      `needs` here is a "wait for, then download from" list, not a gate.
-  #   2. `--scope` from the scope job — it is the ONLY way `ci-rollup` learns an
-  #      area was scheduled and produced NOTHING. Infer scope from the artifacts
-  #      on disk and that case is invisible by construction, which is exactly
-  #      what MISSING exists to catch. A baseline entry outside the scope is
-  #      ignored, never counted as a pass.
+  #   2. `--scope` from the scope job — it is the ONLY way `ci-rollup` learns a
+  #      package was scheduled and produced NOTHING. Infer scope from the
+  #      artifacts on disk and that case is invisible by construction, which is
+  #      exactly what MISSING exists to catch. A baseline entry outside the
+  #      scope is ignored, never counted as a pass.
   #   3. Evidence, not job names. When `needs:` skips a matrix job GitHub never
   #      evaluates the matrix context: the whole matrix collapses into ONE
   #      skipped job named with the raw `${{ matrix.os }}` expression (measured,
@@ -384,12 +409,12 @@ jobs:
   ci-verdict:
     name: ci-verdict
     # Every job that can produce a result or status artifact. The `wsl` leg and
-    # each area's `check`/`lint`/`test`/`l2`/`browser` jobs are nested inside
-    # `area-ci`, so they are covered transitively.
+    # each package's `check`/`lint`/`test`/`l2`/`browser` jobs are nested inside
+    # `package-ci`, so they are covered transitively.
     needs:
       - scope
       - preflight
-      - area-ci
+      - package-ci
       - affected-coverage
       - claudine-generator-signals
       - darkmatter-no-color
@@ -412,15 +437,15 @@ jobs:
         shell: bash
         env:
           SCOPE_RESULT: ${{ needs.scope.result }}
-          AREA_NAMES: ${{ needs.scope.outputs.area_names }}
+          PACKAGE_NAMES: ${{ needs.scope.outputs.package_names }}
         run: |
           set -euo pipefail
           if [ "$SCOPE_RESULT" != "success" ]; then
-            echo "the scope job concluded '$SCOPE_RESULT'; without its area list an area that produced nothing is invisible and this verdict would be vacuous" >&2
+            echo "the scope job concluded '$SCOPE_RESULT'; without its package list a package that produced nothing is invisible and this verdict would be vacuous" >&2
             exit 1
           fi
-          # `area_names` is a JSON array; `--scope` takes a comma list.
-          scope="$(jq -r 'join(",")' <<<"${AREA_NAMES:-[]}")"
+          # `package_names` is a JSON array; `--scope` takes a comma list.
+          scope="$(jq -r 'join(",")' <<<"${PACKAGE_NAMES:-[]}")"
           {
             echo "scope=${scope}"
             if [ -n "$scope" ]; then echo "has_scope=true"; else echo "has_scope=false"; fi
@@ -457,13 +482,9 @@ jobs:
           mkdir -p ci-artifacts
           ./scripts/target/release/ci-rollup rollup \
             --artifacts ci-artifacts \
-            --areas .github/ci/areas.json \
+            --policy ci-artifacts/ci-scope/scope.json \
+            --environments .github/ci/environments.json \
             --scope "$SCOPE" \
-            --browser-environments ubuntu-latest \
-            --provisioned-backends 'ubuntu-latest=tmux' \
-            --provisioned-backends 'macos-latest=tmux' \
-            --provisioned-backends 'windows-latest=' \
-            --provisioned-backends 'wsl2-ubuntu=' \
             --out ci-results.json \
             --run-id '${{ github.run_id }}'
       - name: Upload the machine-readable rollup
@@ -486,7 +507,7 @@ jobs:
       # Success criterion 7: a docs-only change schedules no test leg anywhere,
       # so there is nothing to verdict and this check must pass. Stated out loud
       # rather than left as a silently green job.
-      - name: No area was scheduled
+      - name: No package was scheduled
         if: ${{ steps.verdict-scope.outputs.has_scope != 'true' }}
         shell: bash
         run: |
@@ -495,13 +516,13 @@ jobs:
             echo ""
             echo "## CI verdict"
             echo ""
-            echo "**CLEAR** — the affected-scope calculation selected no package area, so this run scheduled no test leg and there is nothing to compare against the baseline."
+            echo "**CLEAR** — the affected-scope calculation selected no package, so this run scheduled no test leg and there is nothing to compare against the baseline."
           } >>"$GITHUB_STEP_SUMMARY"
 
   # Navigation aid for the jobs `ci-verdict` cannot yet see, and ONLY those.
   #
-  # `ci-rollup` covers every area in `areas.json`. It cannot cover the bootstrap
-  # stages or the specialized workflows: those are not areas, emit no
+  # `ci-rollup` covers every package in the run's resolved policy. It cannot
+  # cover the bootstrap stages or the specialized workflows: those emit no
   # `manifest.jsonl`, and can never appear in an affected scope, so their
   # migrated baseline entries are reported `baseline-out-of-scope` and ignored
   # (plan 3.5 is what closes this). Without a line here they would fail
@@ -535,7 +556,8 @@ jobs:
         env:
           # Listed in dependency order: an earlier stage's failure is the root
           # cause, and later stages were skipped or would only repeat it.
-          # `area-ci` is absent on purpose — every area gate is a rollup cell.
+          # `package-ci` is absent on purpose — every package gate is a rollup
+          # cell.
           RESULTS: |
             bootstrap (scope calculation):${{ needs.scope.result }}
             bootstrap (preflight):${{ needs.preflight.result }}
@@ -564,12 +586,12 @@ jobs:
           done <<<"$RESULTS"
 
           if [ -z "$first" ]; then
-            echo "No bootstrap or specialized workflow failed. **The run's verdict is \`ci-verdict\`, not this line** — area results live in the CI rollup grid above." >>"$GITHUB_STEP_SUMMARY"
+            echo "No bootstrap or specialized workflow failed. **The run's verdict is \`ci-verdict\`, not this line** — package results live in the CI rollup grid above." >>"$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
           {
             echo "**First actionable failure class: ${first}**"
             echo ""
-            echo "This stage is not an \`areas.json\` area, so it is invisible to \`ci-verdict\` until plan 3.5 makes it emit the same result schema. Open that job first — later red jobs are usually the same root cause."
+            echo "This stage emits no result artifacts, so it is invisible to \`ci-verdict\` until plan 3.5 makes it emit the same result schema. Open that job first — later red jobs are usually the same root cause."
           } >>"$GITHUB_STEP_SUMMARY"

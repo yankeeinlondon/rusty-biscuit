@@ -193,10 +193,10 @@ exclusively.
 
 The tier taxonomy above decides *what* runs; this section decides *where* (which
 OS). `.github/workflows/ci.yml` calculates changed workspace packages and their
-reverse Cargo dependencies, maps them to the curated policy in
-`.github/ci/areas.json`, and fans the resulting matrix into the reusable
-`.github/workflows/_area-ci.yml`. Platform behavior is uniform without starting
-jobs for unrelated areas.
+reverse Cargo dependencies, reads each package's policy from its
+`[package.metadata.ci]`, and fans the resulting matrix into the reusable
+`.github/workflows/_package-ci.yml`. Platform behavior is uniform without starting
+jobs for unrelated packages.
 
 A bootstrap `preflight` job runs first (3 OSes for global CI/tooling changes, a
 scoped OS set for package-local changes) and gates the area fan-out via
@@ -247,7 +247,7 @@ the latest stable toolchain (`RUSTUP_TOOLCHAIN=stable`) and runs
   shard's evidence, and per-shard JUnit is uploaded under collision-free names.
   Combined with the build cache this keeps wall-clock under the 30-min ceiling.
 - **CI selects the `ci` nextest profile** explicitly (`NEXTEST_PROFILE: ci` in
-  `_area-ci.yml`; nextest logs `nextest profile: ci`). In `.config/nextest.toml`
+  `_package-ci.yml`; nextest logs `nextest profile: ci`). In `.config/nextest.toml`
   `[profile.ci]` sets `retries = 0`, so a deterministic L1 failure runs exactly
   once; scoped `retries = 2` overrides remain only for the `test(/level2_/)` and
   `test(/browser_/)` tiers (documented resource contention). `[profile.default]`
@@ -290,7 +290,7 @@ because it never builds the code in question.
 The live case is `sniff`'s `remote` (which implies `network`), gating the
 provider client and its Wiremock test, bench, and example targets:
 
-- Sniff's entry in `.github/ci/areas.json` adds `sniff/remote` to the
+- Sniff's `[package.metadata.ci.tests]` adds `remote` to the
   all-target compile check and runs the full L1 suite on macOS, Linux, and
   Windows. Its `just test` recipe executes the provider suites with `remote`
   enabled rather than merely compiling them.
@@ -319,7 +319,7 @@ so a scheduled failure is never read as an L1 regression.
 
 - Agents can always type `just sanity`, `just test`, `just test-l2` and get the
   same behavior regardless of which area they are in.
-- CI validates the curated `areas` list against `.github/ci/areas.json`, then
+- CI validates each package's `[package.metadata.ci]` against the schema, then
   runs only the dependency-derived subset.
 - Drift between packages is detectable: `just _check_canonical` either passes
   or names the missing recipes.
@@ -375,7 +375,7 @@ Rust and long wall-clock times.
 | Fuzz corpus stored in-repo (seed only) | Avoids Git LFS dependency. Only minimized crash inputs are committed back. |
 | tmux as default L2 backend | Most portable: headless, runs on any CI runner without GUI. |
 | `[package.metadata.benchmarks] required = false` convention | Grep-able opt-out for pure data crates. Enforced by reviewer discretion only. |
-| One dependency-aware `ci.yml` caller + reusable `_area-ci.yml` | Uniform platform behavior without starting jobs for unrelated areas. |
+| One dependency-aware `ci.yml` caller + reusable `_package-ci.yml` | Uniform platform behavior without starting jobs for unrelated packages. |
 | macOS compile-checked (not full-tested) on PRs | GitHub macOS runners bill ~10× Linux; the `check` job catches macOS compile drift cheaply while full L1 runs on Linux + Windows. |
 | Windows runs full L1 | Windows is the highest-risk platform for silent API/type drift; compile-only would miss runtime-shaped bugs. |
 | `Swatinem/rust-cache@v2` on every native leg | CI uses no rustc wrapper. `kache` was measured at 0-6% hit rate through the GitHub Actions cache backend and removed from CI on 2026-07-30; it stays a per-host developer opt-in with one version authority (`.github/kache-version`). |

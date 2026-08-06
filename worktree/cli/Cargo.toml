@@ -26,3 +26,8 @@ predicates = "3"
 serial_test = "3"
 tempfile = "3"
 test-toolkit = { path = "../../tools/test-toolkit" }
+
+# CI policy: worktree-cli owns the area's L2 (real-terminal) tier tests.
+[package.metadata.ci.tests]
+tiers = ["L1", "L2"]
+l2-backends = ["tmux", "kitty"]

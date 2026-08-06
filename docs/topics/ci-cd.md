@@ -51,11 +51,14 @@ surface, obtains the changed file set from the event's exact base and head SHAs,
 - all transitive reverse Cargo dependencies,
 - curated package areas owning those packages.
 
-The selected area matrix calls `_area-ci.yml`, which compile-checks macOS, runs L1 on Linux and
-Windows, and runs each area's lint/documentation guards. Area-specific policy—strict versus soft
-Windows, sharding, L2, browser tests, and provider stubs—lives in `.github/ci/areas.json`.
+The selected package matrix calls `_package-ci.yml`, which compile-checks
+Windows, runs L1 on Linux, Windows, and macOS (plus WSL2), and runs each
+package's lint/documentation guards. Per-package policy — L2/browser tier
+ownership, native libraries, Cargo features, runner tools, and companion
+suites — lives in each package's `[package.metadata.ci]`; environment
+capabilities live in `.github/ci/environments.json`.
 Claudine's generator/signals guard and Darkmatter's `NO_COLOR` guard remain conditional jobs in
-the same workflow. Changes to global build/test configuration conservatively select every area.
+the same workflow. Changes to global build/test configuration conservatively select every package.
 
 ### Layer 3 — Affected coverage and specialized workflows
 
@@ -277,10 +280,11 @@ What CI explicitly does **not** guarantee:
 Before adding a new workflow, check:
 
 1. **Does an existing canonical recipe cover this?** If yes, register the area in the root
-   `justfile` and `.github/ci/areas.json` instead of inventing a new workflow.
+   `justfile` and declare the package's CI policy in its `[package.metadata.ci]`
+   instead of inventing a new workflow.
 
 2. **Is this a canonical area contract or a specialized contract?** Canonical work belongs in
-   `_area-ci.yml` and the area policy; specialized hardware, IPC, or console behavior may justify
+   `_package-ci.yml` and the package policy; specialized hardware, IPC, or console behavior may justify
    its own file. If it does, make it a **reusable** workflow (`workflow_call` +
    `workflow_dispatch`, no `push`/`pull_request` triggers, no own `concurrency` group) and add a
    scope-gated job to `ci.yml` that calls it. A self-triggering workflow reintroduces the wall of

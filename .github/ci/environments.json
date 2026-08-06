@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "environments": [
+    {
+      "name": "ubuntu-latest",
+      "runner": "ubuntu-latest",
+      "native_key": "ubuntu-latest",
+      "capabilities": {
+        "tmux": true,
+        "headless_browser": true,
+        "node_pnpm": true,
+        "archive_only": false
+      }
+    },
+    {
+      "name": "windows-latest",
+      "runner": "windows-latest",
+      "native_key": "windows-latest",
+      "capabilities": {
+        "tmux": {
+          "available": false,
+          "reason": "no L2 terminal backend is provisionable on Windows: TmuxHarness::available() is which(\"tmux\") and tmux has no Windows port, while WezTerm/Kitty/Apple Terminal need a live GUI session. The headless wezterm-mux-server spike (plan 2.3) is deferred, separately scoped work.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2027-01-31"
+        },
+        "headless_browser": false,
+        "node_pnpm": false,
+        "archive_only": false
+      }
+    },
+    {
+      "name": "macos-latest",
+      "runner": "macos-latest",
+      "native_key": "macos-latest",
+      "capabilities": {
+        "tmux": true,
+        "headless_browser": false,
+        "node_pnpm": false,
+        "archive_only": false
+      }
+    },
+    {
+      "name": "wsl2-ubuntu",
+      "runner": "windows-latest",
+      "native_key": "ubuntu-latest",
+      "capabilities": {
+        "tmux": {
+          "available": false,
+          "reason": "the WSL2 leg runs a prebuilt nextest archive (plan 2.2): the guest has no cargo or rustc, so it cannot build the biscuit-harness-broker binary the L2 tier needs, and no terminal server runs there. Installing tmux in the guest would satisfy which(\"tmux\") while executing zero L2 tests — the non-evidence plan 1.1 rejects. Closes when the broker ships inside the archive and the guest starts a tmux server; tractable without solving the Windows backend problem, hence the earlier expiry.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2026-12-31"
+        },
+        "headless_browser": false,
+        "node_pnpm": false,
+        "archive_only": true
+      }
+    }
+  ]
+}

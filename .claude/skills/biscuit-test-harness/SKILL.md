@@ -90,7 +90,8 @@ Prefer **`BISCUIT_TEST_REQUIRED_BACKENDS`** for L2 — a comma-separated,
 case-insensitive list of the stable identifiers `tmux`, `wezterm`, `kitty`,
 `apple-terminal`. Named backends hard-fail when unavailable; every other backend
 still skips cleanly. Identifiers match exactly (`wez` is an error, not a
-near-miss), and the same spellings appear in `.github/ci/areas.json`.
+near-miss), and the same spellings appear in each package's
+`[package.metadata.ci.tests]` `l2-backends`.
 
 ```bash
 BISCUIT_TEST_REQUIRED_BACKENDS=tmux just test-l2   # tmux fatal, GUI backends skip

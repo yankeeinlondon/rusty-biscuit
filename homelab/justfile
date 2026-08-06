@@ -334,7 +334,7 @@ lint-frontend:
         echo ""
         if [ -n "${BISCUIT_FRONTEND_REQUIRED:-}" ]; then
             echo "BISCUIT_FRONTEND_REQUIRED is set, so this environment DECLARED the" >&2
-            echo "node capability (\"node\": true in .github/ci/areas.json). A missing" >&2
+            echo "node capability (declared in the owning package's manifest). A missing" >&2
             echo "pnpm here is a PROVISIONING FAILURE, not an absent capability." >&2
             exit 1
         fi
@@ -352,7 +352,7 @@ lint-frontend:
 # Self-gating on the pnpm capability, the way `require_level!` self-gates on a
 # terminal backend: one recipe everywhere, which decides for itself whether the
 # host can run it. CI declares the capability as `"node": true` in
-# `.github/ci/areas.json`; `_area-ci.yml` provisions it on ubuntu-latest only,
+# the owning package's `[package.metadata.ci]`; `_package-ci.yml` provisions it on
 # because this suite has no native dependency and four installs would exercise
 # identical code paths.
 #
@@ -384,7 +384,7 @@ test-frontend:
         echo ""
         if [ -n "${BISCUIT_FRONTEND_REQUIRED:-}" ]; then
             echo "BISCUIT_FRONTEND_REQUIRED is set, so this environment DECLARED the" >&2
-            echo "node capability (\"node\": true in .github/ci/areas.json). A missing" >&2
+            echo "node capability (declared in the owning package's manifest). A missing" >&2
             echo "pnpm here is a PROVISIONING FAILURE, not an absent capability." >&2
             exit 1
         fi

@@ -26,3 +26,12 @@ layout-rs = "0.1"
 
 [dev-dependencies]
 serial_test = "3.0"
+
+# CI exclusion: 71 tests that currently run in no CI job. Promotion is blocked
+# on the canonical just recipe set.
+[package.metadata.ci]
+gates = false
+exclusion-class = "promotion-pending"
+owner = "@yankeeinlondon"
+reason = "71 tests that currently run in NO CI job. Promotion is blocked on the canonical just recipe set — biscuit-visualized/ defines only test and lint."
+expiry = "2026-10-31"

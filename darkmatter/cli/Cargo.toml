@@ -50,3 +50,10 @@ serial_test = "3"
 test-toolkit = { path = "../../tools/test-toolkit" }
 tracing-test = "0.2"
 syntect = "5.2"
+
+# CI policy: darkmatter's L1 contract keeps `slow_` tests, and the CLI owns L2
+# (render-tree terminal) tier tests.
+[package.metadata.ci.tests]
+tiers = ["L1", "L2"]
+l2-backends = ["tmux", "wezterm"]
+l1-include-slow = true
