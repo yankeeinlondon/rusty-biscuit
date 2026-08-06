@@ -256,31 +256,11 @@ expiry = "2026-10-31"
 
 [[failure]]
 area = "biscuit-speaks"
-environment = "windows-latest"
-tier = "L1"
-shard = "1/1"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 1 failing test, e.g. biscuit-speaks::cache::tests::test_populate_cache_for_provider_updates_existing"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-[[failure]]
-area = "biscuit-speaks"
 environment = "wsl2-ubuntu"
 tier = "L1"
 shard = "1/1"
 owner = "@yankeeinlondon"
 reason = "red on main at the time of sync; 34 failing tests, e.g. biscuit-speaks-cli::cli_test::test_cli_background_flag"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-[[failure]]
-area = "biscuit-terminal"
-environment = "macos-latest"
-tier = "L1"
-shard = "1/1"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 1 failing test, e.g. biscuit-terminal::level1_cursor::cursor_position_parses_csi_r_reply"
 source_run = "30791562395"
 expiry = "2026-11-30"
 
@@ -356,16 +336,6 @@ expiry = "2026-11-30"
 
 [[failure]]
 area = "claudine"
-environment = "windows-latest"
-tier = "L1"
-shard = "3/4"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 1 failing test, e.g. claudine::config::codex::tests::sync_considers_proper_wrapper_registration_in_sync"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-[[failure]]
-area = "claudine"
 environment = "wsl2-ubuntu"
 tier = "L1"
 shard = "1/4"
@@ -401,16 +371,6 @@ tier = "L1"
 shard = "4/4"
 owner = "@yankeeinlondon"
 reason = "red on main at the time of sync; 8 failing tests, e.g. claudine-cli::sequence_groups::a_parallel_group_overlaps_its_members"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-[[failure]]
-area = "darkmatter"
-environment = "macos-latest"
-tier = "L1"
-shard = "4/4"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 1 failing test, e.g. darkmatter::markdown::compose::remote_fetch::integration_tests::mock_server_duplicate_url_fetches_once"
 source_run = "30791562395"
 expiry = "2026-11-30"
 
@@ -475,16 +435,6 @@ source_run = "30791562395"
 expiry = "2026-11-30"
 
 [[failure]]
-area = "model-citizen"
-environment = "windows-latest"
-tier = "L1"
-shard = "1/1"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 1 failing test, e.g. model-citizen-cli::integration_test::test_search_no_results"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-[[failure]]
 area = "research"
 environment = "windows-latest"
 tier = "L1"
@@ -495,32 +445,12 @@ source_run = "30791562395"
 expiry = "2026-11-30"
 
 [[failure]]
-area = "schematic"
-environment = "wsl2-ubuntu"
-tier = "L1"
-shard = "1/1"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 3 failing tests, e.g. schematic-gen::terminal_capture::generate_dry_run_emits_module_grouped_filenames"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-[[failure]]
 area = "sniff"
 environment = "wsl2-ubuntu"
 tier = "L1"
 shard = "1/1"
 owner = "@yankeeinlondon"
 reason = "red on main at the time of sync; 14 failing tests, e.g. sniff-cli::snapshots::cargo_monorepo_structure_json_snapshot"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-[[failure]]
-area = "tree-hugger"
-environment = "windows-latest"
-tier = "L1"
-shard = "1/1"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 6 failing tests, e.g. tree-hugger-cli::cli::test_exclude_files_glob_filters_scanned_files"
 source_run = "30791562395"
 expiry = "2026-11-30"
 
