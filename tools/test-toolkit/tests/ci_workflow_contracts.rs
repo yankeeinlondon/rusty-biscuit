@@ -318,6 +318,42 @@ fn the_compile_check_uses_the_scope_derived_package_list() {
     );
 }
 
+/// The guest installs `just` without asking GitHub which version is newest.
+///
+/// Every other environment uses `extractions/setup-just`, which passes
+/// `${{ github.token }}` by default, so its API calls are authenticated at
+/// 5,000/hour. A GitHub Action cannot run inside the WSL guest, so that one
+/// place installs by shell script and its request is anonymous — 60/hour shared
+/// across every job on the runner's IP. Two areas were lost to the resulting
+/// 403: `biscuit-terminal` in run 30755610413, `unchained-ai` in 31041986681.
+///
+/// `--tag` is what removes the API call: the installer only asks for "latest"
+/// when it has no version. Measured against the live endpoint, the unauthenticated
+/// quota is untouched with `--tag` and decrements by one without it.
+#[test]
+fn the_wsl_guest_pins_just_and_authenticates_its_downloads() {
+    let wsl = workflow("_wsl-ci.yml");
+    assert!(
+        wsl.contains("JUST_VERSION:"),
+        "_wsl-ci.yml must pin a just version rather than resolving `latest`"
+    );
+    assert!(
+        wsl.contains("--tag '${{ env.JUST_VERSION }}'"),
+        "the guest installer must be given --tag, or it calls the rate-limited \
+         GitHub API to resolve the newest release"
+    );
+    assert!(
+        wsl.contains("just-version: ${{ env.JUST_VERSION }}"),
+        "the host must pin the SAME version as the guest — both run the repo's \
+         own recipes and must not drift apart"
+    );
+    assert!(
+        wsl.contains("export GITHUB_TOKEN='${{ secrets.GITHUB_TOKEN }}'"),
+        "the guest must export a token so anything still reaching api.github.com \
+         is authenticated rather than sharing the 60/hour anonymous pool"
+    );
+}
+
 #[test]
 fn scope_job_emits_an_actionable_summary() {
     let ci = workflow("ci.yml");

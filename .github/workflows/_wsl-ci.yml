@@ -89,6 +89,15 @@ env:
   COLORTERM: truecolor
   NEXTEST_PROFILE: ci
   ARCHIVE_NAME: nextest-archive.tar.zst
+  # Pinned so the guest's installer never has to ASK which version is newest.
+  # That question is `GET https://api.github.com/repos/casey/just/releases/latest`
+  # — an authenticated-or-60-per-hour-per-IP endpoint — and the guest is the one
+  # place in this repository that reaches it unauthenticated. See the guest
+  # install step for the full account.
+  #
+  # Used for BOTH the host and the guest so the two run the same `just` against
+  # the same recipes. Bump them together.
+  JUST_VERSION: "1.58.0"
 
 jobs:
   # Linux build host. Produces the artifact the guest consumes; nothing here
@@ -101,6 +110,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install just
         uses: extractions/setup-just@v2
+        with:
+          just-version: ${{ env.JUST_VERSION }}
       # Every test binary in the archive carries this job's workspace path baked
       # in as `env!("CARGO_MANIFEST_DIR")`, and the guest clones itself to the
       # same literal so those fixtures resolve. Nothing else enforces that
@@ -320,22 +331,45 @@ jobs:
           # from the archive, so a Rust toolchain would add minutes and buy
           # nothing. cargo-nextest executes an archive without Cargo or rustc.
           #
-          # Both URLs redirect to GitHub release assets, which rate-limit
-          # unauthenticated downloads. A single 403 here is fatal twice over:
-          # `-f` makes curl exit non-zero, and `pipefail` propagates that even
-          # though the failing command is upstream of a pipe. That is exactly how
-          # `biscuit-terminal` was lost in run 30755610413 — `curl: (22) ... 403`
-          # on a guest that had provisioned perfectly, so the cell reported
-          # MISSING while every one of its tests passes on a real WSL2 host.
+          # THE 403, AND WHY IT LANDS ONLY HERE
           #
-          # `--retry-all-errors` is required in addition to `--retry`: 403 is not
-          # in curl's default retryable set, which is transient-by-status only.
+          # Every other environment installs `just` with `extractions/setup-just`,
+          # which passes `${{ github.token }}` by default. Its API calls are
+          # therefore authenticated: 5,000/hour against this repository.
+          #
+          # A GitHub Action cannot run inside the guest — actions execute on the
+          # runner, and the guest is a separate VM reached through a bash
+          # wrapper. So this is the one place tools are installed by shell
+          # script, and the one place the request is anonymous: 60/hour shared
+          # across every job on the runner's Azure IP. `biscuit-terminal` was
+          # lost that way in run 30755610413, and `unchained-ai` in 31041986681.
+          #
+          # `--retry-all-errors` was the previous attempt and could never have
+          # worked. It does retry a 403 — verified, six attempts over 25s — but
+          # the failing request is not this curl. `just.systems/install.sh`
+          # downloads fine; the SCRIPT then calls
+          # `api.github.com/repos/casey/just/releases/latest` using its own curl,
+          # which carries no retry flags. Run 31041986681 failed in 0.9s, which
+          # is the proof: a real retry cycle takes 25.
+          #
+          # Two fixes, both supported by the installer itself. `--tag` skips that
+          # API call entirely (it only asks when it has no version), and
+          # GITHUB_TOKEN authenticates anything that still reaches the API.
+          # Exported by interpolation rather than left to WSLENV, for the reason
+          # given on the L1 step below.
+          export GITHUB_TOKEN='${{ secrets.GITHUB_TOKEN }}'
+          #
+          # `get.nexte.st` is a plain 302 to a release asset, not an API call, so
+          # it is not subject to that limit — but a single 403 anywhere here is
+          # fatal twice over: `-f` makes curl exit non-zero and `pipefail`
+          # propagates it from upstream of a pipe. The retry stays.
           curl_get() {
             curl --proto '=https' --tlsv1.2 -sSfL \
               --retry 5 --retry-delay 5 --retry-all-errors \
               --connect-timeout 15 "$@"
           }
-          curl_get https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+          curl_get https://just.systems/install.sh |
+            bash -s -- --tag '${{ env.JUST_VERSION }}' --to /usr/local/bin
           curl_get https://get.nexte.st/latest/linux | tar zxf - -C /usr/local/bin
           just --version
           cargo-nextest nextest --version
