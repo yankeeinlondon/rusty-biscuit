@@ -58,10 +58,13 @@ if ($Operation -eq "uninstall") {
 }
 
 if ($Operation -eq "status") {
+    # Out-String renders now rather than leaving objects for the formatter to
+    # lay out at pipeline end -- the `exit` below discards anything still
+    # buffered there, which silently swallows the whole report.
     Get-ScheduledTask -TaskName $taskName -ErrorAction Stop |
-        Select-Object TaskName, State, Description
+        Select-Object TaskName, State, Description | Format-List | Out-String
     Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction Stop |
-        Select-Object LastRunTime, LastTaskResult, NextRunTime
+        Select-Object LastRunTime, LastTaskResult, NextRunTime | Format-List | Out-String
     exit 0
 }
 
