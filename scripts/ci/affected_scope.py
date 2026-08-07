@@ -113,6 +113,10 @@ def load_metadata(root: Path) -> dict[str, Any]:
         check=True,
         capture_output=True,
         text=True,
+        # Cargo emits UTF-8; without this, Windows decodes with the locale
+        # codec (cp1252), the reader thread dies on the first non-cp1252 byte,
+        # and `result.stdout` is None.
+        encoding="utf-8",
     )
     return json.loads(result.stdout)
 
