@@ -404,16 +404,18 @@ jobs:
           cargo-nextest nextest --version
       - name: Install native prerequisites in the guest
         shell: wsl-bash {0}
-        env:
-          NATIVE: ${{ inputs.native }}
         run: |
           set -euo pipefail
           # A WSL2 guest IS Linux, so it consumes the `ubuntu-latest` package
           # list — the same dependency-closure union the archive builder
           # installed. Satisfying only the builder is insufficient when an
           # archived binary dynamically links a library the guest lacks.
+          #
+          # Interpolated, NOT read from `env:`: step env lives on the Windows
+          # host process, and `wsl-bash` forwards only WSLENV-listed variables
+          # into the guest — an `env:`-sourced $NATIVE is unbound here.
           cd "${{ env.GUEST_ROOT }}"
-          packages="$(jq -r '."ubuntu-latest" // [] | join(" ")' <<<"$NATIVE")"
+          packages="$(jq -r '."ubuntu-latest" // [] | join(" ")' <<<'${{ inputs.native }}')"
           if [ -n "$packages" ]; then
             just _ensure-native-libs $packages
           fi
@@ -503,6 +505,12 @@ jobs:
           export BISCUIT_NEXTEST_BIN='cargo-nextest nextest'
           export BISCUIT_JUNIT_WORKSPACE_ROOT="${{ env.GUEST_ROOT }}"
           export BISCUIT_JUNIT_TARGET_DIR="${{ env.GUEST_ROOT }}/target"
+          # insta finds the workspace root by running `cargo metadata`; with no
+          # cargo in the guest its manifest-dir fallback DOUBLES the snapshot
+          # path (darkmatter/lib/darkmatter/lib/...), every .snap looks absent,
+          # and each snapshot test fails while rendering correct output — 165
+          # phantom failures on run 30791562395. Pin the root explicitly.
+          export INSTA_WORKSPACE_ROOT="${{ env.GUEST_ROOT }}"
           export BISCUIT_JUNIT_STAGE_DIR='${{ env.BISCUIT_JUNIT_STAGE_DIR }}'
 
           archive=/home/runner/nextest-archive.tar.zst
