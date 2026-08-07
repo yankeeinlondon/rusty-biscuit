@@ -1,4 +1,4 @@
-//! `dmls` binary: argument parsing, logging setup, and the stdio server.
+//! The `dmls` binary: argument parsing, logging setup, and the stdio server.
 //!
 //! stdout is reserved for LSP framing; logging goes to stderr or, with
 //! `--log-file`, to a file. The only stdout writes outside the LSP loop are
