@@ -171,6 +171,44 @@ no-op off Windows and refuses to start below 50 GiB free on Cargo's actual
 target volume. `BISCUIT_BUILD_MIN_FREE_GIB` changes the threshold; zero is an
 explicit emergency disable.
 
+### WSL2 vhdx reclamation
+
+Sweeping Cargo cannot fix every preflight failure. Where a WSL2 distribution
+shares the target volume, its `ext4.vhdx` grows to the guest's high-water mark
+and **never shrinks** — on build-win it reached 178.3 GiB holding 97 GiB of real
+data, leaving 49.2 GiB free against the 50 GiB gate while the Cargo target tree
+sat at 54.9 GiB, comfortably under every sweep cap. Sweep was correct to do
+nothing; the space was not Cargo's.
+
+WSL's own remedy, `wsl --manage <distro> --set-sparse true`, is refused upstream
+as of WSL 2.7.11 ("Sparse VHD support is currently disabled due to potential
+data corruption"). The `--allow-unsafe` override is not worth a dev distro, so
+reclamation stays scheduled and manual.
+
+`scripts/wsl-vhdx-compact.ps1` runs `fstrim` inside each WSL2 guest, measures
+the resulting slack, and compacts only the distributions above
+`-MinSlackGiB` (default 20) — a shutdown plus a multi-minute file rewrite is not
+worth paying to recover a few GiB. It skips while Windows or in-guest build
+processes are active, needs elevation for `diskpart compact vdisk`
+(`Optimize-VHD` requires the Hyper-V module, which these hosts lack), and logs
+to `%LOCALAPPDATA%\rusty-biscuit\logs\wsl-vhdx-compact.log`. Register the weekly
+Saturday 03:00 task with `just install-wsl-compact`; inspect reclaimable space
+per distribution with `just wsl-compact-status`, or reclaim now with
+`just wsl-compact`. **The task runs `wsl --shutdown`** and will end a WSL session
+live at that hour.
+
+Every path is resolved at run time — distribution names and their `BasePath`
+come from the `Lxss` registry, and the target volume from `cargo metadata` — so
+no drive letter is committed anywhere. Two environment variables tune it:
+`BISCUIT_WSL_MIN_SLACK_GIB` (compaction threshold) and
+`BISCUIT_WSL_COMPACT_LOG` (log destination). The host's own `target-dir` lives
+in an untracked `.cargo/config.toml`.
+
+Both this script and the preflight probe set `MSYS_NO_PATHCONV=1` around
+`reg.exe` and `wsl.exe`. Git Bash otherwise rewrites a bare `/s` switch, or the
+guest's `/`, into a Windows path before the native tool sees the argument, which
+fails in ways that read as a missing key or a missing mount point.
+
 ## Starting maxsize: **120GB**
 
 - `cargo-sweep`'s size unit is **decimal** and defaults to MB unsuffixed → 120GB = **111.8 GiB**.
@@ -264,6 +302,7 @@ Swept artifacts come back as link-restores, not recompiles.
 scripts/sweep.sh                                              (version-controlled; `just sweep`)
 scripts/linux-cargo-sweep.sh                        (version-controlled; `just install-linux-sweep`)
 scripts/windows-cargo-sweep.ps1                   (version-controlled; `just install-windows-sweep`)
+scripts/wsl-vhdx-compact.ps1                        (version-controlled; `just install-wsl-compact`)
 ~/.local/bin/rusty-biscuit-sweep.sh                      (+ .bak)   [Mac]
 ~/Library/LaunchAgents/com.ken.rusty-biscuit-sweep.plist  (+ .bak)  [Mac]
 ~/.config/kache/config.toml                                         [Mac; unwritable on build-linux]
