@@ -989,6 +989,28 @@ install-windows-sweep:
 windows-sweep-status:
     @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows-cargo-sweep.ps1 -Operation status
 
+# A WSL2 ext4.vhdx grows to its high-water mark and never shrinks, so it can
+# starve the target volume of space that sweeping Cargo cannot return — the
+# usual cause of a storage-preflight failure that `just sweep` does not fix.
+# WSL's own `--set-sparse` remedy is disabled upstream for corruption risk
+# (docs/kache-strategy.md), which is why this reclaim is scheduled, not automatic.
+#
+# reclaim WSL2 vhdx slack now (elevated; ends any running WSL session)
+wsl-compact *args="":
+    @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/wsl-vhdx-compact.ps1 -Operation run {{ args }}
+
+# install the weekly WSL2 vhdx compaction task in Task Scheduler
+install-wsl-compact:
+    @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/wsl-vhdx-compact.ps1 -Operation install
+
+# show the WSL2 vhdx task's state plus per-distro reclaimable space
+wsl-compact-status:
+    @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/wsl-vhdx-compact.ps1 -Operation status
+
+# remove the weekly WSL2 vhdx compaction task
+uninstall-wsl-compact:
+    @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/wsl-vhdx-compact.ps1 -Operation uninstall
+
 # Separate from the Windows task above even on WSL2: that one sweeps C:\ and
 # cannot see the guest's ext4 filesystem, where target/ actually lives.
 #
