@@ -55,3 +55,10 @@ biscuit-hash = { path = "../../biscuit-hash/lib" }
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
 test-toolkit = { path = "../../tools/test-toolkit" }
 serial_test = "3"
+
+# CI policy: this package owns real L2 tests (`tests/level2_report_terminal.rs`
+# — tmux-driven report rendering), so the tier must be declared here or those
+# tests run in NO tier anywhere (AC12).
+[package.metadata.ci.tests]
+tiers = ["L1", "L2"]
+l2-backends = ["tmux"]

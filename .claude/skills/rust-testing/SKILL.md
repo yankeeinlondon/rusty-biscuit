@@ -4,8 +4,8 @@ description: |-
   Monorepo testing guide: L1/L2/L3 taxonomy, canonical just recipes,
   `require_level!` gating, nextest filtersets, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 1acc7c1c76b11142-4ac6a4feacedd58f
-last_updated: 2026-07-29
+hash: 1acc7c1c76b11142-d49b2c8a09aa1287
+last_updated: 2026-08-06
 ---
 # Rust Testing — Rusty Biscuit Monorepo
 
@@ -93,7 +93,11 @@ case-insensitive list of the stable identifiers `tmux`, `wezterm`, `kitty`,
 than near-misses. Unset or all-whitespace means "no backend is required" and
 every gate keeps its skip behavior. The same vocabulary appears in each
 package's `[package.metadata.ci.tests]` `l2-backends` and
-`scripts/ci/affected_scope.py`, and CI passes it through unmodified.
+`scripts/ci/affected_scope.py`. CI's per-package L2 legs set it to the
+package's declared backends intersected with the provisioned set (tmux is the
+only CI-hostable backend), so an installed-but-never-exercised backend fails
+the `_test_l2` backend-proof bracket instead of rendering a green cell with
+zero executed L2 tests.
 
 ```bash
 BISCUIT_TEST_REQUIRED_BACKENDS=tmux just test-l2        # tmux fatal, GUI backends skip
@@ -200,20 +204,25 @@ For durable native CI, declare package policy in the package's own
 `[package.metadata.ci]`. The dependency-aware `.github/workflows/ci.yml`
 caller calculates changed workspace packages plus their reverse Cargo
 dependencies, reads that policy, and fans the resulting matrix into
-`.github/workflows/_package-ci.yml`. A bootstrap `preflight` job gates that fan-out
-(`needs: [scope, preflight]`). Within each area, `check`, `lint` (build +
-clippy), and `test` (L1 shards) are independent gates; only the expensive
-`l2`/`browser` tiers stage behind `test`. Lint does not gate L1 — one clippy hint
-must not delete an area's entire test evidence. Every configured L1 leg blocks:
-the `soft_os` policy is retired, because `continue-on-error` removed a leg from
-the run's verdict rather than merely making it non-blocking. Enabling `l2` or
-`browser` makes the Linux harness tier hard-required. The shared workflow runs
-each selected area's lint/docs guards and denies warnings in the `lint` job
-only (`_lint` passes `-D warnings` to clippy directly, so the same bar applies
-locally). `check` is a compile gate and does not promote warnings — dead code is
-not a build failure, and platform-conditional dead code is normal. Heavy areas shard their L1 run via nextest
-`--partition count:i/N` with `--no-fail-fast` (darkmatter and claudine both use
-4 shards); CI selects the `ci` nextest profile explicitly.
+`.github/workflows/_package-ci.yml` — one result-producing job per package. A
+bootstrap `preflight` job gates that fan-out (`needs: [scope, preflight]`).
+For each package, `check`, `lint` (build + clippy), and `test` (L1) are
+independent gates; only the expensive `l2`/`browser` tiers stage behind
+`test`. Lint does not gate L1 — one clippy hint must not delete a package's
+entire test evidence. Every configured L1 leg blocks: the `soft_os` policy is
+retired, because `continue-on-error` removed a leg from the run's verdict
+rather than merely making it non-blocking. The L2 leg provisions tmux,
+verifies it (`tmux -V`), and sets `BISCUIT_TEST_REQUIRED_BACKENDS` to the
+declared ∩ provisioned backends, so an installed-but-never-exercised backend
+fails the tier. The shared workflow denies warnings in the `lint` job only
+(`_lint` passes `-D warnings` to clippy directly, so the same bar applies
+locally). `check` is a compile gate and does not promote warnings — dead code
+is not a build failure, and platform-conditional dead code is normal.
+Sharding is removed: no job passes `--partition` (compilation is ~85% of a
+shard and every shard pays it in full, so four shards cost ~3.2× the compute
+to save ~2.4 minutes — see `fixes/2026-08-06-cicd/spec.md` § Sharding). L1
+runs with `--no-fail-fast`, and CI selects the `ci` nextest profile
+explicitly.
 
 Pull requests generate one LCOV report for the same affected package closure.
 The standalone `coverage.yml` performs one full-workspace pass nightly or on

@@ -18,6 +18,12 @@ from affected_scope import (
     package_ci_policy,
     validate_package_ci,
     validate_no_shadow_workspaces,
+    build_closure,
+    estimate_jobs,
+    load_metadata,
+    workspace_packages,
+    MATRIX_LIMIT,
+    ROOT,
     ENVIRONMENTS_CONFIG,
 )
 
@@ -604,6 +610,509 @@ def lockfile(entries: dict[str, tuple[str, list[str]]]) -> str:
             rendered = ", ".join(f"\"{dep}\"" for dep in dependencies)
             lines.append(f"dependencies = [\n {rendered},\n]")
     return "\n".join(lines) + "\n"
+
+
+class GatesFalseScopeTests(unittest.TestCase):
+    """A `gates = false` package is selected but launches no jobs."""
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        packages = [
+            package(self.root, "excluded", "excluded/Cargo.toml"),
+        ]
+        self.metadata = {
+            "workspace_members": [item["id"] for item in packages],
+            "packages": packages,
+            "resolve": {"nodes": [{"id": "excluded", "deps": []}]},
+        }
+        self.policy = package_ci_policy(
+            {
+                "excluded": package(
+                    self.root,
+                    "excluded",
+                    "excluded/Cargo.toml",
+                    ci=ci_policy(
+                        gates=False,
+                        reason="blocked on identified work",
+                        owner="@o",
+                        **{"exclusion-class": "promotion-pending", "expiry": "2027-01-31"},
+                    ),
+                )
+            },
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def test_excluded_from_the_matrix_but_present_in_policy(self) -> None:
+        scope = calculate_scope(
+            ["excluded/src/lib.rs"],
+            self.root,
+            self.metadata,
+            environments_for_tests(),
+            self.policy,
+        )
+        # Still SELECTED (coverage and the reverse-dependency closure see it)...
+        self.assertEqual(["excluded"], scope["packages"])
+        # ...but it launches no jobs...
+        self.assertEqual([], scope["matrix"])
+        # ...while the rollup still learns its governance, so the cell renders
+        # NOT SCHEDULED rather than vanishing.
+        policy = {entry["package"]: entry for entry in scope["policy"]}
+        self.assertIn("excluded", policy)
+        self.assertFalse(policy["excluded"]["gates"])
+        self.assertEqual(
+            policy["excluded"]["exclusion"]["exclusion_class"], "promotion-pending"
+        )
+
+
+class NonPropagationTests(unittest.TestCase):
+    """R5: tiers, runner tools, and companion suites do NOT propagate."""
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        (self.root / "homelab").mkdir()
+        (self.root / "homelab" / "justfile").write_text("test-frontend:\n")
+        packages = [
+            package(self.root, "consumer", "consumer/Cargo.toml"),
+            package(
+                self.root,
+                "declaring-dep",
+                "declaring-dep/Cargo.toml",
+                ci=ci_policy(
+                    tests={
+                        "tiers": ["L1", "L2"],
+                        "l2-backends": ["tmux"],
+                        "runner-tools": ["ai-provider-stubs"],
+                        "companion-suites": ["homelab-frontend"],
+                    }
+                ),
+            ),
+        ]
+        self.metadata = {
+            "workspace_members": [item["id"] for item in packages],
+            "packages": packages,
+            "resolve": {
+                "nodes": [
+                    {
+                        "id": "consumer",
+                        "deps": [{"pkg": "declaring-dep", "dep_kinds": [{"kind": None}]}],
+                    },
+                    {"id": "declaring-dep", "deps": []},
+                ]
+            },
+        }
+        self.policy = package_ci_policy(
+            workspace_packages_from(self.metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def test_a_dependent_keeps_its_own_tiers_tools_and_companions(self) -> None:
+        scope = calculate_scope(
+            ["consumer/src/lib.rs"],
+            self.root,
+            self.metadata,
+            environments_for_tests(),
+            self.policy,
+        )
+        matrix = {entry["package"]: entry for entry in scope["matrix"]}
+        consumer = matrix["consumer"]
+        # Only `native` unions over the closure. The dependency's L2 tier,
+        # runner tools, and companion suites describe ITS tests, not the
+        # packages that compile it.
+        self.assertEqual(consumer["tiers"], ["L1"])
+        self.assertEqual(consumer["l2_environments"], [])
+        self.assertEqual(consumer["runner_tools"], [])
+        self.assertEqual(consumer["companion_suites"], [])
+        self.assertEqual(consumer["node_environments"], [])
+
+
+class BuildClosureEdgeTests(unittest.TestCase):
+    """`build_closure`: seed dev-deps in, transitive dev-deps out."""
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        names = ["seed", "normal", "seed-dev", "transitive-dev", "normal-dev"]
+        packages = [package(self.root, name, f"{name}/Cargo.toml") for name in names]
+        self.packages = {item["id"]: item for item in packages}
+        self.metadata = {
+            "workspace_members": [item["id"] for item in packages],
+            "packages": packages,
+            "resolve": {
+                "nodes": [
+                    {
+                        "id": "seed",
+                        "deps": [
+                            {"pkg": "normal", "dep_kinds": [{"kind": None}]},
+                            {"pkg": "seed-dev", "dep_kinds": [{"kind": "dev"}]},
+                        ],
+                    },
+                    {
+                        "id": "seed-dev",
+                        "deps": [{"pkg": "transitive-dev", "dep_kinds": [{"kind": "dev"}]}],
+                    },
+                    {
+                        "id": "normal",
+                        "deps": [{"pkg": "normal-dev", "dep_kinds": [{"kind": "dev"}]}],
+                    },
+                    {"id": "transitive-dev", "deps": []},
+                    {"id": "normal-dev", "deps": []},
+                ]
+            },
+        }
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def test_dev_dependency_edges(self) -> None:
+        closure = build_closure("seed", self.metadata, self.packages)
+        # The seed's OWN dev-dependencies are compiled to test it...
+        self.assertIn("seed-dev", closure)
+        self.assertIn("normal", closure)
+        # ...but a dependency's dev-dependencies are never built.
+        self.assertNotIn("transitive-dev", closure)
+        self.assertNotIn("normal-dev", closure)
+
+
+class LockfileScopeBranchTests(unittest.TestCase):
+    """The `Cargo.lock` branches through `calculate_scope`."""
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        packages = [
+            package(self.root, "alpha-core", "alpha/lib/Cargo.toml"),
+            package(self.root, "beta-app", "beta/app/Cargo.toml"),
+        ]
+        self.metadata = {
+            "workspace_members": [item["id"] for item in packages],
+            "packages": packages,
+            "resolve": {
+                "nodes": [
+                    {"id": "alpha-core", "deps": []},
+                    {
+                        "id": "beta-app",
+                        "deps": [{"pkg": "alpha-core", "dep_kinds": [{"kind": None}]}],
+                    },
+                ]
+            },
+        }
+        self.policy = package_ci_policy(
+            workspace_packages_from(self.metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def scope(self, files: list[str], **kwargs: object) -> dict[str, object]:
+        return calculate_scope(
+            files,
+            self.root,
+            self.metadata,
+            environments_for_tests(),
+            self.policy,
+            **kwargs,  # type: ignore[arg-type]
+        )
+
+    def test_a_decidable_lockfile_diff_scopes_from_the_diff(self) -> None:
+        (self.root / "Cargo.lock").write_text(
+            lockfile({"alpha-core": ("2", []), "beta-app": ("1", ["alpha-core"])})
+        )
+        base = lockfile({"alpha-core": ("1", []), "beta-app": ("1", ["alpha-core"])})
+        scope = self.scope(["Cargo.lock"], base_lockfile=base)
+        self.assertFalse(scope["full_scope"])
+        self.assertEqual(["alpha-core", "beta-app"], scope["packages"])
+
+    def test_an_undecidable_lockfile_diff_widens_to_full_scope(self) -> None:
+        # No base lockfile supplied: the safe default is never silently
+        # skipped, only ever widened.
+        (self.root / "Cargo.lock").write_text(
+            lockfile({"alpha-core": ("2", []), "beta-app": ("1", ["alpha-core"])})
+        )
+        scope = self.scope(["Cargo.lock"])
+        self.assertTrue(scope["full_scope"])
+        self.assertEqual(["alpha-core", "beta-app"], scope["packages"])
+
+    def test_an_irrelevant_lockfile_change_selects_nothing(self) -> None:
+        (self.root / "Cargo.lock").write_text(
+            lockfile({"alpha-core": ("1", []), "beta-app": ("1", ["alpha-core"])})
+        )
+        scope = self.scope(
+            ["Cargo.lock"],
+            base_lockfile=lockfile(
+                {"alpha-core": ("1", []), "beta-app": ("1", ["alpha-core"]), "serde": ("1", [])}
+            ),
+        )
+        self.assertFalse(scope["full_scope"])
+        self.assertEqual([], scope["packages"])
+
+
+class TopLevelDirectoryFallbackTests(unittest.TestCase):
+    """A file under no package directory selects its top-level directory's packages."""
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        packages = [
+            package(self.root, "alpha-core", "alpha/lib/Cargo.toml"),
+            package(self.root, "alpha-cli", "alpha/cli/Cargo.toml"),
+            package(self.root, "beta-app", "beta/app/Cargo.toml"),
+        ]
+        self.metadata = {
+            "workspace_members": [item["id"] for item in packages],
+            "packages": packages,
+            "resolve": {
+                "nodes": [
+                    {"id": "alpha-core", "deps": []},
+                    {"id": "alpha-cli", "deps": []},
+                    {"id": "beta-app", "deps": []},
+                ]
+            },
+        }
+        self.policy = package_ci_policy(
+            workspace_packages_from(self.metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def test_a_directory_level_justfile_selects_its_packages(self) -> None:
+        scope = calculate_scope(
+            ["alpha/justfile"],
+            self.root,
+            self.metadata,
+            environments_for_tests(),
+            self.policy,
+        )
+        self.assertEqual(["alpha-cli", "alpha-core"], scope["packages"])
+
+    def test_a_root_level_file_outside_any_directory_selects_nothing(self) -> None:
+        scope = calculate_scope(
+            ["README.md"],
+            self.root,
+            self.metadata,
+            environments_for_tests(),
+            self.policy,
+        )
+        self.assertEqual([], scope["packages"])
+
+
+class MatrixLimitTests(unittest.TestCase):
+    def test_over_256_gating_packages_fails_loudly(self) -> None:
+        root = Path(tempfile.mkdtemp())
+        count = MATRIX_LIMIT + 1
+        packages = [
+            package(root, f"pkg-{index}", f"p{index}/Cargo.toml") for index in range(count)
+        ]
+        metadata = {
+            "workspace_members": [item["id"] for item in packages],
+            "packages": packages,
+            "resolve": {"nodes": [{"id": item["id"], "deps": []} for item in packages]},
+        }
+        policy = package_ci_policy(
+            workspace_packages_from(metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=root,
+            today=TODAY,
+        )
+        with self.assertRaises(RuntimeError) as raised:
+            calculate_scope(
+                [], root, metadata, environments_for_tests(), policy, force_all=True
+            )
+        self.assertIn(str(MATRIX_LIMIT), str(raised.exception))
+
+
+class EstimateJobsTests(unittest.TestCase):
+    def test_wsl_counts_two_jobs_and_the_rest_count_one(self) -> None:
+        record = matrix_record(
+            {
+                "package": "a",
+                "tiers": ["L1", "L2"],
+                "l2_backends": ["tmux"],
+                "features": [],
+                "all_features": False,
+                "l1_include_slow": False,
+                "runner_tools": [],
+                "companion_suites": [],
+            },
+            native={},
+            environments=environments_for_tests(),
+        )
+        # check (1) + native environments (3) + wsl (2: archive + guest)
+        # + lint (1) + L2 environments (2: ubuntu, macOS) + browser (0).
+        self.assertEqual(estimate_jobs([record]), 1 + 3 + 2 + 1 + 2)
+
+
+class CiToolingFlagTests(unittest.TestCase):
+    """M4: a change to CI's own tooling must exercise its test suites."""
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        packages = [package(self.root, "alpha-core", "alpha/lib/Cargo.toml")]
+        self.metadata = {
+            "workspace_members": [item["id"] for item in packages],
+            "packages": packages,
+            "resolve": {"nodes": [{"id": "alpha-core", "deps": []}]},
+        }
+        self.policy = package_ci_policy(
+            workspace_packages_from(self.metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def scope(self, files: list[str]) -> dict[str, object]:
+        return calculate_scope(
+            files, self.root, self.metadata, environments_for_tests(), self.policy
+        )
+
+    def test_rollup_and_scope_changes_set_the_tooling_flag(self) -> None:
+        for path in [
+            "scripts/ci-rollup.rs",
+            "scripts/ci-rollup-tests.rs",
+            "scripts/ci/test_affected_scope.py",
+            ".github/ci/ci-baseline.toml",
+        ]:
+            with self.subTest(path=path):
+                scope = self.scope([path])
+                self.assertTrue(scope["flags"]["ci_tooling"])
+
+    def test_a_package_change_does_not_set_the_tooling_flag(self) -> None:
+        scope = self.scope(["alpha/lib/src/lib.rs"])
+        self.assertFalse(scope["flags"]["ci_tooling"])
+
+
+class CompanionRecipeCheckTests(unittest.TestCase):
+    """The companion-recipe existence check is a definition match, not a substring."""
+
+    LABELS = {"ubuntu-latest", "windows-latest", "macos-latest"}
+
+    def justfile_root(self, contents: str) -> Path:
+        root = Path(tempfile.mkdtemp())
+        (root / "homelab").mkdir()
+        (root / "homelab" / "justfile").write_text(contents)
+        return root
+
+    def test_a_watch_recipe_does_not_satisfy_the_check(self) -> None:
+        root = self.justfile_root("test-frontend-watch:\n    echo watch\n")
+        with self.assertRaises(RuntimeError):
+            validate_package_ci(
+                "a",
+                ci_policy(tests={**{"companion-suites": ["homelab-frontend"]}}),
+                self.LABELS,
+                root=root,
+                today=TODAY,
+            )
+
+    def test_the_real_recipe_definition_satisfies_the_check(self) -> None:
+        root = self.justfile_root("test-frontend:\n    echo test\n")
+        validate_package_ci(
+            "a",
+            ci_policy(tests={**{"companion-suites": ["homelab-frontend"]}}),
+            self.LABELS,
+            root=root,
+            today=TODAY,
+        )
+
+    def test_a_recipe_with_parameters_satisfies_the_check(self) -> None:
+        root = self.justfile_root('test-frontend *args="":\n    echo test\n')
+        validate_package_ci(
+            "a",
+            ci_policy(tests={**{"companion-suites": ["homelab-frontend"]}}),
+            self.LABELS,
+            root=root,
+            today=TODAY,
+        )
+
+
+class L2BackendAxisTests(unittest.TestCase):
+    """`l2_environments` follows every declared backend, not only tmux."""
+
+    def test_a_non_tmux_backend_gets_an_environment_axis(self) -> None:
+        environments = environments_for_tests()
+        for environment in environments:
+            environment["capabilities"]["wezterm"] = environment["name"] == "macos-latest"
+        record = matrix_record(
+            {
+                "package": "a",
+                "tiers": ["L1", "L2"],
+                "l2_backends": ["wezterm"],
+                "features": [],
+                "all_features": False,
+                "l1_include_slow": False,
+                "runner_tools": [],
+                "companion_suites": [],
+            },
+            native={},
+            environments=environments,
+        )
+        self.assertEqual(record["l2_environments"], ["macos-latest"])
+
+    def test_a_backend_with_no_capability_entry_is_hostable_nowhere(self) -> None:
+        record = matrix_record(
+            {
+                "package": "a",
+                "tiers": ["L1", "L2"],
+                "l2_backends": ["kitty"],
+                "features": [],
+                "all_features": False,
+                "l1_include_slow": False,
+                "runner_tools": [],
+                "companion_suites": [],
+            },
+            native={},
+            environments=environments_for_tests(),
+        )
+        self.assertEqual(record["l2_environments"], [])
+
+
+class RealWorkspaceNativeGuardTests(unittest.TestCase):
+    """The native union rides the workspace-unified resolve (latent coupling).
+
+    `build_closure` sees an OPTIONAL edge only while some workspace member
+    enables it. biscuit-speaks -> playa is the known instance: if every
+    enabling edge disappears, the union silently loses playa's ALSA/PulseAudio
+    requirements, so pin it against the real metadata.
+    """
+
+    def test_biscuit_speaks_closure_still_contains_playa(self) -> None:
+        metadata = load_metadata(ROOT)
+        packages = workspace_packages(metadata)
+        speaks_id = next(
+            package_id
+            for package_id, package in packages.items()
+            if package["name"] == "biscuit-speaks"
+        )
+        closure = build_closure(speaks_id, metadata, packages)
+        names = {packages[member_id]["name"] for member_id in closure}
+        self.assertIn(
+            "playa",
+            names,
+            "the biscuit-speaks -> playa optional edge vanished from the "
+            "workspace-unified resolve; biscuit-speaks would silently lose "
+            "playa's ALSA/PulseAudio native requirements",
+        )
 
 
 # --- helpers ---------------------------------------------------------------

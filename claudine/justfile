@@ -141,6 +141,10 @@ test-l2 *args="":
         || echo 4)"
     threads=$(( cores < 8 ? cores : 8 ))
     BISCUIT_L2_THREADS="${BISCUIT_L2_THREADS:-${threads}}" just _test_l2 claudine-cli {{ args }}
+    # claudine-gen owns the report-rendering L2 tests (declared in its
+    # manifest). They self-isolate per test but are `#[serial]`-chained, so
+    # the plain serial path — not the self-spawn mode above — is the right fit.
+    just _test_l2 claudine-gen {{ args }}
 
 # Level-3 OS-keyboard-injection tests. Gated by `require_level!(Level::L3, ...)`;
 # the recipe exports RUN_LEVEL3=1, and each test also skips cleanly when its

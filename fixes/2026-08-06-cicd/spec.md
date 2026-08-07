@@ -226,10 +226,14 @@ canonical test recipe consistently; the package must not compile-check one
 feature set and test another accidentally.
 
 `runner-tools` is a closed vocabulary implemented by the reusable workflow, not
-an arbitrary command surface. Initially it contains `ai-provider-stubs`,
-`darkmatter-md-fixture`, `node-22`, and `pnpm-10`. The fixture entry preserves
-Claudine's clean-checkout `md` binary setup, which a direct `_test claudine`
-invocation would otherwise lose. `homelab-frontend` is a closed companion-suite
+an arbitrary command surface. It contains `ai-provider-stubs`,
+`darkmatter-md-fixture`, `node-22`, `pnpm-10`, and `l2-parallel-self-spawn`.
+The fixture entry preserves Claudine's clean-checkout `md` binary setup, which
+a direct `_test claudine` invocation would otherwise lose. The self-spawn
+entry preserves claudine-cli's measured `min(cores, 8)` parallel L2 mode — its
+suite is dominated by self-isolating tests that each spawn their own tmux
+session, so it runs `_test_l2`'s parallel mode rather than the shared-pane
+`-j 1` path. `homelab-frontend` is a closed companion-suite
 name that invokes the existing non-focusing frontend test recipe and attributes
 its producer status to `homelab-server`/L1. Companion suites must emit
 machine-readable evidence or a producer failure; a green Rust JUnit report must

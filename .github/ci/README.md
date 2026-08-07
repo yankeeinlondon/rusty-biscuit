@@ -59,9 +59,15 @@ native-package installer, and a `capabilities` map over a closed vocabulary:
 A capability value is either a boolean or, for a **governed unavailability**, an
 object carrying `available: false` plus `reason`, `owner`, and `expiry`. A
 plain `false` is an **ungoverned** absence — the `POLICY GAP` cell it produces
-is never excused and blocks. The two facts the eight per-area `policy_gaps`
-records used to restate — Windows has no tmux, and the WSL2 leg is archive-only
-— are now declared once, here, with full governance.
+is never excused and blocks. The facts the eight per-area `policy_gaps`
+records used to restate — Windows has no tmux, the WSL2 leg is archive-only,
+and the browser tier is Linux-hosted — are now declared once, here, with full
+governance.
+
+An L2 tier is hostable where ANY of its declared backends is: each backend is
+looked up as a capability under its own name (`tmux` today; `wezterm`,
+`kitty`, and `apple-terminal` get the same axis if they ever become
+CI-hostable), and a backend with no capability entry is hostable nowhere.
 
 Capability only: package policy decides *which* tiers are expected, so an
 unsupported required tier becomes an explicit `POLICY GAP` in the grid rather
@@ -156,8 +162,10 @@ closed vocabulary. `homelab-frontend` invokes the existing non-focusing
 frontend recipe (`homelab/justfile::test-frontend`) and attributes its
 producer status to `homelab-server`/L1. A companion suite must emit
 machine-readable evidence or a producer failure: a green Rust JUnit report
-must never hide a failed or skipped companion suite (the producer-status
-`failure` downgrades the cell in the rollup).
+must never hide a failed OR SKIPPED companion suite
+(the producer-status `failure` downgrades the cell in the rollup, and a
+companion outcome other than `success` — or none at all — downgrades it the
+same way).
 
 ### Exclusions must be owned and time-bounded
 
@@ -208,7 +216,7 @@ Phase 4 bridging run.
 ## `ci-verdict` — the single required check
 
 `ci.yml`'s `ci-verdict` job is the **only** check branch protection should
-require. Every producer — `check`, `lint`, `test`, `l2`, `browser`, `wsl2` —
+require. Every producer — `check`, `lint`, `test`, `l2`, `browser`, `wsl` —
 stays visibly red when it fails and must **not** be a required check: a
 required producer's failure blocks the merge directly, the baseline is never
 consulted, and the whole mechanism is bypassed.
@@ -229,7 +237,7 @@ junit-<package>-<tier>-<environment>/
     <tier>/<package>.xml      that invocation's verbatim JUnit document
 
 status-<package>-<job>[-<environment>]/
-    status.json               {"package","job","environment","result"[,"detail"]}
+    status.json               {"package","job","environment","result"[,"detail"][,"companion"]}
 ```
 
 Every test job uploads the whole `target/nextest/ci-reports` **staging
@@ -240,7 +248,11 @@ with no covering manifest record has no trustworthy identity and is dropped.
 
 `result` is GitHub's own `job.status`. The status step and its upload both
 carry `if: ${{ always() }}` so a **failed** job still reports itself; a job
-that reports nothing at all is `MISSING`, never a pass.
+that reports nothing at all is `MISSING`, never a pass. A package that
+declares a companion suite also records the companion step's `companion`
+outcome on every run — not only on failure — because a *skipped* companion
+leaves no other evidence, and the rollup downgrades a green cell whose
+declared companion produced no success evidence (R12).
 
 ### `job` is read as a tier
 
@@ -252,12 +264,19 @@ failure twice.
 
 ## The cache key — per package
 
-`Swatinem/rust-cache` is keyed per package
-(`package-ci-<package>-<tier>-<environment>`). The per-package unit made the
-old per-directory key wrong, and the choice is the single biggest influence on
-whether this work reduces runtime at all: compilation is ~85% of a test job.
-The implementation starts from a package-scoped key; Phase 6 measures it
-against a real run and records the selected strategy.
+`Swatinem/rust-cache` is keyed per package and per job kind:
+`package-ci-<package>-check-<os>`, `package-ci-<package>-lint-ubuntu-latest`,
+and `package-ci-<package>-test-<environment>`. The L2, browser, and WSL
+archive jobs deliberately REUSE the `test` key for their environment: they
+compile the same crates as the L1 leg, so one warm cache serves every tier
+instead of three cold ones.
+
+The per-package unit made the old per-directory key wrong, and the choice is
+the single biggest influence on whether this work reduces runtime at all:
+compilation is ~85% of a test job. The implementation starts from a
+package-scoped key; Phase 6 measures it against a real run (including the
+cache-quota pressure of ~5 keys × 63 packages against GitHub's 10 GB repo
+quota) and records the selected strategy.
 
 ## Compile-check
 
@@ -275,3 +294,14 @@ It deliberately does **not** deny warnings; `lint` does, through clippy, where
    guesses.
 3. `python3 scripts/ci/test_affected_scope.py` and
    `cargo nextest run -p test-toolkit --test ci_workflow_contracts` must pass.
+
+## CI's own tooling
+
+The merge-gate binary (`scripts/ci-rollup*.rs`), the scope calculator
+(`scripts/ci/`), and the policy store (`.github/ci/`) are not Cargo packages,
+so a change to them selects nothing. `affected_scope.py` maps those paths to a
+`ci_tooling` flag and `ci.yml` runs their own suites (the scope tests and the
+rollup's nextest suite) on a dedicated `ci-tooling` leg, classified in the
+advisory summary like the specialized workflows. The durable fix for the R11
+contract suite (`tools/test-toolkit`, `gates = false` promotion-pending,
+expiry 2026-10-31) is its promotion to a gating package.

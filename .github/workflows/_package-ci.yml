@@ -287,7 +287,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if ! command -v md >/dev/null 2>&1 && [ ! -x target/debug/md ]; then
+          if ! command -v md >/dev/null 2>&1 && [ ! -x target/debug/md ] && [ ! -x target/debug/md.exe ]; then
             cargo build -q -p darkmatter-cli --bin md
           fi
       # Node + pnpm for a package whose declared companion suite is a
@@ -369,17 +369,26 @@ jobs:
           ENVIRONMENT: ${{ matrix.environment }}
           RESULT: ${{ job.status }}
           COMPANION: ${{ steps.companion.outcome }}
+          COMPANION_SUITES: ${{ inputs.companion-suites }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/status"
+          # A DECLARED companion suite always records its step outcome, not
+          # only on failure: a SKIPPED companion leaves no other evidence, and
+          # the rollup downgrades a green Rust cell whose declared companion
+          # produced no success evidence (R12).
+          companion_json=""
+          if [ "$(jq -r 'length' <<<"$COMPANION_SUITES")" -gt 0 ]; then
+            companion_json="$(printf ',"companion":"%s"' "${COMPANION:-skipped}")"
+          fi
           if [ "$COMPANION" = "failure" ]; then
             detail="companion suite homelab-frontend FAILED; the Rust JUnit report does not cover it"
-            printf '{"package":"%s","job":"%s","environment":"%s","result":"%s","detail":"%s"}\n' \
-              "$PACKAGE" "$JOB" "$ENVIRONMENT" "$RESULT" "$detail" \
+            printf '{"package":"%s","job":"%s","environment":"%s","result":"%s","detail":"%s"%s}\n' \
+              "$PACKAGE" "$JOB" "$ENVIRONMENT" "$RESULT" "$detail" "$companion_json" \
               >"$RUNNER_TEMP/status/status.json"
           else
-            printf '{"package":"%s","job":"%s","environment":"%s","result":"%s"}\n' \
-              "$PACKAGE" "$JOB" "$ENVIRONMENT" "$RESULT" \
+            printf '{"package":"%s","job":"%s","environment":"%s","result":"%s"%s}\n' \
+              "$PACKAGE" "$JOB" "$ENVIRONMENT" "$RESULT" "$companion_json" \
               >"$RUNNER_TEMP/status/status.json"
           fi
       - name: Upload producer status
@@ -468,17 +477,22 @@ jobs:
           ENVIRONMENT: ubuntu-latest
           RESULT: ${{ job.status }}
           COMPANION: ${{ steps.companion.outcome }}
+          COMPANION_SUITES: ${{ inputs.companion-suites }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/status"
+          companion_json=""
+          if [ "$(jq -r 'length' <<<"$COMPANION_SUITES")" -gt 0 ]; then
+            companion_json="$(printf ',"companion":"%s"' "${COMPANION:-skipped}")"
+          fi
           if [ "$COMPANION" = "failure" ]; then
             detail="companion suite homelab-frontend lint FAILED; clippy's result does not cover it"
-            printf '{"package":"%s","job":"%s","environment":"%s","result":"%s","detail":"%s"}\n' \
-              "$PACKAGE" "$JOB" "$ENVIRONMENT" "$RESULT" "$detail" \
+            printf '{"package":"%s","job":"%s","environment":"%s","result":"%s","detail":"%s"%s}\n' \
+              "$PACKAGE" "$JOB" "$ENVIRONMENT" "$RESULT" "$detail" "$companion_json" \
               >"$RUNNER_TEMP/status/status.json"
           else
-            printf '{"package":"%s","job":"%s","environment":"%s","result":"%s"}\n' \
-              "$PACKAGE" "$JOB" "$ENVIRONMENT" "$RESULT" \
+            printf '{"package":"%s","job":"%s","environment":"%s","result":"%s"%s}\n' \
+              "$PACKAGE" "$JOB" "$ENVIRONMENT" "$RESULT" "$companion_json" \
               >"$RUNNER_TEMP/status/status.json"
           fi
       - name: Upload producer status
@@ -601,8 +615,19 @@ jobs:
         shell: bash
         env:
           RUNNER_TOOLS: ${{ inputs.runner-tools }}
+          DECLARED_BACKENDS: ${{ inputs.backends }}
         run: |
           set -euo pipefail
+          # Execution proof, not just availability: require exactly the
+          # declared backends this leg actually provisioned (tmux is the only
+          # CI-hostable one). With BISCUIT_TEST_REQUIRED_BACKENDS set,
+          # `_test_l2`'s backend-proof bracket fails the tier when a required
+          # backend produced zero executed tests — an installed tmux plus a
+          # suite that skipped everywhere must not render a green cell.
+          required="$(jq -r '[.[] | select(. == "tmux")] | join(",")' <<<"$DECLARED_BACKENDS")"
+          if [ -n "$required" ]; then
+            export BISCUIT_TEST_REQUIRED_BACKENDS="$required"
+          fi
           # `l2-parallel-self-spawn`: the package's L2 suite is dominated by
           # self-isolating tests (each spawns its own tmux session / PTY), so
           # it runs in `_test_l2`'s parallel self-spawn mode rather than the
@@ -743,6 +768,7 @@ jobs:
       package: ${{ inputs.package }}
       check-args: ${{ inputs.check-args }}
       test-args: ${{ inputs.test-args }}
+      l1-include-slow: ${{ inputs.l1-include-slow }}
       native: ${{ inputs.native }}
     secrets: inherit
 

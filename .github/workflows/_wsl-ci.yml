@@ -57,6 +57,10 @@ on:
         description: "Extra args forwarded to the canonical test recipe (declared feature flags; dropped in archive mode, where they are already baked in)."
         type: string
         default: ""
+      l1-include-slow:
+        description: "Keep `slow_` tests inside the L1 selection (darkmatter's declared L1 contract). Forwarded to the guest or its L1 suite silently narrows relative to every other leg."
+        type: boolean
+        default: false
       native:
         description: "JSON map of runner OS -> system packages, the union of `native` requirements across this package's dependency closure. Both the archive builder and the guest consume the ubuntu-latest list."
         type: string
@@ -81,6 +85,10 @@ on:
         description: "Extra args forwarded to the canonical test recipe."
         type: string
         default: "--features remote"
+      l1-include-slow:
+        description: "Keep `slow_` tests inside the L1 selection."
+        type: boolean
+        default: false
       native:
         description: "JSON map of runner OS -> system packages."
         type: string
@@ -234,6 +242,10 @@ jobs:
       # Spelled out rather than built from `GUEST_ROOT`: one `env:` entry cannot
       # reference another in the same block.
       BISCUIT_JUNIT_STAGE_DIR: /home/runner/work/${{ github.event.repository.name }}/${{ github.event.repository.name }}/target/nextest/ci-reports
+      # The package's declared L1 contract (`l1-include-slow` in
+      # `[package.metadata.ci.tests]`), re-exported inside the guest below so
+      # darkmatter's `slow_` tests run here exactly as on the native legs.
+      BISCUIT_L1_INCLUDE_SLOW: ${{ inputs.l1-include-slow && '1' || '' }}
     steps:
       - uses: actions/checkout@v4
       # Inside the workspace, not RUNNER_TEMP: the guest reaches this through
@@ -287,7 +299,10 @@ jobs:
         with:
           distribution: ${{ inputs.distribution }}
           set-as-default: true
-          additional-packages: ca-certificates curl git xz-utils
+          # jq is NOT optional: the guest's native-prerequisites step parses the
+          # scope-computed package list with it, for every package, before any
+          # recipe that could bootstrap it has run.
+          additional-packages: ca-certificates curl git xz-utils jq
       - name: Let the endpoint settle before a second attempt
         if: ${{ steps.provision.outcome == 'failure' }}
         shell: bash
@@ -299,7 +314,7 @@ jobs:
         with:
           distribution: ${{ inputs.distribution }}
           set-as-default: true
-          additional-packages: ca-certificates curl git xz-utils
+          additional-packages: ca-certificates curl git xz-utils jq
       - name: Verify the guest is WSL2
         shell: wsl-bash {0}
         run: |
@@ -481,6 +496,7 @@ jobs:
           export BISCUIT_CI_ENVIRONMENT='${{ env.BISCUIT_CI_ENVIRONMENT }}'
           export NEXTEST_PROFILE='${{ env.NEXTEST_PROFILE }}'
           export COLORTERM='${{ env.COLORTERM }}'
+          export BISCUIT_L1_INCLUDE_SLOW='${{ env.BISCUIT_L1_INCLUDE_SLOW }}'
           # No Cargo in the guest, so the canonical recipe must reach nextest as
           # a standalone binary and stage its JUnit report without shelling out
           # to `cargo metadata`. See fixes/2026-07-27-refactor/wsl-archive-requirements.md.

@@ -68,10 +68,13 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 
 # The CI/CD tier-contract tests shell out to `cargo nextest list`, which builds
 # the test binaries of an L2/browser-owning package to prove the declared tier
-# is non-vacuous. The build dominates and can exceed the default window.
+# is non-vacuous. The build dominates and can exceed the default window. The
+# undeclared-tier REJECTION tests sweep EVERY gating package (default-policy
+# packages are exactly what they exist to guard), so a cold host builds the
+# whole workspace's test binaries inside a single test.
 [[profile.default.overrides]]
-filter = 'test(/_is_non_vacuous/) + test(=an_undeclared_l2_tier_is_rejected)'
-slow-timeout = { period = "30s", terminate-after = 8 }
+filter = 'test(/_is_non_vacuous/) + test(/_tier_is_rejected/)'
+slow-timeout = { period = "60s", terminate-after = 20 }
 
 # This sequence perf test drives a failing multi-step CLI run and may finish just
 # beyond the default 30s termination window on macOS debug builds.
@@ -324,6 +327,13 @@ retries = 2
 [[profile.ci.overrides]]
 filter = 'test(/browser_/)'
 retries = 2
+
+# See the default-profile note: the tier-contract tests shell out to
+# `cargo nextest list`; the rejection sweeps cover every gating package and can
+# build the whole workspace's test binaries inside one test.
+[[profile.ci.overrides]]
+filter = 'test(/_is_non_vacuous/) + test(/_tier_is_rejected/)'
+slow-timeout = { period = "60s", terminate-after = 20 }
 
 [[profile.ci.overrides]]
 filter = 'test(=compose_loop_rate_limit_pause_waits_then_continues)'

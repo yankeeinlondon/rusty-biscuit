@@ -23,7 +23,12 @@
           "owner": "@yankeeinlondon",
           "expiry": "2027-01-31"
         },
-        "headless_browser": false,
+        "headless_browser": {
+          "available": false,
+          "reason": "no headless browser is provisioned on Windows runners; the browser tier is Linux-hosted in CI. Provisioning and validating a Windows browser leg is separately scoped work.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2027-01-31"
+        },
         "node_pnpm": false,
         "archive_only": false
       }
@@ -34,7 +39,12 @@
       "native_key": "macos-latest",
       "capabilities": {
         "tmux": true,
-        "headless_browser": false,
+        "headless_browser": {
+          "available": false,
+          "reason": "no headless browser is provisioned on macOS runners; the browser tier is Linux-hosted in CI and macOS minutes bill ~10x Linux. A macOS browser leg is separately scoped work.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2027-01-31"
+        },
         "node_pnpm": false,
         "archive_only": false
       }
@@ -50,7 +60,12 @@
           "owner": "@yankeeinlondon",
           "expiry": "2026-12-31"
         },
-        "headless_browser": false,
+        "headless_browser": {
+          "available": false,
+          "reason": "the WSL2 leg runs a prebuilt nextest archive in a guest with no browser provisioning; the browser tier is Linux-hosted in CI.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2026-12-31"
+        },
         "node_pnpm": false,
         "archive_only": true
       }

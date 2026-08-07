@@ -75,6 +75,7 @@ fn expectation(package: &str, environment: &str, tier: Tier) -> ExpectedCell {
         backends: Vec::new(),
         gap: None,
         exclusion: None,
+        companion_suites: Vec::new(),
     }
 }
 
@@ -99,26 +100,33 @@ fn exclusion() -> Exclusion {
 
 /// The four standard environments, shaped like the checked-in
 /// `environments.json`: tmux on Linux/macOS, headless browser and Node on
-/// Linux, and an archive-only WSL2 environment hosted by Windows.
+/// Linux, and an archive-only WSL2 environment hosted by Windows. Every
+/// absence the table governs (tmux and headless_browser off ubuntu) is a
+/// GOVERNED absence here too.
 fn test_environments() -> Vec<Environment> {
-    let governed_tmux_gap = || {
-        Capability::Governed {
-            available: false,
-            reason: "tmux has no Windows port".to_owned(),
-            owner: "@yankeeinlondon".to_owned(),
-            expiry: "2027-01-31".to_owned(),
-        }
+    let governed_gap = |reason: &str| Capability::Governed {
+        available: false,
+        reason: reason.to_owned(),
+        owner: "@yankeeinlondon".to_owned(),
+        expiry: "2027-01-31".to_owned(),
     };
     let plain = |tmux: bool, browser: bool, node: bool, archive: bool| {
         BTreeMap::from([
             ("tmux".to_owned(), Capability::Available(tmux)),
-            ("headless_browser".to_owned(), Capability::Available(browser)),
+            (
+                "headless_browser".to_owned(),
+                Capability::Available(browser),
+            ),
             ("node_pnpm".to_owned(), Capability::Available(node)),
             ("archive_only".to_owned(), Capability::Available(archive)),
         ])
     };
-    let with_gap = |mut caps: BTreeMap<String, Capability>| {
-        caps.insert("tmux".to_owned(), governed_tmux_gap());
+    let with_governed_absences = |mut caps: BTreeMap<String, Capability>| {
+        caps.insert("tmux".to_owned(), governed_gap("tmux has no Windows port"));
+        caps.insert(
+            "headless_browser".to_owned(),
+            governed_gap("the browser tier is Linux-hosted in CI"),
+        );
         caps
     };
     vec![
@@ -128,15 +136,22 @@ fn test_environments() -> Vec<Environment> {
         },
         Environment {
             name: "windows-latest".to_owned(),
-            capabilities: with_gap(plain(false, false, false, false)),
+            capabilities: with_governed_absences(plain(false, false, false, false)),
         },
         Environment {
             name: "macos-latest".to_owned(),
-            capabilities: plain(true, false, false, false),
+            capabilities: {
+                let mut caps = plain(true, false, false, false);
+                caps.insert(
+                    "headless_browser".to_owned(),
+                    governed_gap("the browser tier is Linux-hosted in CI"),
+                );
+                caps
+            },
         },
         Environment {
             name: "wsl2-ubuntu".to_owned(),
-            capabilities: with_gap(plain(false, false, false, true)),
+            capabilities: with_governed_absences(plain(false, false, false, true)),
         },
     ]
 }
@@ -147,6 +162,7 @@ fn policy(package: &str) -> PackagePolicy {
         gates: true,
         tiers: vec![Tier::L1],
         l2_backends: Vec::new(),
+        companion_suites: Vec::new(),
         exclusion: None,
     }
 }
@@ -511,6 +527,7 @@ fn a_failing_lint_is_never_blamed_for_a_missing_l1_cell() {
         result: "failure".to_owned(),
         environment: None,
         detail: None,
+        companion: None,
     }];
     let expected_tests = BTreeMap::new();
 
@@ -549,6 +566,7 @@ fn a_producer_detail_explains_why_a_cell_has_no_evidence() {
         result: "failure".to_owned(),
         environment: Some("wsl2-ubuntu".to_owned()),
         detail: Some("the WSL2 guest became unreachable after the test step".to_owned()),
+        companion: None,
     }];
     let expected_tests = BTreeMap::new();
 
@@ -577,6 +595,7 @@ fn a_failing_l1_is_still_blamed_for_a_missing_l2_cell() {
         result: "failure".to_owned(),
         environment: None,
         detail: None,
+        companion: None,
     }];
     let expected_tests = BTreeMap::new();
 
@@ -660,6 +679,30 @@ fn a_real_failure_outranks_a_governed_gap() {
     );
 }
 
+/// Backstop: `gates = false` with no parseable exclusion is a shape the scope
+/// job's validation is supposed to reject — but the rollup must still render
+/// the package as NOT SCHEDULED rather than vanish it from the grid.
+#[test]
+fn a_gates_false_package_without_exclusion_metadata_still_renders_not_scheduled() {
+    let mut excluded = policy("mystery");
+    excluded.gates = false;
+    excluded.exclusion = None;
+    let scope: BTreeSet<String> = ["mystery".to_owned()].into_iter().collect();
+
+    let expected = expected_cells(&[excluded], &scope, &test_environments());
+    assert_eq!(expected.len(), 4, "one NOT SCHEDULED cell per environment");
+
+    let cells = classify_simple(&expected, &[]);
+    for cell in &cells {
+        assert_eq!(cell.state, CellState::NotScheduled);
+        assert!(
+            cell.reasons.iter().any(|r| r.contains("ungoverned")),
+            "the missing governance must be named: {:?}",
+            cell.reasons
+        );
+    }
+}
+
 /// R12's guard: a green Rust JUnit report must never hide a failed companion
 /// suite (or fixture, or backend proof). The producer job's own `failure`
 /// status downgrades the cell; status evidence can worsen a cell, never
@@ -675,6 +718,7 @@ fn a_producer_failure_downgrades_a_green_report() {
             "companion suite homelab-frontend FAILED; the Rust JUnit report does not cover it"
                 .to_owned(),
         ),
+        companion: None,
     }];
     let expected_tests = BTreeMap::new();
 
@@ -710,6 +754,7 @@ fn a_producer_success_never_upgrades_a_failing_cell() {
         result: "success".to_owned(),
         environment: Some("ubuntu-latest".to_owned()),
         detail: None,
+        companion: None,
     }];
     let expected_tests = BTreeMap::new();
     let mut rec = passing_record("sniff-cli", "ubuntu-latest", Tier::L1);
@@ -723,6 +768,202 @@ fn a_producer_success_never_upgrades_a_failing_cell() {
         expected_tests: &expected_tests,
     }));
     assert_eq!(cell.state, CellState::Fail);
+}
+
+// ---------------------------------------------------------------------------
+// Declared companion suites must leave evidence (R12)
+// ---------------------------------------------------------------------------
+
+fn companion_expectation(package: &str, environment: &str) -> ExpectedCell {
+    let mut expectation = expectation(package, environment, Tier::L1);
+    expectation.companion_suites = vec!["homelab-frontend".to_owned()];
+    expectation
+}
+
+fn companion_status(result: &str, companion: Option<&str>) -> ProducerStatus {
+    ProducerStatus {
+        package: "homelab-server".to_owned(),
+        job: "L1".to_owned(),
+        result: result.to_owned(),
+        environment: Some("ubuntu-latest".to_owned()),
+        detail: None,
+        companion: companion.map(str::to_owned),
+    }
+}
+
+/// The companion expectation is capability-derived: the suite only runs where
+/// Node/pnpm can be provisioned.
+#[test]
+fn companion_suites_are_expected_only_on_node_capable_environments() {
+    let mut homelab = policy("homelab-server");
+    homelab.companion_suites = vec!["homelab-frontend".to_owned()];
+    let scope: BTreeSet<String> = ["homelab-server".to_owned()].into_iter().collect();
+
+    let expected = expected_cells(&[homelab], &scope, &test_environments());
+    let with_companion: BTreeSet<&str> = expected
+        .iter()
+        .filter(|cell| !cell.companion_suites.is_empty())
+        .map(|cell| cell.key.environment.as_str())
+        .collect();
+    assert_eq!(with_companion, ["ubuntu-latest"].into_iter().collect());
+}
+
+#[test]
+fn a_successful_companion_keeps_the_cell_green() {
+    let statuses = vec![companion_status("success", Some("success"))];
+    let expected_tests = BTreeMap::new();
+
+    let cell = only_cell(classify(&ClassifyInputs {
+        expected: &[companion_expectation("homelab-server", "ubuntu-latest")],
+        records: &[passing_record("homelab-server", "ubuntu-latest", Tier::L1)],
+        statuses: &statuses,
+        expected_tests: &expected_tests,
+    }));
+    assert_eq!(cell.state, CellState::Pass);
+}
+
+/// The hole R12 names: a SKIPPED companion step leaves no evidence anywhere
+/// else, so a scope-derivation bug or a capability flip rendered PASS. The
+/// recorded outcome downgrades the cell exactly as a failure does.
+#[test]
+fn a_skipped_companion_downgrades_a_green_report() {
+    let statuses = vec![companion_status("success", Some("skipped"))];
+    let expected_tests = BTreeMap::new();
+
+    let cell = only_cell(classify(&ClassifyInputs {
+        expected: &[companion_expectation("homelab-server", "ubuntu-latest")],
+        records: &[passing_record("homelab-server", "ubuntu-latest", Tier::L1)],
+        statuses: &statuses,
+        expected_tests: &expected_tests,
+    }));
+
+    assert_eq!(cell.state, CellState::Fail);
+    assert!(
+        cell.reasons
+            .iter()
+            .any(|r| r.contains("homelab-frontend") && r.contains("never ran")),
+        "the skipped companion must be named: {:?}",
+        cell.reasons
+    );
+
+    let findings = verdict(
+        &rollup_of(vec![cell], &["homelab-server"]),
+        &Baseline::default(),
+        None,
+    );
+    assert!(blocks_with_rule(&findings, "cell-failed"));
+}
+
+/// An old or broken producer that reports no companion outcome at all is no
+/// better than a skipped one.
+#[test]
+fn a_companion_with_no_reported_outcome_downgrades_a_green_report() {
+    let statuses = vec![companion_status("success", None)];
+    let expected_tests = BTreeMap::new();
+
+    let cell = only_cell(classify(&ClassifyInputs {
+        expected: &[companion_expectation("homelab-server", "ubuntu-latest")],
+        records: &[passing_record("homelab-server", "ubuntu-latest", Tier::L1)],
+        statuses: &statuses,
+        expected_tests: &expected_tests,
+    }));
+    assert_eq!(cell.state, CellState::Fail);
+}
+
+/// The same rule on the lint cell: a declared companion suite lints too, so a
+/// green clippy result must not hide a companion lint that never ran.
+#[test]
+fn a_skipped_companion_downgrades_a_green_lint() {
+    let mut homelab = policy("homelab-server");
+    homelab.companion_suites = vec!["homelab-frontend".to_owned()];
+    let statuses = vec![ProducerStatus {
+        package: "homelab-server".to_owned(),
+        job: "lint".to_owned(),
+        result: "success".to_owned(),
+        environment: None,
+        detail: None,
+        companion: Some("skipped".to_owned()),
+    }];
+
+    let cells = status_cells(
+        &statuses,
+        &scope_of(&["homelab-server"]),
+        &[],
+        &[homelab],
+    );
+    let cell = only_cell(cells);
+    assert_eq!(cell.key.tier, Tier::parse("lint"));
+    assert_eq!(cell.state, CellState::Fail);
+}
+
+// ---------------------------------------------------------------------------
+// status_cells: job results -> cell states
+// ---------------------------------------------------------------------------
+
+#[test]
+fn status_cells_map_each_job_result_to_a_cell_state() {
+    let status = |package: &str, result: &str| ProducerStatus {
+        package: package.to_owned(),
+        job: "lint".to_owned(),
+        result: result.to_owned(),
+        environment: None,
+        detail: None,
+        companion: None,
+    };
+    let statuses = vec![
+        status("pkg-success", "success"),
+        status("pkg-failure", "failure"),
+        status("pkg-cancelled", "cancelled"),
+        status("pkg-skipped", "skipped"),
+        status("pkg-mystery", "mystery"),
+    ];
+    let scope = scope_of(&[
+        "pkg-success",
+        "pkg-failure",
+        "pkg-cancelled",
+        "pkg-skipped",
+        "pkg-mystery",
+    ]);
+
+    let cells = status_cells(&statuses, &scope, &[], &[policy("x")]);
+    let state_of = |package: &str| {
+        cells
+            .iter()
+            .find(|cell| cell.key.package == package)
+            .unwrap_or_else(|| panic!("no cell for {package}"))
+            .state
+    };
+    assert_eq!(state_of("pkg-success"), CellState::Pass);
+    assert_eq!(state_of("pkg-failure"), CellState::Fail);
+    assert_eq!(state_of("pkg-cancelled"), CellState::Missing);
+    assert_eq!(state_of("pkg-skipped"), CellState::NotScheduled);
+    assert_eq!(state_of("pkg-mystery"), CellState::Missing);
+}
+
+/// A test-tier status (L1/L2/browser) never manufactures a second cell beside
+/// the JUnit-backed one, and a status outside the scope is dropped.
+#[test]
+fn status_cells_skip_test_tiers_and_out_of_scope_packages() {
+    let statuses = vec![
+        ProducerStatus {
+            package: "sniff-cli".to_owned(),
+            job: "L1".to_owned(),
+            result: "failure".to_owned(),
+            environment: Some("ubuntu-latest".to_owned()),
+            detail: None,
+            companion: None,
+        },
+        ProducerStatus {
+            package: "outsider".to_owned(),
+            job: "lint".to_owned(),
+            result: "failure".to_owned(),
+            environment: None,
+            detail: None,
+            companion: None,
+        },
+    ];
+    let cells = status_cells(&statuses, &scope_of(&["sniff-cli"]), &[], &[policy("x")]);
+    assert!(cells.is_empty(), "no status cell may appear: {cells:#?}");
 }
 
 // ---------------------------------------------------------------------------
@@ -971,6 +1212,20 @@ fn the_checked_in_environments_table_parses_and_is_well_governed() {
         .unwrap();
     assert!(wsl.capable("archive_only"));
     assert!(wsl.gap_for("tmux").is_some());
+
+    // The browser tier is Linux-hosted; its absence everywhere else must be
+    // governed, or the POLICY GAP cells it now renders would hard-block.
+    for name in ["windows-latest", "macos-latest", "wsl2-ubuntu"] {
+        let environment = doc
+            .environments
+            .iter()
+            .find(|environment| environment.name == name)
+            .unwrap();
+        assert!(
+            environment.gap_for("headless_browser").is_some(),
+            "{name} must govern its headless_browser absence"
+        );
+    }
 }
 
 #[test]
@@ -998,20 +1253,21 @@ fn expected_cells_cover_l1_l2_and_browser_by_capability() {
 
     let expected = expected_cells(&[darkmatter], &scope, &test_environments());
 
-    // L1 on all four environments; L2 on all four (the two that cannot host it
-    // must still appear, so they render POLICY GAP); browser on ubuntu only.
+    // L1 on all four environments; L2 and browser on all four as well — the
+    // environments that cannot host a tier must still appear, so they render
+    // POLICY GAP rather than disappearing from the grid.
     let l1 = expected.iter().filter(|cell| cell.key.tier == Tier::L1).count();
     let l2: Vec<&ExpectedCell> = expected
         .iter()
         .filter(|cell| cell.key.tier == Tier::L2)
         .collect();
-    let browser = expected
+    let browser: Vec<&ExpectedCell> = expected
         .iter()
         .filter(|cell| cell.key.tier == Tier::Browser)
-        .count();
+        .collect();
     assert_eq!(l1, 4);
     assert_eq!(l2.len(), 4);
-    assert_eq!(browser, 1);
+    assert_eq!(browser.len(), 4);
 
     // L2 gaps land exactly where the capability table says tmux is absent.
     let gap_envs: BTreeSet<&str> = l2
@@ -1025,6 +1281,28 @@ fn expected_cells_cover_l1_l2_and_browser_by_capability() {
             assert!(
                 matches!(cell.gap, Some(GapStatus::Governed(_))),
                 "the checked-in governance must reach the expectation"
+            );
+        }
+    }
+
+    // Browser gaps land everywhere a headless browser cannot be hosted —
+    // governed, like the tmux gaps, never a vanished cell.
+    let browser_gap_envs: BTreeSet<&str> = browser
+        .iter()
+        .filter(|cell| cell.gap.is_some())
+        .map(|cell| cell.key.environment.as_str())
+        .collect();
+    assert_eq!(
+        browser_gap_envs,
+        ["windows-latest", "macos-latest", "wsl2-ubuntu"]
+            .into_iter()
+            .collect()
+    );
+    for cell in &browser {
+        if cell.gap.is_some() {
+            assert!(
+                matches!(cell.gap, Some(GapStatus::Governed(_))),
+                "a browser absence must be governed, like tmux's"
             );
         }
     }
@@ -1658,6 +1936,128 @@ fn an_invalid_expiry_is_refused() {
     let err = load_baseline(&path).expect_err("a non-date expiry must be refused");
     assert!(format!("{err:#}").contains("invalid expiry"));
     fs::remove_dir_all(&dir).ok();
+}
+
+/// A version-less baseline must die as a missing field, not silently assume
+/// the current schema generation and skip the migration-error path.
+#[test]
+fn a_version_less_baseline_is_refused() {
+    let dir = std::env::temp_dir().join(format!("ci-rollup-vless-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("versionless.toml");
+    fs::write(
+        &path,
+        "[[failure]]\npackage = \"a\"\nenvironment = \"ubuntu-latest\"\ntier = \"L1\"\n\
+         owner = \"@o\"\nreason = \"r\"\nsource_run = \"1\"\n",
+    )
+    .unwrap();
+
+    let err = load_baseline(&path).expect_err("a missing schema_version must be refused");
+    assert!(
+        format!("{err:#}").contains("schema_version"),
+        "the error must name the missing field: {err:#}"
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+/// AC11: a v2 entry carrying a stale area/shard key (`shard = "1/4"`,
+/// `area = …`) must be rejected, not silently parsed away.
+#[test]
+fn a_baseline_entry_with_a_stale_shard_key_is_refused() {
+    let dir = std::env::temp_dir().join(format!("ci-rollup-stray-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("stray.toml");
+    fs::write(
+        &path,
+        "schema_version = 2\n[[failure]]\npackage = \"a\"\nenvironment = \"ubuntu-latest\"\n\
+         tier = \"L1\"\nowner = \"@o\"\nreason = \"r\"\nsource_run = \"1\"\nshard = \"1/4\"\n",
+    )
+    .unwrap();
+
+    let err = load_baseline(&path).expect_err("a stale shard key must be refused");
+    assert!(
+        format!("{err:#}").contains("unknown field"),
+        "the error must name the stray key: {err:#}"
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+/// A `tier = "lint"` baseline entry excuses a lint FAIL exactly like a
+/// JUnit-backed entry: lint cells come from producer status, and the synthetic
+/// producers will eventually ride this path.
+#[test]
+fn a_lint_baseline_entry_excuses_a_lint_failure() {
+    let statuses = vec![ProducerStatus {
+        package: "homelab-server".to_owned(),
+        job: "lint".to_owned(),
+        result: "failure".to_owned(),
+        environment: None,
+        detail: None,
+        companion: None,
+    }];
+    let cells = status_cells(
+        &statuses,
+        &scope_of(&["homelab-server"]),
+        &[],
+        &[policy("homelab-server")],
+    );
+    assert_eq!(cells.len(), 1);
+    assert_eq!(cells[0].state, CellState::Fail);
+
+    let baseline = Baseline {
+        schema_version: SCHEMA_VERSION,
+        failure: vec![failure_entry(
+            "homelab-server",
+            "ubuntu-latest",
+            Tier::parse("lint"),
+        )],
+        skip: Vec::new(),
+    };
+    let findings = verdict(&rollup_of(cells, &["homelab-server"]), &baseline, None);
+    assert!(!any_block(&findings), "unexpected blocks: {findings:#?}");
+    assert!(
+        findings.iter().any(|f| f.rule == "baseline-accepted"),
+        "the excusal must stay visible: {findings:#?}"
+    );
+}
+
+/// The synthetic identities (`claudine-gen-drift`, `coverage`) are carried
+/// forward outside every package scope: reported out-of-scope BY NAME, never
+/// blocking, never passing.
+#[test]
+fn synthetic_baseline_identities_report_out_of_scope_by_name() {
+    let baseline = Baseline {
+        schema_version: SCHEMA_VERSION,
+        failure: vec![
+            failure_entry("claudine-gen-drift", "ubuntu-latest", Tier::parse("lint")),
+            failure_entry("coverage", "ubuntu-latest", Tier::parse("lint")),
+        ],
+        skip: Vec::new(),
+    };
+
+    let findings = verdict(&rollup_of(Vec::new(), &["sniff"]), &baseline, None);
+    assert!(!any_block(&findings), "out-of-scope must not block: {findings:#?}");
+    let note = findings
+        .iter()
+        .find(|f| f.rule == "baseline-out-of-scope")
+        .expect("the synthetic entries must be reported out of scope");
+    assert!(note.detail.contains("claudine-gen-drift"));
+    assert!(note.detail.contains("coverage"));
+}
+
+#[rstest]
+#[case(CellState::Pass, false)]
+#[case(CellState::Fail, true)]
+#[case(CellState::Skip, false)]
+#[case(CellState::NothingToRun, false)]
+#[case(CellState::Missing, true)]
+#[case(CellState::NotScheduled, false)]
+#[case(CellState::PolicyGap, true)]
+fn only_fail_missing_and_policy_gap_block_the_summary_gate(
+    #[case] state: CellState,
+    #[case] blocks: bool,
+) {
+    assert_eq!(state.blocks(), blocks);
 }
 
 // ---------------------------------------------------------------------------

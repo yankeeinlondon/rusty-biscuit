@@ -99,9 +99,10 @@ to `cargo nextest list` — sniff-cli's L2 suite lives behind the
 - Native provisioning uses the **union of `native` over the selected package's
   dependency closure**, computed by the scope job and passed as an explicit
   list to every building job (including the WSL archive builder and guest).
-- Job count: full scope is **63 gating packages × ~6 jobs ≈ 400 jobs**; the
-  package matrix itself is 63 entries, well under GitHub's 256-job ceiling. The
-  scope summary records the expanded estimate.
+- Job count: full scope is **63 gating packages × ~6–7 jobs ≈ 460 jobs** (the
+  WSL leg spawns two jobs per package — archive plus guest); the package
+  matrix itself is 63 entries, well under GitHub's 256-job ceiling. The scope
+  summary records the expanded estimate.
 
 ## Phase 3a — re-key the build cache
 
@@ -169,18 +170,156 @@ workflow and schema cutover. Until then, the checked-in baseline is candidate.
 On a branch touching exactly one package of a multi-package directory, record
 before/after: jobs scheduled, packages tested, wall-clock, billed minutes, and
 **build-cache restore result and size per package/environment key**. The
-cache-key decision (Phase 3a) closes here, from this data.
+cache-key decision (Phase 3a) closes here, from this data. Phase 6 must ALSO
+measure full-scope hit rates before closing the key decision: ~5 keys × 63
+packages ≈ 315 cache entries press GitHub's 10 GB per-repo quota, and eviction
+thrash on a full-scope run is the failure mode that count predicts. (The WSL
+surface — every gating package provisioning a WSL leg, two jobs each — is
+part of the same billed-minutes measurement.)
+
+## Review 1 — findings and resolutions
+
+`review-1.md` delivered 5 blockers, 7 majors, 16 minors, and a list of
+test-coverage gaps. All were implemented in this branch; the resolutions are
+below. Four items the review marked "needs Ken's ruling" were decided as
+follows and are flagged for ratification:
+
+1. **M2 (browser tier)** — decided per the ratified spec's letter: the browser
+   absences in `environments.json` are now GOVERNED (owner/reason/expiry) and
+   the rollup renders explicit POLICY GAP cells for them, exactly like the
+   tmux gaps, instead of the tier disappearing from the grid.
+2. **M5 (required backends)** — wired now: the per-package L2 leg sets
+   `BISCUIT_TEST_REQUIRED_BACKENDS` to the package's declared backends
+   intersected with the provisioned set (tmux), so `_test_l2`'s backend-proof
+   bracket is live in CI. The skill and test-toolkit docs claiming "CI passes
+   it through unmodified" were corrected.
+3. **`l2-parallel-self-spawn`** — ratified into the spec's `runner-tools`
+   vocabulary (spec.md § Where the survivors live).
+4. **WSL surface** — confirmed: `wsl: true` for every gating package is
+   consistent with R1/R6; the cost (2 jobs × ~63 packages) is explicitly part
+   of Phase 6's billed-minutes measurement.
+
+### Blockers
+
+- **B1** — `claudine-gen` now declares `tiers = ["L1", "L2"]` with
+  `l2-backends = ["tmux"]` (it owns real L2 tests in
+  `tests/level2_report_terminal.rs`), and the claudine area's local `test-l2`
+  runs `_test_l2 claudine-gen` after `claudine-cli` (the dmls precedent), so
+  the declared tier runs locally too — verified: 3 tests, all passing.
+- **B2** — `package_policies()` in the contract suite now enumerates EVERY
+  workspace member with an empty-object default policy (the default-policy
+  packages are what the guard exists for); `an_undeclared_browser_tier_is_rejected`
+  added; `nextest_test_count` fails loudly on spawn/listing failure instead of
+  returning a vacuous 0.
+- **B3** — the WSL guest is provisioned with `jq` (`additional-packages`),
+  which its native-prerequisites step requires before anything else installs.
+- **B4** — `l1-include-slow` is forwarded `_package-ci.yml` → `_wsl-ci.yml`
+  and exported in the guest L1 step, so darkmatter's L1 contract no longer
+  differs by environment. Contract test pins both directions.
+- **B5** — `has_packages` is computed from `.matrix | length > 0` (the
+  impacted list includes non-gating packages; the old derivation crashed a
+  `gates = false`-only change at strategy evaluation). Contract test added.
+
+### Majors
+
+- **M1** — `companion_suites` now travels in the rollup-facing policy; the
+  producer status records the companion step's outcome on EVERY run of a
+  declaring package (not only failures); the rollup downgrades a green
+  L1/lint cell whose declared companion produced no success evidence
+  (skipped or unreported), test-proven in both places.
+- **M2** — see ruling 1 above.
+- **M3** — resolved by merge strategy: the cutover lands as a SQUASH MERGE,
+  so the broken intermediate tree (`c52eea5b3` deleting `_area-ci.yml` while
+  `ci.yml` still referenced it) never reaches `main`. Recorded here rather
+  than fixed by rebase so the reviewed commit `e844fc2e9` stays addressable
+  for the rest of the review cycle.
+- **M4** — `affected_scope.py` maps `scripts/` and `.github/ci/` to a
+  `ci_tooling` flag; `ci.yml` runs the scope tests and the rollup's nextest
+  suite on a dedicated `ci-tooling` leg, classified in the advisory summary.
+  The durable fix for the R11 contract suite remains test-toolkit's promotion
+  (`gates = false`, expiry 2026-10-31) — recorded in `.github/ci/README.md`.
+- **M5** — see ruling 2 above.
+- **M6** — the AC4 no-reader guard now globs all workflows, `just/*.just`,
+  `scripts/**`, the root justfile, and every area justfile (with a
+  non-vacuity assertion), instead of a hardcoded 7-file list.
+- **M7** — `rust-testing/SKILL.md` (sharding removed, per-package gates,
+  required-backends wiring; hash + `last_updated` regenerated via `md hash`)
+  and `docs/testing-strategy.md` (per-package fan-out, full L1 on macOS, the
+  Windows `--all-targets` check, POLICY GAP rows, sharding removal,
+  `BISCUIT_TEST_LEVEL_REQUIRED` never set) were brought in line with the
+  cutover.
+
+### Minors
+
+1. Baseline `schema_version` is now a required field (a version-less file
+   dies as a parse error, never a silent self-upgrade). Test added.
+2. `FailureEntry` is `deny_unknown_fields` — a stale `shard`/`area` key is
+   rejected. Test added.
+3. A `gates = false` package without parseable exclusion metadata now renders
+   NOT SCHEDULED with an "ungoverned" backstop record instead of vanishing.
+   Test added.
+4. `estimate_jobs` counts the WSL leg as two jobs; the docstring no longer
+   claims exactness. Test added; Phase 3 note above corrected.
+5. Phase 6 must measure full-scope cache hit rates against the 10 GB quota
+   (see the Phase 6 section above).
+6. `messenger-desktop` selection is prefix-matched in the scope step
+   (`messenger` flag), so a messenger-cli-only change selects it.
+7. The native-union/feature coupling is now documented on `build_closure`
+   and pinned by a scope test asserting the biscuit-speaks → playa edge
+   against the real metadata.
+8. `biscuit-visualized` records `all-features = true` in its manifest, so
+   promotion cannot silently drop its 56 feature-gated tests.
+9. `biscuit-clipboard`'s three exclusion records carry package-specific
+   reasons (counts and per-package blocking rationale).
+10. The companion-recipe existence check matches a recipe DEFINITION
+    (`^recipe(:|\s)`), not a substring.
+11. `l2_environments` and the rollup's L2 expected-cells now derive from
+    every declared backend (each backend is a capability under its own name);
+    `tmux` is no longer hardcoded.
+12. The scope.json `native` arrays are sorted (byte-stable output).
+13. Baseline header drift fixed ("claudine library" → "claudine CLI").
+14. Stale area/shard prose fixed in `ci-rollup.rs` (status_cells doc,
+    degraded-scope note, `validate_date` parameter), `just/devops.just`
+    (`_expected_manifest` comments), `darkmatter/dmls/Cargo.toml`, and
+    `memory/just.md` (causal sentence restored).
+15. `.github/ci/README.md` documents the real cache-key scheme (check/lint
+    keys; L2/browser/WSL-archive reuse the test key) and names the `wsl`
+    producer correctly.
+16. The md-fixture probe also checks `target/debug/md.exe` (Windows).
+
+### Test-coverage gaps closed
+
+- **Scope:** gates=false path (excluded-from-matrix + present-in-policy);
+  non-propagation of tiers/tools/companions; `build_closure` dev-dep edge
+  rules; the `Cargo.lock` branches through `calculate_scope` (decidable,
+  undecidable, irrelevant); the top-level-directory fallback; MATRIX_LIMIT
+  overflow; `estimate_jobs`; the `ci_tooling` flag; the companion-recipe
+  definition check; the L2 backend axis.
+- **Rollup:** `status_cells` result mapping (+ test-tier/out-of-scope
+  exclusion); a `tier = "lint"` baseline entry excusing a lint FAIL;
+  `claudine-gen-drift`/`coverage` reported `baseline-out-of-scope` by name;
+  `NotScheduled` added to the blocking-states rstest; stray-key rejection;
+  version-less baseline refusal; companion evidence (success/skipped/absent,
+  L1 and lint); the gates=false backstop.
+- **Contracts:** everything under B2; `has_packages` derives from the matrix
+  (B5); the companion-downgrade check no longer matches comment lines.
 
 ## Verification run locally
 
-- `python3 scripts/ci/test_affected_scope.py` — **35 pass**.
-- `cargo nextest run --no-default-features --bin ci-rollup` (scripts) — **114
+- `python3 scripts/ci/test_affected_scope.py` — **53 pass**.
+- `cargo nextest run --no-default-features --bin ci-rollup` (scripts) — **133
   pass**.
-- `cargo nextest run -p test-toolkit --test ci_workflow_contracts` — **53
-  pass** (including the slow tier-contract builds).
-- `just check-canonical` — passes.
+- `cargo nextest run -p test-toolkit --test ci_workflow_contracts` — **57
+  pass** (including the slow tier-contract sweeps, which now cover all 63
+  gating packages under a 20-minute nextest override in `.config/nextest.toml`).
+- `just check-canonical` — passes (27/27).
+- `actionlint` on ci.yml, _package-ci.yml, _wsl-ci.yml — clean (pre-existing
+  SC2086 infos only).
 - End-to-end rollup+verdict smoke test (synthetic artifacts) — package-keyed
-  grid, MISSING detection, correct verdict.
+  grid, MISSING detection, governed browser POLICY GAP acceptance, and the
+  skipped-companion downgrade, all rendering as designed.
+- Live scope checks: a `gates = false`-only change now yields an empty matrix
+  (`has_packages=false`, B5); `scripts/ci-rollup.rs` sets `ci_tooling` (M4).
 
 ### Pre-existing, unrelated failures observed
 

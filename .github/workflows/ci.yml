@@ -48,6 +48,8 @@ jobs:
       preflight_reason: ${{ steps.scope.outputs.preflight_reason }}
       change_class: ${{ steps.scope.outputs.change_class }}
       job_estimate: ${{ steps.scope.outputs.job_estimate }}
+      messenger: ${{ steps.scope.outputs.messenger }}
+      ci_tooling: ${{ steps.scope.outputs.ci_tooling }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -113,13 +115,23 @@ jobs:
             echo "package_matrix=$package_matrix"
             echo "packages=$packages"
             echo "package_names=$(jq -c '.packages' <<<"$scope_json")"
-            echo "has_packages=$(jq -r '.packages | length > 0' <<<"$scope_json")"
+            # Derived from the MATRIX, not the impacted list: a change touching
+            # only `gates = false` packages impacts packages but schedules none,
+            # and an empty matrix under `has_packages=true` fails the fan-out at
+            # strategy evaluation.
+            echo "has_packages=$(jq -r '.matrix | length > 0' <<<"$scope_json")"
             echo "full_scope=$(jq -r '.full_scope' <<<"$scope_json")"
             echo "claudine=$(jq -r '.flags.claudine' <<<"$scope_json")"
             echo "darkmatter=$(jq -r '.flags.darkmatter' <<<"$scope_json")"
             echo "sniff=$(jq -r '.flags.sniff' <<<"$scope_json")"
             echo "biscuit_tui=$(jq -r '.flags."biscuit-tui"' <<<"$scope_json")"
             echo "playa=$(jq -r '.flags.playa' <<<"$scope_json")"
+            # `messenger` packages are EXEMPT (`gates = false`), so they never
+            # appear in the matrix; select the specialized workflow from the
+            # impacted PACKAGE list instead. Prefix-matched: a messenger-cli-only
+            # change is still messenger's entire CI ownership.
+            echo "messenger=$(jq -r '[.packages[] | select(startswith("messenger"))] | length > 0' <<<"$scope_json")"
+            echo "ci_tooling=$(jq -r '.flags.ci_tooling' <<<"$scope_json")"
             echo "job_estimate=$(jq -r '.job_estimate' <<<"$scope_json")"
             echo "preflight_os=$(jq -c '.preflight_os' <<<"$scope_json")"
             echo "preflight_reason=$(jq -r '.preflight_reason' <<<"$scope_json")"
@@ -373,15 +385,44 @@ jobs:
     uses: ./.github/workflows/playa-windows.yml
     secrets: inherit
 
+  # CI's own tooling — the merge-gate binary (`scripts/ci-rollup*.rs`), the
+  # scope calculator (`scripts/ci/`), and the policy store (`.github/ci/`) —
+  # is not a Cargo package, so a change to it selects nothing and would
+  # otherwise exercise nothing. This leg runs their own test suites. Its
+  # selection flag is derived by `affected_scope.py`, not hardcoded here.
+  ci-tooling:
+    name: ci-tooling (rollup + scope tests)
+    needs: [scope, preflight]
+    if: >-
+      !cancelled() &&
+      needs.scope.outputs.ci_tooling == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
+      - uses: taiki-e/install-action@nextest
+      - name: Test the scope calculator
+        run: python3 scripts/ci/test_affected_scope.py
+      # `--no-default-features` deselects the crates the other two bins in
+      # `scripts/` need and this one does not. Same shape as ci-verdict's build.
+      - name: Test the rollup and verdict
+        run: |
+          cargo nextest run \
+            --manifest-path scripts/Cargo.toml \
+            --no-default-features --bin ci-rollup
+
   # `messenger` packages are EXEMPT (`gates = false`), so they never appear in
   # the package matrix. Select them from the affected PACKAGE list instead —
-  # this workflow is messenger's entire CI ownership.
+  # this workflow is messenger's entire CI ownership. Prefix-matched in the
+  # scope step so a messenger-cli-only change selects it too.
   messenger-desktop:
     name: messenger-desktop
     needs: [scope, preflight]
     if: >-
       !cancelled() &&
-      contains(fromJSON(needs.scope.outputs.packages), 'messenger')
+      needs.scope.outputs.messenger == 'true'
     uses: ./.github/workflows/messenger-desktop-tests.yml
     secrets: inherit
 
@@ -422,6 +463,7 @@ jobs:
       - biscuit-tui-captured-stdout
       - playa-windows
       - messenger-desktop
+      - ci-tooling
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -547,6 +589,7 @@ jobs:
       - biscuit-tui-captured-stdout
       - playa-windows
       - messenger-desktop
+      - ci-tooling
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -567,6 +610,7 @@ jobs:
             biscuit-tui Windows captured stdout:${{ needs.biscuit-tui-captured-stdout.result }}
             playa native Windows build:${{ needs.playa-windows.result }}
             messenger desktop helpers:${{ needs.messenger-desktop.result }}
+            ci tooling (rollup and scope):${{ needs.ci-tooling.result }}
             coverage:${{ needs.affected-coverage.result }}
         run: |
           set -euo pipefail

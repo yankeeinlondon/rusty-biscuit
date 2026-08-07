@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 from datetime import date
 from pathlib import Path, PurePosixPath
@@ -43,6 +44,15 @@ GLOBAL_PREFIXES = (".cargo/", ".github/actions/", "just/")
 # it carries workspace membership and shared dependency tables whose effects are
 # not recoverable from the file alone.
 LOCKFILE_PATH = "Cargo.lock"
+
+# CI's own tooling — the merge-gate binary (`scripts/ci-rollup*.rs`), the
+# scope calculator (`scripts/ci/`), and the policy store (`.github/ci/`) — is
+# not a Cargo package, so a change to it selects no package. It must still
+# exercise something: `ci.yml` runs the rollup and scope test suites on the
+# `ci_tooling` flag. (`scripts/ci/affected_scope.py` and
+# `.github/ci/environments.json` are additionally GLOBAL_PATHS, since every
+# package's scope depends on them.)
+CI_TOOLING_PREFIXES = ("scripts/", ".github/ci/")
 
 # Bootstrap-preflight breadth (D3). A global CI/tooling change validates every
 # runner OS before fan-out; a package-local change validates only the scope host
@@ -253,6 +263,22 @@ def capability_gap(environment: dict[str, Any], name: str) -> dict[str, str] | N
     return None
 
 
+def backend_hostable(environment: dict[str, Any], backend: str) -> bool:
+    """Whether an environment can host an L2 backend.
+
+    The capability is looked up under the backend's own name (`tmux`,
+    `wezterm`, `kitty`, `apple-terminal`), giving every declared backend an
+    environment axis rather than hardcoding `tmux`. A backend with no
+    capability entry is not hostable there.
+    """
+    value = environment["capabilities"].get(backend)
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    return bool(value.get("available"))
+
+
 # ---------------------------------------------------------------------------
 # Package CI policy — [package.metadata.ci] in each Cargo manifest
 # ---------------------------------------------------------------------------
@@ -426,7 +452,14 @@ def validate_package_ci(
             )
         directory, recipe = registered
         justfile = root / directory / "justfile"
-        if not justfile.is_file() or f"\n{recipe}" not in f"\n{justfile.read_text(encoding='utf-8')}":
+        # A recipe DEFINITION, not a substring: `test-frontend-watch:` must not
+        # satisfy the check for `test-frontend`.
+        recipe_defined = justfile.is_file() and re.search(
+            rf"^{re.escape(recipe)}(?::|\s)",
+            justfile.read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+        if not recipe_defined:
             raise RuntimeError(
                 f"companion suite '{suite}' expects the canonical recipe '{recipe}' in "
                 f"{directory}/justfile, which does not exist"
@@ -541,6 +574,14 @@ def build_closure(
     restrictions are deliberately not evaluated: a library needed on one
     platform is installed on all, which is the safe direction and matches how
     the declarations were consumed before.
+
+    The closure comes from the workspace-unified `cargo metadata` resolve, not
+    from any job's declared feature set: an OPTIONAL edge (e.g.
+    biscuit-speaks -> playa) is present here only because some member enables
+    it. If every enabling edge disappears, the union silently loses the
+    optional package's native requirements. `test_affected_scope.py` pins the
+    known instance (biscuit-speaks -> playa) against the real metadata so the
+    coupling fails loudly instead of silently.
     """
     nodes = {node["id"]: node for node in metadata["resolve"]["nodes"]}
 
@@ -826,7 +867,10 @@ def matrix_record(
             [
                 environment["name"]
                 for environment in environments
-                if capability(environment, "tmux")
+                if any(
+                    backend_hostable(environment, backend)
+                    for backend in record["l2_backends"]
+                )
             ]
             if "L2" in record["tiers"]
             else []
@@ -857,11 +901,17 @@ def matrix_record(
 
 
 def estimate_jobs(matrix: list[dict[str, Any]]) -> int:
-    """The exact expanded job count for the package fan-out."""
+    """The expanded job-count estimate for the package fan-out.
+
+    An estimate, not an exact count: each `wsl` entry spawns two jobs (the
+    Linux archive builder plus the Windows-hosted guest), and the reusable
+    workflows may add legs this does not model. The enforced limit is the
+    matrix length (checked against MATRIX_LIMIT), not this number.
+    """
     return sum(
         len(entry["check_os"])
         + len(entry["native_environments"])
-        + (1 if entry["wsl"] else 0)
+        + (2 if entry["wsl"] else 0)
         + 1  # lint
         + len(entry["l2_environments"])
         + len(entry["browser_environments"])
@@ -876,6 +926,9 @@ def policy_record(record: dict[str, Any]) -> dict[str, Any]:
         "gates": record["gates"],
         "tiers": record["tiers"],
         "l2_backends": record["l2_backends"],
+        # The rollup needs to know a companion suite was DECLARED: a green
+        # Rust JUnit report must not hide a companion that never ran (R12).
+        "companion_suites": record["companion_suites"],
     }
     if not record["gates"]:
         shaped["exclusion"] = record["exclusion"]
@@ -935,6 +988,10 @@ def calculate_scope(
                 for entry in declared:
                     if entry not in bucket:
                         bucket.append(entry)
+        # Sorted so scope.json is byte-stable across runs (set-iteration order
+        # is PYTHONHASHSEED-dependent); nothing consumes the order, but noisy
+        # diffs obscure real scope changes.
+        native = {os_name: sorted(bucket) for os_name, bucket in native.items()}
         matrix.append(matrix_record(record, native, environments))
 
     job_estimate = estimate_jobs(matrix)
@@ -953,6 +1010,15 @@ def calculate_scope(
         for package_id in affected_ids
     }
 
+    flags = {
+        directory: directory in top_dirs
+        for directory in ("claudine", "darkmatter", "sniff", "biscuit-tui", "playa")
+    }
+    flags["ci_tooling"] = any(
+        raw.replace("\\", "/").removeprefix("./").startswith(CI_TOOLING_PREFIXES)
+        for raw in files
+    )
+
     return {
         "packages": impacted,
         "full_scope": full_scope,
@@ -962,10 +1028,7 @@ def calculate_scope(
         "matrix": matrix,
         "policy": [policy_record(policy[name]) for name in impacted],
         "job_estimate": job_estimate,
-        "flags": {
-            directory: directory in top_dirs
-            for directory in ("claudine", "darkmatter", "sniff", "biscuit-tui", "playa")
-        },
+        "flags": flags,
     }
 
 

@@ -397,6 +397,12 @@ struct ProducerStatus {
     /// render one indistinguishable blank cell for both.
     #[serde(default)]
     detail: Option<String>,
+    /// The companion-suite step's outcome (`success`, `failure`, `skipped`),
+    /// recorded by every job of a package that DECLARES a companion suite —
+    /// not only on failure, because a skipped companion leaves no other
+    /// evidence and must downgrade the cell just as a failed one does.
+    #[serde(default)]
+    companion: Option<String>,
 }
 
 /// Tests the target environment actually compiled, generated *on* that
@@ -432,6 +438,11 @@ struct PackagePolicy {
     /// L2 terminal backends the package's tests require.
     #[serde(default)]
     l2_backends: Vec<String>,
+    /// Non-Cargo companion suites the package owns (e.g. `homelab-frontend`).
+    /// The rollup needs the declaration itself: a green Rust JUnit report must
+    /// not hide a companion suite that never ran (R12).
+    #[serde(default)]
+    companion_suites: Vec<String>,
     /// Governance for a `gates = false` package. Non-gating is never inferred
     /// from zero observed tests; it is always this explicit, owned, dated
     /// record.
@@ -572,6 +583,11 @@ struct ExpectedCell {
     /// Set when the package is `gates = false`: the cell renders NOT SCHEDULED
     /// with this governance metadata rather than running.
     exclusion: Option<Exclusion>,
+    /// Companion suites expected to run alongside this cell (L1 only, and only
+    /// on a Node-capable environment). Non-empty means the cell's producer
+    /// status must report the companion step's success; a skipped companion
+    /// downgrades an otherwise-green cell (R12).
+    companion_suites: Vec<String>,
 }
 
 /// Cross the resolved package policy with the run's affected scope to derive
@@ -579,11 +595,14 @@ struct ExpectedCell {
 ///
 /// ## Notes
 ///
-/// An L2 tier is expected on **every** environment, not only the ones with a
-/// provisionable backend. Omitting the unprovisioned ones would make them
-/// vanish from the grid, which is the failure mode `POLICY GAP` exists to
-/// prevent. The browser tier is expected only where the capability table says
-/// a headless browser can be hosted, matching the tier's Linux-only policy.
+/// An L2 or browser tier is expected on **every** environment, not only the
+/// ones that can host it. Omitting the unhostable ones would make them vanish
+/// from the grid, which is the failure mode `POLICY GAP` exists to prevent.
+/// L2 is hostable where ANY declared backend is (each backend is looked up as
+/// its own capability, so `kitty`/`apple-terminal` get an environment axis
+/// rather than the tier hardcoding `tmux`); a gap arises only when no
+/// declared backend can be hosted, governed by that backend's own capability
+/// record.
 fn expected_cells(
     policies: &[PackagePolicy],
     scope: &BTreeSet<String>,
@@ -596,9 +615,20 @@ fn expected_cells(
             continue;
         }
 
-        if let Some(exclusion) = &policy.exclusion {
+        if !policy.gates {
             // `gates = false`: visible, governed NOT SCHEDULED cells — never a
-            // pass, never a silent absence.
+            // pass, never a silent absence. A policy whose exclusion block is
+            // absent still renders (backstop): `affected_scope.py` validation
+            // is supposed to reject that shape, and the rollup must not let a
+            // config-side regression vanish a package from the grid.
+            let exclusion = policy.exclusion.clone().unwrap_or_else(|| Exclusion {
+                exclusion_class: "ungoverned".to_owned(),
+                owner: "unassigned".to_owned(),
+                reason: "`gates = false` without exclusion metadata; the scope \
+                         job's validation is supposed to reject this"
+                    .to_owned(),
+                expiry: None,
+            });
             for environment in environments {
                 expected.push(ExpectedCell {
                     key: CellKey {
@@ -609,11 +639,9 @@ fn expected_cells(
                     backends: Vec::new(),
                     gap: None,
                     exclusion: Some(exclusion.clone()),
+                    companion_suites: Vec::new(),
                 });
             }
-            continue;
-        }
-        if !policy.gates {
             continue;
         }
 
@@ -621,26 +649,50 @@ fn expected_cells(
             for tier in &policy.tiers {
                 let (backends, gap) = match tier {
                     Tier::L2 => {
-                        let gap = if environment.capable("tmux") {
+                        let gap = if policy
+                            .l2_backends
+                            .iter()
+                            .any(|backend| environment.capable(backend))
+                        {
                             None
                         } else {
-                            Some(match environment.gap_for("tmux") {
-                                Some(governed) => GapStatus::Governed(governed),
-                                None => GapStatus::Ungoverned,
-                            })
+                            Some(
+                                match policy
+                                    .l2_backends
+                                    .iter()
+                                    .find_map(|backend| environment.gap_for(backend))
+                                {
+                                    Some(governed) => GapStatus::Governed(governed),
+                                    None => GapStatus::Ungoverned,
+                                },
+                            )
                         };
                         (policy.l2_backends.clone(), gap)
                     }
                     Tier::Browser => {
-                        // Browser cells exist only where a headless browser can
-                        // be hosted at all; elsewhere the tier is not
-                        // scheduled, which is capability policy, not a gap.
-                        if !environment.capable("headless_browser") {
-                            continue;
-                        }
-                        (Vec::new(), None)
+                        // Same rule as L2: an environment that cannot host the
+                        // tier renders an explicit POLICY GAP (governed by the
+                        // `headless_browser` capability record), never a cell
+                        // that silently disappeared from the grid.
+                        let gap = if environment.capable("headless_browser") {
+                            None
+                        } else {
+                            Some(match environment.gap_for("headless_browser") {
+                                Some(governed) => GapStatus::Governed(governed),
+                                None => GapStatus::Ungoverned,
+                            })
+                        };
+                        (Vec::new(), gap)
                     }
                     _ => (Vec::new(), None),
+                };
+                let companion_suites = if *tier == Tier::L1
+                    && !policy.companion_suites.is_empty()
+                    && environment.capable("node_pnpm")
+                {
+                    policy.companion_suites.clone()
+                } else {
+                    Vec::new()
                 };
                 expected.push(ExpectedCell {
                     key: CellKey {
@@ -651,6 +703,7 @@ fn expected_cells(
                     backends,
                     gap,
                     exclusion: None,
+                    companion_suites,
                 });
             }
         }
@@ -1151,12 +1204,21 @@ fn classify_one(
         // such a table from landing; catching it here too means a config-side
         // regression surfaces as a blocking cell rather than a green one.
         policy_gap = true;
+        let requirement = match key.tier {
+            Tier::L2 => format!(
+                "tier requires backend(s) [{}] but {} cannot host any of them",
+                backends.join(", "),
+                key.environment
+            ),
+            Tier::Browser => format!(
+                "the browser tier but {} cannot host a headless browser",
+                key.environment
+            ),
+            _ => format!("the {} tier but {} cannot host it", key.tier, key.environment),
+        };
         reasons.push(format!(
-            "UNGOVERNED policy gap: tier requires backend(s) [{}] but {} cannot \
-             host an L2 backend, and environments.json records no governed \
-             unavailability for it",
-            backends.join(", "),
-            key.environment
+            "UNGOVERNED policy gap: {requirement}, and environments.json records \
+             no governed unavailability for it"
         ));
     }
 
@@ -1187,7 +1249,7 @@ fn classify_one(
             && status.environment.as_deref() == Some(key.environment.as_str())
     });
 
-    let state = if let Some(exclusion) = &exclusion {
+    let mut state = if let Some(exclusion) = &exclusion {
         if indices.is_empty() {
             // `gates = false`: NOT SCHEDULED with its governance metadata —
             // never conflated with NOTHING TO RUN, never a pass.
@@ -1228,6 +1290,30 @@ fn classify_one(
             upstream.as_ref(),
         )
     };
+
+    // R12: a DECLARED companion suite must leave success evidence. A skipped
+    // companion step — or no reported outcome at all — leaves the Rust JUnit
+    // report green while the suite never ran, so it downgrades the cell
+    // exactly as a failed companion does. Only green-reading states are
+    // downgraded; MISSING and FAIL already block.
+    let expected_companions = expectation
+        .map(|cell| cell.companion_suites.as_slice())
+        .unwrap_or(&[]);
+    if !expected_companions.is_empty()
+        && matches!(state, CellState::Pass | CellState::NothingToRun | CellState::Skip)
+    {
+        let outcome = own_status.and_then(|status| status.companion.as_deref());
+        if outcome != Some("success") {
+            reasons.push(format!(
+                "declared companion suite(s) [{}] produced no success evidence \
+                 (the producer reports `{}`); a green Rust JUnit report must not \
+                 hide a companion suite that never ran",
+                expected_companions.join(", "),
+                outcome.unwrap_or("no companion outcome"),
+            ));
+            state = CellState::Fail;
+        }
+    }
 
     Cell {
         key: key.clone(),
@@ -1352,8 +1438,8 @@ fn missing_report_reason(exit_code: i64) -> String {
 
 /// Turn producer statuses for non-test jobs (today: `lint`, `check`) into
 /// cells, so a job that emits no JUnit can still be baselined and can still
-/// block, under the same stable `{area, environment, tier}` identity as a test
-/// tier.
+/// block, under the same stable `{package, environment, tier}` identity as a
+/// test tier.
 ///
 /// ## Notes
 ///
@@ -1364,6 +1450,7 @@ fn status_cells(
     statuses: &[ProducerStatus],
     scope: &BTreeSet<String>,
     existing: &[Cell],
+    policies: &[PackagePolicy],
 ) -> Vec<Cell> {
     let mut cells = Vec::new();
 
@@ -1404,6 +1491,30 @@ fn status_cells(
                 CellState::Missing,
                 Some(format!("unrecognized job result `{other}`")),
             ),
+        };
+
+        // A declared companion suite lints too (the lint job runs the frontend
+        // lint on its Node-capable leg), so its success must be evidenced
+        // exactly as on the L1 cell: a skipped companion downgrades a green
+        // lint rather than hiding behind it (R12).
+        let (state, reason) = if status.job == "lint"
+            && state == CellState::Pass
+            && policies
+                .iter()
+                .any(|policy| policy.package == status.package && !policy.companion_suites.is_empty())
+            && status.companion.as_deref() != Some("success")
+        {
+            (
+                CellState::Fail,
+                Some(format!(
+                    "declared companion suite produced no success evidence (the \
+                     producer reports `{}`); a green lint must not hide a \
+                     companion suite that never ran",
+                    status.companion.as_deref().unwrap_or("no companion outcome"),
+                )),
+            )
+        } else {
+            (state, reason)
         };
 
         cells.push(Cell {
@@ -1448,7 +1559,9 @@ fn produced_a_result(inputs: &ClassifyInputs<'_>, indices: &[usize], test: &str)
 /// it.
 #[derive(Clone, Debug, Default, Deserialize)]
 struct Baseline {
-    #[serde(default = "default_schema_version")]
+    // Required, not defaulted: a version-less file must die here as a missing
+    // field rather than silently assume the current schema generation and
+    // skip the migration-error path on the next bump.
     schema_version: u32,
     #[serde(default)]
     failure: Vec<FailureEntry>,
@@ -1456,12 +1569,11 @@ struct Baseline {
     skip: Vec<SkipEntry>,
 }
 
-fn default_schema_version() -> u32 {
-    SCHEMA_VERSION
-}
-
 /// A known-red leg, keyed by stable identity — never by a GitHub display name.
+/// `deny_unknown_fields`: a stale area/shard key (`shard = "1/4"`, `area = …`)
+/// must be rejected, not silently parsed away (AC11).
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FailureEntry {
     package: String,
     environment: String,
@@ -1541,10 +1653,10 @@ fn is_iso_date(value: &str) -> bool {
         && parts.iter().all(|p| p.chars().all(|c| c.is_ascii_digit()))
 }
 
-fn validate_date(value: Option<&str>, kind: &str, area: &str) -> Result<()> {
+fn validate_date(value: Option<&str>, kind: &str, package: &str) -> Result<()> {
     let Some(value) = value else { return Ok(()) };
     if !is_iso_date(value) {
-        bail!("{kind} entry for `{area}` has an invalid expiry `{value}`; expected YYYY-MM-DD");
+        bail!("{kind} entry for `{package}` has an invalid expiry `{value}`; expected YYYY-MM-DD");
     }
     Ok(())
 }
@@ -1999,7 +2111,7 @@ fn render_grid(rollup: &Rollup) -> String {
 
     if rollup.scope_degraded {
         out.push_str(
-            "> **Scope was inferred from the artifacts on disk.** An area that produced \
+            "> **Scope was inferred from the artifacts on disk.** A package that produced \
              nothing at all is invisible to an inferred scope, which is precisely the case \
              `MISSING` exists to catch. Pass `--scope`.\n\n",
         );
@@ -2589,7 +2701,7 @@ fn cmd_rollup(args: &Args) -> Result<i32> {
         statuses: &statuses,
         expected_tests: &expected_tests,
     });
-    cells.extend(status_cells(&statuses, &scope, &cells));
+    cells.extend(status_cells(&statuses, &scope, &cells, &policy_doc.policy));
     cells.sort_by(|left, right| left.key.cmp(&right.key));
 
     let rollup = Rollup {

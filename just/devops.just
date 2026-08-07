@@ -799,10 +799,10 @@ _test pkg *args="": _storage_preflight
 #
 # The hazard it closes is live: `_test` passes `--no-tests=pass`, so a tier that
 # selects zero tests exits 0 and stages a valid, empty report. The rollup renders
-# that `N/A` — correct in isolation, since a tier with no tests is N/A rather
-# than PASS — so a drifted filter expression would quietly downgrade a real area
-# to N/A with nothing anywhere failing. Comparing against the manifest turns that
-# into N absent tests.
+# that `NOTHING TO RUN` — correct in isolation, since a tier with no tests is
+# not a PASS — so a drifted filter expression would quietly downgrade a real
+# package to NOTHING TO RUN with nothing anywhere failing. Comparing against
+# the manifest turns that into N absent tests.
 #
 # `tier` is `L1` / `L2` / `L3` / `browser` / `real` / `sanity`. `specs` follows
 # `_run_all`: whitespace-separated package names, or — when it contains a `;` —
@@ -814,9 +814,6 @@ _test pkg *args="": _storage_preflight
 # `_stage_junit` uses. `environment` comes from `$BISCUIT_CI_ENVIRONMENT` — the
 # same value the manifest records carry, because the rollup keys expectations by
 # `{environment, tier}` and has no other way to join the two.
-#
-# Deliberately takes no `--partition`: the rollup aggregates every shard of a
-# cell, so each shard's expectation is the cell's whole compiled test set.
 _expected_manifest tier specs *args="":
     #!/usr/bin/env bash
     set -euo pipefail

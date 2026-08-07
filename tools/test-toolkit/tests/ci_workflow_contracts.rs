@@ -70,6 +70,11 @@ fn job_block(file: &str, header: &str) -> String {
 }
 
 /// Every workspace package's resolved `[package.metadata.ci]` policy.
+///
+/// EVERY member is enumerated: a package with no metadata block yields an
+/// empty record (the default policy), because the default-policy packages are
+/// precisely what the undeclared-tier guards exist for. Dropping them here is
+/// how `claudine-gen` owned real L2 tests while every contract stayed green.
 fn package_policies() -> Vec<serde_json::Value> {
     let output = Command::new("cargo")
         .args(["metadata", "--no-deps", "--format-version", "1"])
@@ -94,14 +99,15 @@ fn package_policies() -> Vec<serde_json::Value> {
         .expect("packages is an array")
         .iter()
         .filter(|package| members.contains(&package["id"].as_str().unwrap_or("")))
-        .filter_map(|package| {
-            let ci = package["metadata"]["ci"].as_object()?;
+        .map(|package| {
             let mut record = serde_json::Map::new();
             record.insert("name".to_owned(), package["name"].clone());
-            for (key, value) in ci {
-                record.insert(key.clone(), value.clone());
+            if let Some(ci) = package["metadata"]["ci"].as_object() {
+                for (key, value) in ci {
+                    record.insert(key.clone(), value.clone());
+                }
             }
-            Some(serde_json::Value::Object(record))
+            serde_json::Value::Object(record)
         })
         .collect()
 }
@@ -477,6 +483,14 @@ fn l2_provisions_and_verifies_only_the_ci_capable_backend() {
         !shared.contains("BISCUIT_TEST_LEVEL_REQUIRED:"),
         "the L2 job must not SET a global L2 hard-require (would panic GUI-only tests)"
     );
+    // Execution proof, not mere availability: the leg requires exactly the
+    // declared backends it provisioned (today only tmux is CI-hostable), so an
+    // installed-but-never-exercised backend fails `_test_l2`'s backend-proof
+    // bracket instead of rendering a green cell with zero executed L2 tests.
+    assert!(
+        shared.contains("BISCUIT_TEST_REQUIRED_BACKENDS"),
+        "the L2 job must require the provisioned backends through BISCUIT_TEST_REQUIRED_BACKENDS"
+    );
     // Focus safety: CI must never run L3 or take foreground focus.
     assert!(
         !shared.contains("BISCUIT_L3_TAKE_FOCUS") && !shared.contains("test-l3"),
@@ -597,11 +611,13 @@ const ORCHESTRATED: [(&str, &str, &str); 4] = [
     ),
     (
         // messenger packages are EXEMPT (`gates = false`), so they are selected
-        // from the affected PACKAGE list rather than from the matrix. Its unique
-        // evidence is the desktop-feature build.
+        // from the affected PACKAGE list rather than from the matrix —
+        // prefix-matched in the scope step so a messenger-cli-only change
+        // selects the only workflow that covers messenger. Its unique evidence
+        // is the desktop-feature build.
         "messenger-desktop-tests.yml",
         "--features desktop",
-        "contains(fromJSON(needs.scope.outputs.packages), 'messenger')",
+        "needs.scope.outputs.messenger == 'true'",
     ),
 ];
 
@@ -1205,8 +1221,11 @@ fn a_declared_node_capability_is_provisioned_verified_and_hard_required() {
         "the declared companion suite must execute, not be dropped by the conversion"
     );
     // Its producer status downgrades a green Rust JUnit report on failure (R12).
+    // Comment lines are excluded: a YAML comment mentioning the mechanism must
+    // not satisfy the guard.
     let status_step = job_block("_package-ci.yml", "  test:")
         .lines()
+        .filter(|line| !line.trim_start().starts_with('#'))
         .any(|line| line.contains("COMPANION") && line.contains("failure"));
     assert!(
         status_step,
@@ -1598,26 +1617,61 @@ fn no_workflow_passes_partition() {
 }
 
 /// AC4: `areas.json` is deleted, and no workflow, recipe, or script reads it.
+/// The guard GLOBS — a hardcoded file list cannot keep the repo clean (the
+/// homelab justfile carried an areas.json reference while off the old list).
 #[test]
 fn areas_json_is_gone_and_has_no_readers() {
     assert!(
         !repo_root().join(".github/ci/areas.json").exists(),
         ".github/ci/areas.json must be deleted (Phase 5)"
     );
-    let offenders = [
-        ".github/workflows/ci.yml",
-        ".github/workflows/_package-ci.yml",
-        ".github/workflows/_wsl-ci.yml",
-        "justfile",
-        "just/devops.just",
-        "scripts/ci/affected_scope.py",
-        "scripts/ci-rollup.rs",
-    ];
-    for path in offenders {
-        let source = read(path);
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    let mut collect = |dir: &str, extensions: &[&str]| {
+        let mut pending = vec![repo_root().join(dir)];
+        while let Some(dir) = pending.pop() {
+            for entry in fs::read_dir(&dir).unwrap_or_else(|e| panic!("read {}: {e}", dir.display())) {
+                let path = entry.expect("dir entry").path();
+                if path.is_dir() {
+                    pending.push(path);
+                } else {
+                    let name = path.file_name().unwrap().to_string_lossy().to_string();
+                    let matches = name == "justfile"
+                        || extensions
+                            .iter()
+                            .any(|ext| name.ends_with(&format!(".{ext}")));
+                    if matches {
+                        candidates.push(path);
+                    }
+                }
+            }
+        }
+    };
+    collect(".github/workflows", &["yml", "yaml"]);
+    collect("just", &["just"]);
+    collect("scripts", &["rs", "py", "sh"]);
+    candidates.push(repo_root().join("justfile"));
+    // One justfile per package area directory.
+    for entry in fs::read_dir(repo_root()).expect("read repo root") {
+        let path = entry.expect("root entry").path().join("justfile");
+        if path.is_file() {
+            candidates.push(path);
+        }
+    }
+
+    assert!(
+        candidates.len() > 30,
+        "the glob itself must be non-vacuous (found {} files)",
+        candidates.len()
+    );
+    for path in candidates {
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+            .replace("\r\n", "\n");
         assert!(
             !source.contains("areas.json"),
-            "{path} must not read the deleted areas.json"
+            "{} must not read the deleted areas.json",
+            path.display()
         );
     }
 }
@@ -1675,21 +1729,20 @@ fn nextest_test_count(package: &str, filter: &str, feature_args: &[String]) -> u
     for arg in feature_args {
         cmd.arg(arg);
     }
-    let output = cmd.output();
-    let Ok(output) = output else {
-        // nextest may be absent or the build may be impractical in some
-        // environments; skip rather than fail, the way a missing optional tool
-        // would. The non-vacuous proof is still expected wherever this runs.
-        eprintln!("cargo nextest list unavailable for {package}; skipping");
-        return 0;
-    };
-    if !output.status.success() {
-        eprintln!(
-            "cargo nextest list -p {package} failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        return 0;
-    }
+    // Listing failure is LOUD, never a silent 0: a fake zero makes the
+    // undeclared-tier REJECTION tests pass vacuously (the exact inversion the
+    // guard exists to prevent) while the non-vacuity tests fail spuriously.
+    let output = cmd.output().unwrap_or_else(|error| {
+        panic!(
+            "failed to spawn `cargo nextest list -p {package}`: {error}. \
+             cargo-nextest is a required dev tool (the canonical recipes use it)"
+        )
+    });
+    assert!(
+        output.status.success(),
+        "cargo nextest list -p {package} failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     // `nextest list --message-format json` emits ONE JSON object whose
     // `rust-suites` map carries every test case with a `filter-match.status`.
     // `test-count` is the package TOTAL, not the filtered count, so count the
@@ -1779,4 +1832,104 @@ fn an_undeclared_l2_tier_is_rejected() {
              skip in CI. Add \"L2\" to [package.metadata.ci.tests] tiers."
         );
     }
+}
+
+/// AC12 covers BOTH non-default tiers: a package that gains browser tests
+/// without declaring the tier must fail here, exactly like L2.
+#[test]
+fn an_undeclared_browser_tier_is_rejected() {
+    for policy in gating_packages() {
+        let tiers = policy["tests"]["tiers"]
+            .as_array()
+            .map(|tiers| tiers.iter().filter_map(|tier| tier.as_str()).collect::<Vec<_>>())
+            .unwrap_or_default();
+        if tiers.contains(&"browser") {
+            continue;
+        }
+        let package = policy["name"].as_str().expect("a package name");
+        let filter = nextest_filter("browser", package);
+        let count = nextest_test_count(package, &filter, &feature_args_for(&policy));
+        assert_eq!(
+            count, 0,
+            "{package} owns browser tests but declares no browser tier — a silently-added tier \
+             test would skip in CI. Add \"browser\" to [package.metadata.ci.tests] tiers."
+        );
+    }
+}
+
+/// B5: a change touching only `gates = false` packages impacts packages but
+/// schedules none. The fan-out gate must derive from the MATRIX, or that
+/// change fails the package-ci job at strategy evaluation.
+#[test]
+fn the_fan_out_gate_derives_from_the_matrix_not_the_impacted_list() {
+    let ci = workflow("ci.yml");
+    assert!(
+        ci.contains("has_packages=$(jq -r '.matrix | length > 0'"),
+        "has_packages must be computed from the matrix; the impacted package list \
+         includes non-gating packages"
+    );
+    assert!(
+        !ci.contains("has_packages=$(jq -r '.packages | length > 0'"),
+        "deriving has_packages from the impacted list crashes a `gates = false`-only change"
+    );
+}
+
+/// M4: CI's own tooling — the merge-gate binary, the scope calculator, and
+/// the policy store — is not a Cargo package, so a change to it must schedule
+/// the leg that runs their own test suites.
+#[test]
+fn ci_tooling_changes_schedule_the_tooling_leg() {
+    let policy = read("scripts/ci/affected_scope.py");
+    assert!(
+        policy.contains(r#"CI_TOOLING_PREFIXES = ("scripts/", ".github/ci/")"#),
+        "affected_scope.py must map scripts/ and .github/ci/ to the ci_tooling flag"
+    );
+
+    let ci = workflow("ci.yml");
+    assert!(
+        ci.contains("ci_tooling=$(jq -r '.flags.ci_tooling'"),
+        "the scope job must emit the derived ci_tooling flag"
+    );
+    let leg = job_block("ci.yml", "  ci-tooling:");
+    assert!(
+        leg.contains("needs.scope.outputs.ci_tooling == 'true'"),
+        "the ci-tooling leg must be gated on the scope-derived flag"
+    );
+    assert!(
+        leg.contains("python3 scripts/ci/test_affected_scope.py"),
+        "the ci-tooling leg must run the scope tests"
+    );
+    assert!(
+        leg.contains("cargo nextest run") && leg.contains("--bin ci-rollup"),
+        "the ci-tooling leg must run the rollup's test suite"
+    );
+    // A red tooling leg must not be invisible under a CLEAR verdict.
+    let summary = job_block("ci.yml", "  summary:");
+    assert!(
+        summary.contains("needs.ci-tooling.result"),
+        "the advisory summary must classify a ci-tooling failure"
+    );
+}
+
+/// B3/B4: the WSL guest must have `jq` before its native-prerequisites step
+/// parses with it, and the package's declared L1 slow-test contract must reach
+/// the guest or darkmatter's L1 suite silently narrows on wsl2-ubuntu only.
+#[test]
+fn the_wsl_leg_provisions_jq_and_forwards_the_slow_test_contract() {
+    let wsl = workflow("_wsl-ci.yml");
+    assert!(
+        wsl.contains("xz-utils jq"),
+        "the WSL guest must be provisioned with jq — the native-prerequisites step \
+         parses the package list with it before anything could install it"
+    );
+    assert!(
+        wsl.contains("l1-include-slow:") && wsl.contains("BISCUIT_L1_INCLUDE_SLOW"),
+        "_wsl-ci.yml must accept and export the package's l1-include-slow contract"
+    );
+
+    let wsl_job = job_block("_package-ci.yml", "  wsl:");
+    assert!(
+        wsl_job.contains("l1-include-slow: ${{ inputs.l1-include-slow }}"),
+        "the WSL leg must receive the package's declared L1 slow-test policy"
+    );
 }
