@@ -83,12 +83,11 @@ messenger or rendezvous failure blocks a merge exactly like any other
 package's — closing the "specialized workflows are invisible to the merge
 gate" gap for these two.
 
-**R5 — SID redaction is decided, not dropped.** Either (a) the JUnit staging
-path redacts `S-1-5-21-…` user SIDs in failure text the way the bespoke
-workflow redacted its logs, or (b) it is ratified that SIDs of ephemeral
-GitHub-runner accounts are not sensitive and redaction ends with the
-workflow. Decision owner: Ken. The retirement PR must implement whichever is
-chosen; silence is not an option because the redaction exists today.
+**R5 — SID redaction ends with the workflow.** DECIDED (Ken, 2026-08-07):
+SIDs of ephemeral GitHub-runner accounts are not sensitive. No redaction is
+added to the JUnit staging path; the bespoke workflow's redaction step is
+deleted with the workflow. Recorded here so the behavior ends by decision
+rather than by accident.
 
 **R6 — first-run reds join the baseline honestly.** These packages' first
 gating runs may surface red cells (run 31184682085 already shows
@@ -116,7 +115,8 @@ baseline with owner and expiry, or fix, but never silently re-exclude.
    retirement PR description, to the grid cell that now covers it.
 5. A rendezvous or messenger test failure produces a package-keyed FAIL cell
    that blocks the verdict.
-6. The SID decision (R5) is recorded and implemented.
+6. No SID redaction machinery exists anywhere after the retirement (R5:
+   decided — ephemeral-runner SIDs are not sensitive).
 7. `ci.yml`'s job graph for a PR touching neither package shows no
    messenger- or rendezvous-specific jobs.
 
