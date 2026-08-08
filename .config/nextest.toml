@@ -39,10 +39,26 @@ retries = 3
 # load. 30s catches real hangs without killing healthy-but-contended tests.
 slow-timeout = { period = "5s", terminate-after = 6 }
 # Fail any test that leaves a child process holding its stdout/stderr open when
-# it exits (nextest's `LEAK` status). Keep the default 100ms grace period so
-# clean tests are not slowed — only an actual leak waits the window out. To
-# downgrade leaks back to a non-fatal warning, drop `result = "fail"`.
-leak-timeout = { period = "100ms", result = "fail" }
+# it exits (nextest's `LEAK` status). `result = "fail"` stays: a genuinely
+# leaked child is a hard failure everywhere.
+#
+# The window is 5s, not the 100ms stock default. Under full-workspace parallel
+# load, nextest's post-test pipe-drain observation is scheduler-starved on this
+# host and the spurious LEAK-FAIL lands on a RANDOM fast test each run — every
+# victim exits code 0 with assertions green and provably holds no pipe (pure
+# string/formatting tests flagged repeatedly, e.g. sniff's `error::tests::*_display`,
+# messenger-cli's `windows_shortcut_path_builds_start_menu_layout`,
+# biscuit-terminal's `standalone_code_block_emits_no_restoration_escape`,
+# claudine-cli's argv-parse tests that never spawn at all). The historical
+# record was a dozen per-package exemptions (worktree, preflight_graph,
+# biscuit-speaks-cli, claudine-cli L2, characterization, biscuit-terminal,
+# browser-tier Chrome teardown, and more); that many exceptions — plus victims
+# observed lagging even a 1s window — is evidence the global default was the
+# thing that was wrong, so a 5s window (the value the browser tier had already
+# validated) is now the default and those blocks are removed. Clean tests pay
+# nothing (their pipes reach EOF immediately); only an actual leak waits the
+# window out, and it still fails.
+leak-timeout = { period = "5s", result = "fail" }
 # `cargo nextest archive` carries test binaries and non-test *bin* targets;
 # examples are built but never archived. biscuit-terminal's PTY tests spawn the
 # `discovery_probe` example, so without this they fail in the only environment
@@ -66,28 +82,14 @@ test-group = 'claudine-windows-l1'
 filter = 'test(=compose_loop_rate_limit_pause_waits_then_continues)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
-# The CI/CD tier-contract tests shell out to `cargo nextest list`, which builds
-# the test binaries of an L2/browser-owning package to prove the declared tier
-# is non-vacuous. The build dominates and can exceed the default window. The
-# undeclared-tier REJECTION tests sweep EVERY gating package (default-policy
-# packages are exactly what they exist to guard), so a cold host builds the
-# whole workspace's test binaries inside a single test.
+# The CI/CD tier-contract tests shell out to `cargo nextest list`. The four
+# tier sweeps share one memoized, workspace-wide listing per tier, but on a
+# COLD host those two listings still build every gating package's test
+# binaries (the undeclared-tier REJECTION tests must see default-policy
+# packages, which is exactly what they guard), so the leash stays generous.
 [[profile.default.overrides]]
 filter = 'test(/_is_non_vacuous/) + test(/_tier_is_rejected/)'
 slow-timeout = { period = "60s", terminate-after = 20 }
-
-# This sequence perf test drives a failing multi-step CLI run and may finish just
-# beyond the default 30s termination window on macOS debug builds.
-[[profile.default.overrides]]
-filter = 'test(=sequence_perf_with_fail_fast_still_renders_partial_report)'
-slow-timeout = { period = "30s", terminate-after = 3 }
-
-# Same sequence perf path, but successful: it still launches the claudine CLI
-# once per sequence step and can approach the default 30s termination window
-# under full-suite contention on macOS debug builds.
-[[profile.default.overrides]]
-filter = 'test(=sequence_perf_renders_single_aggregated_report)'
-slow-timeout = { period = "30s", terminate-after = 3 }
 
 # These stdout parity tests launch the claudine CLI twice (perf and non-perf).
 # They are below the default timeout isolated, but can exceed 30s under
@@ -175,63 +177,25 @@ filter = 'test(=level2_render_tree_style_in_wezterm)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
 # Browser-tier tests spawn real headless Chrome, whose multi-process teardown
-# (helper + crashpad processes that inherit the test's stdout) routinely takes
-# longer than the default 100ms leak window — producing spurious LEAK-FAILs even
-# though the test itself exits cleanly (code 0). Give Chrome room to reap before
-# the leak check fires; keep `result = "fail"` so a genuinely runaway browser
-# still fails. The tier also runs with `-j 1` (see `_test_browser`) so only one
-# Chrome tears down at a time.
-[[profile.default.overrides]]
-filter = 'test(/browser_/)'
-leak-timeout = { period = "5s", result = "fail" }
+# (helper + crashpad processes that inherit the test's stdout) is the slowest
+# in the workspace. Chrome's teardown fits the global 5s leak window (the
+# tier also runs with `-j 1`, see `_test_browser`, so only one Chrome tears
+# down at a time), so the historical 5s browser override was removed with the
+# other exemptions; `result = "fail"` still catches a genuinely runaway
+# browser.
 
-# The `preflight_graph_*` acceptance tests exercise preflight-graph reuse over
-# `::file` transclusion only — they spawn no subprocess at all (the echo-spawning
-# acceptance tests live under different names and are deliberately excluded). Yet
-# under full-suite parallel load nextest's post-test pipe-drain check occasionally
-# flags them with a spurious LEAK-FAIL (exits code 0, but the pipe read lags the
-# 100ms window). Same situation as the worktree note below: give a 1s grace
-# window; keep `result = "fail"` so a genuine leak still fails. The strict 100ms
-# window stays in force for the sibling acceptance tests that do spawn `echo`.
-[[profile.default.overrides]]
-filter = 'test(/markdown::compose::preflight::acceptance_tests::preflight_graph_/)'
-leak-timeout = { period = "1s", result = "fail" }
-
-# worktree's lib/CLI tests are fast and spawn only short-lived git children.
-# Under heavy parallel load nextest's post-test pipe-drain check occasionally
-# flags spurious LEAK-FAILs on tests that provably spawn nothing (e.g.
-# `classify_dirty_lines_clean`, a pure string parse). Give the runner a 1s
-# grace window to observe the closed pipe; keep `result = "fail"` so a genuine
-# runaway child still fails (1s is far longer than any real git child here).
-[[profile.default.overrides]]
-filter = 'package(worktree) + package(worktree-cli)'
-leak-timeout = { period = "1s", result = "fail" }
-
-# biscuit-speaks-cli's integration tests spawn the `so-you-say` binary, which in
-# turn spawns OS TTS/audio children (`say`, audio playback). Under full-suite
-# parallel load — up to a dozen of those concurrent — nextest's post-test
-# pipe-drain check occasionally lags past the 100ms window and flags a spurious
-# LEAK-FAIL, hopping between whichever fast test loses the race (including ones
-# that spawn nothing, e.g. `test_cli_empty_stdin`). The tests themselves exit
-# clean (code 0) and the `--background` child is redirected to null, so no real
-# pipe is held. The `tts-audio` test-group caps how many run at once (root cause);
-# the 1s grace window absorbs any residual teardown lag. Keep `result = "fail"`
-# so a genuinely runaway TTS child still fails.
+# The `tts-audio` group caps how many audio-spawning tests run at once (see
+# [test-groups] above): biscuit-speaks-cli's integration tests spawn the
+# `so-you-say` binary, which in turn spawns OS TTS/audio children (`say`,
+# audio playback), and a dozen of those concurrently saturate the shared
+# audio subsystem.
 [[profile.default.overrides]]
 filter = 'package(biscuit-speaks-cli)'
 test-group = 'tts-audio'
-leak-timeout = { period = "1s", result = "fail" }
 
 # claudine-cli's L2 tier runs in parallel self-spawn mode (see
 # `claudine/justfile`'s `test-l2` and `just/devops.just`'s `BISCUIT_L2_THREADS`
-# path): every test spawns its own tmux session / PTY plus short-lived
-# claudine+git children. Under `-j N` their concurrent teardown occasionally
-# lags nextest's 100ms post-test pipe-drain check and flags a spurious
-# LEAK-FAIL — same situation as the worktree / tts-audio groups above. Give a
-# 1s grace window; keep `result = "fail"` so a genuinely leaked child still
-# fails.
-#
-# slow-timeout: these tests own an internal ~40s wait-for-marker deadline (the
+# path): these tests own an internal ~40s wait-for-marker deadline (the
 # tmux spawn boots a login shell, then a real claudine run drives a fake
 # provider through the full lifecycle). The default 5s×6 = 30s termination
 # ceiling is *below* that internal deadline, so a healthy-but-heavily-contended
@@ -242,47 +206,7 @@ leak-timeout = { period = "1s", result = "fail" }
 # genuine deadlock still trips the longer window.
 [[profile.default.overrides]]
 filter = 'package(claudine-cli) & test(/level2_/)'
-leak-timeout = { period = "1s", result = "fail" }
 slow-timeout = { period = "30s", terminate-after = 3 }
-
-# The error-propagation D10 characterization baseline
-# (`claudine/features/2026-07-13-error-propogation/`) spawns the real claudine
-# binary once per route, which in turn forks short-lived children (git
-# discovery, the provider shim, terminal capability probes). Under parallel
-# load their teardown lags nextest's 100ms post-test pipe-drain check and flags
-# a spurious LEAK-FAIL on whichever route finishes fastest — reliably
-# `characterize_unstructured_fallback`, which fails during argument parsing in
-# ~0.1s and so loses the race. Same situation as the worktree / tts-audio /
-# level2_ groups above; the test itself exits code 0 with every assertion
-# passing. Give a 1s grace window; keep `result = "fail"` so a genuinely leaked
-# child still fails. This baseline must be non-flaky by Checkpoint 1 — a flaky
-# baseline cannot prove the migration was behavior-neutral.
-[[profile.default.overrides]]
-filter = 'package(claudine-cli) & binary(characterization_error_routes)'
-leak-timeout = { period = "1s", result = "fail" }
-
-# biscuit-terminal's lib unit tier renders through `Terminal::new_optimistic`,
-# a plain struct literal, so these tests perform no capability discovery and
-# spawn no child that could inherit the test process's output handles. On the
-# 3-core macOS runner one of them nonetheless drew a LEAK-FAIL while exiting
-# code 0 with every assertion passing
-# (`components::prose::tests::standalone_code_block_emits_no_restoration_escape`,
-# a pure string comparison). With no descendant able to hold those handles, the
-# leading explanation is delayed observation of their closure under contention —
-# an inference, not a proven mechanism, so the grace stays small and scoped.
-#
-# Restricted to macOS because that is the only host where it has been observed;
-# Linux and Windows keep the strict 100ms window, as do biscuit-terminal's
-# integration binaries, which do spawn real PTY children.
-#
-# MUST stay below the `browser_` override above. nextest applies the FIRST
-# matching override per setting, and `test(/browser_/)` is a substring match
-# that also catches this binary's `test_browser_renderable_*` unit tests — put
-# this block first and it would silently downgrade their 5s grace to 1s.
-[[profile.default.overrides]]
-platform = { host = 'cfg(target_os = "macos")' }
-filter = 'package(biscuit-terminal) & kind(lib)'
-leak-timeout = { period = "1s", result = "fail" }
 
 [profile.ci]
 # Deterministic L1 failures must run exactly ONCE (D6). Blanket retries would run
@@ -309,8 +233,11 @@ retries = 0
 # `retries = 0` deliberately stays. A timeout must not be retried into looking
 # healthy — it should either fit the ceiling or be reported.
 slow-timeout = { period = "30s", terminate-after = 3 }
-# Leaked child processes are a hard failure in CI as well.
-leak-timeout = { period = "100ms", result = "fail" }
+# Leaked child processes are a hard failure in CI as well. 5s window (see
+# the default-profile note: sub-second windows produced random spurious
+# LEAK-FAILs under full-suite load; `result = "fail"` keeps genuine leaks
+# fatal).
+leak-timeout = { period = "5s", result = "fail" }
 # JUnit XML for CI dashboards.
 junit = { path = "test-results.xml" }
 
@@ -329,22 +256,14 @@ filter = 'test(/browser_/)'
 retries = 2
 
 # See the default-profile note: the tier-contract tests shell out to
-# `cargo nextest list`; the rejection sweeps cover every gating package and can
-# build the whole workspace's test binaries inside one test.
+# `cargo nextest list`; the shared sweep's two workspace-wide listings build
+# every gating package's test binaries on a cold host.
 [[profile.ci.overrides]]
 filter = 'test(/_is_non_vacuous/) + test(/_tier_is_rejected/)'
 slow-timeout = { period = "60s", terminate-after = 20 }
 
 [[profile.ci.overrides]]
 filter = 'test(=compose_loop_rate_limit_pause_waits_then_continues)'
-slow-timeout = { period = "30s", terminate-after = 3 }
-
-[[profile.ci.overrides]]
-filter = 'test(=sequence_perf_with_fail_fast_still_renders_partial_report)'
-slow-timeout = { period = "30s", terminate-after = 3 }
-
-[[profile.ci.overrides]]
-filter = 'test(=sequence_perf_renders_single_aggregated_report)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
 [[profile.ci.overrides]]
@@ -385,57 +304,13 @@ slow-timeout = { period = "15s", terminate-after = 2 }
 filter = 'test(=level2_render_tree_style_in_wezterm)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
-# See the default-profile note: headless-Chrome teardown exceeds the 100ms leak
-# window. CI hosts may be slower still, so the same generous grace applies.
-[[profile.ci.overrides]]
-filter = 'test(/browser_/)'
-leak-timeout = { period = "5s", result = "fail" }
+# See the default-profile note: Chrome teardown fits the global 5s window,
+# so the historical 5s browser override was removed with the other
+# exemptions; `result = "fail"` still catches a genuinely runaway browser.
 
-# See the default-profile note: the no-subprocess `preflight_graph_*` acceptance
-# tests draw spurious LEAK-FAILs under parallel load. CI hosts may be slower, so
-# the same 1s grace applies; `result = "fail"` still catches a genuine leak.
-[[profile.ci.overrides]]
-filter = 'test(/markdown::compose::preflight::acceptance_tests::preflight_graph_/)'
-leak-timeout = { period = "1s", result = "fail" }
-
-# See the default-profile note: spurious LEAK-FAILs on worktree's fast,
-# no-child tests under parallel load. CI hosts may be slower, so the same 1s
-# grace applies; `result = "fail"` still catches a genuine runaway child.
-[[profile.ci.overrides]]
-filter = 'package(worktree) + package(worktree-cli)'
-leak-timeout = { period = "1s", result = "fail" }
-
-# See the default-profile note: biscuit-speaks-cli's TTS/audio children draw
-# spurious LEAK-FAILs under parallel load. The `tts-audio` test-group caps
-# concurrency (root cause); the 1s grace absorbs residual lag. `result = "fail"`
-# still catches a genuinely runaway child.
+# The `tts-audio` group caps how many audio-spawning tests run at once (see
+# [test-groups]); the leak grace that used to ride along is now the global
+# default.
 [[profile.ci.overrides]]
 filter = 'package(biscuit-speaks-cli)'
 test-group = 'tts-audio'
-leak-timeout = { period = "1s", result = "fail" }
-
-# See the default-profile note: claudine-cli's parallel self-spawn L2 tier
-# draws spurious LEAK-FAILs from concurrent tmux/PTY/child teardown. CI hosts
-# may be slower, so the same 1s grace applies; `result = "fail"` still catches
-# a genuine leak.
-[[profile.ci.overrides]]
-filter = 'package(claudine-cli) & test(/level2_/)'
-leak-timeout = { period = "1s", result = "fail" }
-
-# See the default-profile note: the error-propagation characterization baseline
-# spawns the real claudine binary per route and draws spurious LEAK-FAILs from
-# child teardown lag under parallel load. CI hosts may be slower, so the same 1s
-# grace applies; `result = "fail"` still catches a genuine leak.
-[[profile.ci.overrides]]
-filter = 'package(claudine-cli) & binary(characterization_error_routes)'
-leak-timeout = { period = "1s", result = "fail" }
-
-# See the default-profile note: biscuit-terminal's no-subprocess lib unit tier
-# drew a LEAK-FAIL on the macOS runner, which is where this was observed. Same
-# 1s grace, same macOS-only scope, and the same ordering requirement — it must
-# stay below the `browser_` override so those `test_browser_*` lib tests keep
-# their 5s window under nextest's first-match-wins precedence.
-[[profile.ci.overrides]]
-platform = { host = 'cfg(target_os = "macos")' }
-filter = 'package(biscuit-terminal) & kind(lib)'
-leak-timeout = { period = "1s", result = "fail" }
