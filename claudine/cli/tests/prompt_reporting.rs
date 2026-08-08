@@ -564,10 +564,15 @@ fn compose_frontmatter_verbose_shows_full_system_prompt() {
     let (workspace, path_dir, md_file, sp_file) =
         make_workspace_with_goose_and_verbose_system_prompt();
 
+    // Run from the isolated workspace (as the sibling system-prompt tests
+    // do): with the ambient monorepo as cwd, compose's repository discovery
+    // pays a full git worktree-metadata refresh that can exceed nextest's
+    // 30s termination ceiling under full-suite contention.
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
         .args([
             "compose",
             "--goose",

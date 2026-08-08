@@ -184,7 +184,14 @@ fn mcp_check_json_reports_invalid_servers() {
     invalid.command = None;
     seed_catalog(&home, &[invalid]);
 
+    // Run from the isolated workspace, not the ambient (real) repository:
+    // `mcp check` resolves the repo root from the cwd, and inside this
+    // monorepo that discovery pays a full git worktree-metadata refresh,
+    // which is slow enough under full-suite contention to trip nextest's
+    // termination ceiling. The assertion below covers catalog validation
+    // only; a repo root contributes nothing to it.
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .current_dir(workspace.path())
         .env("HOME", &home)
         .env("NO_COLOR", "1")
         .args(["mcp", "check", "--json"])
