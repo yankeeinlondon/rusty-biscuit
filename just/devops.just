@@ -15,9 +15,12 @@ underline := '\033[4m'
 # dim := '\033[2m'
 
 # Preserve enough headroom for Cargo and the Windows linker before entering a
-# storage-heavy recipe. Other hosts return immediately.
+# storage-heavy recipe. Other hosts return immediately. Workspaces that merely
+# import these recipes (e.g. the test-toolkit staging fixtures) are not git
+# checkouts and have no scripts/ dir, so the preflight skips them; a real
+# preflight failure still fails the recipe.
 _storage_preflight:
-    @repo_root="$(git rev-parse --show-toplevel)"; bash "$repo_root/scripts/storage-preflight.sh"
+    @repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"; if [[ -n "$repo_root" && -f "$repo_root/scripts/storage-preflight.sh" ]]; then bash "$repo_root/scripts/storage-preflight.sh"; fi
 
 # Build the package
 _build package pkg_name *args="": _storage_preflight

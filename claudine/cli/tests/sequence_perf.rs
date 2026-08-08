@@ -43,10 +43,16 @@ exit 0
 "#,
     );
 
+    // Run from the isolated workspace (as
+    // `sequence_perf_propagates_startup_timings` does): with the ambient
+    // monorepo as cwd, each step's repository discovery pays a full git
+    // worktree-metadata refresh that can exceed nextest's termination
+    // ceiling under full-suite contention.
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
         .args(["sequence", "--goose", "--perf", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -168,6 +174,7 @@ exit 0
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
         .env("CLAUDINE_COUNT_FILE", &count_path)
+        .current_dir(workspace.path())
         .args([
             "sequence",
             "--goose",

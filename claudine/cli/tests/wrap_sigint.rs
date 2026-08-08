@@ -25,10 +25,17 @@ fn slow_compose_sigint_during_prep_exits_130_with_notice() {
     // for OpenCode. Without it, `hints.model.is_none()` short-circuits the
     // refresh and the slow `opencode models` subprocess never runs, leaving
     // this test's interrupt window non-deterministic.
+    //
+    // The hint must be *valid*: frontmatter models are validated against
+    // the baseline catalog (`resolve_model_with_env` step 4) and an invalid
+    // hint falls through to the provider default (`None`), which fails
+    // OpenCode's non-TTY model requirement with exit 1 before the interrupt
+    // path is reached. `llamacpp/…` matches via `offering_sources` prefix,
+    // so validity is structural and immune to baseline offering churn.
     let md_file = workspace.path().join("slow.md");
     fs::write(
         &md_file,
-        "---\ntitle: test\nmodel: test-model\n---\nPrompt body\n",
+        "---\ntitle: test\nmodel: llamacpp/test-model\n---\nPrompt body\n",
     )
     .unwrap();
 
@@ -55,12 +62,19 @@ exit 0
 "#,
     );
 
+    // `CLAUDINE_BACKGROUND_REFRESH=0` forces the caller-blocking refresh
+    // path (the documented escape hatch). The default W3 refresh is
+    // detached, so prep would race ahead of the `opencode models`
+    // subprocess and this test's interrupt window would not exist; the
+    // blocking path is the one whose SIGINT cancellability is under test.
     let bin = common::claudine_bin();
     let child = std::process::Command::new(bin)
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
         .env("CLAUDINE_READY_MARKER", &ready_marker)
+        .env("CLAUDINE_BACKGROUND_REFRESH", "0")
+        .current_dir(workspace.path())
         .args([
             "compose",
             "--opencode",
@@ -102,12 +116,13 @@ exit 0
         "SIGINT during prep must yield exit code 130"
     );
 
-    // Bounded interrupt latency: the cancellable refresh path returns
-    // within ~50 ms of the interrupt poll under normal conditions. The
+    // Bounded interrupt latency: the cancellable fetch (`kill_on_drop`
+    // plus the interrupt-flag race in `fetch_shell_command_models`)
+    // returns within ~50 ms of the interrupt under normal conditions. The
     // fake `opencode models` sleeps for 10s — anywhere near that means
-    // we've regressed to the uncancellable `refresh_provider_blocking`
-    // path. A 4-second ceiling sits comfortably below the 10s blocking
-    // floor while leaving headroom for OS scheduling under contention.
+    // the fetch stopped responding to the interrupt flag. A 4-second
+    // ceiling sits comfortably below the 10s blocking floor while leaving
+    // headroom for OS scheduling under contention.
     assert!(
         interrupt_to_exit < std::time::Duration::from_secs(4),
         "SIGINT-to-exit latency exceeded 4s ({:?}); blocked-prep regression",
