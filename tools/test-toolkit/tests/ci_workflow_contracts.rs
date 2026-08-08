@@ -10,7 +10,7 @@
 //! manifest source so a regression fails locally without a live GitHub Actions
 //! run.
 
-use std::{fs, path::PathBuf, process::Command};
+use std::{collections::BTreeMap, fs, path::PathBuf, process::Command, sync::OnceLock};
 
 fn repo_root() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -116,6 +116,47 @@ fn gating_packages() -> Vec<serde_json::Value> {
     package_policies()
         .into_iter()
         .filter(|policy| policy["gates"].as_bool().unwrap_or(true))
+        .collect()
+}
+
+/// [`gating_packages`], memoized: the tier-contract tests below each iterate
+/// the same list, and the shared tier sweep needs it too. `cargo metadata`
+/// is not free, so run it once per test process.
+static GATING_PACKAGES: OnceLock<Vec<serde_json::Value>> = OnceLock::new();
+
+fn gating_packages_shared() -> &'static [serde_json::Value] {
+    GATING_PACKAGES.get_or_init(gating_packages)
+}
+
+/// Every workspace package's declared Cargo features (the keys of each
+/// manifest's `[features]` table), from one `cargo metadata` pass. Used to
+/// replicate `all-features = true` per package in qualified `pkg/feature`
+/// form for the workspace-wide tier listings.
+fn workspace_feature_names() -> BTreeMap<String, Vec<String>> {
+    let output = Command::new("cargo")
+        .args(["metadata", "--no-deps", "--format-version", "1"])
+        .current_dir(repo_root())
+        .output()
+        .expect("cargo metadata runs");
+    assert!(
+        output.status.success(),
+        "cargo metadata failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("metadata is JSON");
+    metadata["packages"]
+        .as_array()
+        .expect("packages is an array")
+        .iter()
+        .map(|package| {
+            let name = package["name"].as_str().expect("a package name").to_owned();
+            let features = package["features"]
+                .as_object()
+                .map(|table| table.keys().cloned().collect())
+                .unwrap_or_default();
+            (name, features)
+        })
         .collect()
 }
 
@@ -1682,29 +1723,13 @@ fn areas_json_is_gone_and_has_no_readers() {
 ///
 /// These build the test binaries, so they are slow — they guard correctness,
 /// not speed, and run where the contract suite runs (not in CI preflight).
-fn feature_args_for(policy: &serde_json::Value) -> Vec<String> {
-    let tests = &policy["tests"];
-    if tests.get("all-features").and_then(|value| value.as_bool()) == Some(true) {
-        return vec!["--all-features".to_owned()];
-    }
-    let mut args = Vec::new();
-    if let Some(features) = tests.get("features").and_then(|value| value.as_array()) {
-        let joined = features
-            .iter()
-            .filter_map(|feature| feature.as_str())
-            .collect::<Vec<_>>()
-            .join(",");
-        if !joined.is_empty() {
-            args.push("--features".to_owned());
-            args.push(joined);
-        }
-    }
-    args
-}
-
 fn nextest_filter(tier: &str, package: &str) -> String {
+    let mut args = vec!["_tier_filter", tier];
+    if !package.is_empty() {
+        args.push(package);
+    }
     let output = Command::new("just")
-        .args(["_tier_filter", tier, package])
+        .args(&args)
         .current_dir(repo_root())
         .output()
         .unwrap_or_else(|error| panic!("just _tier_filter {tier} {package} failed: {error}"));
@@ -1719,62 +1744,143 @@ fn nextest_filter(tier: &str, package: &str) -> String {
         .to_owned()
 }
 
-fn nextest_test_count(package: &str, filter: &str, feature_args: &[String]) -> usize {
+/// Per-package test counts for the two non-default tiers.
+#[derive(Debug, Clone, Copy, Default)]
+struct TierCounts {
+    l2: usize,
+    browser: usize,
+}
+
+/// The four tier-contract tests below each used to sweep every gating
+/// package with their own per-package `cargo nextest list` subprocesses —
+/// 60+ packages × 2 listings × 4 tests, with the four concurrent sweeps
+/// additionally serializing against cargo's build-directory lock. Each test
+/// ran past a minute under load.
+///
+/// The sweep is now computed ONCE per test process and shared: two
+/// workspace-wide listings (one per tier), each selecting every gating
+/// package in a single cargo invocation. Per-package build semantics are
+/// unchanged: a package's declared features reach the listing in qualified
+/// `pkg/feature` form (`sniff-cli/test-fixtures`), and `all-features = true`
+/// is replicated by enumerating that package's declared features.
+static TIER_SWEEP: OnceLock<BTreeMap<String, TierCounts>> = OnceLock::new();
+
+fn tier_sweep() -> &'static BTreeMap<String, TierCounts> {
+    TIER_SWEEP.get_or_init(|| {
+        let policies = gating_packages_shared();
+        let feature_names = workspace_feature_names();
+
+        let mut select: Vec<String> = Vec::new();
+        let mut qualified: Vec<String> = Vec::new();
+        for policy in policies {
+            let package = policy["name"].as_str().expect("a package name");
+            select.push("-p".to_owned());
+            select.push(package.to_owned());
+            let tests = &policy["tests"];
+            if tests.get("all-features").and_then(|value| value.as_bool()) == Some(true) {
+                for feature in feature_names.get(package).into_iter().flatten() {
+                    qualified.push(format!("{package}/{feature}"));
+                }
+            } else if let Some(features) = tests.get("features").and_then(|value| value.as_array())
+            {
+                for feature in features.iter().filter_map(|value| value.as_str()) {
+                    qualified.push(format!("{package}/{feature}"));
+                }
+            }
+        }
+
+        // The L2/browser filters are tier-constant (only L1 varies per
+        // package), but they still come from the canonical recipe so a
+        // recipe change is picked up here.
+        let l2 = workspace_tier_counts(&select, &qualified, &nextest_filter("L2", ""));
+        let browser =
+            workspace_tier_counts(&select, &qualified, &nextest_filter("browser", ""));
+
+        policies
+            .iter()
+            .map(|policy| {
+                let package = policy["name"].as_str().expect("a package name").to_owned();
+                let counts = TierCounts {
+                    l2: l2.get(&package).copied().unwrap_or(0),
+                    browser: browser.get(&package).copied().unwrap_or(0),
+                };
+                (package, counts)
+            })
+            .collect()
+    })
+}
+
+/// One `cargo nextest list` over every gating package for one tier filter,
+/// returning the matched-test count keyed by package name.
+fn workspace_tier_counts(
+    select: &[String],
+    qualified_features: &[String],
+    filter: &str,
+) -> BTreeMap<String, usize> {
     let mut cmd = Command::new("cargo");
-    cmd.args(["nextest", "list", "-p", package, "-E", filter, "--message-format", "json"])
+    cmd.arg("nextest")
+        .arg("list")
+        .args(select)
+        .arg("-E")
+        .arg(filter)
+        .arg("--message-format")
+        .arg("json")
         .current_dir(repo_root());
-    // Tier tests can live behind a declared feature (sniff-cli's L2 suite is
-    // behind `test-fixtures`), so the listing must build with the package's
-    // declared feature set or it sees zero tests and reports a false gap.
-    for arg in feature_args {
-        cmd.arg(arg);
+    if !qualified_features.is_empty() {
+        cmd.arg("--features").arg(qualified_features.join(","));
     }
     // Listing failure is LOUD, never a silent 0: a fake zero makes the
     // undeclared-tier REJECTION tests pass vacuously (the exact inversion the
     // guard exists to prevent) while the non-vacuity tests fail spuriously.
     let output = cmd.output().unwrap_or_else(|error| {
         panic!(
-            "failed to spawn `cargo nextest list -p {package}`: {error}. \
+            "failed to spawn `cargo nextest list`: {error}. \
              cargo-nextest is a required dev tool (the canonical recipes use it)"
         )
     });
     assert!(
         output.status.success(),
-        "cargo nextest list -p {package} failed:\n{}",
+        "cargo nextest list failed:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
     // `nextest list --message-format json` emits ONE JSON object whose
-    // `rust-suites` map carries every test case with a `filter-match.status`.
-    // `test-count` is the package TOTAL, not the filtered count, so count the
-    // cases whose filter-match is `match`.
+    // `rust-suites` map carries each suite's `package-name` and every test
+    // case with a `filter-match.status`. `test-count` is the unfiltered
+    // TOTAL, so count the cases whose filter-match is `match`.
     let stdout = String::from_utf8(output.stdout).expect("utf8");
-    let mut matched = 0;
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for line in stdout.lines() {
         let Ok(document) = serde_json::from_str::<serde_json::Value>(line) else {
             continue;
         };
         if let Some(suites) = document.get("rust-suites").and_then(|value| value.as_object()) {
             for suite in suites.values() {
-                if let Some(testcases) = suite.get("testcases").and_then(|value| value.as_object()) {
+                let Some(package) = suite.get("package-name").and_then(|value| value.as_str())
+                else {
+                    continue;
+                };
+                if let Some(testcases) = suite.get("testcases").and_then(|value| value.as_object())
+                {
                     for testcase in testcases.values() {
                         let status = testcase
                             .get("filter-match")
                             .and_then(|value| value.get("status"))
                             .and_then(|value| value.as_str());
                         if status == Some("matches") {
-                            matched += 1;
+                            *counts.entry(package.to_owned()).or_default() += 1;
                         }
                     }
                 }
             }
         }
     }
-    matched
+    counts
 }
 
 #[test]
 fn every_declared_l2_tier_is_non_vacuous() {
-    for policy in gating_packages() {
+    let sweep = tier_sweep();
+    for policy in gating_packages_shared() {
         let tiers = policy["tests"]["tiers"]
             .as_array()
             .map(|tiers| tiers.iter().filter_map(|tier| tier.as_str()).collect::<Vec<_>>())
@@ -1783,8 +1889,7 @@ fn every_declared_l2_tier_is_non_vacuous() {
             continue;
         }
         let package = policy["name"].as_str().expect("a package name");
-        let filter = nextest_filter("L2", package);
-        let count = nextest_test_count(package, &filter, &feature_args_for(&policy));
+        let count = sweep.get(package).map(|counts| counts.l2).unwrap_or(0);
         assert!(
             count > 0,
             "{package} declares the L2 tier but its canonical L2 filter selects no tests — \
@@ -1795,7 +1900,8 @@ fn every_declared_l2_tier_is_non_vacuous() {
 
 #[test]
 fn every_declared_browser_tier_is_non_vacuous() {
-    for policy in gating_packages() {
+    let sweep = tier_sweep();
+    for policy in gating_packages_shared() {
         let tiers = policy["tests"]["tiers"]
             .as_array()
             .map(|tiers| tiers.iter().filter_map(|tier| tier.as_str()).collect::<Vec<_>>())
@@ -1804,8 +1910,10 @@ fn every_declared_browser_tier_is_non_vacuous() {
             continue;
         }
         let package = policy["name"].as_str().expect("a package name");
-        let filter = nextest_filter("browser", package);
-        let count = nextest_test_count(package, &filter, &feature_args_for(&policy));
+        let count = sweep
+            .get(package)
+            .map(|counts| counts.browser)
+            .unwrap_or(0);
         assert!(
             count > 0,
             "{package} declares the browser tier but its canonical browser filter selects no tests"
@@ -1815,7 +1923,8 @@ fn every_declared_browser_tier_is_non_vacuous() {
 
 #[test]
 fn an_undeclared_l2_tier_is_rejected() {
-    for policy in gating_packages() {
+    let sweep = tier_sweep();
+    for policy in gating_packages_shared() {
         let tiers = policy["tests"]["tiers"]
             .as_array()
             .map(|tiers| tiers.iter().filter_map(|tier| tier.as_str()).collect::<Vec<_>>())
@@ -1824,8 +1933,7 @@ fn an_undeclared_l2_tier_is_rejected() {
             continue;
         }
         let package = policy["name"].as_str().expect("a package name");
-        let filter = nextest_filter("L2", package);
-        let count = nextest_test_count(package, &filter, &feature_args_for(&policy));
+        let count = sweep.get(package).map(|counts| counts.l2).unwrap_or(0);
         assert_eq!(
             count, 0,
             "{package} owns L2 tests but declares no L2 tier — a silently-added tier test would \
@@ -1838,7 +1946,8 @@ fn an_undeclared_l2_tier_is_rejected() {
 /// without declaring the tier must fail here, exactly like L2.
 #[test]
 fn an_undeclared_browser_tier_is_rejected() {
-    for policy in gating_packages() {
+    let sweep = tier_sweep();
+    for policy in gating_packages_shared() {
         let tiers = policy["tests"]["tiers"]
             .as_array()
             .map(|tiers| tiers.iter().filter_map(|tier| tier.as_str()).collect::<Vec<_>>())
@@ -1847,8 +1956,10 @@ fn an_undeclared_browser_tier_is_rejected() {
             continue;
         }
         let package = policy["name"].as_str().expect("a package name");
-        let filter = nextest_filter("browser", package);
-        let count = nextest_test_count(package, &filter, &feature_args_for(&policy));
+        let count = sweep
+            .get(package)
+            .map(|counts| counts.browser)
+            .unwrap_or(0);
         assert_eq!(
             count, 0,
             "{package} owns browser tests but declares no browser tier — a silently-added tier \
