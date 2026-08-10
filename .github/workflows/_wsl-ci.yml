@@ -1,11 +1,11 @@
 name: wsl-ci
 
-# The `wsl2-ubuntu` environment: the canonical L1 suite, run inside a WSL2 Ubuntu
-# guest hosted by a `windows-latest` runner.
+# The `wsl2-ubuntu` environment: one Cargo package's canonical L1 suite, run
+# inside a WSL2 Ubuntu guest hosted by a `windows-latest` runner.
 #
 # WHY THIS IS A SEPARATE WORKFLOW
 #
-# WSL2 cannot be another entry in `_area-ci.yml`'s `runs-on` matrix. The job
+# WSL2 cannot be another entry in `_package-ci.yml`'s `runs-on` matrix. The job
 # still runs on `windows-latest` and every command executes through `wsl-bash`,
 # so a shared job would evaluate `runner.os == 'Windows'` and take the Windows
 # branch for native-package installation, path handling, shell
@@ -38,44 +38,61 @@ name: wsl-ci
 # compile inside WSL, and the binaries are byte-identical to the Linux leg's, so
 # a `wsl2-ubuntu` failure is an environment difference rather than a build
 # difference. L1 ONLY — the L2 tier needs the broker binary and a live tmux
-# server, which an archive does not carry; `wsl2-ubuntu` is therefore absent from
-# `L2_PROVISIONED_ENVIRONMENTS` in `scripts/ci/affected_scope.py`.
+# server, which an archive does not carry; the environment capability table
+# (`.github/ci/environments.json`) records `wsl2-ubuntu` as archive-only with no
+# tmux, so the rollup renders the package's L2 cell there as a POLICY GAP.
 
 on:
   workflow_call:
     inputs:
-      area:
-        description: "Area directory, used for `cd`, cache keys, and result identity (e.g. sniff)."
+      package:
+        description: "Cargo package name; the unit of selection, execution, and result identity (e.g. sniff-cli)."
         type: string
         required: true
       check-args:
-        description: "Cargo package selectors for the archive build (e.g. '-p sniff -p sniff-cli --features sniff/remote')."
+        description: "Cargo package selector and declared features for the archive build (e.g. '-p sniff --features remote')."
         type: string
         required: true
-      shards:
-        description: 'JSON array of nextest partition specs; ["1/1"] means no sharding.'
+      test-args:
+        description: "Extra args forwarded to the canonical test recipe (declared feature flags; dropped in archive mode, where they are already baked in)."
         type: string
-        default: '["1/1"]'
+        default: ""
+      l1-include-slow:
+        description: "Keep `slow_` tests inside the L1 selection (darkmatter's declared L1 contract). Forwarded to the guest or its L1 suite silently narrows relative to every other leg."
+        type: boolean
+        default: false
+      native:
+        description: "JSON map of runner OS -> system packages, the union of `native` requirements across this package's dependency closure. Both the archive builder and the guest consume the ubuntu-latest list."
+        type: string
+        default: '{}'
       distribution:
         description: "WSL distribution to provision."
         type: string
         default: Ubuntu-24.04
   workflow_dispatch:
     inputs:
-      area:
-        description: "Area directory to run inside WSL2."
+      package:
+        description: "Cargo package to run inside WSL2."
         type: string
         required: true
         default: sniff
       check-args:
-        description: "Cargo package selectors for the archive build."
+        description: "Cargo package selector and features for the archive build."
         type: string
         required: true
-        default: "-p sniff -p sniff-cli --features sniff/remote"
-      shards:
-        description: "JSON array of nextest partition specs."
+        default: "-p sniff --features remote"
+      test-args:
+        description: "Extra args forwarded to the canonical test recipe."
         type: string
-        default: '["1/1"]'
+        default: "--features remote"
+      l1-include-slow:
+        description: "Keep `slow_` tests inside the L1 selection."
+        type: boolean
+        default: false
+      native:
+        description: "JSON map of runner OS -> system packages."
+        type: string
+        default: '{}'
       distribution:
         description: "WSL distribution to provision."
         type: string
@@ -103,7 +120,7 @@ jobs:
   # Linux build host. Produces the artifact the guest consumes; nothing here
   # touches WSL.
   archive:
-    name: archive (linux build for wsl2)
+    name: archive (${{ inputs.package }} for wsl2)
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -117,7 +134,7 @@ jobs:
       # same literal so those fixtures resolve. Nothing else enforces that
       # coupling, so assert it here — a mismatch caught now is one clear error,
       # where a mismatch discovered later is every fixture-reading test in the
-      # area failing on a missing file and looking like a code regression.
+      # package failing on a missing file and looking like a code regression.
       - name: Verify the guest path assumption holds
         shell: bash
         run: |
@@ -149,9 +166,20 @@ jobs:
             echo "See fixes/2026-07-27-refactor/wsl-archive-requirements.md for the exact contract." >&2
             exit 1
           fi
+      # The package's own native requirements AND any it compiles from its
+      # dependency closure: the scope job computed the union, and an archived
+      # binary that dynamically links a library the guest lacks fails there,
+      # not here — so both sides install it.
       - name: Install native prerequisites
         shell: bash
-        run: just _ensure-native-libs "${{ inputs.area }}"
+        env:
+          NATIVE: ${{ inputs.native }}
+        run: |
+          set -euo pipefail
+          packages="$(jq -r '."ubuntu-latest" // [] | join(" ")' <<<"$NATIVE")"
+          if [ -n "$packages" ]; then
+            just _ensure-native-libs $packages
+          fi
       - name: Set up the pinned Rust toolchain
         run: rustup show
       - name: Install protoc
@@ -161,7 +189,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
-          shared-key: area-ci-${{ inputs.area }}-test-ubuntu-latest
+          shared-key: package-ci-${{ inputs.package }}-test-ubuntu-latest
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
       - name: Build the nextest archive
@@ -177,27 +205,21 @@ jobs:
       - name: Upload the nextest archive
         uses: actions/upload-artifact@v4
         with:
-          name: nextest-archive-${{ inputs.area }}-wsl2-ubuntu
+          name: nextest-archive-${{ inputs.package }}-wsl2-ubuntu
           path: ${{ runner.temp }}/${{ env.ARCHIVE_NAME }}
           retention-days: 1
           if-no-files-found: error
 
   wsl:
-    name: test (wsl2-ubuntu${{ matrix.shard != '1/1' && format(' {0}', matrix.shard) || '' }})
+    name: test (${{ inputs.package }} on wsl2-ubuntu)
     needs: archive
     runs-on: windows-latest
     timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: ${{ fromJSON(inputs.shards) }}
     env:
       # Result identity, declared once. The environment is `wsl2-ubuntu` even
       # though the runner label is `windows-latest`; stamping the label here
       # would silently merge this leg into the native Windows rollup cell.
-      BISCUIT_CI_AREA: ${{ inputs.area }}
       BISCUIT_CI_ENVIRONMENT: wsl2-ubuntu
-      BISCUIT_CI_SHARD: ${{ matrix.shard }}
       # The guest checkout must sit at the SAME ABSOLUTE PATH the archive was
       # built at, because `env!("CARGO_MANIFEST_DIR")` is a string literal
       # compiled into every test binary. `--workspace-remap` cannot touch it —
@@ -220,14 +242,18 @@ jobs:
       # Spelled out rather than built from `GUEST_ROOT`: one `env:` entry cannot
       # reference another in the same block.
       BISCUIT_JUNIT_STAGE_DIR: /home/runner/work/${{ github.event.repository.name }}/${{ github.event.repository.name }}/target/nextest/ci-reports
+      # The package's declared L1 contract (`l1-include-slow` in
+      # `[package.metadata.ci.tests]`), re-exported inside the guest below so
+      # darkmatter's `slow_` tests run here exactly as on the native legs.
+      BISCUIT_L1_INCLUDE_SLOW: ${{ inputs.l1-include-slow && '1' || '' }}
     steps:
       - uses: actions/checkout@v4
-      # Inside the workspace, not RUNNER_TEMP: the guest reaches this through the
-      # 9p mount by resolving `pwd`, which needs no environment forwarding.
+      # Inside the workspace, not RUNNER_TEMP: the guest reaches this through
+      # the 9p mount by resolving `pwd`, which needs no environment forwarding.
       - name: Download the nextest archive
         uses: actions/download-artifact@v4
         with:
-          name: nextest-archive-${{ inputs.area }}-wsl2-ubuntu
+          name: nextest-archive-${{ inputs.package }}-wsl2-ubuntu
           path: ${{ github.workspace }}/nextest-archive
       # No `wsl-version:` pin — the action already defaults to 2, and pinning 1
       # would be an explicit downgrade to an environment without WSLg.
@@ -273,7 +299,10 @@ jobs:
         with:
           distribution: ${{ inputs.distribution }}
           set-as-default: true
-          additional-packages: ca-certificates curl git xz-utils
+          # jq is NOT optional: the guest's native-prerequisites step parses the
+          # scope-computed package list with it, for every package, before any
+          # recipe that could bootstrap it has run.
+          additional-packages: ca-certificates curl git xz-utils jq
       - name: Let the endpoint settle before a second attempt
         if: ${{ steps.provision.outcome == 'failure' }}
         shell: bash
@@ -285,7 +314,7 @@ jobs:
         with:
           distribution: ${{ inputs.distribution }}
           set-as-default: true
-          additional-packages: ca-certificates curl git xz-utils
+          additional-packages: ca-certificates curl git xz-utils jq
       - name: Verify the guest is WSL2
         shell: wsl-bash {0}
         run: |
@@ -341,7 +370,7 @@ jobs:
           # runner, and the guest is a separate VM reached through a bash
           # wrapper. So this is the one place tools are installed by shell
           # script, and the one place the request is anonymous: 60/hour shared
-          # across every job on the runner's Azure IP. `biscuit-terminal` was
+          # across every job on the runner's IP. `biscuit-terminal` was
           # lost that way in run 30755610413, and `unchained-ai` in 31041986681.
           #
           # `--retry-all-errors` was the previous attempt and could never have
@@ -377,11 +406,19 @@ jobs:
         shell: wsl-bash {0}
         run: |
           set -euo pipefail
-          # A WSL2 guest IS Linux, so `_ensure-native-libs` keys off `uname -s`
-          # and reads the area's `ubuntu-latest` package list. There is no
-          # separate `wsl2-ubuntu` key in areas.json.
+          # A WSL2 guest IS Linux, so it consumes the `ubuntu-latest` package
+          # list — the same dependency-closure union the archive builder
+          # installed. Satisfying only the builder is insufficient when an
+          # archived binary dynamically links a library the guest lacks.
+          #
+          # Interpolated, NOT read from `env:`: step env lives on the Windows
+          # host process, and `wsl-bash` forwards only WSLENV-listed variables
+          # into the guest — an `env:`-sourced $NATIVE is unbound here.
           cd "${{ env.GUEST_ROOT }}"
-          just _ensure-native-libs "${{ inputs.area }}"
+          packages="$(jq -r '."ubuntu-latest" // [] | join(" ")' <<<'${{ inputs.native }}')"
+          if [ -n "$packages" ]; then
+            just _ensure-native-libs $packages
+          fi
       # DIAGNOSTIC ONLY — nothing below changes what runs or how it is reported.
       #
       # THE CONFIRMED FAILURE, AND WHY THE CENSUS RUNS *BEFORE* EXTRACTION
@@ -405,9 +442,10 @@ jobs:
       # an `ENOSPC` return. Same cause, different symptom depending on which
       # write hits the wall first.
       #
-      # It is a capacity threshold, not a claudine-code question — claudine's
-      # archive is 6.4 GiB, darkmatter's 3.9 GiB and its guests survive, and no
-      # other area exceeds 870 MiB.
+      # It is a capacity threshold, not a code question — claudine's archive was
+      # 6.4 GiB when it carried five packages, darkmatter's 3.9 GiB and its
+      # guests survive. Per-package archives are far smaller, but the census
+      # stays: it is cheap, and the next capacity cliff is unknowable in advance.
       #
       # Hence the ordering below. A post-mortem cannot run on a runner that has
       # already died, so the measurement that matters is taken BEFORE extraction,
@@ -419,7 +457,7 @@ jobs:
         run: |
           # Headroom on the volume the guest's VHDX grows into. This number is
           # the whole diagnosis: compare it against the extracted size of the
-          # area's archive.
+          # package's archive.
           Get-PSDrive -PSProvider FileSystem |
             Select-Object Name, @{n='UsedGB';e={[math]::Round($_.Used/1GB,1)}},
                                 @{n='FreeGB';e={[math]::Round($_.Free/1GB,1)}} |
@@ -457,17 +495,22 @@ jobs:
           # result identity is far too consequential to leave to that. A missing
           # or wrong BISCUIT_CI_ENVIRONMENT does not fail — it silently files
           # these results under the native Windows cell.
-          export BISCUIT_CI_AREA='${{ env.BISCUIT_CI_AREA }}'
           export BISCUIT_CI_ENVIRONMENT='${{ env.BISCUIT_CI_ENVIRONMENT }}'
-          export BISCUIT_CI_SHARD='${{ env.BISCUIT_CI_SHARD }}'
           export NEXTEST_PROFILE='${{ env.NEXTEST_PROFILE }}'
           export COLORTERM='${{ env.COLORTERM }}'
+          export BISCUIT_L1_INCLUDE_SLOW='${{ env.BISCUIT_L1_INCLUDE_SLOW }}'
           # No Cargo in the guest, so the canonical recipe must reach nextest as
           # a standalone binary and stage its JUnit report without shelling out
           # to `cargo metadata`. See fixes/2026-07-27-refactor/wsl-archive-requirements.md.
           export BISCUIT_NEXTEST_BIN='cargo-nextest nextest'
           export BISCUIT_JUNIT_WORKSPACE_ROOT="${{ env.GUEST_ROOT }}"
           export BISCUIT_JUNIT_TARGET_DIR="${{ env.GUEST_ROOT }}/target"
+          # insta finds the workspace root by running `cargo metadata`; with no
+          # cargo in the guest its manifest-dir fallback DOUBLES the snapshot
+          # path (darkmatter/lib/darkmatter/lib/...), every .snap looks absent,
+          # and each snapshot test fails while rendering correct output — 165
+          # phantom failures on run 30791562395. Pin the root explicitly.
+          export INSTA_WORKSPACE_ROOT="${{ env.GUEST_ROOT }}"
           export BISCUIT_JUNIT_STAGE_DIR='${{ env.BISCUIT_JUNIT_STAGE_DIR }}'
 
           archive=/home/runner/nextest-archive.tar.zst
@@ -502,13 +545,14 @@ jobs:
 
           # --workspace-remap is not optional: the archive records the BUILD
           # host's source paths, and the guest checkout is somewhere else.
-          args=(--no-fail-fast --archive-file "$archive" --workspace-remap "${{ env.GUEST_ROOT }}")
-          if [ "${{ matrix.shard }}" != "1/1" ]; then
-            args+=(--partition "count:${{ matrix.shard }}")
-          fi
-
-          cd "${{ env.GUEST_ROOT }}/${{ inputs.area }}"
-          just test "${args[@]}"
+          # Declared feature flags are passed along and dropped by
+          # `_archive_drop_build_flags` — they were baked into the archive.
+          cd "${{ env.GUEST_ROOT }}"
+          just _test "${{ inputs.package }}" \
+            --no-fail-fast \
+            --archive-file "$archive" \
+            --workspace-remap "${{ env.GUEST_ROOT }}" \
+            ${{ inputs.test-args }}
       - name: Stage the JUnit reports for upload
         id: stage_junit
         if: ${{ !cancelled() }}
@@ -522,9 +566,7 @@ jobs:
           mkdir -p "$workspace/wsl-junit"
           # The CONTENTS of the staging root, so `manifest.jsonl` lands at the
           # artifact root. `ci-rollup` reads the manifest only from there;
-          # copying `target/nextest/` instead would bury it one level down, and
-          # every record would silently degrade to artifact-name parsing with an
-          # unknown shard.
+          # copying `target/nextest/` instead would bury it one level down.
           cp -R '${{ env.BISCUIT_JUNIT_STAGE_DIR }}/.' "$workspace/wsl-junit/" 2>/dev/null || true
           # Staging must never change the tier's outcome.
           exit 0
@@ -532,7 +574,7 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: junit-${{ inputs.area }}-L1-wsl2-ubuntu-${{ strategy.job-index }}
+          name: junit-${{ inputs.package }}-L1-wsl2-ubuntu
           path: wsl-junit
           if-no-files-found: ignore
       # DIAGNOSTIC ONLY, and deliberately `continue-on-error`: if the guest is
@@ -603,7 +645,7 @@ jobs:
         with:
           # A prefix `ci-rollup` does not walk: this is evidence for a human
           # reading a failure, never an input to a cell's verdict.
-          name: wsl-diag-${{ inputs.area }}-wsl2-ubuntu-${{ strategy.job-index }}
+          name: wsl-diag-${{ inputs.package }}-wsl2-ubuntu
           path: wsl-diag
           if-no-files-found: ignore
           retention-days: 3
@@ -614,7 +656,7 @@ jobs:
         if: ${{ always() }}
         shell: bash
         env:
-          AREA: ${{ inputs.area }}
+          PACKAGE: ${{ inputs.package }}
           JOB: L1
           ENVIRONMENT: wsl2-ubuntu
           RESULT: ${{ job.status }}
@@ -633,10 +675,8 @@ jobs:
           # A guest that dies takes the staging step with it, `wsl-junit` stays
           # empty, and `if-no-files-found: ignore` uploads nothing successfully —
           # so the rollup could only say "produced no report at all", which reads
-          # identically to a tier that ran and had no tests. In run 30595280027
-          # that hid two different faults: claudine's guest was killed by SIGBUS
-          # mid-suite, and darkmatter's shard 3/4 never provisioned at all
-          # (`wsl.exe` exit 4294967295). Both rendered as the same blank cell.
+          # identically to a tier that ran and had no tests. Only the producer
+          # can tell those apart, so it says which.
           #
           # A failing TEST does not reach here: the guest stays healthy, staging
           # succeeds, and the report is uploaded normally.
@@ -647,17 +687,17 @@ jobs:
             detail="the WSL2 guest became unreachable after the test step (L1: ${L1}, staging: ${STAGED}); its reports could not be collected"
           fi
           if [ -n "$detail" ]; then
-            printf '{"area":"%s","job":"%s","environment":"%s","result":"%s","detail":"%s"}\n' \
-              "$AREA" "$JOB" "$ENVIRONMENT" "$RESULT" "$detail" \
+            printf '{"package":"%s","job":"%s","environment":"%s","result":"%s","detail":"%s"}\n' \
+              "$PACKAGE" "$JOB" "$ENVIRONMENT" "$RESULT" "$detail" \
               >"$RUNNER_TEMP/status/status.json"
           else
-            printf '{"area":"%s","job":"%s","environment":"%s","result":"%s"}\n' \
-              "$AREA" "$JOB" "$ENVIRONMENT" "$RESULT" \
+            printf '{"package":"%s","job":"%s","environment":"%s","result":"%s"}\n' \
+              "$PACKAGE" "$JOB" "$ENVIRONMENT" "$RESULT" \
               >"$RUNNER_TEMP/status/status.json"
           fi
       - name: Upload producer status
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: status-${{ inputs.area }}-L1-wsl2-ubuntu-${{ strategy.job-index }}
+          name: status-${{ inputs.package }}-L1-wsl2-ubuntu
           path: ${{ runner.temp }}/status

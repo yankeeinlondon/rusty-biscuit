@@ -19,9 +19,7 @@ use std::time::Duration;
 use quinn::crypto::rustls::QuicClientConfig;
 use quinn::{ClientConfig, Endpoint, ServerConfig, TransportConfig};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-use rustls::pki_types::{
-    CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName, UnixTime,
-};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName, UnixTime};
 use rustls::{DigitallySignedStruct, SignatureScheme};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -99,19 +97,16 @@ impl QuicEndpoint {
         install_default_crypto_provider();
 
         let (server_config, client_config) = build_quinn_configs()?;
-        let mut endpoint = Endpoint::server(server_config, bind_addr).map_err(|source| {
-            QuicError::Bind {
-                addr: bind_addr,
-                source,
-            }
-        })?;
-        endpoint.set_default_client_config(client_config);
-        let local_addr = endpoint
-            .local_addr()
-            .map_err(|source| QuicError::Bind {
+        let mut endpoint =
+            Endpoint::server(server_config, bind_addr).map_err(|source| QuicError::Bind {
                 addr: bind_addr,
                 source,
             })?;
+        endpoint.set_default_client_config(client_config);
+        let local_addr = endpoint.local_addr().map_err(|source| QuicError::Bind {
+            addr: bind_addr,
+            source,
+        })?;
 
         let (tx, rx) = mpsc::unbounded_channel();
         let endpoint_clone = endpoint.clone();
@@ -211,9 +206,7 @@ async fn run_accept_loop(endpoint: Endpoint, tx: mpsc::UnboundedSender<InboundCo
 fn build_quinn_configs() -> Result<(ServerConfig, ClientConfig), QuicError> {
     let cert_key = rcgen::generate_simple_self_signed(vec!["rendezvous".to_string()])?;
     let cert_der = CertificateDer::from(cert_key.cert.der().to_vec());
-    let key_der = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
-        cert_key.key_pair.serialize_der(),
-    ));
+    let key_der = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(cert_key.key_pair.serialize_der()));
 
     let mut server_crypto = rustls::ServerConfig::builder()
         .with_no_client_auth()

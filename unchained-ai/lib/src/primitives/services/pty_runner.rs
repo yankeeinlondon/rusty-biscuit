@@ -9,6 +9,9 @@ use super::error::AgentStatusError;
 /// Default timeout for PTY operations.
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// ConPTY may need its cursor-inheritance timeout to expire during shutdown.
+const OUTPUT_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// A step in an interactive PTY session.
 #[derive(Debug, Clone)]
 pub enum InteractiveStep {
@@ -46,6 +49,7 @@ fn run_pty_blocking(
 ) -> Result<String, AgentStatusError> {
     use std::sync::mpsc;
     use std::thread;
+    use std::time::Instant;
 
     let pty_system = native_pty_system();
 
@@ -67,16 +71,13 @@ fn run_pty_blocking(
         AgentStatusError::PtySpawnError(format!("Failed to spawn '{}': {}", program, e))
     })?;
 
-    // Get reader before dropping slave
     let mut reader = pair
         .master
         .try_clone_reader()
         .map_err(|e| AgentStatusError::PtyReadError(format!("Failed to clone reader: {}", e)))?;
 
-    // CRITICAL: Drop slave so PTY gets EOF after child exits
     drop(pair.slave);
 
-    // Read output in a separate thread to avoid blocking
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
         let mut raw_output = Vec::new();
@@ -84,27 +85,42 @@ fn run_pty_blocking(
         tx.send((raw_output, result)).ok();
     });
 
-    // Wait for reader with timeout. The reader finishes when the child exits
-    // (since slave is dropped, master reader gets EOF). If the child hangs,
-    // recv_timeout fires and we kill the child to unblock the reader thread.
-    let (raw_output, read_result) = match rx.recv_timeout(timeout_dur) {
-        Ok(result) => result,
-        Err(_) => {
+    let start = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {}
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(AgentStatusError::PtyReadError(format!(
+                    "Failed to query child status: {}",
+                    error
+                )));
+            }
+        }
+
+        if start.elapsed() >= timeout_dur {
             let _ = child.kill();
+            let _ = child.wait();
             return Err(AgentStatusError::TimeoutError(format!(
                 "Command timed out after {}s",
                 timeout_dur.as_secs()
             )));
         }
-    };
 
-    // Reap the child process
+        thread::sleep(Duration::from_millis(10));
+    }
+
     let _ = child.wait();
+    drop(pair.master);
 
+    let (raw_output, read_result) = rx.recv_timeout(OUTPUT_DRAIN_TIMEOUT).map_err(|_| {
+        AgentStatusError::TimeoutError("Timed out waiting for PTY output shutdown".to_string())
+    })?;
     read_result
         .map_err(|e| AgentStatusError::PtyReadError(format!("Failed to read PTY output: {}", e)))?;
 
-    // Strip ANSI escape sequences
     let stripped = strip(&raw_output);
 
     String::from_utf8(stripped)
@@ -171,12 +187,8 @@ fn run_pty_interactive_blocking(
         .take_writer()
         .map_err(|e| AgentStatusError::PtyWriteError(format!("Failed to get writer: {}", e)))?;
 
-    // CRITICAL: Drop slave so PTY gets EOF after child exits
     drop(pair.slave);
 
-    // Start reader thread that accumulates output using chunked reads.
-    // Uses chunked read() instead of read_to_end() to handle EIO gracefully
-    // (EIO occurs after child is killed and is expected behavior).
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
         let mut output = Vec::new();
@@ -185,7 +197,7 @@ fn run_pty_interactive_blocking(
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => output.extend_from_slice(&buf[..n]),
-                Err(_) => break, // EIO after kill is expected
+                Err(_) => break,
             }
         }
         tx.send(output).ok();
@@ -193,10 +205,10 @@ fn run_pty_interactive_blocking(
 
     let start = Instant::now();
 
-    // Execute interactive steps
     for step in steps {
         if start.elapsed() >= timeout_dur {
             let _ = child.kill();
+            let _ = child.wait();
             return Err(AgentStatusError::TimeoutError(format!(
                 "Interactive session timed out after {}s",
                 timeout_dur.as_secs()
@@ -219,23 +231,15 @@ fn run_pty_interactive_blocking(
         }
     }
 
-    // Drop writer so child sees EOF on stdin
     drop(writer);
 
-    // Kill the child process to trigger reader EOF
     let _ = child.kill();
     let _ = child.wait();
+    drop(pair.master);
 
-    // Collect output with remaining timeout
-    let remaining = timeout_dur.saturating_sub(start.elapsed());
-    let raw_output = rx
-        .recv_timeout(remaining.max(Duration::from_secs(2)))
-        .map_err(|_| {
-            AgentStatusError::TimeoutError(format!(
-                "Timed out waiting for output after {}s",
-                timeout_dur.as_secs()
-            ))
-        })?;
+    let raw_output = rx.recv_timeout(OUTPUT_DRAIN_TIMEOUT).map_err(|_| {
+        AgentStatusError::TimeoutError("Timed out waiting for PTY output shutdown".to_string())
+    })?;
 
     let stripped = strip(&raw_output);
 
@@ -247,20 +251,39 @@ fn run_pty_interactive_blocking(
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    const ECHO_PROGRAM: &str = "echo";
+    #[cfg(windows)]
+    const ECHO_PROGRAM: &str = "cmd.exe";
+
+    #[cfg(unix)]
+    const ECHO_ARGS: &[&str] = &["hello world"];
+    #[cfg(windows)]
+    const ECHO_ARGS: &[&str] = &["/D", "/S", "/C", "echo hello world"];
+
+    #[cfg(unix)]
+    const ANSI_PROGRAM: &str = "printf";
+    #[cfg(windows)]
+    const ANSI_PROGRAM: &str = "cmd.exe";
+
+    #[cfg(unix)]
+    const ANSI_ARGS: &[&str] = &["\x1b[31mred\x1b[0m"];
+    #[cfg(windows)]
+    const ANSI_ARGS: &[&str] = &["/D", "/S", "/C", "echo \x1b[31mred\x1b[0m"];
+
     #[tokio::test]
     async fn test_run_echo_command() {
-        let result = run_pty_command("echo", &["hello world"], None).await;
-        assert!(result.is_ok());
-        let output = result.unwrap();
+        let output = run_pty_command(ECHO_PROGRAM, ECHO_ARGS, None)
+            .await
+            .expect("echo command should succeed");
         assert!(output.trim().contains("hello world"));
     }
 
     #[tokio::test]
     async fn test_ansi_stripping() {
-        // echo with ANSI should have codes stripped
-        let result = run_pty_command("printf", &[r"\033[31mred\033[0m"], None).await;
-        assert!(result.is_ok());
-        let output = result.unwrap();
+        let output = run_pty_command(ANSI_PROGRAM, ANSI_ARGS, None)
+            .await
+            .expect("ANSI-producing command should succeed");
         assert!(output.trim().contains("red"));
         assert!(!output.contains("\x1b["));
     }
@@ -272,8 +295,8 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(unix)]
     async fn test_interactive_cat() {
-        // Use cat as an interactive program: write text, then collect output
         let steps = vec![
             InteractiveStep::Wait(Duration::from_millis(100)),
             InteractiveStep::Write("hello interactive\n".to_string()),
@@ -287,6 +310,19 @@ mod tests {
             "Output should contain written text, got: {}",
             output
         );
+    }
+
+    #[tokio::test]
+    #[cfg(windows)]
+    async fn test_interactive_command_shutdown() {
+        let steps = vec![
+            InteractiveStep::Wait(Duration::from_millis(100)),
+            InteractiveStep::Write("exit\r\n".to_string()),
+            InteractiveStep::Wait(Duration::from_millis(200)),
+        ];
+        run_pty_interactive("cmd.exe", &steps, Some(Duration::from_secs(3)))
+            .await
+            .expect("interactive command should shut down cleanly");
     }
 
     #[tokio::test]

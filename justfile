@@ -25,19 +25,20 @@ import "./just/spec.just"
 # Every package area in this monorepo that owns tests.
 #
 # This list is what `check-canonical` validates and what `_orchestrate`,
-# `changed-areas`, and `install` iterate. It used to be a verbatim copy of the
-# 21 `ci: true` records in `.github/ci/areas.json`, which made the canonical
-# recipe guard structurally blind to every excluded area — so the six areas
-# below could sit at `ci: false` with "blocked on the canonical recipe set" as
-# the recorded reason and nothing ever reported the gap. An area is listed here
-# because it has tests worth gating, NOT because it is already promoted to CI;
-# promotion remains a separate, deliberate decision in `areas.json`.
+# `changed-areas`, and `install` iterate. An area is listed here because it has
+# tests worth gating, NOT because it is already promoted to CI; promotion is a
+# separate, deliberate decision in the package's own manifest
+# (`[package.metadata.ci] gates`).
 #
 # Deliberately absent: `visualizer`, `reaper`, `agent-sandbox`, and `tabby`.
 # Those four carry zero or one test, so a canonical recipe set would gate
 # nothing (`agent-sandbox` and `tabby` have no justfile at all). Add each one
 # here at the same time it gains a suite worth running.
 areas := "biscuit-hash biscuit-location biscuit-speaks biscuit-terminal biscuit-tui schematic biscuit-file unchained-ai playa tree-hugger darkmatter sniff model-citizen claudine research queue homelab biscuit-contract biscuit-icon renderable worktree tools biscuit-test-harness biscuit-browser-harness messenger biscuit-visualized biscuit-clipboard"
+
+# The `areas :=` list above is a LOCAL convenience (canonical-recipe validation
+# and `changed-areas` iteration). CI does not read it: CI selects and records
+# work by package, with package policy in each manifest's `[package.metadata.ci]`.
 BOLD := '\033[1m'
 DIM := '\033[2m'
 ITALIC := '\033[3m'
@@ -617,10 +618,12 @@ _ensure-build-deps:
     fi
     echo "Build dependencies installed."
 
-# ensure the system libraries areas declare in `.github/ci/areas.json` are present
-# (no argument = every area's libraries, for `just init`; an area name = only that
-# area's, which is what CI runs before an area's build/test/lint commands)
-_ensure-native-libs area="":
+# ensure the system libraries packages declare in their own manifests
+# (`[package.metadata.ci.native]`) are present. No argument = every workspace
+# package's libraries (for `just init` and the workspace-wide coverage job);
+# arguments = an explicit list of CI-key package names, which is what CI passes
+# after the scope job computes a package's dependency-closure union.
+_ensure-native-libs *packages="":
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -653,73 +656,53 @@ _ensure-native-libs area="":
         esac
     }
 
-    areas_json="{{ justfile_directory() }}/.github/ci/areas.json"
-
-    if ! command -v jq &> /dev/null; then
-        if [[ "$runner_key" == "windows-latest" ]]; then
-            # No apt/brew here; winget is the only system package manager.
-            if command -v winget &> /dev/null; then
-                echo "Installing jq (needed to read .github/ci/areas.json)..."
-                winget install --id jqlang.jq -e --silent \
-                    --accept-source-agreements --accept-package-agreements || true
-                hash -r
-            fi
-            if ! command -v jq &> /dev/null; then
-                # No area currently declares windows-latest native packages;
-                # scan only the "native" blocks so a declaration added later
-                # is not silently skipped on a jq-less host.
-                awk_bin="$(command -v awk || command -v gawk || true)"
-                if [[ -n "$awk_bin" ]] && "$awk_bin" '
-                        /"native"[[:space:]]*:[[:space:]]*\{/ { inblock=1 }
-                        inblock && /windows-latest/           { found=1 }
-                        inblock && /^[[:space:]]*\}/          { inblock=0 }
-                        END { exit(found ? 1 : 0) }' "$areas_json"; then
-                    echo "no native prerequisites declared for Windows — skipping"
-                    exit 0
-                fi
-                if [[ -z "$awk_bin" ]]; then
-                    echo "Cannot verify Windows native prerequisites: neither jq nor awk/gawk is installed." >&2
-                    echo "Install jq (winget install jqlang.jq) or the Cygwin gawk package, then re-run just init." >&2
-                else
-                    echo "Windows native prerequisites are declared in .github/ci/areas.json but jq is not installed." >&2
-                    echo "Install jq with: winget install jqlang.jq — then re-run just init." >&2
-                fi
-                exit 1
-            fi
-        elif [[ -z "$pm" ]]; then
-            echo "Could not detect a package manager; install jq, then run just init again." >&2
-            exit 1
-        else
-            echo "Installing jq (needed to read .github/ci/areas.json)..."
-            install_packages jq
-        fi
-    fi
-
-    # `.github/ci/areas.json` declares EVERY area -- gating or not -- and is the
-    # single source of truth for native OS packages; this recipe is the single
-    # installer. A requirement is declared once, on the area that needs it, and
-    # reaches both developer hosts and CI from there. Declarations are per-OS, so
-    # a Linux-only dependency never touches a macOS or Windows host.
-    area="{{ area }}"
-
-    if [[ -n "$area" ]] && ! jq -e --arg a "$area" 'any(.[]; .area == $a)' "$areas_json" > /dev/null; then
-        echo "No area named '$area' in .github/ci/areas.json" >&2
-        exit 1
-    fi
-
-    # An empty area selects every record, which is what `just init` and the
-    # workspace-wide coverage job need: non-gating areas carry declarations too
-    # and have no area name to scope to.
-    declared=$(jq -r --arg k "$runner_key" --arg a "$area" \
-        '[.[] | select($a == "" or .area == $a) | (.native // {})[$k] // []] | add // [] | unique | .[]' \
-        "$areas_json")
+    declared="{{ packages }}"
 
     if [[ -z "$declared" ]]; then
-        echo "no native prerequisites declared for ${area:-all areas} on $runner_key"
+        # The whole-workspace form. Declarations live in each package's own
+        # manifest, which `cargo metadata` reports; a package's system
+        # libraries are a property of the package, so there is one lookup for
+        # developer hosts and CI alike. The WSL2 guest has no cargo, but CI
+        # never uses this form there — it passes the explicit list the scope
+        # job computed.
+        if ! command -v cargo &> /dev/null; then
+            echo "cargo is required to read package native declarations; pass an" >&2
+            echo "explicit package list instead (CI does)." >&2
+            exit 1
+        fi
+        if ! command -v jq &> /dev/null; then
+            if [[ "$runner_key" == "windows-latest" ]]; then
+                # No apt/brew here; winget is the only system package manager.
+                if command -v winget &> /dev/null; then
+                    echo "Installing jq (needed to read package native declarations)..."
+                    winget install --id jqlang.jq -e --silent \
+                        --accept-source-agreements --accept-package-agreements || true
+                    hash -r
+                fi
+                if ! command -v jq &> /dev/null; then
+                    echo "Cannot verify Windows native prerequisites: jq is not installed." >&2
+                    echo "Install jq with: winget install jqlang.jq — then re-run just init." >&2
+                    exit 1
+                fi
+            elif [[ -z "$pm" ]]; then
+                echo "Could not detect a package manager; install jq, then run just init again." >&2
+                exit 1
+            else
+                echo "Installing jq (needed to read package native declarations)..."
+                install_packages jq
+            fi
+        fi
+        declared=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r --arg k "$runner_key" \
+                '[.packages[].metadata.ci.native[$k] // []] | add // [] | unique | .[]')
+    fi
+
+    if [[ -z "$declared" ]]; then
+        echo "no native prerequisites declared for $runner_key"
         exit 0
     fi
 
-    # areas.json names packages the way the CI runner does (apt on Linux, brew on
+    # Manifests name packages the way the CI runner does (apt on Linux, brew on
     # macOS). Each row adds the pkg-config module that proves the library is
     # installed — the same check the failing `-sys` build scripts perform — plus
     # the equivalent package name on the other Linux package managers.
@@ -991,20 +974,42 @@ _ensure-cargo-sweep:
 sweep *args="": _ensure-cargo-sweep
     @scripts/sweep.sh {{ args }}
 
-# verify the Cargo target volume has enough free space for another Windows gate
+# restore the native Cargo target cap if needed, then verify Windows headroom
 storage-check: _storage_preflight
 
 # run the native Windows 80 GB sweep policy now
 windows-sweep:
     @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows-cargo-sweep.ps1 -Operation run
 
-# install the native Windows sweep policy in Task Scheduler
+# install the daily native Windows sweep policy in Task Scheduler
 install-windows-sweep:
     @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows-cargo-sweep.ps1 -Operation install
 
 # show the native Windows sweep task's state and next run
 windows-sweep-status:
     @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows-cargo-sweep.ps1 -Operation status
+
+# A WSL2 ext4.vhdx grows to its high-water mark and never shrinks, so it can
+# starve the target volume of space that sweeping Cargo cannot return — the
+# usual cause of a storage-preflight failure that `just sweep` does not fix.
+# WSL's own `--set-sparse` remedy is disabled upstream for corruption risk
+# (docs/kache-strategy.md), which is why this reclaim is scheduled, not automatic.
+#
+# reclaim WSL2 vhdx slack now (elevated; ends any running WSL session)
+wsl-compact *args="":
+    @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/wsl-vhdx-compact.ps1 -Operation run {{ args }}
+
+# install the weekly WSL2 vhdx compaction task in Task Scheduler
+install-wsl-compact:
+    @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/wsl-vhdx-compact.ps1 -Operation install
+
+# show the WSL2 vhdx task's state plus per-distro reclaimable space
+wsl-compact-status:
+    @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/wsl-vhdx-compact.ps1 -Operation status
+
+# remove the weekly WSL2 vhdx compaction task
+uninstall-wsl-compact:
+    @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/wsl-vhdx-compact.ps1 -Operation uninstall
 
 # Separate from the Windows task above even on WSL2: that one sweeps C:\ and
 # cannot see the guest's ext4 filesystem, where target/ actually lives.

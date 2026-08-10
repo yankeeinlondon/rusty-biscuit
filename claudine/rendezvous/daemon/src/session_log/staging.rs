@@ -42,15 +42,12 @@ impl SessionLogManager {
         // past the value we persist.
         let (envelope, counter_to_persist) = {
             let mut sealer = self.sealer.lock();
-            let envelope = sealer.seal(
-                chunk.as_path(),
-                PayloadKind::Snapshot,
-                snapshot_bytes,
-            );
+            let envelope = sealer.seal(chunk.as_path(), PayloadKind::Snapshot, snapshot_bytes);
             let counter = sealer.next_counter();
             (envelope, counter)
         };
-        self.storage.save_outbound_counter(&self.node_id(), counter_to_persist)?;
+        self.storage
+            .save_outbound_counter(&self.node_id(), counter_to_persist)?;
         Ok(Some(envelope))
     }
 
@@ -191,7 +188,9 @@ impl SessionLogManager {
         };
 
         drop(inner);
-        Ok(StagedRemoteUpdate { state: staged_state })
+        Ok(StagedRemoteUpdate {
+            state: staged_state,
+        })
     }
 
     /// Commit a previously staged remote update by persisting the
@@ -344,10 +343,7 @@ impl SessionLogManager {
     /// entry in that chunk to the projection batcher. Callers should
     /// invoke this only from the live sync path — startup replay relies
     /// on [`Self::rebuild_projection_from_storage`] instead.
-    pub fn submit_chunk_to_projection(
-        &self,
-        chunk: &ChunkId,
-    ) -> Result<(), SessionLogError> {
+    pub fn submit_chunk_to_projection(&self, chunk: &ChunkId) -> Result<(), SessionLogError> {
         let key = chunk.as_path();
         let inner = self.inner.lock();
         let Some(state) = inner.chunks.get(&key) else {

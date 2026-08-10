@@ -154,12 +154,15 @@ async fn an_incompatible_endpoint_is_rejected_without_booting() {
     let tmp = TempDir::new().expect("tempdir");
     let before = shared_boot_count();
 
+    #[cfg(unix)]
+    let endpoint =
+        LocalEndpoint::WindowsNamedPipe(r"\\.\pipe\claudine-rendezvous-sid-S-1-5-21-7".into());
+    #[cfg(windows)]
+    let endpoint = LocalEndpoint::UnixSocket(tmp.path().join("foreign.sock"));
+
     let error = expect_refusal(
-        spawn_local_server(
-            LocalEndpoint::WindowsNamedPipe(r"\\.\pipe\claudine-rendezvous-sid-S-1-5-21-7".into()),
-            ephemeral_config(&tmp),
-        ),
-        "a named pipe is not bindable on Unix",
+        spawn_local_server(endpoint, ephemeral_config(&tmp)),
+        "the other target's transport must not bind",
     );
 
     assert!(matches!(error, ServerError::Endpoint(_)), "got: {error:?}");

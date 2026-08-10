@@ -11,12 +11,12 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::{Duration, Instant};
 
 use rendezvous_client::connect;
+use rendezvous_core::local_endpoint::{LocalEndpoint, test_support::private_endpoint};
 use rendezvous_core::{
     AppendEntryRequest, ConnectToPeerRequest, CreateInvitationRequest, ListChunkEntriesRequest,
     ListPeersRequest, ListSessionChunksRequest, PeerConnectionState, PeerSource,
     SyncWithPeerRequest,
 };
-use rendezvous_core::local_endpoint::{LocalEndpoint, test_support::private_endpoint};
 use rendezvous_daemon::local_transport::spawn_local_server;
 use rendezvous_daemon::server::{DaemonConfig, NetworkConfig, ServerHandle};
 use tempfile::TempDir;
@@ -173,7 +173,9 @@ async fn wait_for_inbound(
 #[tokio::test]
 async fn real_mdns_discovered_peer_cannot_sync_before_approval() {
     if std::env::var("RENDEZVOUS_REAL_MDNS").as_deref() != Ok("1") {
-        eprintln!("skipping real_ mDNS data-exchange boundary test (set RENDEZVOUS_REAL_MDNS=1 to run)");
+        eprintln!(
+            "skipping real_ mDNS data-exchange boundary test (set RENDEZVOUS_REAL_MDNS=1 to run)"
+        );
         return;
     }
     let tmp = TempDir::new().expect("tempdir");

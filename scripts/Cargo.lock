@@ -432,6 +432,7 @@ dependencies = [
  "tracing-subscriber",
  "unic-langid",
  "unicode-width 0.2.2",
+ "url",
  "viuer",
 ]
 

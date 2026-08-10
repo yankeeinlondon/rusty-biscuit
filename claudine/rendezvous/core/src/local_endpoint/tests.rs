@@ -82,6 +82,16 @@ fn pipe_endpoint(name: &str) -> LocalEndpoint {
     LocalEndpoint::WindowsNamedPipe(OsString::from(name))
 }
 
+#[cfg(unix)]
+fn private_tempdir() -> tempfile::TempDir {
+    use std::os::unix::fs::PermissionsExt;
+
+    tempfile::Builder::new()
+        .permissions(std::fs::Permissions::from_mode(0o700))
+        .tempdir()
+        .expect("private tempdir")
+}
+
 // ---------------------------------------------------------------------------
 // Enum and accessor behavior
 // ---------------------------------------------------------------------------
@@ -362,9 +372,7 @@ fn unix_default_falls_back_to_a_uid_qualified_private_temp_directory() {
 #[test]
 fn unix_default_uses_a_private_xdg_runtime_dir_when_one_is_usable() {
     let env = EnvSnapshot::new();
-    let runtime = tempfile::tempdir().expect("tempdir");
-    // tempfile creates 0700 directories owned by the current user, which is
-    // exactly the shape a real $XDG_RUNTIME_DIR has.
+    let runtime = private_tempdir();
     env.set("XDG_RUNTIME_DIR", runtime.path());
 
     assert_eq!(
@@ -452,7 +460,7 @@ fn wsl_markers_do_not_move_identity_off_the_unix_branch() {
 #[test]
 fn unix_default_prefers_the_runtime_dir_over_tmpdir() {
     let env = EnvSnapshot::new();
-    let runtime = tempfile::tempdir().expect("tempdir");
+    let runtime = private_tempdir();
     let tmp = tempfile::tempdir().expect("tempdir");
     env.set("XDG_RUNTIME_DIR", runtime.path());
     env.set("TMPDIR", tmp.path());

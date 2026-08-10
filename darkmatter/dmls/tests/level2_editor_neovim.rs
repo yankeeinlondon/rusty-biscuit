@@ -47,7 +47,7 @@ use std::time::{Duration, Instant};
 use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serde::Deserialize;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 /// One deterministic token site per assertion target; distinct identifier
 /// names (`title` / `east` / `cond` / `nope`) keep needle lookups unambiguous.
@@ -93,13 +93,18 @@ fn nvim_available() -> bool {
 }
 
 /// Workspace root for one test run: `tokens.md`, its transclusion target, and
-/// a `.dmls.toml` root marker. Canonicalized so the paths Neovim reports match
+/// a `.dmls.toml` root marker. Canonicalized on Unix so Neovim's paths match
 /// the paths `dmls` resolves (macOS `/var` → `/private/var`).
+/// Windows canonicalization adds a `\\?\` prefix that Ex interprets as
+/// pattern syntax instead of part of the filename.
 fn stage_workspace() -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().expect("create workspace tempdir");
     fs::write(dir.path().join("tokens.md"), FIXTURE_DOC).unwrap();
     fs::write(dir.path().join("other.md"), "# Other\n").unwrap();
     fs::write(dir.path().join(".dmls.toml"), DMLS_TOML).unwrap();
+    #[cfg(windows)]
+    let root = dir.path().to_path_buf();
+    #[cfg(not(windows))]
     let root = fs::canonicalize(dir.path()).unwrap_or_else(|_| dir.path().to_path_buf());
     (dir, root)
 }
@@ -375,11 +380,12 @@ fn wait_for_frame(
 
 #[test]
 fn level2_neovim_tmux_renders_recipe_colors_and_repaints() {
-    require_level!(
-        Level::L2,
-        nvim_available() && TmuxHarness::available(),
-        "nvim+tmux"
-    );
+    // Two gates, not one composite: a composite gate carries no backend
+    // identity, so it can neither satisfy nor block
+    // BISCUIT_TEST_REQUIRED_BACKENDS — and this is the only test that proves
+    // dmls's declared tmux backend actually executes in CI.
+    require_level!(Level::L2, nvim_available(), "nvim");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let (_dir, root) = stage_workspace();
 
     let init = fs::read_to_string(fixture_path("init.lua"))

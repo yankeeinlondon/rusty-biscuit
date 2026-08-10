@@ -55,3 +55,8 @@ windows = { version = "0.62", features = [
 [package.metadata.benchmarks]
 required = false
 reason = "Thin CLI wrapper around biscuit-tui; no measurable hot paths."
+
+# CI policy: biscuit-tui-cli owns the area's L2 (real-terminal) tier tests.
+[package.metadata.ci.tests]
+tiers = ["L1", "L2"]
+l2-backends = ["tmux", "wezterm", "kitty"]

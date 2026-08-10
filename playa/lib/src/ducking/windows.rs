@@ -133,10 +133,6 @@ impl FadeFailures {
     pub(crate) fn is_empty(&self) -> bool {
         self.volume_write_failures == 0 && self.mute_write_failures == 0
     }
-
-    pub(crate) fn total(&self) -> usize {
-        self.volume_write_failures + self.mute_write_failures
-    }
 }
 
 /// Builds fade plans for all snapshotted sessions that match the live volume map.
@@ -236,10 +232,10 @@ pub(crate) fn execute_multi_session_fade(
             let step = &plan.steps[step_idx];
             let vol = step.volume.clamp(0.0, 1.0);
 
-            if let Some(writer) = volume_map.get(&plan.key) {
-                if writer.set_volume(vol).is_err() {
-                    failures.volume_write_failures += 1;
-                }
+            if let Some(writer) = volume_map.get(&plan.key)
+                && writer.set_volume(vol).is_err()
+            {
+                failures.volume_write_failures += 1;
             }
         }
 
@@ -256,10 +252,10 @@ pub(crate) fn execute_multi_session_fade(
 
     if restore_mute {
         for plan in plans {
-            if let Some(writer) = volume_map.get(&plan.key) {
-                if writer.set_mute(plan.mute).is_err() {
-                    failures.mute_write_failures += 1;
-                }
+            if let Some(writer) = volume_map.get(&plan.key)
+                && writer.set_mute(plan.mute).is_err()
+            {
+                failures.mute_write_failures += 1;
             }
         }
     }
@@ -451,7 +447,7 @@ fn enumerate_sessions(our_pid: u32) -> Result<Vec<LiveSession>, DuckingError> {
             let Ok(instance_id_pwstr) = control2.GetSessionInstanceIdentifier() else {
                 continue;
             };
-            let Some(key) = (unsafe { pwstr_to_string_and_free(instance_id_pwstr) }) else {
+            let Some(key) = pwstr_to_string_and_free(instance_id_pwstr) else {
                 continue;
             };
             if key.is_empty() {
@@ -511,7 +507,7 @@ fn build_volume_map(
                 continue;
             };
 
-            let Some(key) = (unsafe { pwstr_to_string_and_free(instance_id_pwstr) }) else {
+            let Some(key) = pwstr_to_string_and_free(instance_id_pwstr) else {
                 continue;
             };
             if key.is_empty() {
@@ -689,7 +685,10 @@ mod tests {
             eprintln!("Skipping: WASAPI not available");
             return;
         }
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let snapshot = rt.block_on(backend.snapshot()).unwrap();
         assert!(snapshot.len() <= 20, "unexpectedly many sessions");
     }
@@ -950,7 +949,7 @@ mod tests {
     fn fade_failures_default_is_empty() {
         let f = FadeFailures::default();
         assert!(f.is_empty());
-        assert_eq!(f.total(), 0);
+        assert_eq!(f.volume_write_failures + f.mute_write_failures, 0);
     }
 
     #[test]
@@ -960,7 +959,7 @@ mod tests {
             mute_write_failures: 0,
         };
         assert!(!f.is_empty());
-        assert_eq!(f.total(), 3);
+        assert_eq!(f.volume_write_failures + f.mute_write_failures, 3);
     }
 
     #[test]

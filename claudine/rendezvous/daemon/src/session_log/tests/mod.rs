@@ -25,11 +25,13 @@ fn make_remote_snapshot(
             session_id.to_string(),
             chunk_index - 1,
         );
-        map.insert("previous_chunk_id", prev.as_path().as_str()).unwrap();
+        map.insert("previous_chunk_id", prev.as_path().as_str())
+            .unwrap();
     }
     let list = doc.get_list(ENTRIES_CONTAINER);
     for entry in entries {
-        list.push(serde_json::to_string(entry).unwrap().as_str()).unwrap();
+        list.push(serde_json::to_string(entry).unwrap().as_str())
+            .unwrap();
     }
     doc.commit();
     doc.export(ExportMode::Snapshot).unwrap()
@@ -64,10 +66,13 @@ fn build_harness(config: ChunkConfig) -> Harness {
     let tmp = TempDir::new().expect("tempdir");
     let storage = Storage::open(tmp.path().join("session.redb")).expect("open storage");
     let projection = Projection::in_memory().expect("projection");
-    let worker = spawn(projection.clone(), BatcherConfig {
-        flush_interval: std::time::Duration::from_millis(20),
-        flush_size: 16,
-    });
+    let worker = spawn(
+        projection.clone(),
+        BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        },
+    );
     let manager = SessionLogManager::with_clock(
         storage.clone(),
         worker.handle(),
@@ -85,10 +90,8 @@ fn build_harness(config: ChunkConfig) -> Harness {
     }
 }
 
-
 mod append_rotation;
 mod durability;
 mod remote_validation;
-mod replay_rehydration;
 mod replace_update;
-
+mod replay_rehydration;

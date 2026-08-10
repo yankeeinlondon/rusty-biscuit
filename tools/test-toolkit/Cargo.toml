@@ -31,8 +31,18 @@ required-features = ["backend-proof"]
 [dev-dependencies]
 serial_test = "3"
 tempfile = "3"
+serde_json = "1"
 
 # Opt-out of benchmarking: this crate has no algorithmic hot paths.
 [package.metadata.benchmarks]
 required = false
 reason = "Test helper crate; no measurable hot paths."
+
+# CI exclusion: 63 L1 tests that currently run in no CI job. Promotion is
+# blocked on the canonical just recipe set (check-canonical) for tools/.
+[package.metadata.ci]
+gates = false
+exclusion-class = "promotion-pending"
+owner = "@yankeeinlondon"
+reason = "63 L1 tests that currently run in NO CI job. Promotion is blocked on the canonical just recipe set (check-canonical) for tools/; the transitive-coverage argument was never true — a consumer package's suite exercises the harness code paths it happens to call, not test-toolkit's own tests."
+expiry = "2026-10-31"

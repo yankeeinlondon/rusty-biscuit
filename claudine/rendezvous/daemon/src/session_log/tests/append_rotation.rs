@@ -81,8 +81,7 @@ fn concurrent_appends_to_one_session_keep_unique_durable_sequences() {
         .manager
         .list_chunk_entries(&chunk)
         .expect("list in-memory");
-    let mut in_memory_messages: Vec<String> =
-        in_memory.iter().map(|e| e.message.clone()).collect();
+    let mut in_memory_messages: Vec<String> = in_memory.iter().map(|e| e.message.clone()).collect();
     in_memory_messages.sort();
     let expected_messages: Vec<String> =
         (0..append_count).map(|i| format!("message-{i}")).collect();
@@ -98,10 +97,13 @@ fn concurrent_appends_to_one_session_keep_unique_durable_sequences() {
     // sequential tests miss — a lost redb write would only surface
     // after reload.
     let projection2 = Projection::in_memory().expect("projection2");
-    let worker2 = spawn(projection2.clone(), BatcherConfig {
-        flush_interval: std::time::Duration::from_millis(20),
-        flush_size: 16,
-    });
+    let worker2 = spawn(
+        projection2.clone(),
+        BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        },
+    );
     let manager2 = SessionLogManager::with_clock(
         harness.storage.clone(),
         worker2.handle(),
@@ -115,8 +117,7 @@ fn concurrent_appends_to_one_session_keep_unique_durable_sequences() {
     let durable = manager2
         .list_chunk_entries(&chunk)
         .expect("list after reload");
-    let mut durable_messages: Vec<String> =
-        durable.iter().map(|e| e.message.clone()).collect();
+    let mut durable_messages: Vec<String> = durable.iter().map(|e| e.message.clone()).collect();
     durable_messages.sort();
     assert_eq!(
         durable_messages, expected_messages,
@@ -172,10 +173,13 @@ fn rehydrate_picks_up_existing_snapshots() {
     let storage_path = tmp.path().join("session.redb");
     let storage = Storage::open(&storage_path).expect("storage");
     let projection = Projection::in_memory().expect("projection");
-    let worker = spawn(projection.clone(), BatcherConfig {
-        flush_interval: std::time::Duration::from_millis(20),
-        flush_size: 16,
-    });
+    let worker = spawn(
+        projection.clone(),
+        BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        },
+    );
     let manager = SessionLogManager::with_clock(
         storage.clone(),
         worker.handle(),
@@ -194,10 +198,13 @@ fn rehydrate_picks_up_existing_snapshots() {
     drop(manager);
 
     let projection2 = Projection::in_memory().expect("projection");
-    let worker2 = spawn(projection2.clone(), BatcherConfig {
-        flush_interval: std::time::Duration::from_millis(20),
-        flush_size: 16,
-    });
+    let worker2 = spawn(
+        projection2.clone(),
+        BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        },
+    );
     let manager2 = SessionLogManager::with_clock(
         storage,
         worker2.handle(),
@@ -221,7 +228,14 @@ fn append_succeeds_after_batcher_shutdown_without_retry_ambiguity() {
 
     let first = harness
         .manager
-        .append_entry("node-a", "session-1", "test", "info", "before-shutdown", None)
+        .append_entry(
+            "node-a",
+            "session-1",
+            "test",
+            "info",
+            "before-shutdown",
+            None,
+        )
         .expect("first append");
     assert_eq!(first.sequence, 0);
 
@@ -229,7 +243,14 @@ fn append_succeeds_after_batcher_shutdown_without_retry_ambiguity() {
 
     let second = harness
         .manager
-        .append_entry("node-a", "session-1", "test", "info", "after-shutdown", None)
+        .append_entry(
+            "node-a",
+            "session-1",
+            "test",
+            "info",
+            "after-shutdown",
+            None,
+        )
         .expect("append must succeed even with closed batcher");
     assert_eq!(second.sequence, 1);
 

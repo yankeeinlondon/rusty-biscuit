@@ -36,13 +36,11 @@ fn skipped_case(name: &str) -> String {
     format!(r#"        <testcase name="{name}" classname="pkg" time="0.0"><skipped/></testcase>"#)
 }
 
-fn record(area: &str, environment: &str, tier: Tier, shard: &str, package: &str) -> RunRecord {
+fn record(package: &str, environment: &str, tier: Tier) -> RunRecord {
     RunRecord {
-        area: area.to_owned(),
+        package: package.to_owned(),
         environment: environment.to_owned(),
         tier,
-        shard: shard.to_owned(),
-        package: package.to_owned(),
         artifact: "junit-test".to_owned(),
         degraded: false,
         report_present: true,
@@ -56,8 +54,8 @@ fn record(area: &str, environment: &str, tier: Tier, shard: &str, package: &str)
     }
 }
 
-fn passing_record(area: &str, environment: &str, tier: Tier) -> RunRecord {
-    let mut rec = record(area, environment, tier, "1/1", "pkg");
+fn passing_record(package: &str, environment: &str, tier: Tier) -> RunRecord {
+    let mut rec = record(package, environment, tier);
     rec.counts = Counts {
         total: 3,
         passed: 3,
@@ -67,21 +65,22 @@ fn passing_record(area: &str, environment: &str, tier: Tier) -> RunRecord {
     rec
 }
 
-fn expectation(area: &str, environment: &str, tier: Tier) -> ExpectedCell {
+fn expectation(package: &str, environment: &str, tier: Tier) -> ExpectedCell {
     ExpectedCell {
         key: CellKey {
-            area: area.to_owned(),
+            package: package.to_owned(),
             environment: environment.to_owned(),
             tier,
         },
-        shards: vec!["1/1".to_owned()],
         backends: Vec::new(),
-        declared_gap: None,
+        gap: None,
+        exclusion: None,
+        companion_suites: Vec::new(),
     }
 }
 
-/// A well-formed, owned, unexpired `areas.json` policy gap. Tests that exercise
-/// a *malformed* one mutate this rather than restating every field.
+/// A well-formed, owned, unexpired governed capability gap. Tests that
+/// exercise a *malformed* one mutate this rather than restating every field.
 fn gap() -> DeclaredGap {
     DeclaredGap {
         owner: "@yankeeinlondon".to_owned(),
@@ -90,15 +89,91 @@ fn gap() -> DeclaredGap {
     }
 }
 
+fn exclusion() -> Exclusion {
+    Exclusion {
+        exclusion_class: "promotion-pending".to_owned(),
+        owner: "@yankeeinlondon".to_owned(),
+        reason: "blocked on the canonical recipe set".to_owned(),
+        expiry: Some("2026-10-31".to_owned()),
+    }
+}
+
+/// The four standard environments, shaped like the checked-in
+/// `environments.json`: tmux on Linux/macOS, headless browser and Node on
+/// Linux, and an archive-only WSL2 environment hosted by Windows. Every
+/// absence the table governs (tmux and headless_browser off ubuntu) is a
+/// GOVERNED absence here too.
+fn test_environments() -> Vec<Environment> {
+    let governed_gap = |reason: &str| Capability::Governed {
+        available: false,
+        reason: reason.to_owned(),
+        owner: "@yankeeinlondon".to_owned(),
+        expiry: "2027-01-31".to_owned(),
+    };
+    let plain = |tmux: bool, browser: bool, node: bool, archive: bool| {
+        BTreeMap::from([
+            ("tmux".to_owned(), Capability::Available(tmux)),
+            (
+                "headless_browser".to_owned(),
+                Capability::Available(browser),
+            ),
+            ("node_pnpm".to_owned(), Capability::Available(node)),
+            ("archive_only".to_owned(), Capability::Available(archive)),
+        ])
+    };
+    let with_governed_absences = |mut caps: BTreeMap<String, Capability>| {
+        caps.insert("tmux".to_owned(), governed_gap("tmux has no Windows port"));
+        caps.insert(
+            "headless_browser".to_owned(),
+            governed_gap("the browser tier is Linux-hosted in CI"),
+        );
+        caps
+    };
+    vec![
+        Environment {
+            name: "ubuntu-latest".to_owned(),
+            capabilities: plain(true, true, true, false),
+        },
+        Environment {
+            name: "windows-latest".to_owned(),
+            capabilities: with_governed_absences(plain(false, false, false, false)),
+        },
+        Environment {
+            name: "macos-latest".to_owned(),
+            capabilities: {
+                let mut caps = plain(true, false, false, false);
+                caps.insert(
+                    "headless_browser".to_owned(),
+                    governed_gap("the browser tier is Linux-hosted in CI"),
+                );
+                caps
+            },
+        },
+        Environment {
+            name: "wsl2-ubuntu".to_owned(),
+            capabilities: with_governed_absences(plain(false, false, false, true)),
+        },
+    ]
+}
+
+fn policy(package: &str) -> PackagePolicy {
+    PackagePolicy {
+        package: package.to_owned(),
+        gates: true,
+        tiers: vec![Tier::L1],
+        l2_backends: Vec::new(),
+        companion_suites: Vec::new(),
+        exclusion: None,
+    }
+}
+
 /// Classify with the given expectations and records and nothing else.
 fn classify_simple(expected: &[ExpectedCell], records: &[RunRecord]) -> Vec<Cell> {
-    let provisioned = BTreeMap::new();
     let expected_tests = BTreeMap::new();
     classify(&ClassifyInputs {
         expected,
         records,
         statuses: &[],
-        provisioned: &provisioned,
         expected_tests: &expected_tests,
     })
 }
@@ -119,12 +194,11 @@ fn rollup_of(cells: Vec<Cell>, scope: &[&str]) -> Rollup {
     }
 }
 
-fn failure_entry(area: &str, environment: &str, tier: Tier) -> FailureEntry {
+fn failure_entry(package: &str, environment: &str, tier: Tier) -> FailureEntry {
     FailureEntry {
-        area: area.to_owned(),
+        package: package.to_owned(),
         environment: environment.to_owned(),
         tier,
-        shard: "1/1".to_owned(),
         owner: "@owner".to_owned(),
         reason: "known".to_owned(),
         source_run: "1".to_owned(),
@@ -226,40 +300,6 @@ fn parses_an_empty_but_valid_report_as_zero_tests() {
 }
 
 // ---------------------------------------------------------------------------
-// Artifact name fallback
-// ---------------------------------------------------------------------------
-
-#[rstest]
-#[case("junit-biscuit-file-L1-ubuntu-latest-0", "biscuit-file", Tier::L1, "ubuntu-latest")]
-#[case("junit-sniff-L1-windows-latest-3", "sniff", Tier::L1, "windows-latest")]
-#[case("junit-biscuit-terminal-L2-ubuntu", "biscuit-terminal", Tier::L2, "ubuntu")]
-#[case("junit-darkmatter-browser-ubuntu", "darkmatter", Tier::Browser, "ubuntu")]
-fn recovers_identity_from_an_artifact_name(
-    #[case] name: &str,
-    #[case] area: &str,
-    #[case] tier: Tier,
-    #[case] environment: &str,
-) {
-    let parsed = parse_artifact_name(name).expect("parsable");
-    assert_eq!(
-        parsed,
-        DegradedIdentity {
-            area: area.to_owned(),
-            tier,
-            environment: environment.to_owned(),
-        }
-    );
-}
-
-#[rstest]
-#[case("results-biscuit-file-L1-ubuntu-latest-0")]
-#[case("junit-biscuit-file-ubuntu-latest-0")]
-#[case("junit-L1-ubuntu-latest")]
-fn refuses_to_guess_an_unparsable_artifact_name(#[case] name: &str) {
-    assert_eq!(parse_artifact_name(name), None);
-}
-
-// ---------------------------------------------------------------------------
 // Cell states — all seven
 // ---------------------------------------------------------------------------
 
@@ -285,7 +325,7 @@ fn state_fail_when_any_test_failed() {
 
 #[test]
 fn state_skip_when_evidence_exists_but_nothing_executed() {
-    let mut rec = record("a", "ubuntu-latest", Tier::L2, "1/1", "pkg");
+    let mut rec = record("a", "ubuntu-latest", Tier::L2);
     rec.counts = Counts {
         total: 2,
         skipped: 2,
@@ -301,15 +341,20 @@ fn state_skip_when_evidence_exists_but_nothing_executed() {
     assert_ne!(cell.state, CellState::Pass, "an all-skipped tier is never PASS");
 }
 
+/// R10: a scheduled package whose invocation selects zero tests records
+/// NOTHING TO RUN — neither a pass implying coverage nor a blocking missing
+/// result, and never conflated with NOT SCHEDULED.
 #[test]
-fn state_not_applicable_when_the_tier_has_no_tests() {
-    let rec = record("a", "ubuntu-latest", Tier::L2, "1/1", "pkg");
+fn state_nothing_to_run_when_the_invocation_selects_zero_tests() {
+    let rec = record("tabby", "ubuntu-latest", Tier::L1);
     let cell = only_cell(classify_simple(
-        &[expectation("a", "ubuntu-latest", Tier::L2)],
+        &[expectation("tabby", "ubuntu-latest", Tier::L1)],
         &[rec],
     ));
-    assert_eq!(cell.state, CellState::NotApplicable);
-    assert_ne!(cell.state, CellState::Pass, "a zero-test tier is N/A, not PASS");
+    assert_eq!(cell.state, CellState::NothingToRun);
+    assert_ne!(cell.state, CellState::Pass, "a zero-test package is not a pass");
+    assert!(!cell.state.blocks(), "NOTHING TO RUN never blocks");
+    assert!(cell.reasons.iter().any(|r| r.contains("zero tests")));
 }
 
 #[test]
@@ -324,7 +369,7 @@ fn state_missing_when_scheduled_but_no_artifact_exists() {
 
 #[test]
 fn state_missing_when_nextest_produced_no_report() {
-    let mut rec = record("a", "ubuntu-latest", Tier::L1, "1/1", "pkg");
+    let mut rec = record("a", "ubuntu-latest", Tier::L1);
     rec.report_present = false;
     rec.exit_code = 0;
 
@@ -338,7 +383,7 @@ fn state_missing_when_nextest_produced_no_report() {
 
 #[test]
 fn state_missing_when_the_report_is_unreadable() {
-    let mut rec = record("a", "ubuntu-latest", Tier::L1, "1/1", "pkg");
+    let mut rec = record("a", "ubuntu-latest", Tier::L1);
     rec.parse_error = Some("truncated JUnit XML".to_owned());
 
     let cell = only_cell(classify_simple(
@@ -349,34 +394,12 @@ fn state_missing_when_the_report_is_unreadable() {
 }
 
 #[test]
-fn state_missing_when_a_shard_produced_nothing() {
-    let mut expectation = expectation("darkmatter", "ubuntu-latest", Tier::L1);
-    expectation.shards = vec!["1/2".to_owned(), "2/2".to_owned()];
-
-    let mut rec = passing_record("darkmatter", "ubuntu-latest", Tier::L1);
-    rec.shard = "1/2".to_owned();
-
-    let cell = only_cell(classify_simple(&[expectation], &[rec]));
-    assert_eq!(cell.state, CellState::Missing);
-    assert_eq!(cell.missing_shards, vec!["2/2"]);
-}
-
-#[test]
-fn state_not_scheduled_for_an_area_outside_the_run_scope() {
-    let areas = vec![AreaPolicy {
-        area: "homelab".to_owned(),
-        ci: true,
-        environments: default_environments(),
-        shards: default_shards(),
-        l2: false,
-        browser: false,
-        backends: Vec::new(),
-        policy_gaps: Vec::new(),
-    }];
+fn state_not_scheduled_for_a_package_outside_the_run_scope() {
+    let policies = vec![policy("homelab")];
     let scope = BTreeSet::new();
 
-    let expected = expected_cells(&areas, &scope, &[]);
-    assert!(expected.is_empty(), "an out-of-scope area schedules nothing");
+    let expected = expected_cells(&policies, &scope, &test_environments());
+    assert!(expected.is_empty(), "an out-of-scope package schedules nothing");
 
     // With no expectation and no evidence there is no cell at all, which the
     // grid renders as NOT SCHEDULED.
@@ -384,108 +407,134 @@ fn state_not_scheduled_for_an_area_outside_the_run_scope() {
     assert!(cells.is_empty());
 }
 
+/// R10: a `gates = false` package records NOT SCHEDULED *with its governance
+/// metadata* — visible, owned, and never conflated with NOTHING TO RUN.
 #[test]
-fn state_not_scheduled_for_a_ci_false_area() {
-    let areas = vec![AreaPolicy {
-        area: "tabby".to_owned(),
-        ci: false,
-        environments: default_environments(),
-        shards: default_shards(),
-        l2: false,
-        browser: false,
-        backends: Vec::new(),
-        policy_gaps: Vec::new(),
-    }];
-    let scope: BTreeSet<String> = ["tabby".to_owned()].into_iter().collect();
-    assert!(expected_cells(&areas, &scope, &[]).is_empty());
+fn state_not_scheduled_for_an_excluded_package_carries_governance() {
+    let mut excluded_policy = policy("test-toolkit");
+    excluded_policy.gates = false;
+    excluded_policy.exclusion = Some(exclusion());
+    let scope: BTreeSet<String> = ["test-toolkit".to_owned()].into_iter().collect();
+
+    let expected = expected_cells(&[excluded_policy], &scope, &test_environments());
+    assert_eq!(
+        expected.len(),
+        4,
+        "an excluded package renders one governed cell per environment"
+    );
+
+    let cells = classify_simple(&expected, &[]);
+    for cell in &cells {
+        assert_eq!(cell.state, CellState::NotScheduled);
+        assert!(!cell.state.blocks(), "NOT SCHEDULED never blocks");
+        assert!(!cell.scheduled);
+        assert!(
+            cell.reasons.iter().any(|r| r.contains("promotion-pending")
+                && r.contains("@yankeeinlondon")
+                && r.contains("2026-10-31")),
+            "the exclusion's governance must reach the rendered cell: {:?}",
+            cell.reasons
+        );
+    }
+}
+
+/// Evidence for a `gates = false` package means CI ran something policy
+/// excludes: reported honestly, and the verdict blocks on the disagreement.
+#[test]
+fn evidence_for_an_excluded_package_blocks_as_unscheduled_evidence() {
+    let mut excluded_policy = policy("test-toolkit");
+    excluded_policy.gates = false;
+    excluded_policy.exclusion = Some(exclusion());
+    let scope: BTreeSet<String> = ["test-toolkit".to_owned()].into_iter().collect();
+    let expected = expected_cells(&[excluded_policy], &scope, &test_environments());
+
+    let cells = classify_simple(
+        &expected,
+        &[passing_record("test-toolkit", "ubuntu-latest", Tier::L1)],
+    );
+    let cell = cells
+        .iter()
+        .find(|cell| cell.key.environment == "ubuntu-latest")
+        .expect("the cell with evidence exists");
+    assert_eq!(
+        cell.state,
+        CellState::Pass,
+        "a leg that ran and passed is not NOT SCHEDULED"
+    );
+
+    let findings = verdict(
+        &rollup_of(cells, &["test-toolkit"]),
+        &Baseline::default(),
+        None,
+    );
+    assert!(blocks_with_rule(&findings, "cell-unscheduled-evidence"));
 }
 
 #[test]
-fn state_policy_gap_when_no_compatible_backend_is_provisioned() {
-    let mut expectation = expectation("biscuit-terminal", "windows-latest", Tier::L2);
+fn state_policy_gap_when_the_capability_is_governed_and_absent() {
+    let mut expectation = expectation("biscuit-terminal-cli", "windows-latest", Tier::L2);
     expectation.backends = vec!["tmux".to_owned(), "wezterm".to_owned()];
+    expectation.gap = Some(GapStatus::Governed(gap()));
 
     // The tier "passes" only because every test early-returned; without a
     // provisioned backend that is a policy gap, not a green cell.
-    let record = passing_record("biscuit-terminal", "windows-latest", Tier::L2);
-    let provisioned: BTreeMap<String, BTreeSet<String>> =
-        [("windows-latest".to_owned(), BTreeSet::new())]
-            .into_iter()
-            .collect();
-    let expected_tests = BTreeMap::new();
+    let record = passing_record("biscuit-terminal-cli", "windows-latest", Tier::L2);
 
-    let cell = only_cell(classify(&ClassifyInputs {
-        expected: &[expectation],
-        records: &[record],
-        statuses: &[],
-        provisioned: &provisioned,
-        expected_tests: &expected_tests,
-    }));
-
+    let cell = only_cell(classify_simple(&[expectation], &[record]));
     assert_eq!(cell.state, CellState::PolicyGap);
     assert!(cell.state.blocks());
 }
 
 #[test]
-fn no_policy_gap_when_a_compatible_backend_is_provisioned() {
-    let mut expectation = expectation("biscuit-terminal", "ubuntu-latest", Tier::L2);
-    expectation.backends = vec!["tmux".to_owned(), "wezterm".to_owned()];
-
-    let provisioned: BTreeMap<String, BTreeSet<String>> = [(
-        "ubuntu-latest".to_owned(),
-        ["tmux".to_owned()].into_iter().collect(),
-    )]
-    .into_iter()
-    .collect();
-    let expected_tests = BTreeMap::new();
-
-    let cell = only_cell(classify(&ClassifyInputs {
-        expected: &[expectation],
-        records: &[passing_record("biscuit-terminal", "ubuntu-latest", Tier::L2)],
-        statuses: &[],
-        provisioned: &provisioned,
-        expected_tests: &expected_tests,
-    }));
-    assert_eq!(cell.state, CellState::Pass);
-}
-
-#[test]
-fn unknown_backend_provisioning_asserts_no_policy_gap() {
-    let mut expectation = expectation("biscuit-terminal", "macos-latest", Tier::L2);
-    expectation.backends = vec!["tmux".to_owned()];
+fn no_policy_gap_on_an_environment_that_can_host_the_tier() {
+    let expectation = expectation("biscuit-terminal-cli", "ubuntu-latest", Tier::L2);
 
     let cell = only_cell(classify_simple(
         &[expectation],
-        &[passing_record("biscuit-terminal", "macos-latest", Tier::L2)],
+        &[passing_record("biscuit-terminal-cli", "ubuntu-latest", Tier::L2)],
     ));
     assert_eq!(cell.state, CellState::Pass);
-    assert!(cell.skip_evidence_degraded);
-    assert!(cell.reasons.iter().any(|r| r.contains("unknown")));
 }
 
-/// The measured case: `needs: lint` skipped the whole matrix, GitHub never
-/// evaluated the matrix context, and no artifact exists for any leg.
+/// A plain `false` in the capability table — no owner, no reason, no expiry —
+/// is an UNGOVERNED gap: rendered POLICY GAP and never excused.
+#[test]
+fn an_ungoverned_policy_gap_is_named_as_ungoverned() {
+    let mut expectation = expectation("biscuit-tui-cli", "windows-latest", Tier::L2);
+    expectation.backends = vec!["tmux".to_owned()];
+    expectation.gap = Some(GapStatus::Ungoverned);
+
+    let cell = only_cell(classify_simple(
+        &[expectation],
+        &[passing_record("biscuit-tui-cli", "windows-latest", Tier::L2)],
+    ));
+
+    assert_eq!(cell.state, CellState::PolicyGap);
+    assert!(cell.declared_gap.is_none());
+    assert!(cell.reasons.iter().any(|r| r.contains("UNGOVERNED")));
+}
+
+/// The measured case: `needs:` skips the whole matrix, GitHub never evaluates
+/// the matrix context, and no artifact exists for any leg.
 #[test]
 fn a_failing_lint_is_never_blamed_for_a_missing_l1_cell() {
-    // `needs: lint` was removed from the test job, so lint gates nothing. This
-    // test previously asserted the opposite, which was correct while the edge
-    // existed. Blaming any failing job in the area sent claudine's triage at
-    // lint in run 30427703024 for MISSING L1 cells lint could not have caused.
+    // `needs: lint` was removed from the test job, so lint gates nothing.
+    // Blaming any failing job for the package sent claudine's triage at lint in
+    // run 30427703024 for MISSING L1 cells lint could not have caused.
     let statuses = vec![ProducerStatus {
-        area: "claudine".to_owned(),
+        package: "claudine-cli".to_owned(),
         job: "lint".to_owned(),
         result: "failure".to_owned(),
         environment: None,
         detail: None,
+        companion: None,
     }];
-    let provisioned = BTreeMap::new();
     let expected_tests = BTreeMap::new();
 
     let cell = only_cell(classify(&ClassifyInputs {
-        expected: &[expectation("claudine", "windows-latest", Tier::L1)],
+        expected: &[expectation("claudine-cli", "windows-latest", Tier::L1)],
         records: &[],
         statuses: &statuses,
-        provisioned: &provisioned,
         expected_tests: &expected_tests,
     }));
 
@@ -508,29 +557,23 @@ fn a_failing_lint_is_never_blamed_for_a_missing_l1_cell() {
 ///
 /// "Scheduled but produced no report at all" is equally true of a WSL2 guest
 /// that died mid-suite and of a tier that ran no tests, and only the producer
-/// can tell them apart. In run 30595280027 that single wording hid two
-/// different faults: claudine's guest was killed by SIGBUS after extracting 153
-/// binaries, and darkmatter's shard 3/4 never provisioned (`wsl.exe` exit
-/// 4294967295). Both rendered as the same blank cell.
+/// can tell them apart.
 #[test]
 fn a_producer_detail_explains_why_a_cell_has_no_evidence() {
     let statuses = vec![ProducerStatus {
-        area: "claudine".to_owned(),
+        package: "claudine-cli".to_owned(),
         job: "L1".to_owned(),
         result: "failure".to_owned(),
         environment: Some("wsl2-ubuntu".to_owned()),
-        detail: Some(
-            "the WSL2 guest became unreachable after the test step".to_owned(),
-        ),
+        detail: Some("the WSL2 guest became unreachable after the test step".to_owned()),
+        companion: None,
     }];
-    let provisioned = BTreeMap::new();
     let expected_tests = BTreeMap::new();
 
     let cell = only_cell(classify(&ClassifyInputs {
-        expected: &[expectation("claudine", "wsl2-ubuntu", Tier::L1)],
+        expected: &[expectation("claudine-cli", "wsl2-ubuntu", Tier::L1)],
         records: &[],
         statuses: &statuses,
-        provisioned: &provisioned,
         expected_tests: &expected_tests,
     }));
 
@@ -547,20 +590,19 @@ fn a_producer_detail_explains_why_a_cell_has_no_evidence() {
 #[test]
 fn a_failing_l1_is_still_blamed_for_a_missing_l2_cell() {
     let statuses = vec![ProducerStatus {
-        area: "darkmatter".to_owned(),
+        package: "darkmatter-cli".to_owned(),
         job: "L1".to_owned(),
         result: "failure".to_owned(),
         environment: None,
         detail: None,
+        companion: None,
     }];
-    let provisioned = BTreeMap::new();
     let expected_tests = BTreeMap::new();
 
     let cell = only_cell(classify(&ClassifyInputs {
-        expected: &[expectation("darkmatter", "ubuntu-latest", Tier::L2)],
+        expected: &[expectation("darkmatter-cli", "ubuntu-latest", Tier::L2)],
         records: &[],
         statuses: &statuses,
-        provisioned: &provisioned,
         expected_tests: &expected_tests,
     }));
 
@@ -588,30 +630,30 @@ fn evidence_for_an_unscheduled_cell_is_reported_not_dropped() {
     assert!(cell.reasons.iter().any(|r| r.contains("did not schedule")));
 }
 
-/// `areas.json` declares the gap, so it is authoritative — no provisioning
-/// information is needed to render POLICY GAP.
+/// The capability table carries the governance, so no further declaration is
+/// needed to render POLICY GAP.
 #[test]
-fn a_declared_policy_gap_renders_policy_gap_without_provisioning_data() {
-    let mut expectation = expectation("biscuit-terminal", "windows-latest", Tier::L2);
+fn a_governed_policy_gap_renders_policy_gap() {
+    let mut expectation = expectation("biscuit-terminal-cli", "windows-latest", Tier::L2);
     expectation.backends = vec!["tmux".to_owned()];
-    expectation.declared_gap = Some(gap());
+    expectation.gap = Some(GapStatus::Governed(gap()));
 
     let cell = only_cell(classify_simple(
         &[expectation],
-        &[passing_record("biscuit-terminal", "windows-latest", Tier::L2)],
+        &[passing_record("biscuit-terminal-cli", "windows-latest", Tier::L2)],
     ));
 
     assert_eq!(cell.state, CellState::PolicyGap);
-    assert!(cell.reasons.iter().any(|r| r.contains("declared policy gap")));
+    assert!(cell.reasons.iter().any(|r| r.contains("governed policy gap")));
 }
 
-/// A declared gap explains the absence of evidence, so the cell must not read
+/// A governed gap explains the absence of evidence, so the cell must not read
 /// MISSING — nobody failed to upload anything.
 #[test]
-fn a_declared_gap_with_no_evidence_is_policy_gap_not_missing() {
-    let mut expectation = expectation("biscuit-tui", "windows-latest", Tier::L2);
+fn a_governed_gap_with_no_evidence_is_policy_gap_not_missing() {
+    let mut expectation = expectation("biscuit-tui-cli", "windows-latest", Tier::L2);
     expectation.backends = vec!["tmux".to_owned()];
-    expectation.declared_gap = Some(gap());
+    expectation.gap = Some(GapStatus::Governed(gap()));
 
     let cell = only_cell(classify_simple(&[expectation], &[]));
     assert_eq!(cell.state, CellState::PolicyGap);
@@ -619,45 +661,309 @@ fn a_declared_gap_with_no_evidence_is_policy_gap_not_missing() {
 }
 
 /// A real failure is more actionable than a config classification, so it wins
-/// even inside a declared gap.
+/// even inside a governed gap.
 #[test]
-fn a_real_failure_outranks_a_declared_gap() {
-    let mut expectation = expectation("biscuit-tui", "windows-latest", Tier::L2);
-    expectation.declared_gap = Some(gap());
+fn a_real_failure_outranks_a_governed_gap() {
+    let mut expectation = expectation("biscuit-tui-cli", "windows-latest", Tier::L2);
+    expectation.gap = Some(GapStatus::Governed(gap()));
 
-    let mut rec = passing_record("biscuit-tui", "windows-latest", Tier::L2);
+    let mut rec = passing_record("biscuit-tui-cli", "windows-latest", Tier::L2);
     rec.counts.failed = 1;
     rec.failed_tests = vec!["t::x".into()];
 
     let cell = only_cell(classify_simple(&[expectation], &[rec]));
     assert_eq!(cell.state, CellState::Fail);
     assert!(
-        cell.reasons.iter().any(|r| r.contains("declared policy gap")),
+        cell.reasons.iter().any(|r| r.contains("governed policy gap")),
         "the gap must still be recorded in reasons"
     );
 }
 
+/// Backstop: `gates = false` with no parseable exclusion is a shape the scope
+/// job's validation is supposed to reject — but the rollup must still render
+/// the package as NOT SCHEDULED rather than vanish it from the grid.
 #[test]
-fn an_undeclared_policy_gap_is_named_as_undeclared() {
-    let mut expectation = expectation("biscuit-tui", "windows-latest", Tier::L2);
-    expectation.backends = vec!["tmux".to_owned()];
+fn a_gates_false_package_without_exclusion_metadata_still_renders_not_scheduled() {
+    let mut excluded = policy("mystery");
+    excluded.gates = false;
+    excluded.exclusion = None;
+    let scope: BTreeSet<String> = ["mystery".to_owned()].into_iter().collect();
 
-    let provisioned: BTreeMap<String, BTreeSet<String>> =
-        [("windows-latest".to_owned(), BTreeSet::new())]
-            .into_iter()
-            .collect();
+    let expected = expected_cells(&[excluded], &scope, &test_environments());
+    assert_eq!(expected.len(), 4, "one NOT SCHEDULED cell per environment");
+
+    let cells = classify_simple(&expected, &[]);
+    for cell in &cells {
+        assert_eq!(cell.state, CellState::NotScheduled);
+        assert!(
+            cell.reasons.iter().any(|r| r.contains("ungoverned")),
+            "the missing governance must be named: {:?}",
+            cell.reasons
+        );
+    }
+}
+
+/// R12's guard: a green Rust JUnit report must never hide a failed companion
+/// suite (or fixture, or backend proof). The producer job's own `failure`
+/// status downgrades the cell; status evidence can worsen a cell, never
+/// improve it.
+#[test]
+fn a_producer_failure_downgrades_a_green_report() {
+    let statuses = vec![ProducerStatus {
+        package: "homelab-server".to_owned(),
+        job: "L1".to_owned(),
+        result: "failure".to_owned(),
+        environment: Some("ubuntu-latest".to_owned()),
+        detail: Some(
+            "companion suite homelab-frontend FAILED; the Rust JUnit report does not cover it"
+                .to_owned(),
+        ),
+        companion: None,
+    }];
     let expected_tests = BTreeMap::new();
 
     let cell = only_cell(classify(&ClassifyInputs {
-        expected: &[expectation],
-        records: &[passing_record("biscuit-tui", "windows-latest", Tier::L2)],
-        statuses: &[],
-        provisioned: &provisioned,
+        expected: &[expectation("homelab-server", "ubuntu-latest", Tier::L1)],
+        records: &[passing_record("homelab-server", "ubuntu-latest", Tier::L1)],
+        statuses: &statuses,
         expected_tests: &expected_tests,
     }));
 
-    assert_eq!(cell.state, CellState::PolicyGap);
-    assert!(cell.reasons.iter().any(|r| r.contains("UNDECLARED")));
+    assert_eq!(cell.state, CellState::Fail);
+    assert!(
+        cell.reasons.iter().any(|r| r.contains("homelab-frontend")),
+        "the companion suite's failure must be named: {:?}",
+        cell.reasons
+    );
+
+    let findings = verdict(
+        &rollup_of(vec![cell], &["homelab-server"]),
+        &Baseline::default(),
+        None,
+    );
+    assert!(blocks_with_rule(&findings, "cell-failed"));
+}
+
+/// The symmetric case: a `success` producer status can never upgrade a red
+/// cell.
+#[test]
+fn a_producer_success_never_upgrades_a_failing_cell() {
+    let statuses = vec![ProducerStatus {
+        package: "sniff-cli".to_owned(),
+        job: "L1".to_owned(),
+        result: "success".to_owned(),
+        environment: Some("ubuntu-latest".to_owned()),
+        detail: None,
+        companion: None,
+    }];
+    let expected_tests = BTreeMap::new();
+    let mut rec = passing_record("sniff-cli", "ubuntu-latest", Tier::L1);
+    rec.counts.failed = 1;
+    rec.failed_tests = vec!["sniff-cli::x".into()];
+
+    let cell = only_cell(classify(&ClassifyInputs {
+        expected: &[expectation("sniff-cli", "ubuntu-latest", Tier::L1)],
+        records: &[rec],
+        statuses: &statuses,
+        expected_tests: &expected_tests,
+    }));
+    assert_eq!(cell.state, CellState::Fail);
+}
+
+// ---------------------------------------------------------------------------
+// Declared companion suites must leave evidence (R12)
+// ---------------------------------------------------------------------------
+
+fn companion_expectation(package: &str, environment: &str) -> ExpectedCell {
+    let mut expectation = expectation(package, environment, Tier::L1);
+    expectation.companion_suites = vec!["homelab-frontend".to_owned()];
+    expectation
+}
+
+fn companion_status(result: &str, companion: Option<&str>) -> ProducerStatus {
+    ProducerStatus {
+        package: "homelab-server".to_owned(),
+        job: "L1".to_owned(),
+        result: result.to_owned(),
+        environment: Some("ubuntu-latest".to_owned()),
+        detail: None,
+        companion: companion.map(str::to_owned),
+    }
+}
+
+/// The companion expectation is capability-derived: the suite only runs where
+/// Node/pnpm can be provisioned.
+#[test]
+fn companion_suites_are_expected_only_on_node_capable_environments() {
+    let mut homelab = policy("homelab-server");
+    homelab.companion_suites = vec!["homelab-frontend".to_owned()];
+    let scope: BTreeSet<String> = ["homelab-server".to_owned()].into_iter().collect();
+
+    let expected = expected_cells(&[homelab], &scope, &test_environments());
+    let with_companion: BTreeSet<&str> = expected
+        .iter()
+        .filter(|cell| !cell.companion_suites.is_empty())
+        .map(|cell| cell.key.environment.as_str())
+        .collect();
+    assert_eq!(with_companion, ["ubuntu-latest"].into_iter().collect());
+}
+
+#[test]
+fn a_successful_companion_keeps_the_cell_green() {
+    let statuses = vec![companion_status("success", Some("success"))];
+    let expected_tests = BTreeMap::new();
+
+    let cell = only_cell(classify(&ClassifyInputs {
+        expected: &[companion_expectation("homelab-server", "ubuntu-latest")],
+        records: &[passing_record("homelab-server", "ubuntu-latest", Tier::L1)],
+        statuses: &statuses,
+        expected_tests: &expected_tests,
+    }));
+    assert_eq!(cell.state, CellState::Pass);
+}
+
+/// The hole R12 names: a SKIPPED companion step leaves no evidence anywhere
+/// else, so a scope-derivation bug or a capability flip rendered PASS. The
+/// recorded outcome downgrades the cell exactly as a failure does.
+#[test]
+fn a_skipped_companion_downgrades_a_green_report() {
+    let statuses = vec![companion_status("success", Some("skipped"))];
+    let expected_tests = BTreeMap::new();
+
+    let cell = only_cell(classify(&ClassifyInputs {
+        expected: &[companion_expectation("homelab-server", "ubuntu-latest")],
+        records: &[passing_record("homelab-server", "ubuntu-latest", Tier::L1)],
+        statuses: &statuses,
+        expected_tests: &expected_tests,
+    }));
+
+    assert_eq!(cell.state, CellState::Fail);
+    assert!(
+        cell.reasons
+            .iter()
+            .any(|r| r.contains("homelab-frontend") && r.contains("never ran")),
+        "the skipped companion must be named: {:?}",
+        cell.reasons
+    );
+
+    let findings = verdict(
+        &rollup_of(vec![cell], &["homelab-server"]),
+        &Baseline::default(),
+        None,
+    );
+    assert!(blocks_with_rule(&findings, "cell-failed"));
+}
+
+/// An old or broken producer that reports no companion outcome at all is no
+/// better than a skipped one.
+#[test]
+fn a_companion_with_no_reported_outcome_downgrades_a_green_report() {
+    let statuses = vec![companion_status("success", None)];
+    let expected_tests = BTreeMap::new();
+
+    let cell = only_cell(classify(&ClassifyInputs {
+        expected: &[companion_expectation("homelab-server", "ubuntu-latest")],
+        records: &[passing_record("homelab-server", "ubuntu-latest", Tier::L1)],
+        statuses: &statuses,
+        expected_tests: &expected_tests,
+    }));
+    assert_eq!(cell.state, CellState::Fail);
+}
+
+/// The same rule on the lint cell: a declared companion suite lints too, so a
+/// green clippy result must not hide a companion lint that never ran.
+#[test]
+fn a_skipped_companion_downgrades_a_green_lint() {
+    let mut homelab = policy("homelab-server");
+    homelab.companion_suites = vec!["homelab-frontend".to_owned()];
+    let statuses = vec![ProducerStatus {
+        package: "homelab-server".to_owned(),
+        job: "lint".to_owned(),
+        result: "success".to_owned(),
+        environment: None,
+        detail: None,
+        companion: Some("skipped".to_owned()),
+    }];
+
+    let cells = status_cells(
+        &statuses,
+        &scope_of(&["homelab-server"]),
+        &[],
+        &[homelab],
+    );
+    let cell = only_cell(cells);
+    assert_eq!(cell.key.tier, Tier::parse("lint"));
+    assert_eq!(cell.state, CellState::Fail);
+}
+
+// ---------------------------------------------------------------------------
+// status_cells: job results -> cell states
+// ---------------------------------------------------------------------------
+
+#[test]
+fn status_cells_map_each_job_result_to_a_cell_state() {
+    let status = |package: &str, result: &str| ProducerStatus {
+        package: package.to_owned(),
+        job: "lint".to_owned(),
+        result: result.to_owned(),
+        environment: None,
+        detail: None,
+        companion: None,
+    };
+    let statuses = vec![
+        status("pkg-success", "success"),
+        status("pkg-failure", "failure"),
+        status("pkg-cancelled", "cancelled"),
+        status("pkg-skipped", "skipped"),
+        status("pkg-mystery", "mystery"),
+    ];
+    let scope = scope_of(&[
+        "pkg-success",
+        "pkg-failure",
+        "pkg-cancelled",
+        "pkg-skipped",
+        "pkg-mystery",
+    ]);
+
+    let cells = status_cells(&statuses, &scope, &[], &[policy("x")]);
+    let state_of = |package: &str| {
+        cells
+            .iter()
+            .find(|cell| cell.key.package == package)
+            .unwrap_or_else(|| panic!("no cell for {package}"))
+            .state
+    };
+    assert_eq!(state_of("pkg-success"), CellState::Pass);
+    assert_eq!(state_of("pkg-failure"), CellState::Fail);
+    assert_eq!(state_of("pkg-cancelled"), CellState::Missing);
+    assert_eq!(state_of("pkg-skipped"), CellState::NotScheduled);
+    assert_eq!(state_of("pkg-mystery"), CellState::Missing);
+}
+
+/// A test-tier status (L1/L2/browser) never manufactures a second cell beside
+/// the JUnit-backed one, and a status outside the scope is dropped.
+#[test]
+fn status_cells_skip_test_tiers_and_out_of_scope_packages() {
+    let statuses = vec![
+        ProducerStatus {
+            package: "sniff-cli".to_owned(),
+            job: "L1".to_owned(),
+            result: "failure".to_owned(),
+            environment: Some("ubuntu-latest".to_owned()),
+            detail: None,
+            companion: None,
+        },
+        ProducerStatus {
+            package: "outsider".to_owned(),
+            job: "lint".to_owned(),
+            result: "failure".to_owned(),
+            environment: None,
+            detail: None,
+            companion: None,
+        },
+    ];
+    let cells = status_cells(&statuses, &scope_of(&["sniff-cli"]), &[], &[policy("x")]);
+    assert!(cells.is_empty(), "no status cell may appear: {cells:#?}");
 }
 
 // ---------------------------------------------------------------------------
@@ -665,11 +971,11 @@ fn an_undeclared_policy_gap_is_named_as_undeclared() {
 // ---------------------------------------------------------------------------
 
 /// 101 means the crate never built. That tells us nothing about whether the
-/// tier has tests, so it can never be N/A — and because it emits no test
-/// result, it can never be accepted as a known test failure either.
+/// tier has tests, so it can never be NOTHING TO RUN — and because it emits no
+/// test result, it can never be accepted as a known test failure either.
 #[test]
 fn a_build_failure_is_missing_and_says_so_not_an_empty_tier() {
-    let mut rec = record("biscuit-file", "windows-latest", Tier::L1, "1/1", "biscuit-file");
+    let mut rec = record("biscuit-file", "windows-latest", Tier::L1);
     rec.report_present = false;
     rec.exit_code = 101;
 
@@ -679,7 +985,7 @@ fn a_build_failure_is_missing_and_says_so_not_an_empty_tier() {
     ));
 
     assert_eq!(cell.state, CellState::Missing);
-    assert_ne!(cell.state, CellState::NotApplicable);
+    assert_ne!(cell.state, CellState::NothingToRun);
     assert!(
         cell.reasons.iter().any(|r| r.contains("failed to BUILD")),
         "a build failure must say so: {:?}",
@@ -687,11 +993,11 @@ fn a_build_failure_is_missing_and_says_so_not_an_empty_tier() {
     );
 }
 
-/// 100 means tests ran and failed, so a report *should* exist. Its absence is a
-/// different defect from a build failure and must read differently.
+/// 100 means tests ran and failed, so a report *should* exist. Its absence is
+/// a different defect from a build failure and must read differently.
 #[test]
 fn a_test_failure_with_no_staged_report_reads_differently_from_a_build_failure() {
-    let mut rec = record("queue", "windows-latest", Tier::L1, "1/1", "queue");
+    let mut rec = record("queue", "windows-latest", Tier::L1);
     rec.report_present = false;
     rec.exit_code = 100;
 
@@ -734,69 +1040,6 @@ fn every_exit_code_gets_its_own_explanation(#[case] code: i64, #[case] expected:
         "exit {code} -> {}",
         missing_report_reason(code)
     );
-}
-
-// ---------------------------------------------------------------------------
-// Shard identity lives only in the manifest
-// ---------------------------------------------------------------------------
-
-#[test]
-fn a_report_with_no_manifest_records_shard_as_unknown_not_one_of_one() {
-    let temp = TempDir::new("shardless");
-    let artifact = temp.path().join("junit-darkmatter-L1-ubuntu-latest-2");
-    fs::create_dir_all(artifact.join("L1")).unwrap();
-    fs::write(
-        artifact.join("L1").join("darkmatter.xml"),
-        junit("darkmatter", &passing_case("a")),
-    )
-    .unwrap();
-
-    let records = records_from_artifact(&ArtifactDir {
-        name: "junit-darkmatter-L1-ubuntu-latest-2".to_owned(),
-        path: artifact,
-    })
-    .unwrap();
-
-    assert_eq!(
-        records[0].shard, "unknown",
-        "the staged path carries no shard, so it must not be invented"
-    );
-    assert!(records[0].degraded);
-}
-
-/// Two shards of the same area staging into one directory collide on
-/// `<tier>/<package>.xml` — but both manifest records survive, so keying on the
-/// manifest keeps both identities.
-#[test]
-fn two_shard_records_sharing_one_xml_keep_distinct_identities() {
-    let temp = TempDir::new("collide");
-    let artifact = temp.path().join("junit-darkmatter-L1-ubuntu-latest-0");
-    fs::create_dir_all(artifact.join("L1")).unwrap();
-    fs::write(
-        artifact.join("L1").join("darkmatter.xml"),
-        junit("darkmatter", &passing_case("a")),
-    )
-    .unwrap();
-    fs::write(
-        artifact.join("manifest.jsonl"),
-        "{\"tier\":\"L1\",\"package\":\"darkmatter\",\"xml\":\"L1/darkmatter.xml\",\"exit_code\":0,\
-         \"area\":\"darkmatter\",\"environment\":\"ubuntu-latest\",\"shard\":\"1/4\",\
-         \"duration_s\":1,\"report_present\":true}\n\
-         {\"tier\":\"L1\",\"package\":\"darkmatter\",\"xml\":\"L1/darkmatter.xml\",\"exit_code\":0,\
-         \"area\":\"darkmatter\",\"environment\":\"ubuntu-latest\",\"shard\":\"2/4\",\
-         \"duration_s\":1,\"report_present\":true}\n",
-    )
-    .unwrap();
-
-    let records = records_from_artifact(&ArtifactDir {
-        name: "junit-darkmatter-L1-ubuntu-latest-0".to_owned(),
-        path: artifact,
-    })
-    .unwrap();
-
-    assert_eq!(records.len(), 2);
-    let shards: BTreeSet<&str> = records.iter().map(|r| r.shard.as_str()).collect();
-    assert_eq!(shards, ["1/4", "2/4"].into_iter().collect());
 }
 
 // ---------------------------------------------------------------------------
@@ -844,58 +1087,225 @@ fn every_tier_the_producer_emits_round_trips(#[case] raw: &str, #[case] expected
 }
 
 // ---------------------------------------------------------------------------
-// areas.json tolerance
+// Policy and capability inputs
 // ---------------------------------------------------------------------------
 
 #[test]
-fn unknown_areas_json_fields_are_ignored_and_new_environments_are_accepted() {
-    let json = r#"[
-      {
-        "area": "sniff",
-        "check_args": "-p sniff",
-        "environments": ["ubuntu-latest", "windows-latest", "macos-latest", "wsl2-ubuntu"],
-        "exclusion_class": "capability",
-        "some_field_added_next_week": {"nested": [1, 2, 3]}
-      }
-    ]"#;
+fn unknown_scope_policy_fields_are_ignored() {
+    let json = r#"{
+      "packages": ["sniff"],
+      "policy": [
+        {
+          "package": "sniff",
+          "gates": true,
+          "tiers": ["L1", "L2"],
+          "l2_backends": ["tmux"],
+          "some_field_added_next_week": {"nested": [1, 2, 3]}
+        }
+      ],
+      "matrix": []
+    }"#;
 
-    let areas: Vec<AreaPolicy> = serde_json::from_str(json).expect("unknown fields are ignored");
-    assert_eq!(areas[0].environments.len(), 4);
-    assert!(areas[0]
-        .environments
-        .contains(&"wsl2-ubuntu".to_owned()));
+    let doc: PolicyDoc = serde_json::from_str(json).expect("unknown fields are ignored");
+    assert_eq!(doc.policy[0].package, "sniff");
+    assert_eq!(doc.policy[0].tiers, vec![Tier::L1, Tier::L2]);
 }
 
 #[test]
-fn the_retired_full_os_field_is_still_read_as_environments() {
-    let json = r#"[{"area": "a", "full_os": ["ubuntu-latest"]}]"#;
-    let areas: Vec<AreaPolicy> = serde_json::from_str(json).unwrap();
-    assert_eq!(areas[0].environments, vec!["ubuntu-latest"]);
+fn capability_values_parse_as_booleans_or_governed_objects() {
+    let json = r#"{
+      "schema_version": 1,
+      "environments": [
+        {
+          "name": "ubuntu-latest",
+          "runner": "ubuntu-latest",
+          "native_key": "ubuntu-latest",
+          "capabilities": {
+            "tmux": true,
+            "headless_browser": true,
+            "node_pnpm": true,
+            "archive_only": false
+          }
+        },
+        {
+          "name": "windows-latest",
+          "runner": "windows-latest",
+          "native_key": "windows-latest",
+          "capabilities": {
+            "tmux": {"available": false, "reason": "no port", "owner": "@o", "expiry": "2027-01-31"},
+            "headless_browser": false,
+            "node_pnpm": false,
+            "archive_only": false
+          }
+        }
+      ]
+    }"#;
+
+    let doc: EnvironmentsDoc = serde_json::from_str(json).unwrap();
+    let ubuntu = &doc.environments[0];
+    assert!(ubuntu.capable("tmux"));
+    assert!(ubuntu.gap_for("tmux").is_none());
+
+    let windows = &doc.environments[1];
+    assert!(!windows.capable("tmux"));
+    let gap = windows.gap_for("tmux").expect("a governed absence");
+    assert_eq!(gap.owner, "@o");
+    assert_eq!(gap.expiry, "2027-01-31");
+    // A plain false is an UNGOVERNED absence.
+    assert!(windows.gap_for("headless_browser").is_none());
+}
+
+#[test]
+fn the_checked_in_environments_table_parses_and_is_well_governed() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .join(".github")
+        .join("ci")
+        .join("environments.json");
+    let text = fs::read_to_string(&path).expect("environments.json is readable");
+    let doc: EnvironmentsDoc = serde_json::from_str(&text).expect("environments.json parses");
+
+    assert_eq!(doc.environments.len(), 4);
+    let names: BTreeSet<&str> = doc
+        .environments
+        .iter()
+        .map(|environment| environment.name.as_str())
+        .collect();
+    assert_eq!(
+        names,
+        ["ubuntu-latest", "windows-latest", "macos-latest", "wsl2-ubuntu"]
+            .into_iter()
+            .collect()
+    );
+
+    // Every governed absence must satisfy the acceptance rule, or `ci-verdict`
+    // can never exit 0 on a run touching an L2-owning package.
+    for environment in &doc.environments {
+        for capability in environment.capabilities.values() {
+            if let Some(gap) = capability.governed_gap() {
+                assert!(!gap.owner.trim().is_empty(), "{} gap has no owner", environment.name);
+                assert!(!gap.reason.trim().is_empty(), "{} gap has no reason", environment.name);
+                assert!(
+                    is_iso_date(gap.expiry.trim()),
+                    "{} gap expiry `{}` is not YYYY-MM-DD",
+                    environment.name,
+                    gap.expiry
+                );
+            }
+        }
+    }
+
+    // The two facts the eight per-area policy_gaps records used to restate:
+    // Windows has no tmux, and the WSL2 leg is archive-only.
+    let windows = doc
+        .environments
+        .iter()
+        .find(|environment| environment.name == "windows-latest")
+        .unwrap();
+    assert!(!windows.capable("tmux"));
+    assert!(windows.gap_for("tmux").is_some());
+    let wsl = doc
+        .environments
+        .iter()
+        .find(|environment| environment.name == "wsl2-ubuntu")
+        .unwrap();
+    assert!(wsl.capable("archive_only"));
+    assert!(wsl.gap_for("tmux").is_some());
+
+    // The browser tier is Linux-hosted; its absence everywhere else must be
+    // governed, or the POLICY GAP cells it now renders would hard-block.
+    for name in ["windows-latest", "macos-latest", "wsl2-ubuntu"] {
+        let environment = doc
+            .environments
+            .iter()
+            .find(|environment| environment.name == name)
+            .unwrap();
+        assert!(
+            environment.gap_for("headless_browser").is_some(),
+            "{name} must govern its headless_browser absence"
+        );
+    }
 }
 
 #[test]
 fn a_wsl2_environment_gets_its_own_cell_not_the_windows_one() {
-    let areas = vec![AreaPolicy {
-        area: "sniff".to_owned(),
-        ci: true,
-        environments: vec!["windows-latest".to_owned(), "wsl2-ubuntu".to_owned()],
-        shards: default_shards(),
-        l2: false,
-        browser: false,
-        backends: Vec::new(),
-        policy_gaps: Vec::new(),
-    }];
     let scope: BTreeSet<String> = ["sniff".to_owned()].into_iter().collect();
-
-    let expected = expected_cells(&areas, &scope, &[]);
+    let expected = expected_cells(&[policy("sniff")], &scope, &test_environments());
     let environments: BTreeSet<&str> = expected
         .iter()
         .map(|cell| cell.key.environment.as_str())
         .collect();
     assert_eq!(
         environments,
-        ["windows-latest", "wsl2-ubuntu"].into_iter().collect()
+        ["ubuntu-latest", "windows-latest", "macos-latest", "wsl2-ubuntu"]
+            .into_iter()
+            .collect()
     );
+}
+
+#[test]
+fn expected_cells_cover_l1_l2_and_browser_by_capability() {
+    let mut darkmatter = policy("darkmatter");
+    darkmatter.tiers = vec![Tier::L1, Tier::L2, Tier::Browser];
+    darkmatter.l2_backends = vec!["tmux".to_owned()];
+    let scope: BTreeSet<String> = ["darkmatter".to_owned()].into_iter().collect();
+
+    let expected = expected_cells(&[darkmatter], &scope, &test_environments());
+
+    // L1 on all four environments; L2 and browser on all four as well — the
+    // environments that cannot host a tier must still appear, so they render
+    // POLICY GAP rather than disappearing from the grid.
+    let l1 = expected.iter().filter(|cell| cell.key.tier == Tier::L1).count();
+    let l2: Vec<&ExpectedCell> = expected
+        .iter()
+        .filter(|cell| cell.key.tier == Tier::L2)
+        .collect();
+    let browser: Vec<&ExpectedCell> = expected
+        .iter()
+        .filter(|cell| cell.key.tier == Tier::Browser)
+        .collect();
+    assert_eq!(l1, 4);
+    assert_eq!(l2.len(), 4);
+    assert_eq!(browser.len(), 4);
+
+    // L2 gaps land exactly where the capability table says tmux is absent.
+    let gap_envs: BTreeSet<&str> = l2
+        .iter()
+        .filter(|cell| cell.gap.is_some())
+        .map(|cell| cell.key.environment.as_str())
+        .collect();
+    assert_eq!(gap_envs, ["windows-latest", "wsl2-ubuntu"].into_iter().collect());
+    for cell in &l2 {
+        if cell.gap.is_some() {
+            assert!(
+                matches!(cell.gap, Some(GapStatus::Governed(_))),
+                "the checked-in governance must reach the expectation"
+            );
+        }
+    }
+
+    // Browser gaps land everywhere a headless browser cannot be hosted —
+    // governed, like the tmux gaps, never a vanished cell.
+    let browser_gap_envs: BTreeSet<&str> = browser
+        .iter()
+        .filter(|cell| cell.gap.is_some())
+        .map(|cell| cell.key.environment.as_str())
+        .collect();
+    assert_eq!(
+        browser_gap_envs,
+        ["windows-latest", "macos-latest", "wsl2-ubuntu"]
+            .into_iter()
+            .collect()
+    );
+    for cell in &browser {
+        if cell.gap.is_some() {
+            assert!(
+                matches!(cell.gap, Some(GapStatus::Governed(_))),
+                "a browser absence must be governed, like tmux's"
+            );
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -907,8 +1317,8 @@ fn an_expected_test_with_no_result_counts_as_a_skip() {
     let expected_tests: ExpectedTests = [(
         ("windows-latest".to_owned(), Tier::L1),
         [(
-            "pkg".to_owned(),
-            vec!["pkg::a".to_owned(), "pkg::vanished".to_owned()],
+            "a".to_owned(),
+            vec!["a::present".to_owned(), "a::vanished".to_owned()],
         )]
         .into_iter()
         .collect(),
@@ -916,36 +1326,34 @@ fn an_expected_test_with_no_result_counts_as_a_skip() {
     .into_iter()
     .collect();
 
-    let mut rec = record("a", "windows-latest", Tier::L1, "1/1", "pkg");
+    let mut rec = record("a", "windows-latest", Tier::L1);
     rec.counts = Counts {
         total: 1,
         passed: 1,
         ..Counts::default()
     };
-    rec.passed_identities = vec!["pkg::a".to_owned()];
+    rec.passed_identities = vec!["a::present".to_owned()];
 
-    let provisioned = BTreeMap::new();
     let cell = only_cell(classify(&ClassifyInputs {
         expected: &[expectation("a", "windows-latest", Tier::L1)],
         records: &[rec],
         statuses: &[],
-        provisioned: &provisioned,
         expected_tests: &expected_tests,
     }));
 
-    assert_eq!(cell.skipped_tests, vec!["pkg::vanished"]);
+    assert_eq!(cell.skipped_tests, vec!["a::vanished"]);
     assert!(!cell.skip_evidence_degraded);
 }
 
 #[test]
 fn without_a_manifest_absence_is_not_inferred_to_be_a_skip() {
-    let mut rec = record("a", "windows-latest", Tier::L1, "1/1", "pkg");
+    let mut rec = record("a", "windows-latest", Tier::L1);
     rec.counts = Counts {
         total: 1,
         passed: 1,
         ..Counts::default()
     };
-    rec.passed_identities = vec!["pkg::a".to_owned()];
+    rec.passed_identities = vec!["a::present".to_owned()];
 
     let cell = only_cell(classify_simple(
         &[expectation("a", "windows-latest", Tier::L1)],
@@ -963,22 +1371,20 @@ fn without_a_manifest_absence_is_not_inferred_to_be_a_skip() {
 fn a_package_with_no_evidence_does_not_manufacture_skips_from_the_manifest() {
     let expected_tests: ExpectedTests = [(
         ("windows-latest".to_owned(), Tier::L1),
-        [("pkg".to_owned(), vec!["pkg::a".to_owned()])]
+        [("a".to_owned(), vec!["a::gone".to_owned()])]
             .into_iter()
             .collect(),
     )]
     .into_iter()
     .collect();
 
-    let mut rec = record("a", "windows-latest", Tier::L1, "1/1", "pkg");
+    let mut rec = record("a", "windows-latest", Tier::L1);
     rec.report_present = false;
 
-    let provisioned = BTreeMap::new();
     let cell = only_cell(classify(&ClassifyInputs {
         expected: &[expectation("a", "windows-latest", Tier::L1)],
         records: &[rec],
         statuses: &[],
-        provisioned: &provisioned,
         expected_tests: &expected_tests,
     }));
 
@@ -1066,19 +1472,18 @@ fn an_out_of_scope_entry_is_ignored_and_not_treated_as_a_pass() {
 #[rstest]
 #[case(CellState::Missing)]
 #[case(CellState::Skip)]
-#[case(CellState::NotApplicable)]
+#[case(CellState::NothingToRun)]
 #[case(CellState::PolicyGap)]
 fn a_scheduled_entry_with_no_test_result_stays_blocking(#[case] state: CellState) {
     let cell = Cell {
         key: CellKey {
-            area: "claudine".to_owned(),
+            package: "claudine".to_owned(),
             environment: "ubuntu-latest".to_owned(),
             tier: Tier::L1,
         },
         state,
         counts: Counts::default(),
         scheduled: true,
-        missing_shards: Vec::new(),
         skipped_tests: Vec::new(),
         failed_tests: Vec::new(),
         skip_evidence_degraded: false,
@@ -1100,7 +1505,7 @@ fn a_scheduled_entry_with_no_test_result_stays_blocking(#[case] state: CellState
 }
 
 #[test]
-fn a_baselined_area_that_produced_no_cell_at_all_blocks() {
+fn a_baselined_package_that_produced_no_cell_at_all_blocks() {
     let baseline = Baseline {
         schema_version: SCHEMA_VERSION,
         failure: vec![failure_entry("claudine", "windows-latest", Tier::L1)],
@@ -1153,50 +1558,31 @@ fn missing_and_policy_gap_cells_block_on_their_own() {
 // ---------------------------------------------------------------------------
 // Policy gaps: acknowledged ≠ acceptable ≠ invisible
 //
-// Every case here starts from a real `areas.json` shape — an area that owns L2
-// tests, declares an L2 gap on `windows-latest`, and would otherwise render a
-// green `0 run / N skipped` cell there.
+// Every case here starts from the shape the capability table produces for an
+// L2-owning package on Windows: a governed unavailability, and a tier whose
+// tests all early-return for want of a backend.
 // ---------------------------------------------------------------------------
 
-/// Build the `sniff`-shaped Windows L2 cell: L2 tier, tmux-only backend, a
-/// Windows runner that provisions nothing, and whatever gap declaration and
-/// evidence the caller supplies.
-///
-/// ## Notes
-///
-/// The two realistic evidence shapes differ, and the difference is load-bearing.
-/// A *declared* gap means the tier was never dispatched, so there are no records
-/// at all — and only the declaration stops that reading as `MISSING`. An
-/// *undeclared* gap means the tier ran and every test early-returned from
-/// `require_level!`, which JUnit records as passes; that is the green cell the
-/// state exists to catch.
-fn windows_l2_gap_cell(declared: Option<DeclaredGap>, records: &[RunRecord]) -> Cell {
-    let mut expectation = expectation("sniff", "windows-latest", Tier::L2);
+/// Build the `sniff-cli`-shaped Windows L2 cell: L2 tier, tmux-only backend,
+/// and whatever gap governance and evidence the caller supplies.
+fn windows_l2_gap_cell(governed: Option<DeclaredGap>, records: &[RunRecord]) -> Cell {
+    let mut expectation = expectation("sniff-cli", "windows-latest", Tier::L2);
     expectation.backends = vec!["tmux".to_owned()];
-    expectation.declared_gap = declared;
+    expectation.gap = match governed {
+        Some(gap) => Some(GapStatus::Governed(gap)),
+        None => Some(GapStatus::Ungoverned),
+    };
 
-    let provisioned: BTreeMap<String, BTreeSet<String>> =
-        [("windows-latest".to_owned(), BTreeSet::new())]
-            .into_iter()
-            .collect();
-    let expected_tests = BTreeMap::new();
-
-    only_cell(classify(&ClassifyInputs {
-        expected: &[expectation],
-        records,
-        statuses: &[],
-        provisioned: &provisioned,
-        expected_tests: &expected_tests,
-    }))
+    only_cell(classify_simple(&[expectation], records))
 }
 
 fn gap_verdict(cell: Cell, today: Option<&str>) -> Vec<Finding> {
-    verdict(&rollup_of(vec![cell], &["sniff"]), &Baseline::default(), today)
+    verdict(&rollup_of(vec![cell], &["sniff-cli"]), &Baseline::default(), today)
 }
 
-/// The defect this file's policy-gap rules exist to fix: eight areas declare an
-/// owned Windows-L2 gap, so before this rule the verdict could never exit 0 on
-/// any run touching one of them.
+/// The defect this file's policy-gap rules exist to fix: every L2-owning
+/// package has a governed Windows-L2 gap, so before this rule the verdict
+/// could never exit 0 on any run touching one of them.
 #[test]
 fn an_owned_unexpired_policy_gap_does_not_block() {
     let findings = gap_verdict(windows_l2_gap_cell(Some(gap()), &[]), Some("2026-07-28"));
@@ -1211,15 +1597,15 @@ fn an_owned_unexpired_policy_gap_does_not_block() {
     );
 }
 
-/// Acceptance changes the verdict, never the grid. Success criterion 2 and plan
-/// §2.3: never a green `0 run / N skipped` cell.
+/// Acceptance changes the verdict, never the grid: never a green
+/// `0 run / N skipped` cell.
 #[test]
 fn an_accepted_policy_gap_still_renders_policy_gap_never_pass() {
     let cell = windows_l2_gap_cell(Some(gap()), &[]);
     assert_eq!(cell.state, CellState::PolicyGap);
     assert_ne!(cell.state, CellState::Pass);
 
-    let rollup = rollup_of(vec![cell], &["sniff"]);
+    let rollup = rollup_of(vec![cell], &["sniff-cli"]);
     let grid = render_grid(&rollup);
     assert!(grid.contains("POLICY GAP"), "{grid}");
     assert!(!grid.contains("PASS"), "{grid}");
@@ -1233,8 +1619,7 @@ fn an_accepted_policy_gap_still_renders_policy_gap_never_pass() {
     )));
 }
 
-/// Same rule §1.3 applies to a baselined failure, applied to a gap: a lapsed
-/// bound is a permanent exclusion wearing a temporary label.
+/// A lapsed bound is a permanent exclusion wearing a temporary label.
 #[test]
 fn an_expired_policy_gap_blocks() {
     let mut expired = gap();
@@ -1244,13 +1629,14 @@ fn an_expired_policy_gap_blocks() {
     assert!(blocks_with_rule(&findings, "policy-gap-expired"));
 }
 
-/// The case that catches someone quietly turning a tier off. `areas.json` says
-/// nothing, so there is nobody to hold accountable and nothing to expire.
+/// The case that catches someone quietly turning a tier off: a plain `false`
+/// in the capability table, so there is nobody to hold accountable and nothing
+/// to expire.
 #[test]
-fn an_undeclared_policy_gap_still_blocks() {
+fn an_ungoverned_policy_gap_still_blocks() {
     let cell = windows_l2_gap_cell(
         None,
-        &[passing_record("sniff", "windows-latest", Tier::L2)],
+        &[passing_record("sniff-cli", "windows-latest", Tier::L2)],
     );
     assert_eq!(cell.state, CellState::PolicyGap);
     assert!(cell.declared_gap.is_none());
@@ -1259,18 +1645,18 @@ fn an_undeclared_policy_gap_still_blocks() {
     assert!(blocks_with_rule(&findings, "cell-policy-gap"));
     assert!(
         !findings.iter().any(|f| f.rule == "policy-gap-accepted"),
-        "an undeclared gap is never acceptable: {findings:#?}"
+        "an ungoverned gap is never acceptable: {findings:#?}"
     );
 }
 
-/// A gap declaration must never suppress genuine evidence. `classify_one` ranks
+/// A gap declaration must never suppress genuine evidence. `classify` ranks
 /// `Fail` above `PolicyGap`, so the cell never reaches the acceptance path.
 #[test]
-fn a_declared_gap_with_real_failures_still_surfaces_them() {
-    let mut expectation = expectation("sniff", "windows-latest", Tier::L2);
-    expectation.declared_gap = Some(gap());
+fn a_governed_gap_with_real_failures_still_surfaces_them() {
+    let mut expectation = expectation("sniff-cli", "windows-latest", Tier::L2);
+    expectation.gap = Some(GapStatus::Governed(gap()));
 
-    let mut rec = passing_record("sniff", "windows-latest", Tier::L2);
+    let mut rec = passing_record("sniff-cli", "windows-latest", Tier::L2);
     rec.counts.failed = 1;
     rec.failed_tests = vec!["sniff-cli::level2_probe".into()];
 
@@ -1288,19 +1674,19 @@ fn a_declared_gap_with_real_failures_still_surfaces_them() {
     assert!(!findings.iter().any(|f| f.rule == "policy-gap-accepted"));
 }
 
-/// The shape a *correctly* declared gap actually produces when its job runs: a
+/// The shape a *correctly* governed gap actually produces when its job runs: a
 /// `require_level!` gate that skips for want of a backend early-returns, and
 /// nextest records that as a JUnit pass. The cell must still read POLICY GAP,
 /// and must still be accepted — a "the tests passed, so the gap is stale" rule
 /// would block precisely the case the gap exists to describe.
 #[test]
-fn a_declared_gap_whose_tests_all_early_returned_is_still_accepted() {
-    let mut expectation = expectation("sniff", "windows-latest", Tier::L2);
-    expectation.declared_gap = Some(gap());
+fn a_governed_gap_whose_tests_all_early_returned_is_still_accepted() {
+    let mut expectation = expectation("sniff-cli", "windows-latest", Tier::L2);
+    expectation.gap = Some(GapStatus::Governed(gap()));
 
     let cell = only_cell(classify_simple(
         &[expectation],
-        &[passing_record("sniff", "windows-latest", Tier::L2)],
+        &[passing_record("sniff-cli", "windows-latest", Tier::L2)],
     ));
     assert_eq!(cell.state, CellState::PolicyGap, "never PASS, even so");
 
@@ -1324,12 +1710,12 @@ fn an_unattributable_or_undated_policy_gap_blocks(#[case] field: &str, #[case] v
     assert!(blocks_with_rule(&findings, "policy-gap-incomplete"));
 }
 
-/// `verdict` reads only `results.json`, never `areas.json`, so the gap's
-/// accountability fields have to survive the round trip or the decision is made
-/// on absent data.
+/// `verdict` reads only `results.json`, never `environments.json`, so the
+/// gap's accountability fields have to survive the round trip or the decision
+/// is made on absent data.
 #[test]
-fn a_declared_gap_round_trips_through_the_result_document() {
-    let rollup = rollup_of(vec![windows_l2_gap_cell(Some(gap()), &[])], &["sniff"]);
+fn a_governed_gap_round_trips_through_the_result_document() {
+    let rollup = rollup_of(vec![windows_l2_gap_cell(Some(gap()), &[])], &["sniff-cli"]);
     let json = serde_json::to_string(&rollup).unwrap();
     let parsed: Rollup = serde_json::from_str(&json).unwrap();
 
@@ -1340,38 +1726,6 @@ fn a_declared_gap_round_trips_through_the_result_document() {
     )));
 }
 
-/// `areas.json` is the source of the gap, so the deserializer has to keep
-/// `expiry` — which it did not before this rule existed.
-#[test]
-fn areas_json_policy_gap_expiry_reaches_the_cell() {
-    let areas: Vec<AreaPolicy> = serde_json::from_str(
-        r#"[{
-          "area": "sniff",
-          "l2": true,
-          "backends": ["tmux"],
-          "policy_gaps": [{
-            "tier": "L2",
-            "environments": ["windows-latest"],
-            "reason": "tmux has no Windows port",
-            "owner": "@yankeeinlondon",
-            "expiry": "2027-01-31"
-          }]
-        }]"#,
-    )
-    .unwrap();
-    let scope: BTreeSet<String> = ["sniff".to_owned()].into_iter().collect();
-
-    let gap = expected_cells(&areas, &scope, &[])
-        .into_iter()
-        .find(|cell| cell.key.environment == "windows-latest" && cell.key.tier == Tier::L2)
-        .expect("windows L2 must be expected, so it can render POLICY GAP")
-        .declared_gap
-        .expect("the declared gap must reach the expectation");
-
-    assert_eq!(gap.owner, "@yankeeinlondon");
-    assert_eq!(gap.expiry, "2027-01-31");
-}
-
 // ---------------------------------------------------------------------------
 // Exact-test-identity skip diff
 // ---------------------------------------------------------------------------
@@ -1379,7 +1733,7 @@ fn areas_json_policy_gap_expiry_reaches_the_cell() {
 fn skip_cell(skips: &[&str]) -> Cell {
     Cell {
         key: CellKey {
-            area: "biscuit-terminal".to_owned(),
+            package: "biscuit-terminal".to_owned(),
             environment: "ubuntu-latest".to_owned(),
             tier: Tier::L2,
         },
@@ -1391,7 +1745,6 @@ fn skip_cell(skips: &[&str]) -> Cell {
             ..Counts::default()
         },
         scheduled: true,
-        missing_shards: Vec::new(),
         skipped_tests: skips.iter().map(|s| (*s).to_owned()).collect(),
         failed_tests: Vec::new(),
         skip_evidence_degraded: false,
@@ -1406,7 +1759,7 @@ fn skip_budget(tests: &[&str]) -> Baseline {
         schema_version: SCHEMA_VERSION,
         failure: Vec::new(),
         skip: vec![SkipEntry {
-            area: "biscuit-terminal".to_owned(),
+            package: "biscuit-terminal".to_owned(),
             environment: "ubuntu-latest".to_owned(),
             tier: Tier::L2,
             backend: "wezterm".to_owned(),
@@ -1429,9 +1782,8 @@ fn an_exactly_matching_skip_set_is_clear() {
     assert!(!any_block(&findings), "{findings:#?}");
 }
 
-/// The crux of §1.2. Counts are identical (2 approved, 2 observed) — only an
-/// identity-set comparison sees that one skip was resolved and a different one
-/// appeared.
+/// Counts are identical (2 approved, 2 observed) — only an identity-set
+/// comparison sees that one skip was resolved and a different one appeared.
 #[test]
 fn a_one_for_one_skip_swap_blocks_on_both_halves() {
     let findings = verdict(
@@ -1503,87 +1855,8 @@ fn an_out_of_scope_skip_entry_is_ignored() {
 }
 
 // ---------------------------------------------------------------------------
-// Policy derivation
+// Baseline document
 // ---------------------------------------------------------------------------
-
-#[test]
-fn expected_cells_cover_l1_shards_l2_and_browser() {
-    let areas = vec![AreaPolicy {
-        area: "darkmatter".to_owned(),
-        ci: true,
-        environments: vec!["ubuntu-latest".to_owned(), "windows-latest".to_owned()],
-        shards: vec!["1/4".into(), "2/4".into(), "3/4".into(), "4/4".into()],
-        l2: true,
-        browser: true,
-        backends: vec!["tmux".to_owned()],
-        policy_gaps: Vec::new(),
-    }];
-    let scope: BTreeSet<String> = ["darkmatter".to_owned()].into_iter().collect();
-
-    let expected = expected_cells(&areas, &scope, &["ubuntu-latest".to_owned()]);
-
-    // L1 on both environments, L2 on both (the unprovisioned one must still
-    // appear, so it can render POLICY GAP), browser on Linux only.
-    assert_eq!(expected.len(), 5);
-    let l1: Vec<&ExpectedCell> = expected
-        .iter()
-        .filter(|cell| cell.key.tier == Tier::L1)
-        .collect();
-    assert_eq!(l1.len(), 2);
-    assert_eq!(l1[0].shards.len(), 4);
-    assert_eq!(
-        expected
-            .iter()
-            .filter(|cell| cell.key.tier == Tier::L2)
-            .count(),
-        2
-    );
-    assert_eq!(
-        expected
-            .iter()
-            .filter(|cell| cell.key.tier == Tier::Browser)
-            .count(),
-        1
-    );
-}
-
-#[test]
-fn the_real_areas_json_parses() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join(".github")
-        .join("ci")
-        .join("areas.json");
-    let text = fs::read_to_string(&path).expect("areas.json is readable");
-    let areas: Vec<AreaPolicy> = serde_json::from_str(&text).expect("areas.json parses");
-
-    assert!(areas.len() >= 31);
-    let terminal = areas
-        .iter()
-        .find(|area| area.area == "biscuit-terminal")
-        .expect("biscuit-terminal is declared");
-    assert!(terminal.l2);
-    assert!(terminal.backends.contains(&"tmux".to_owned()));
-
-    // Every checked-in gap must satisfy the acceptance rule, or `ci-verdict`
-    // can never exit 0 on a run touching that area — the defect these rules
-    // exist to fix. Eight areas declare a Windows-L2 gap today.
-    let gaps: Vec<(&String, &PolicyGap)> = areas
-        .iter()
-        .flat_map(|area| area.policy_gaps.iter().map(move |gap| (&area.area, gap)))
-        .collect();
-    assert!(gaps.len() >= 8, "expected the declared Windows-L2 gaps");
-    for (area, gap) in gaps {
-        assert!(!gap.owner.trim().is_empty(), "{area} gap has no owner");
-        assert!(!gap.reason.trim().is_empty(), "{area} gap has no reason");
-        assert!(
-            is_iso_date(gap.expiry.trim()),
-            "{area} gap expiry `{}` is not YYYY-MM-DD",
-            gap.expiry
-        );
-    }
-}
 
 #[test]
 fn the_checked_in_baseline_parses_and_every_entry_is_well_formed() {
@@ -1597,9 +1870,9 @@ fn the_checked_in_baseline_parses_and_every_entry_is_well_formed() {
 
     assert!(!baseline.failure.is_empty());
     for entry in &baseline.failure {
-        assert!(!entry.owner.is_empty(), "{} has no owner", entry.area);
-        assert!(!entry.reason.is_empty(), "{} has no reason", entry.area);
-        assert!(!entry.source_run.is_empty(), "{} has no source run", entry.area);
+        assert!(!entry.owner.is_empty(), "{} has no owner", entry.package);
+        assert!(!entry.reason.is_empty(), "{} has no reason", entry.package);
+        assert!(!entry.source_run.is_empty(), "{} has no source run", entry.package);
     }
 }
 
@@ -1615,6 +1888,39 @@ fn a_baseline_from_the_future_is_refused() {
     fs::remove_dir_all(&dir).ok();
 }
 
+/// The v1 baseline was keyed by `{area, environment, tier, shard}`. Reading it
+/// as v2 would silently mis-key every entry, so the error names the migration.
+#[test]
+fn an_area_keyed_baseline_is_refused_with_a_migration_error() {
+    let dir = std::env::temp_dir().join(format!("ci-rollup-v1-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("v1.toml");
+    fs::write(&path, "schema_version = 1\n").unwrap();
+
+    let err = load_baseline(&path).expect_err("the area-keyed baseline must be refused");
+    let message = format!("{err:#}");
+    assert!(message.contains("area-keyed"), "unhelpful error: {message}");
+    fs::remove_dir_all(&dir).ok();
+}
+
+/// Same migration guard on result documents, in both readers.
+#[test]
+fn an_area_keyed_result_document_is_refused_with_a_migration_error() {
+    let dir = std::env::temp_dir().join(format!("ci-rollup-r1-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("v1-results.json");
+    fs::write(
+        &path,
+        r#"{"schema_version":1,"scope":[],"scope_degraded":false,"records":[],"cells":[]}"#,
+    )
+    .unwrap();
+
+    let err = load_rollup(&path).expect_err("the area-keyed document must be refused");
+    let message = format!("{err:#}");
+    assert!(message.contains("area-keyed"), "unhelpful error: {message}");
+    fs::remove_dir_all(&dir).ok();
+}
+
 #[test]
 fn an_invalid_expiry_is_refused() {
     let dir = std::env::temp_dir().join(format!("ci-rollup-expiry-{}", std::process::id()));
@@ -1622,7 +1928,7 @@ fn an_invalid_expiry_is_refused() {
     let path = dir.join("bad.toml");
     fs::write(
         &path,
-        "[[failure]]\narea = \"a\"\nenvironment = \"ubuntu-latest\"\ntier = \"L1\"\n\
+        "schema_version = 2\n[[failure]]\npackage = \"a\"\nenvironment = \"ubuntu-latest\"\ntier = \"L1\"\n\
          owner = \"@o\"\nreason = \"r\"\nsource_run = \"1\"\nexpiry = \"soon\"\n",
     )
     .unwrap();
@@ -1630,6 +1936,128 @@ fn an_invalid_expiry_is_refused() {
     let err = load_baseline(&path).expect_err("a non-date expiry must be refused");
     assert!(format!("{err:#}").contains("invalid expiry"));
     fs::remove_dir_all(&dir).ok();
+}
+
+/// A version-less baseline must die as a missing field, not silently assume
+/// the current schema generation and skip the migration-error path.
+#[test]
+fn a_version_less_baseline_is_refused() {
+    let dir = std::env::temp_dir().join(format!("ci-rollup-vless-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("versionless.toml");
+    fs::write(
+        &path,
+        "[[failure]]\npackage = \"a\"\nenvironment = \"ubuntu-latest\"\ntier = \"L1\"\n\
+         owner = \"@o\"\nreason = \"r\"\nsource_run = \"1\"\n",
+    )
+    .unwrap();
+
+    let err = load_baseline(&path).expect_err("a missing schema_version must be refused");
+    assert!(
+        format!("{err:#}").contains("schema_version"),
+        "the error must name the missing field: {err:#}"
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+/// AC11: a v2 entry carrying a stale area/shard key (`shard = "1/4"`,
+/// `area = …`) must be rejected, not silently parsed away.
+#[test]
+fn a_baseline_entry_with_a_stale_shard_key_is_refused() {
+    let dir = std::env::temp_dir().join(format!("ci-rollup-stray-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("stray.toml");
+    fs::write(
+        &path,
+        "schema_version = 2\n[[failure]]\npackage = \"a\"\nenvironment = \"ubuntu-latest\"\n\
+         tier = \"L1\"\nowner = \"@o\"\nreason = \"r\"\nsource_run = \"1\"\nshard = \"1/4\"\n",
+    )
+    .unwrap();
+
+    let err = load_baseline(&path).expect_err("a stale shard key must be refused");
+    assert!(
+        format!("{err:#}").contains("unknown field"),
+        "the error must name the stray key: {err:#}"
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+/// A `tier = "lint"` baseline entry excuses a lint FAIL exactly like a
+/// JUnit-backed entry: lint cells come from producer status, and the synthetic
+/// producers will eventually ride this path.
+#[test]
+fn a_lint_baseline_entry_excuses_a_lint_failure() {
+    let statuses = vec![ProducerStatus {
+        package: "homelab-server".to_owned(),
+        job: "lint".to_owned(),
+        result: "failure".to_owned(),
+        environment: None,
+        detail: None,
+        companion: None,
+    }];
+    let cells = status_cells(
+        &statuses,
+        &scope_of(&["homelab-server"]),
+        &[],
+        &[policy("homelab-server")],
+    );
+    assert_eq!(cells.len(), 1);
+    assert_eq!(cells[0].state, CellState::Fail);
+
+    let baseline = Baseline {
+        schema_version: SCHEMA_VERSION,
+        failure: vec![failure_entry(
+            "homelab-server",
+            "ubuntu-latest",
+            Tier::parse("lint"),
+        )],
+        skip: Vec::new(),
+    };
+    let findings = verdict(&rollup_of(cells, &["homelab-server"]), &baseline, None);
+    assert!(!any_block(&findings), "unexpected blocks: {findings:#?}");
+    assert!(
+        findings.iter().any(|f| f.rule == "baseline-accepted"),
+        "the excusal must stay visible: {findings:#?}"
+    );
+}
+
+/// The synthetic identities (`claudine-gen-drift`, `coverage`) are carried
+/// forward outside every package scope: reported out-of-scope BY NAME, never
+/// blocking, never passing.
+#[test]
+fn synthetic_baseline_identities_report_out_of_scope_by_name() {
+    let baseline = Baseline {
+        schema_version: SCHEMA_VERSION,
+        failure: vec![
+            failure_entry("claudine-gen-drift", "ubuntu-latest", Tier::parse("lint")),
+            failure_entry("coverage", "ubuntu-latest", Tier::parse("lint")),
+        ],
+        skip: Vec::new(),
+    };
+
+    let findings = verdict(&rollup_of(Vec::new(), &["sniff"]), &baseline, None);
+    assert!(!any_block(&findings), "out-of-scope must not block: {findings:#?}");
+    let note = findings
+        .iter()
+        .find(|f| f.rule == "baseline-out-of-scope")
+        .expect("the synthetic entries must be reported out of scope");
+    assert!(note.detail.contains("claudine-gen-drift"));
+    assert!(note.detail.contains("coverage"));
+}
+
+#[rstest]
+#[case(CellState::Pass, false)]
+#[case(CellState::Fail, true)]
+#[case(CellState::Skip, false)]
+#[case(CellState::NothingToRun, false)]
+#[case(CellState::Missing, true)]
+#[case(CellState::NotScheduled, false)]
+#[case(CellState::PolicyGap, true)]
+fn only_fail_missing_and_policy_gap_block_the_summary_gate(
+    #[case] state: CellState,
+    #[case] blocks: bool,
+) {
+    assert_eq!(state.blocks(), blocks);
 }
 
 // ---------------------------------------------------------------------------
@@ -1664,7 +2092,7 @@ impl Drop for TempDir {
 #[test]
 fn the_manifest_is_the_identity_source() {
     let temp = TempDir::new("manifest");
-    let artifact = temp.path().join("junit-biscuit-file-L1-ubuntu-latest-0");
+    let artifact = temp.path().join("junit-biscuit-file-cli-L1-windows-latest");
     fs::create_dir_all(artifact.join("L1")).unwrap();
     fs::write(
         artifact.join("L1").join("biscuit-file-cli.xml"),
@@ -1673,32 +2101,30 @@ fn the_manifest_is_the_identity_source() {
     .unwrap();
     fs::write(
         artifact.join("manifest.jsonl"),
-        r#"{"tier":"L1","package":"biscuit-file-cli","xml":"L1/biscuit-file-cli.xml","exit_code":0,"area":"biscuit-file","environment":"windows-latest","shard":"2/4","duration_s":12,"report_present":true}
+        r#"{"tier":"L1","package":"biscuit-file-cli","xml":"L1/biscuit-file-cli.xml","exit_code":0,"environment":"windows-latest","duration_s":12,"report_present":true}
 "#,
     )
     .unwrap();
 
     let records = records_from_artifact(&ArtifactDir {
-        name: "junit-biscuit-file-L1-ubuntu-latest-0".to_owned(),
+        name: "junit-biscuit-file-cli-L1-windows-latest".to_owned(),
         path: artifact,
     })
     .unwrap();
 
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].package, "biscuit-file-cli");
-    assert_eq!(records[0].shard, "2/4");
-    assert_eq!(
-        records[0].environment, "windows-latest",
-        "the manifest wins over the artifact directory name"
-    );
+    assert_eq!(records[0].environment, "windows-latest");
     assert!(!records[0].degraded);
     assert_eq!(records[0].counts.passed, 1);
 }
 
+/// Artifact-name parsing was retired with the area model: a staged report with
+/// no covering manifest record has no trustworthy identity and is dropped.
 #[test]
-fn a_report_with_no_manifest_falls_back_to_the_artifact_name_and_is_degraded() {
+fn a_report_with_no_manifest_record_is_dropped_not_guessed() {
     let temp = TempDir::new("nomanifest");
-    let artifact = temp.path().join("junit-sniff-L1-macos-latest-1");
+    let artifact = temp.path().join("junit-sniff-L1-macos-latest");
     fs::create_dir_all(artifact.join("L1")).unwrap();
     fs::write(
         artifact.join("L1").join("sniff.xml"),
@@ -1707,33 +2133,32 @@ fn a_report_with_no_manifest_falls_back_to_the_artifact_name_and_is_degraded() {
     .unwrap();
 
     let records = records_from_artifact(&ArtifactDir {
-        name: "junit-sniff-L1-macos-latest-1".to_owned(),
+        name: "junit-sniff-L1-macos-latest".to_owned(),
         path: artifact,
     })
     .unwrap();
 
-    assert_eq!(records.len(), 1);
-    assert_eq!(records[0].area, "sniff");
-    assert_eq!(records[0].environment, "macos-latest");
-    assert_eq!(records[0].package, "sniff");
-    assert!(records[0].degraded, "no manifest means degraded identity");
-    assert_eq!(records[0].counts.failed, 1);
+    assert_eq!(
+        records.len(),
+        0,
+        "identity is never recovered from a directory name"
+    );
 }
 
 #[test]
 fn report_present_false_yields_a_record_with_no_counts() {
     let temp = TempDir::new("noreport");
-    let artifact = temp.path().join("junit-queue-L1-windows-latest-0");
+    let artifact = temp.path().join("junit-queue-L1-windows-latest");
     fs::create_dir_all(&artifact).unwrap();
     fs::write(
         artifact.join("manifest.jsonl"),
-        r#"{"tier":"L1","package":"queue","xml":"L1/queue.xml","exit_code":101,"area":"queue","environment":"windows-latest","shard":"1/1","duration_s":3,"report_present":false}
+        r#"{"tier":"L1","package":"queue","xml":"L1/queue.xml","exit_code":101,"environment":"windows-latest","duration_s":3,"report_present":false}
 "#,
     )
     .unwrap();
 
     let records = records_from_artifact(&ArtifactDir {
-        name: "junit-queue-L1-windows-latest-0".to_owned(),
+        name: "junit-queue-L1-windows-latest".to_owned(),
         path: artifact,
     })
     .unwrap();
@@ -1746,7 +2171,7 @@ fn report_present_false_yields_a_record_with_no_counts() {
 #[test]
 fn a_truncated_staged_report_becomes_a_parse_error_not_a_pass() {
     let temp = TempDir::new("truncated");
-    let artifact = temp.path().join("junit-playa-L1-ubuntu-latest-0");
+    let artifact = temp.path().join("junit-playa-L1-ubuntu-latest");
     fs::create_dir_all(artifact.join("L1")).unwrap();
     let full = junit("playa", &passing_case("a"));
     fs::write(
@@ -1756,13 +2181,13 @@ fn a_truncated_staged_report_becomes_a_parse_error_not_a_pass() {
     .unwrap();
     fs::write(
         artifact.join("manifest.jsonl"),
-        r#"{"tier":"L1","package":"playa","xml":"L1/playa.xml","exit_code":0,"area":"playa","environment":"ubuntu-latest","shard":"1/1","duration_s":1,"report_present":true}
+        r#"{"tier":"L1","package":"playa","xml":"L1/playa.xml","exit_code":0,"environment":"ubuntu-latest","duration_s":1,"report_present":true}
 "#,
     )
     .unwrap();
 
     let records = records_from_artifact(&ArtifactDir {
-        name: "junit-playa-L1-ubuntu-latest-0".to_owned(),
+        name: "junit-playa-L1-ubuntu-latest".to_owned(),
         path: artifact,
     })
     .unwrap();
@@ -1775,17 +2200,17 @@ fn a_truncated_staged_report_becomes_a_parse_error_not_a_pass() {
 #[test]
 fn a_manifest_record_for_a_missing_xml_file_is_a_parse_error() {
     let temp = TempDir::new("absentxml");
-    let artifact = temp.path().join("junit-research-L1-ubuntu-latest-0");
+    let artifact = temp.path().join("junit-research-L1-ubuntu-latest");
     fs::create_dir_all(&artifact).unwrap();
     fs::write(
         artifact.join("manifest.jsonl"),
-        r#"{"tier":"L1","package":"research","xml":"L1/research.xml","exit_code":0,"area":"research","environment":"ubuntu-latest","shard":"1/1","duration_s":1,"report_present":true}
+        r#"{"tier":"L1","package":"research","xml":"L1/research.xml","exit_code":0,"environment":"ubuntu-latest","duration_s":1,"report_present":true}
 "#,
     )
     .unwrap();
 
     let records = records_from_artifact(&ArtifactDir {
-        name: "junit-research-L1-ubuntu-latest-0".to_owned(),
+        name: "junit-research-L1-ubuntu-latest".to_owned(),
         path: artifact,
     })
     .unwrap();
@@ -1797,12 +2222,12 @@ fn a_manifest_record_for_a_missing_xml_file_is_a_parse_error() {
 #[test]
 fn a_malformed_manifest_line_is_a_hard_error() {
     let temp = TempDir::new("badmanifest");
-    let artifact = temp.path().join("junit-a-L1-ubuntu-latest-0");
+    let artifact = temp.path().join("junit-a-L1-ubuntu-latest");
     fs::create_dir_all(&artifact).unwrap();
     fs::write(artifact.join("manifest.jsonl"), "{not json}\n").unwrap();
 
     let err = records_from_artifact(&ArtifactDir {
-        name: "junit-a-L1-ubuntu-latest-0".to_owned(),
+        name: "junit-a-L1-ubuntu-latest".to_owned(),
         path: artifact,
     })
     .expect_err("a corrupt manifest must not be silently ignored");
@@ -1854,6 +2279,17 @@ fn the_grid_never_renders_a_missing_cell_as_pass() {
 }
 
 #[test]
+fn the_grid_renders_nothing_to_run_and_not_scheduled_as_themselves() {
+    let cells = classify_simple(
+        &[expectation("tabby", "ubuntu-latest", Tier::L1)],
+        &[record("tabby", "ubuntu-latest", Tier::L1)],
+    );
+    let markdown = render_grid(&rollup_of(cells, &["tabby"]));
+    assert!(markdown.contains("NOTHING TO RUN"), "{markdown}");
+    assert!(!markdown.contains("PASS 0/0/0"), "{markdown}");
+}
+
+#[test]
 fn table_cells_escape_pipes_so_the_grid_cannot_be_corrupted() {
     assert_eq!(cell_text("a|b"), "a\\|b");
     assert_eq!(cell_text("a\nb"), "a b");
@@ -1897,131 +2333,29 @@ fn repeated_and_comma_joined_flags_flatten_to_one_list() {
 }
 
 #[test]
-fn provisioned_backends_parse_per_environment() {
-    let args = Args::parse(
-        [
-            "--provisioned-backends",
-            "ubuntu-latest=tmux",
-            "--provisioned-backends",
-            "windows-latest=",
-        ]
-        .into_iter()
-        .map(str::to_owned),
-    )
-    .unwrap();
-
-    let provisioned = parse_provisioned(&args).unwrap();
-    assert_eq!(
-        provisioned["ubuntu-latest"],
-        ["tmux".to_owned()].into_iter().collect::<BTreeSet<_>>()
-    );
-    assert!(
-        provisioned["windows-latest"].is_empty(),
-        "an explicit empty set means `provisioned nothing`, not `unknown`"
-    );
-}
-
-#[test]
-fn a_malformed_provisioned_backends_flag_is_rejected() {
-    let args = Args::parse(
-        ["--provisioned-backends", "tmux"]
-            .into_iter()
-            .map(str::to_owned),
-    )
-    .unwrap();
-    assert!(parse_provisioned(&args).is_err());
-}
-
-#[test]
 fn a_positional_argument_is_rejected() {
     assert!(Args::parse(["oops".to_owned()].into_iter()).is_err());
 }
 
 // ---------------------------------------------------------------------------
-// `wsl2-ubuntu` and the areas.json default-environment contract
+// `wsl2-ubuntu` cells
 // ---------------------------------------------------------------------------
 
-/// An area record that omits `environments`, exactly as serde builds it.
-fn defaulted_area(area: &str) -> AreaPolicy {
-    AreaPolicy {
-        area: area.to_owned(),
-        ci: true,
-        environments: default_environments(),
-        shards: default_shards(),
-        l2: false,
-        browser: false,
-        backends: Vec::new(),
-        policy_gaps: Vec::new(),
-    }
+fn scope_of(packages: &[&str]) -> BTreeSet<String> {
+    packages.iter().map(|p| (*p).to_owned()).collect()
 }
 
-fn scope_of(areas: &[&str]) -> BTreeSet<String> {
-    areas.iter().map(|a| (*a).to_owned()).collect()
-}
-
-/// `AREA_DEFAULTS["environments"]` as written in `affected_scope.py`.
-///
-/// Panics rather than returning an `Option` on a shape it cannot read: a
-/// silently-skipped drift guard is the failure mode this whole test exists to
-/// prevent.
-fn python_default_environments() -> Vec<String> {
-    let source = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/ci/affected_scope.py"
-    ))
-    .expect("scripts/ci/affected_scope.py must be readable");
-
-    let defaults = source
-        .split_once("AREA_DEFAULTS")
-        .expect("affected_scope.py must define AREA_DEFAULTS")
-        .1;
-    let line = defaults
-        .lines()
-        .find(|line| line.trim_start().starts_with("\"environments\":"))
-        .expect("AREA_DEFAULTS must set \"environments\"");
-    let list = line
-        .split_once('[')
-        .and_then(|(_, rest)| rest.split_once(']'))
-        .expect("\"environments\" must be a single-line list literal")
-        .0;
-
-    let parsed: Vec<String> = list
-        .split(',')
-        .map(|item| item.trim().trim_matches('"').to_owned())
-        .filter(|item| !item.is_empty())
-        .collect();
-    assert!(
-        !parsed.is_empty(),
-        "parsed an empty environment list out of `{line}`, so this guard would pass vacuously"
-    );
-    parsed
-}
-
-/// Most areas omit `environments`, so this Rust list — not `areas.json` —
-/// decides which cells exist for them. It silently fell behind the Python side
-/// once already; that cost a full run of WSL2 evidence.
-#[test]
-fn default_environments_match_affected_scope_py() {
-    assert_eq!(
-        default_environments(),
-        python_default_environments(),
-        "ci-rollup's default environments have drifted from AREA_DEFAULTS in \
-         scripts/ci/affected_scope.py; an area omitting `environments` will be \
-         judged against a different cell set than CI actually scheduled"
-    );
-}
-
-/// The reported bug: five WSL2 legs ran green and were filed `NOT SCHEDULED`.
+/// The reported bug that motivated environment-keyed cells: green legs filed
+/// `NOT SCHEDULED`.
 #[test]
 fn a_passing_wsl2_leg_renders_pass_not_not_scheduled() {
-    let areas = vec![defaulted_area("biscuit-hash")];
-    let expected = expected_cells(&areas, &scope_of(&["biscuit-hash"]), &[]);
+    let expected = expected_cells(&[policy("biscuit-hash")], &scope_of(&["biscuit-hash"]), &test_environments());
 
     assert!(
         expected
             .iter()
             .any(|cell| cell.key.environment == "wsl2-ubuntu"),
-        "an area that omits `environments` must still schedule a wsl2-ubuntu cell"
+        "a gating package must schedule a wsl2-ubuntu cell"
     );
 
     let cells = classify_simple(
@@ -2042,8 +2376,7 @@ fn a_passing_wsl2_leg_renders_pass_not_not_scheduled() {
 /// quietly become a non-blocking `NOT SCHEDULED`.
 #[test]
 fn a_scheduled_wsl2_leg_with_no_report_is_missing_and_blocks() {
-    let areas = vec![defaulted_area("biscuit-hash")];
-    let expected = expected_cells(&areas, &scope_of(&["biscuit-hash"]), &[]);
+    let expected = expected_cells(&[policy("biscuit-hash")], &scope_of(&["biscuit-hash"]), &test_environments());
 
     // Every native leg reported; only wsl2-ubuntu is silent.
     let records: Vec<RunRecord> = ["ubuntu-latest", "windows-latest", "macos-latest"]
@@ -2072,29 +2405,6 @@ fn a_scheduled_wsl2_leg_with_no_report_is_missing_and_blocks() {
     assert!(blocks_with_rule(&findings, "cell-missing"));
 }
 
-/// The legitimate case must keep working: opting out is a policy statement, and
-/// it is the one thing `NOT SCHEDULED` is for.
-#[test]
-fn an_area_excluding_wsl2_from_environments_still_renders_not_scheduled() {
-    let mut area = defaulted_area("homelab");
-    area.environments = vec!["ubuntu-latest".to_owned(), "macos-latest".to_owned()];
-
-    let expected = expected_cells(&[area], &scope_of(&["homelab"]), &[]);
-    assert!(
-        !expected
-            .iter()
-            .any(|cell| cell.key.environment == "wsl2-ubuntu"),
-        "a declared opt-out must schedule no wsl2-ubuntu cell"
-    );
-
-    // No expectation and no evidence means no cell at all, which the grid
-    // renders as NOT SCHEDULED.
-    let cells = classify_simple(&expected, &[]);
-    assert!(!cells
-        .iter()
-        .any(|cell| cell.key.environment == "wsl2-ubuntu"));
-}
-
 /// Evidence proves a leg ran, so the cell must report what the tests did. The
 /// policy disagreement is separately blocking rather than a state that hides
 /// the counts.
@@ -2119,17 +2429,16 @@ fn passing_evidence_for_an_unscheduled_cell_renders_pass_and_blocks() {
 // compare
 // ---------------------------------------------------------------------------
 
-fn compare_cell(area: &str, state: CellState, failed: &[&str]) -> Cell {
+fn compare_cell(package: &str, state: CellState, failed: &[&str]) -> Cell {
     Cell {
         key: CellKey {
-            area: area.to_owned(),
+            package: package.to_owned(),
             environment: "ubuntu-latest".to_owned(),
             tier: Tier::L1,
         },
         state,
         counts: Counts::default(),
         scheduled: state != CellState::NotScheduled,
-        missing_shards: Vec::new(),
         skipped_tests: Vec::new(),
         failed_tests: failed.iter().map(|t| (*t).to_owned()).collect(),
         skip_evidence_degraded: false,

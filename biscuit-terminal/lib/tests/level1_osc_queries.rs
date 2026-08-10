@@ -1,10 +1,12 @@
-//! Level-1 PTY tests for OSC colour queries.
+//! Level-1 PTY tests for Unix OSC color queries.
 //!
 //! These tests exercise `query_osc_actual` by spawning `discovery_probe`
 //! inside a pseudoterminal, manufacturing the OSC reply bytes, and
 //! asserting on the parsed output.
 //!
 //! Run `cargo build -p biscuit-terminal --example discovery_probe` first.
+
+#![cfg(unix)]
 
 mod common;
 

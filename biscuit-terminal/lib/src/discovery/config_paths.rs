@@ -122,18 +122,15 @@ mod tests {
     #[test]
     fn test_alacritty_config_paths_multiple() {
         let paths = get_terminal_config_paths(&TerminalApp::Alacritty);
-        #[cfg(not(target_os = "windows"))]
-        {
-            assert!(
-                paths.len() >= 2,
-                "Alacritty should have multiple config paths"
-            );
-            // Should include both .toml and .yml options
-            let has_toml = paths.iter().any(|p| p.to_string_lossy().contains(".toml"));
-            let has_yml = paths.iter().any(|p| p.to_string_lossy().contains(".yml"));
-            assert!(has_toml, "Should include .toml path");
-            assert!(has_yml, "Should include .yml path");
-        }
+        assert!(
+            paths.len() >= 2,
+            "Alacritty should have multiple config paths"
+        );
+        // Should include both .toml and .yml options
+        let has_toml = paths.iter().any(|p| p.to_string_lossy().contains(".toml"));
+        let has_yml = paths.iter().any(|p| p.to_string_lossy().contains(".yml"));
+        assert!(has_toml, "Should include .toml path");
+        assert!(has_yml, "Should include .yml path");
     }
 
     #[test]
@@ -235,6 +232,8 @@ mod tests {
             let path = path.unwrap();
             assert!(path.to_string_lossy().contains(".warp"));
         }
+        #[cfg(target_os = "windows")]
+        assert!(path.is_none(), "Warp has no Windows config candidate");
     }
 
     #[test]

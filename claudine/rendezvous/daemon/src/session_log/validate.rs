@@ -32,9 +32,7 @@ pub(super) fn read_map_i64(doc: &LoroDoc, key: &str) -> Result<i64, SessionLogEr
     };
     match voc {
         ValueOrContainer::Value(loro::LoroValue::I64(n)) => Ok(n),
-        ValueOrContainer::Value(loro::LoroValue::Double(n)) if n.fract() == 0.0 => {
-            Ok(n as i64)
-        }
+        ValueOrContainer::Value(loro::LoroValue::Double(n)) if n.fract() == 0.0 => Ok(n as i64),
         _ => Err(SessionLogError::SchemaValidation {
             reason: format!("metadata key {key} is not an integer"),
         }),
@@ -193,9 +191,7 @@ pub(super) fn validate_remote_entries(
 
     if len < existing_entry_count {
         return Err(SessionLogError::SchemaValidation {
-            reason: format!(
-                "entry count decreased from {existing_entry_count} to {len}"
-            ),
+            reason: format!("entry count decreased from {existing_entry_count} to {len}"),
         });
     }
 
@@ -259,11 +255,7 @@ pub(super) fn collect_entry_json_strings(doc: &LoroDoc) -> Result<Vec<String>, S
             }
         }
     });
-    if let Some(e) = err {
-        Err(e)
-    } else {
-        Ok(out)
-    }
+    if let Some(e) = err { Err(e) } else { Ok(out) }
 }
 
 pub(super) fn validate_append_only_prefix(
@@ -316,16 +308,13 @@ pub(super) fn refresh_session_cursor(inner: &mut ManagerInner, chunk: &ChunkId) 
     let session_key = chunk.session_key();
     let state = inner.chunks.get(&key).expect("just inserted or merged");
     let mut highest_seq = None;
-    state
-        .doc
-        .get_list(ENTRIES_CONTAINER)
-        .for_each(|value| {
-            if let Some(json) = value_to_string(&value)
-                && let Ok(entry) = serde_json::from_str::<Entry>(&json)
-            {
-                highest_seq = Some(highest_seq.map_or(entry.sequence, |h: u64| h.max(entry.sequence)));
-            }
-        });
+    state.doc.get_list(ENTRIES_CONTAINER).for_each(|value| {
+        if let Some(json) = value_to_string(&value)
+            && let Ok(entry) = serde_json::from_str::<Entry>(&json)
+        {
+            highest_seq = Some(highest_seq.map_or(entry.sequence, |h: u64| h.max(entry.sequence)));
+        }
+    });
     let cursor = inner.sessions.entry(session_key).or_insert(SessionCursor {
         active_chunk_index: chunk.chunk_index,
         next_sequence: 0,

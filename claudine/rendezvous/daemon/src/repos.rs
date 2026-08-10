@@ -40,10 +40,7 @@ const SCAN_MAX_DEPTH: usize = 4;
 /// with the result. Returns `true` when the register changed. With no
 /// roots configured the register is left untouched (the feature is
 /// opt-in until a scan location is known).
-pub fn refresh_repos(
-    store: &RegisterStore,
-    roots: &[PathBuf],
-) -> Result<bool, RegisterError> {
+pub fn refresh_repos(store: &RegisterStore, roots: &[PathBuf]) -> Result<bool, RegisterError> {
     if roots.is_empty() {
         return Ok(false);
     }
@@ -210,11 +207,15 @@ mod tests {
 
         let repos = detect_repos(&[root]);
         assert_eq!(
-            repos.get("github.com/acme/widget").and_then(JsonValue::as_str),
+            repos
+                .get("github.com/acme/widget")
+                .and_then(JsonValue::as_str),
             Some(widget_head.as_str()),
         );
         assert_eq!(
-            repos.get("gitlab.com/acme/gadget").and_then(JsonValue::as_str),
+            repos
+                .get("gitlab.com/acme/gadget")
+                .and_then(JsonValue::as_str),
             Some(nested_head.as_str()),
         );
         assert_eq!(repos.len(), 2, "orphan must be skipped: {repos:?}");
@@ -268,6 +269,11 @@ mod tests {
         let identity = Arc::new(NodeIdentity::from_seed([8u8; 32]));
         let store = RegisterStore::new(storage, identity).expect("store");
         assert!(!refresh_repos(&store, &[]).expect("noop"));
-        assert!(store.deep_value(&store.local_repos_id()).expect("read").is_none());
+        assert!(
+            store
+                .deep_value(&store.local_repos_id())
+                .expect("read")
+                .is_none()
+        );
     }
 }

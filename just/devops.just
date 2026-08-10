@@ -15,9 +15,12 @@ underline := '\033[4m'
 # dim := '\033[2m'
 
 # Preserve enough headroom for Cargo and the Windows linker before entering a
-# storage-heavy recipe. Other hosts return immediately.
+# storage-heavy recipe. Other hosts return immediately. Workspaces that merely
+# import these recipes (e.g. the test-toolkit staging fixtures) are not git
+# checkouts and have no scripts/ dir, so the preflight skips them; a real
+# preflight failure still fails the recipe.
 _storage_preflight:
-    @repo_root="$(git rev-parse --show-toplevel)"; bash "$repo_root/scripts/storage-preflight.sh"
+    @repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"; if [[ -n "$repo_root" && -f "$repo_root/scripts/storage-preflight.sh" ]]; then bash "$repo_root/scripts/storage-preflight.sh"; fi
 
 # Build the package
 _build package pkg_name *args="": _storage_preflight
@@ -179,19 +182,19 @@ gitnexus:
 #
 # Each manifest record carries exactly these keys:
 #
-#     tier package xml exit_code area environment shard duration_s report_present
+#     tier package xml exit_code environment duration_s report_present
 #
-# `area` / `environment` / `shard` come from `$BISCUIT_CI_AREA`,
-# `$BISCUIT_CI_ENVIRONMENT` and `$BISCUIT_CI_SHARD` and are `""` when unset
-# (local dev) — never invented. `report_present` is `false` when nextest emitted
-# no XML at all (a compile failure, say). A MISSING report is signal for the
-# rollup, so the record is still written.
+# `package` is the recipe argument — the package is the unit of result
+# identity. `environment` comes from `$BISCUIT_CI_ENVIRONMENT` and is `""` when
+# unset (local dev) — never invented. `report_present` is `false` when nextest
+# emitted no XML at all (a compile failure, say). A MISSING report is signal
+# for the rollup, so the record is still written.
 #
 # `_stage_junit_reset` runs BEFORE the invocation rather than deleting the
 # report after copying it, for two reasons: a run that never reaches the report
 # stage cannot then be credited with its predecessor's XML, and the last
 # invocation's report survives at the legacy `target/nextest/ci/test-results.xml`
-# path that `_area-ci.yml` still uploads.
+# path that `_package-ci.yml` still uploads.
 # ---------------------------------------------------------------------------
 
 # Announce, unmissably, that JUnit staging is about to no-op.
@@ -289,12 +292,10 @@ _stage_junit tier pkg exit_code duration:
         --arg package '{{ pkg }}' \
         --arg xml "${relative_xml}" \
         --argjson exit_code "${exit_code}" \
-        --arg area "${BISCUIT_CI_AREA:-}" \
         --arg environment "${BISCUIT_CI_ENVIRONMENT:-}" \
-        --arg shard "${BISCUIT_CI_SHARD:-}" \
         --argjson duration_s "${duration}" \
         --argjson report_present "${report_present}" \
-        '{tier: $tier, package: $package, xml: $xml, exit_code: $exit_code, area: $area, environment: $environment, shard: $shard, duration_s: $duration_s, report_present: $report_present}' \
+        '{tier: $tier, package: $package, xml: $xml, exit_code: $exit_code, environment: $environment, duration_s: $duration_s, report_present: $report_present}' \
         >> "${stage}/manifest.jsonl" 2>/dev/null || exit 0
     exit 0
 
@@ -561,8 +562,10 @@ _backend_proof command:
 # `pkg` matters only for L1: `worktree-cli` additionally excludes its `perf_` SLA
 # tests, which assert wall-clock budgets and belong to `just test-perf`.
 # `BISCUIT_TEST_FILTER` replaces the L1 expression wholesale — only areas whose
-# L1 contract genuinely differs should set it (darkmatter runs its `slow_` tests
-# as part of `just test`).
+# L1 contract genuinely differs should set it. `BISCUIT_L1_INCLUDE_SLOW=1`
+# keeps `slow_` tests inside L1 instead of excluding them, which is darkmatter's
+# declared L1 contract (`l1-include-slow` in `[package.metadata.ci.tests]`).
+# The explicit `BISCUIT_TEST_FILTER` override wins over both.
 #
 # ## A tier marker is a prefix, not a substring
 #
@@ -583,6 +586,8 @@ _tier_filter tier pkg="":
             filter="${base}"
             if [[ '{{ pkg }}' == "worktree-cli" ]]; then
                 filter='!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/) + test(/(^|::)perf_/))'
+            elif [[ "${BISCUIT_L1_INCLUDE_SLOW:-}" == "1" ]]; then
+                filter='!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/))'
             fi
             printf '%s\n' "${BISCUIT_TEST_FILTER:-${filter}}"
             ;;
@@ -605,9 +610,9 @@ _tier_filter tier pkg="":
 # than ignoring it. An area that carries a per-package build flag
 # (`_test_all "messenger --features desktop; messenger-cli"`) would therefore be
 # unable to use the archive path at all. The features are not lost by dropping
-# them here: they were baked into the archive at build time, which is why
-# `areas.json` carries them on `check_args` and `_wsl-ci.yml` passes `check_args`
-# to `cargo nextest archive`.
+# them here: they were baked into the archive at build time, which is why the
+# package's declared features (`[package.metadata.ci.tests]`) also reach
+# `_wsl-ci.yml`'s `cargo nextest archive` invocation.
 _archive_drop_build_flags *args="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -797,10 +802,10 @@ _test pkg *args="": _storage_preflight
 #
 # The hazard it closes is live: `_test` passes `--no-tests=pass`, so a tier that
 # selects zero tests exits 0 and stages a valid, empty report. The rollup renders
-# that `N/A` — correct in isolation, since a tier with no tests is N/A rather
-# than PASS — so a drifted filter expression would quietly downgrade a real area
-# to N/A with nothing anywhere failing. Comparing against the manifest turns that
-# into N absent tests.
+# that `NOTHING TO RUN` — correct in isolation, since a tier with no tests is
+# not a PASS — so a drifted filter expression would quietly downgrade a real
+# package to NOTHING TO RUN with nothing anywhere failing. Comparing against
+# the manifest turns that into N absent tests.
 #
 # `tier` is `L1` / `L2` / `L3` / `browser` / `real` / `sanity`. `specs` follows
 # `_run_all`: whitespace-separated package names, or — when it contains a `;` —
@@ -812,9 +817,6 @@ _test pkg *args="": _storage_preflight
 # `_stage_junit` uses. `environment` comes from `$BISCUIT_CI_ENVIRONMENT` — the
 # same value the manifest records carry, because the rollup keys expectations by
 # `{environment, tier}` and has no other way to join the two.
-#
-# Deliberately takes no `--partition`: the rollup aggregates every shard of a
-# cell, so each shard's expectation is the cell's whole compiled test set.
 _expected_manifest tier specs *args="":
     #!/usr/bin/env bash
     set -euo pipefail

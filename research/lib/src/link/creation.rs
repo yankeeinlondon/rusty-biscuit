@@ -529,6 +529,7 @@ mod tests {
         create_skill_symlink(&skill_dir, &symlink_location).unwrap();
 
         let target = fs::read_link(&symlink_location).unwrap();
+        let target = target.canonicalize().unwrap();
         let expected = skill_dir.canonicalize().unwrap();
         assert_eq!(target, expected);
     }
@@ -740,6 +741,7 @@ mod tests {
         create_deep_dive_symlink(&deep_dive, &symlink_location).unwrap();
 
         let target = fs::read_link(&symlink_location).unwrap();
+        let target = target.canonicalize().unwrap();
         let expected = deep_dive.canonicalize().unwrap();
         assert_eq!(target, expected);
     }

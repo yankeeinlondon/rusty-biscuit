@@ -66,3 +66,13 @@ tempfile = "3"
 # tmux terminal harness for real-rendering SGR capture.
 test-toolkit = { path = "../../tools/test-toolkit" }
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
+
+# CI policy: darkmatter's L1 contract keeps `slow_` tests, and dmls owns the
+# language-server L2 (real-terminal) tier tests — neovim semantic-token
+# rendering under tmux. The per-package conversion surfaced them: the old area
+# recipe ran L2 only for the library and CLI, so these had never run as L2.
+[package.metadata.ci.tests]
+tiers = ["L1", "L2"]
+l2-backends = ["tmux"]
+runner-tools = ["neovim"]
+l1-include-slow = true

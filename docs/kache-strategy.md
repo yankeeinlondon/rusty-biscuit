@@ -163,13 +163,60 @@ untouched.
 It skips safely while Cargo, rustc, Clippy, or a linker is active, caps the
 resolved target tree at 80 GB, and logs before/after capacity to
 `%LOCALAPPDATA%\rusty-biscuit\logs\cargo-sweep.log`. Run
-`just install-windows-sweep` once to register the current-user task for Sunday
-and Wednesday at 04:00; inspect it with `just windows-sweep-status`.
+`just install-windows-sweep` once to register the current-user task for every
+day at 04:00; inspect it with `just windows-sweep-status`. The daily task is a
+backstop: this target has grown by more than 50 GiB between two scheduled runs,
+so schedule frequency alone cannot guarantee headroom.
 
 The shared Cargo gate recipes also run `scripts/storage-preflight.sh`. It is a
-no-op off Windows and refuses to start below 50 GiB free on Cargo's actual
-target volume. `BISCUIT_BUILD_MIN_FREE_GIB` changes the threshold; zero is an
-explicit emergency disable.
+no-op off Windows. Below 50 GiB free on Cargo's actual target volume, it first
+runs the native 80 GB artifact cap and measures again; it refuses to start only
+when that reclaim cannot restore the required headroom. With the current volume
+layout, the cap restores roughly 83 GiB free and leaves about 33 GiB of
+hysteresis before another reclaim. A higher floor would repeatedly discard and
+rebuild artifacts without fixing the underlying capacity shortage.
+`BISCUIT_BUILD_MIN_FREE_GIB` changes the threshold,
+`BISCUIT_BUILD_SWEEP_MAX_GB` changes the automatic cap, and
+`BISCUIT_BUILD_AUTO_SWEEP=0` disables automatic reclaim. Setting the minimum to
+zero remains the explicit emergency override.
+
+### WSL2 vhdx reclamation
+
+Sweeping Cargo cannot fix every preflight failure. Where a WSL2 distribution
+shares the target volume, its `ext4.vhdx` grows to the guest's high-water mark
+and **never shrinks** — on build-win it reached 178.3 GiB holding 97 GiB of real
+data, leaving 49.2 GiB free against the 50 GiB gate while the Cargo target tree
+sat at 54.9 GiB, comfortably under every sweep cap. Sweep was correct to do
+nothing; the space was not Cargo's.
+
+WSL's own remedy, `wsl --manage <distro> --set-sparse true`, is refused upstream
+as of WSL 2.7.11 ("Sparse VHD support is currently disabled due to potential
+data corruption"). The `--allow-unsafe` override is not worth a dev distro, so
+reclamation stays scheduled and manual.
+
+`scripts/wsl-vhdx-compact.ps1` runs `fstrim` inside each WSL2 guest, measures
+the resulting slack, and compacts only the distributions above
+`-MinSlackGiB` (default 20) — a shutdown plus a multi-minute file rewrite is not
+worth paying to recover a few GiB. It skips while Windows or in-guest build
+processes are active, needs elevation for `diskpart compact vdisk`
+(`Optimize-VHD` requires the Hyper-V module, which these hosts lack), and logs
+to `%LOCALAPPDATA%\rusty-biscuit\logs\wsl-vhdx-compact.log`. Register the weekly
+Saturday 03:00 task with `just install-wsl-compact`; inspect reclaimable space
+per distribution with `just wsl-compact-status`, or reclaim now with
+`just wsl-compact`. **The task runs `wsl --shutdown`** and will end a WSL session
+live at that hour.
+
+Every path is resolved at run time — distribution names and their `BasePath`
+come from the `Lxss` registry, and the target volume from `cargo metadata` — so
+no drive letter is committed anywhere. Two environment variables tune it:
+`BISCUIT_WSL_MIN_SLACK_GIB` (compaction threshold) and
+`BISCUIT_WSL_COMPACT_LOG` (log destination). The host's own `target-dir` lives
+in an untracked `.cargo/config.toml`.
+
+Both this script and the preflight probe set `MSYS_NO_PATHCONV=1` around
+`reg.exe` and `wsl.exe`. Git Bash otherwise rewrites a bare `/s` switch, or the
+guest's `/`, into a Windows path before the native tool sees the argument, which
+fails in ways that read as a missing key or a missing mount point.
 
 ## Starting maxsize: **120GB**
 
@@ -200,12 +247,21 @@ to 150–200GB. If nothing ever approaches 120GB, it can come down.
 - `cargo-sweep` **stays** alongside kache. Not redundant: kache's per-crate keying degrades ~100×
   on a huge tree (~18 s/crate on a 957k-file `target/deps` vs ~30–170 ms clean).
 
-The 280 GiB native-Windows build volume also carries a roughly 140 GiB WSL
-VHDX, so its 80 GB cap is intentionally lower than the 120 GB general default.
-A dry run against a 141 GiB target measured 76.68 GiB reclaimable. That host's
-ignored `.cargo/config.toml` also sets `build.incremental = false`; keep the
-setting consistent because toggling it inside one target temporarily retains
-both artifact variants.
+The 280 GiB native-Windows build volume also carries a large WSL VHDX, so its
+80 GB cap is intentionally lower than the 120 GB general default. A dry run
+against a 141 GiB target measured 76.68 GiB reclaimable. That host's ignored
+`.cargo/config.toml` also sets `build.incremental = false`; keep the setting
+consistent because toggling it inside one target temporarily retains both
+artifact variants.
+
+This is a capacity guard, not a substitute for capacity. The long-term Windows
+layout should place Cargo's target on its own ReFS Dev Drive rather than beside
+the WSL VHDX. A separate volume isolates the two independently growing working
+sets and gives kache the ReFS block-cloning semantics required to avoid a second
+physical copy. Existing NTFS volumes cannot be converted in place; provision a
+new volume, format it as a Dev Drive, and then update the host-only
+`.cargo/config.toml` target directory. Keep kache disabled while the target and
+store remain on NTFS.
 
 ### WSL VHD maintenance
 
@@ -264,6 +320,7 @@ Swept artifacts come back as link-restores, not recompiles.
 scripts/sweep.sh                                              (version-controlled; `just sweep`)
 scripts/linux-cargo-sweep.sh                        (version-controlled; `just install-linux-sweep`)
 scripts/windows-cargo-sweep.ps1                   (version-controlled; `just install-windows-sweep`)
+scripts/wsl-vhdx-compact.ps1                        (version-controlled; `just install-wsl-compact`)
 ~/.local/bin/rusty-biscuit-sweep.sh                      (+ .bak)   [Mac]
 ~/Library/LaunchAgents/com.ken.rusty-biscuit-sweep.plist  (+ .bak)  [Mac]
 ~/.config/kache/config.toml                                         [Mac; unwritable on build-linux]

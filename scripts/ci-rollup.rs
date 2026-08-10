@@ -1,14 +1,15 @@
-//! Roll per-job JUnit artifacts into an area × environment × tier grid, and
+//! Roll per-job JUnit artifacts into a package × environment × tier grid, and
 //! render a merge verdict against a machine-readable baseline.
 //!
 //! Two subcommands share one data model:
 //!
 //! - `rollup` walks the downloaded CI artifacts, parses every staged JUnit
-//!   document, crosses the observations with `areas.json` policy, and emits
-//!   both a Markdown grid (for `GITHUB_STEP_SUMMARY`) and a machine-readable
-//!   result document.
+//!   document, crosses the observations with the run's resolved package policy
+//!   (the scope job's artifact) and the environment capability table, and
+//!   emits both a Markdown grid (for `GITHUB_STEP_SUMMARY`) and a
+//!   machine-readable result document.
 //! - `verdict` diffs that result document against `.github/ci/ci-baseline.toml`,
-//!   rules on the `areas.json` policy gaps the rollup recorded, and exits
+//!   rules on the capability-derived policy gaps the rollup recorded, and exits
 //!   non-zero when the run must not merge. It is the single required
 //!   branch-protection check, so it must run even when every producer job
 //!   failed.
@@ -16,19 +17,19 @@
 //! The split is observation versus judgement. `rollup` never consults the
 //! baseline and never excuses anything: its grid shows every cell that is not
 //! green, including ones the verdict will go on to accept. All merge policy —
-//! baselined failures and declared policy gaps alike — lives in `verdict`.
+//! baselined failures and governed policy gaps alike — lives in `verdict`.
 //!
 //! ## Notes
 //!
-//! Cell identity is `{area, environment, tier}` and record identity is
-//! `{area, environment, tier, shard, package}`. Neither is ever derived from a
-//! GitHub job display name: when `needs: lint` skips a matrix job, GitHub never
+//! Cell identity is `{package, environment, tier}`. It is never derived from a
+//! GitHub job display name: when `needs:` skips a matrix job, GitHub never
 //! evaluates the matrix context and reports the raw, un-interpolated name
-//! expression, so `os` and `shard` are not recoverable from it at all.
+//! expression, so nothing is recoverable from it at all.
 //!
 //! The absence of an artifact is therefore ambiguous on its own. `NOT
-//! SCHEDULED` versus `MISSING` is resolved from policy (`areas.json` crossed
-//! with the run's affected scope), never from what happens to be on disk.
+//! SCHEDULED` versus `MISSING` is resolved from policy (the scope artifact
+//! crossed with the run's affected scope), never from what happens to be on
+//! disk.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -42,12 +43,10 @@ use quick_xml::Reader;
 use serde::{Deserialize, Serialize};
 
 /// Version of both emitted documents (`results.json`) and the accepted
-/// baseline. A consumer that reads a higher version must refuse to interpret it.
-const SCHEMA_VERSION: u32 = 1;
-
-/// Tiers L2 and browser run only on Linux today. Overridable so Phase 3 can
-/// widen them without a code change.
-const DEFAULT_TIER_ENVIRONMENTS: &str = "ubuntu-latest";
+/// baseline. Version 2 keys every identity on the package; version 1 was
+/// area-keyed and is rejected with an explicit migration error. A consumer
+/// that reads a higher version must refuse to interpret it.
+const SCHEMA_VERSION: u32 = 2;
 
 /// Process exit codes. The verdict is destined to be the single required
 /// branch-protection check, so a blocked run and a broken tool must be
@@ -119,18 +118,23 @@ impl<'de> Deserialize<'de> for Tier {
 /// ## Notes
 ///
 /// Resolution order is `NotScheduled → Missing → Fail → PolicyGap →
-/// NotApplicable → Skip → Pass`, and `Pass` additionally requires at least one
+/// NothingToRun → Skip → Pass`, and `Pass` additionally requires at least one
 /// *executed* test. `Fail` outranks `PolicyGap` because a real failure is the
 /// more actionable signal and both block; the policy-gap observation is still
 /// recorded in the cell's `reasons`, so nothing is lost by the ordering.
+///
+/// `NothingToRun` and `NotScheduled` are never conflated (R10): the first is a
+/// scheduled package whose invocation selected zero tests — neither a pass
+/// implying coverage nor a blocking missing result; the second is a
+/// `gates = false` package carrying its governance metadata.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 enum CellState {
     Pass,
     Fail,
     Skip,
-    #[serde(rename = "N/A")]
-    NotApplicable,
+    #[serde(rename = "NOTHING TO RUN")]
+    NothingToRun,
     Missing,
     #[serde(rename = "NOT SCHEDULED")]
     NotScheduled,
@@ -144,7 +148,7 @@ impl CellState {
             Self::Pass => "PASS",
             Self::Fail => "FAIL",
             Self::Skip => "SKIP",
-            Self::NotApplicable => "N/A",
+            Self::NothingToRun => "NOTHING TO RUN",
             Self::Missing => "MISSING",
             Self::NotScheduled => "NOT SCHEDULED",
             Self::PolicyGap => "POLICY GAP",
@@ -161,10 +165,10 @@ impl CellState {
     ///
     /// This is the *rollup's* gate, which observes rather than judges. `Fail`
     /// and `PolicyGap` both appear here even though the baseline can excuse the
-    /// first and an owned, unexpired `areas.json` record can excuse the second:
-    /// the merge decision belongs to `verdict`, and keeping this predicate
-    /// policy-free is what makes the rollup's "Cells failing the summary gate"
-    /// table an honest inventory of everything not green.
+    /// first and a governed, unexpired `environments.json` capability gap can
+    /// excuse the second: the merge decision belongs to `verdict`, and keeping
+    /// this predicate policy-free is what makes the rollup's "Cells failing the
+    /// summary gate" table an honest inventory of everything not green.
     fn blocks(self) -> bool {
         matches!(self, Self::Fail | Self::Missing | Self::PolicyGap)
     }
@@ -205,21 +209,18 @@ impl Counts {
 // Machine-readable result schema
 // ---------------------------------------------------------------------------
 
-/// One nextest invocation. Shard and package identity are preserved here so a
-/// count can be traced back to the invocation that produced it without parsing
-/// any display name.
+/// One nextest invocation. Package identity is preserved here so a count can
+/// be traced back to the invocation that produced it without parsing any
+/// display name.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct RunRecord {
-    area: String,
+    package: String,
     environment: String,
     tier: Tier,
-    /// nextest `--partition` selector, `"1/1"` when unsharded.
-    shard: String,
-    package: String,
     /// Downloaded artifact directory this record came from.
     artifact: String,
-    /// True when identity was recovered from the artifact directory name
-    /// because no manifest record covered this report.
+    /// True when identity was incomplete in the manifest record (a local-dev
+    /// run stages no environment, for instance).
     degraded: bool,
     report_present: bool,
     exit_code: i64,
@@ -241,7 +242,7 @@ struct RunRecord {
 impl RunRecord {
     fn cell_key(&self) -> CellKey {
         CellKey {
-            area: self.area.clone(),
+            package: self.package.clone(),
             environment: self.environment.clone(),
             tier: self.tier.clone(),
         }
@@ -250,27 +251,27 @@ impl RunRecord {
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 struct CellKey {
-    area: String,
+    package: String,
     environment: String,
     tier: Tier,
 }
 
 impl fmt::Display for CellKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}/{}/{}", self.area, self.environment, self.tier)
+        write!(f, "{}/{}/{}", self.package, self.environment, self.tier)
     }
 }
 
-/// The `areas.json` policy gap that explains a `POLICY GAP` cell, carried into
+/// The capability-table gap that explains a `POLICY GAP` cell, carried into
 /// `results.json` verbatim.
 ///
 /// ## Notes
 ///
-/// `verdict` reads only the result document — never `areas.json` — so the
-/// accountability fields have to travel with the cell. Rendering the gap into a
-/// prose `reasons` line is not enough: the verdict has to decide on `owner`,
-/// `reason`, and `expiry` individually, and re-parsing them out of prose would
-/// be a second, drift-prone encoding of the same policy.
+/// `verdict` reads only the result document — never `environments.json` — so
+/// the accountability fields have to travel with the cell. Rendering the gap
+/// into a prose `reasons` line is not enough: the verdict has to decide on
+/// `owner`, `reason`, and `expiry` individually, and re-parsing them out of
+/// prose would be a second, drift-prone encoding of the same policy.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 struct DeclaredGap {
     owner: String,
@@ -312,9 +313,6 @@ struct Cell {
     counts: Counts,
     /// Whether policy scheduled this cell for this run.
     scheduled: bool,
-    /// Shards policy expected minus shards that produced a record.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    missing_shards: Vec<String>,
     /// Exact identities of every test observed as skipped, plus (when an
     /// expected-test manifest was supplied) every expected test absent from the
     /// report.
@@ -325,9 +323,10 @@ struct Cell {
     /// True when the skip set could not be completed because no expected-test
     /// manifest was supplied for this environment and tier.
     skip_evidence_degraded: bool,
-    /// The `areas.json` gap covering this cell, when one is declared. `None` on
-    /// a `POLICY GAP` cell means the gap is *undeclared* — inferred from
-    /// backend provisioning — which the verdict must never excuse.
+    /// The capability-table gap covering this cell, when one is governed.
+    /// `None` on a `POLICY GAP` cell means the gap is *ungoverned* — the
+    /// capability is recorded as plain absent — which the verdict must never
+    /// excuse.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     declared_gap: Option<DeclaredGap>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -342,10 +341,10 @@ struct Rollup {
     schema_version: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     run_id: Option<String>,
-    /// Areas policy considered in scope for this run.
+    /// Packages policy considered in scope for this run.
     scope: Vec<String>,
     /// True when the scope was inferred from the artifacts on disk instead of
-    /// being supplied. An inferred scope cannot see an area that produced
+    /// being supplied. An inferred scope cannot see a package that produced
     /// nothing at all, which is exactly the case `MISSING` exists to catch.
     scope_degraded: bool,
     records: Vec<RunRecord>,
@@ -363,8 +362,8 @@ impl Rollup {
 // ---------------------------------------------------------------------------
 
 /// One record of `$STAGE/manifest.jsonl`, written by `just/devops.just`'s
-/// `_stage_junit`. `area`, `environment`, and `shard` are `""` when unset
-/// (local dev) — never invented by the producer, so never inferred here either.
+/// `_stage_junit`. `environment` is `""` when unset (local dev) — never
+/// invented by the producer, so never inferred here either.
 #[derive(Clone, Debug, Deserialize)]
 struct ManifestRecord {
     tier: String,
@@ -373,11 +372,7 @@ struct ManifestRecord {
     #[serde(default)]
     exit_code: i64,
     #[serde(default)]
-    area: String,
-    #[serde(default)]
     environment: String,
-    #[serde(default)]
-    shard: String,
     #[serde(default)]
     duration_s: u64,
     #[serde(default)]
@@ -387,10 +382,10 @@ struct ManifestRecord {
 /// Explicit status for a producer job, so a job that failed before it could
 /// stage anything is distinguishable from one that was never scheduled.
 ///
-/// Uploaded as `status-<area>-<job>/status.json`.
+/// Uploaded as `status-<package>-<job>[-<environment>]/status.json`.
 #[derive(Clone, Debug, Deserialize)]
 struct ProducerStatus {
-    area: String,
+    package: String,
     job: String,
     /// GitHub `needs.<job>.result`: `success`, `failure`, `cancelled`, `skipped`.
     result: String,
@@ -402,6 +397,12 @@ struct ProducerStatus {
     /// render one indistinguishable blank cell for both.
     #[serde(default)]
     detail: Option<String>,
+    /// The companion-suite step's outcome (`success`, `failure`, `skipped`),
+    /// recorded by every job of a package that DECLARES a companion suite —
+    /// not only on failure, because a skipped companion leaves no other
+    /// evidence and must downgrade the cell just as a failed one does.
+    #[serde(default)]
+    companion: Option<String>,
 }
 
 /// Tests the target environment actually compiled, generated *on* that
@@ -418,161 +419,291 @@ struct ExpectedManifest {
 }
 
 // ---------------------------------------------------------------------------
-// Policy: areas.json
+// Policy: the scope artifact's resolved package policy + environments.json
 // ---------------------------------------------------------------------------
 
-/// One `areas.json` record. Read-only — `affected_scope.py` owns this schema,
-/// and unknown fields are ignored so a concurrent schema addition cannot break
-/// the rollup.
+/// One impacted package's resolved CI policy, as emitted by the scope job in
+/// its `ci-scope` artifact. Derived from the package's own
+/// `[package.metadata.ci]` manifest block; `affected_scope.py` owns and
+/// validates that schema.
 #[derive(Clone, Debug, Deserialize)]
-struct AreaPolicy {
-    area: String,
+struct PackagePolicy {
+    package: String,
     #[serde(default = "default_true")]
-    ci: bool,
-    /// Environments running the full canonical L1 suite.
-    ///
-    /// `environment` is not `os`: `wsl2-ubuntu` is a distinct Linux environment
-    /// hosted by a Windows runner. Retired `full_os` is accepted as an alias so
-    /// an artifact produced before the rename still rolls up.
-    #[serde(default = "default_environments", alias = "full_os")]
-    environments: Vec<String>,
-    #[serde(default = "default_shards")]
-    shards: Vec<String>,
+    gates: bool,
+    /// CI-gating tiers this package owns. Always contains L1 for a gating
+    /// package; L2 and browser are declared opt-ins.
+    #[serde(default = "default_tiers")]
+    tiers: Vec<Tier>,
+    /// L2 terminal backends the package's tests require.
     #[serde(default)]
-    l2: bool,
+    l2_backends: Vec<String>,
+    /// Non-Cargo companion suites the package owns (e.g. `homelab-frontend`).
+    /// The rollup needs the declaration itself: a green Rust JUnit report must
+    /// not hide a companion suite that never ran (R12).
     #[serde(default)]
-    browser: bool,
+    companion_suites: Vec<String>,
+    /// Governance for a `gates = false` package. Non-gating is never inferred
+    /// from zero observed tests; it is always this explicit, owned, dated
+    /// record.
     #[serde(default)]
-    backends: Vec<String>,
-    /// Tiers this area owns tests for that a declared environment cannot host.
-    #[serde(default)]
-    policy_gaps: Vec<PolicyGap>,
+    exclusion: Option<Exclusion>,
 }
 
-/// A declared, owned, time-bounded inability to execute a tier on an
-/// environment. Its whole purpose is to make the cell render `POLICY GAP`
-/// rather than a green `0 run / N skipped`.
+/// Why a package does not gate, who owns closing that, and when the exclusion
+/// runs out.
 #[derive(Clone, Debug, Deserialize)]
-struct PolicyGap {
-    tier: Tier,
-    #[serde(default)]
-    environments: Vec<String>,
-    #[serde(default)]
+struct Exclusion {
+    exclusion_class: String,
+    owner: String,
     reason: String,
     #[serde(default)]
-    owner: String,
-    /// `""` when `areas.json` omits it. Absent is *not* "never expires": the
-    /// verdict blocks an undated gap, matching `affected_scope.py`, where
-    /// `expiry` is in `POLICY_GAP_FIELDS` and therefore mandatory.
-    #[serde(default)]
-    expiry: String,
+    expiry: Option<String>,
+}
+
+impl Exclusion {
+    fn describe(&self) -> String {
+        let expiry = match &self.expiry {
+            Some(expiry) => format!(", expires {expiry}"),
+            None => String::new(),
+        };
+        format!(
+            "{} ({} — owner {}{})",
+            self.reason, self.exclusion_class, self.owner, expiry
+        )
+    }
+}
+
+/// The scope artifact (`ci-scope/scope.json`). Only `policy` is read here.
+#[derive(Clone, Debug, Deserialize)]
+struct PolicyDoc {
+    policy: Vec<PackagePolicy>,
+}
+
+/// `.github/ci/environments.json` — the one versioned capability table.
+#[derive(Clone, Debug, Deserialize)]
+struct EnvironmentsDoc {
+    schema_version: u32,
+    environments: Vec<Environment>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct Environment {
+    name: String,
+    capabilities: BTreeMap<String, Capability>,
+}
+
+/// A capability is either a plain boolean or, for a governed unavailability,
+/// an object carrying the accountability fields the verdict rules on.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(untagged)]
+enum Capability {
+    Available(bool),
+    Governed {
+        available: bool,
+        #[serde(default)]
+        reason: String,
+        #[serde(default)]
+        owner: String,
+        #[serde(default)]
+        expiry: String,
+    },
+}
+
+impl Capability {
+    fn available(&self) -> bool {
+        match self {
+            Self::Available(value) => *value,
+            Self::Governed { available, .. } => *available,
+        }
+    }
+
+    /// The governance record, when this unavailability is governed. A plain
+    /// `false` is an UNGOVERNED absence — the gap it produces is never
+    /// excused, exactly like an undeclared gap before.
+    fn governed_gap(&self) -> Option<DeclaredGap> {
+        match self {
+            Self::Governed {
+                available: false,
+                reason,
+                owner,
+                expiry,
+            } => Some(DeclaredGap {
+                owner: owner.clone(),
+                reason: reason.clone(),
+                expiry: expiry.clone(),
+            }),
+            _ => None,
+        }
+    }
+}
+
+impl Environment {
+    fn capable(&self, capability: &str) -> bool {
+        self.capabilities
+            .get(capability)
+            .map(Capability::available)
+            .unwrap_or(false)
+    }
+
+    fn gap_for(&self, capability: &str) -> Option<DeclaredGap> {
+        self.capabilities.get(capability)?.governed_gap()
+    }
 }
 
 fn default_true() -> bool {
     true
 }
 
-/// Second copy of `scripts/ci/affected_scope.py`'s `AREA_DEFAULTS["environments"]`.
-///
-/// Most areas omit `environments` entirely, so this list — not `areas.json` —
-/// decides which cells exist for them. When it fell behind the Python side's
-/// addition of `wsl2-ubuntu`, six areas' WSL2 legs ran, passed, and uploaded
-/// JUnit that the rollup then filed as `NOT SCHEDULED`.
-/// `default_environments_match_affected_scope_py` reads the Python literal and
-/// fails on any divergence; keep it, because a comment saying "mirrors" is what
-/// was here when the two lists drifted apart.
-fn default_environments() -> Vec<String> {
-    vec![
-        "ubuntu-latest".to_owned(),
-        "windows-latest".to_owned(),
-        "macos-latest".to_owned(),
-        "wsl2-ubuntu".to_owned(),
-    ]
+fn default_tiers() -> Vec<Tier> {
+    vec![Tier::L1]
 }
 
-fn default_shards() -> Vec<String> {
-    vec!["1/1".to_owned()]
+/// Whether the environment can host a cell's tier, and if not, whether the
+/// absence is governed.
+#[derive(Clone, Debug)]
+enum GapStatus {
+    /// The capability table carries owner, reason, and expiry for this
+    /// absence. The verdict may accept it.
+    Governed(DeclaredGap),
+    /// A plain `false` in the capability table: nobody owns this absence, so
+    /// the verdict must never excuse it.
+    Ungoverned,
 }
 
-/// A cell policy says should exist, and the shards it should be built from.
+/// A cell policy says should exist.
 #[derive(Clone, Debug)]
 struct ExpectedCell {
     key: CellKey,
-    shards: Vec<String>,
-    /// L2 backends this area's tests require, empty when the tier is
+    /// L2 backends this package's tests require, empty when the tier is
     /// backend-agnostic.
     backends: Vec<String>,
-    /// Set when `areas.json` declares this cell cannot execute here.
-    declared_gap: Option<DeclaredGap>,
+    /// Set when the environment cannot host this cell's tier.
+    gap: Option<GapStatus>,
+    /// Set when the package is `gates = false`: the cell renders NOT SCHEDULED
+    /// with this governance metadata rather than running.
+    exclusion: Option<Exclusion>,
+    /// Companion suites expected to run alongside this cell (L1 only, and only
+    /// on a Node-capable environment). Non-empty means the cell's producer
+    /// status must report the companion step's success; a skipped companion
+    /// downgrades an otherwise-green cell (R12).
+    companion_suites: Vec<String>,
 }
 
-/// Cross `areas.json` with the run's affected scope to derive every cell that
-/// should have produced evidence.
+/// Cross the resolved package policy with the run's affected scope to derive
+/// every cell that should have produced evidence.
 ///
 /// ## Notes
 ///
-/// An L2 tier is expected on **every** environment the area declares, not only
-/// the ones with a provisioned backend. Omitting the unprovisioned ones would
-/// make them vanish from the grid, which is the failure mode `POLICY GAP`
-/// exists to prevent.
+/// An L2 or browser tier is expected on **every** environment, not only the
+/// ones that can host it. Omitting the unhostable ones would make them vanish
+/// from the grid, which is the failure mode `POLICY GAP` exists to prevent.
+/// L2 is hostable where ANY declared backend is (each backend is looked up as
+/// its own capability, so `kitty`/`apple-terminal` get an environment axis
+/// rather than the tier hardcoding `tmux`); a gap arises only when no
+/// declared backend can be hosted, governed by that backend's own capability
+/// record.
 fn expected_cells(
-    areas: &[AreaPolicy],
+    policies: &[PackagePolicy],
     scope: &BTreeSet<String>,
-    browser_environments: &[String],
+    environments: &[Environment],
 ) -> Vec<ExpectedCell> {
     let mut expected = Vec::new();
 
-    for area in areas {
-        if !area.ci || !scope.contains(&area.area) {
+    for policy in policies {
+        if !scope.contains(&policy.package) {
             continue;
         }
 
-        let gap_for = |tier: &Tier, environment: &str| -> Option<DeclaredGap> {
-            area.policy_gaps
-                .iter()
-                .find(|gap| &gap.tier == tier && gap.environments.iter().any(|e| e == environment))
-                .map(|gap| DeclaredGap {
-                    owner: gap.owner.clone(),
-                    reason: gap.reason.clone(),
-                    expiry: gap.expiry.clone(),
-                })
-        };
-
-        for environment in &area.environments {
-            expected.push(ExpectedCell {
-                key: CellKey {
-                    area: area.area.clone(),
-                    environment: environment.clone(),
-                    tier: Tier::L1,
-                },
-                shards: area.shards.clone(),
-                backends: Vec::new(),
-                declared_gap: gap_for(&Tier::L1, environment),
+        if !policy.gates {
+            // `gates = false`: visible, governed NOT SCHEDULED cells — never a
+            // pass, never a silent absence. A policy whose exclusion block is
+            // absent still renders (backstop): `affected_scope.py` validation
+            // is supposed to reject that shape, and the rollup must not let a
+            // config-side regression vanish a package from the grid.
+            let exclusion = policy.exclusion.clone().unwrap_or_else(|| Exclusion {
+                exclusion_class: "ungoverned".to_owned(),
+                owner: "unassigned".to_owned(),
+                reason: "`gates = false` without exclusion metadata; the scope \
+                         job's validation is supposed to reject this"
+                    .to_owned(),
+                expiry: None,
             });
-
-            if area.l2 {
+            for environment in environments {
                 expected.push(ExpectedCell {
                     key: CellKey {
-                        area: area.area.clone(),
-                        environment: environment.clone(),
-                        tier: Tier::L2,
+                        package: policy.package.clone(),
+                        environment: environment.name.clone(),
+                        tier: Tier::L1,
                     },
-                    shards: default_shards(),
-                    backends: area.backends.clone(),
-                    declared_gap: gap_for(&Tier::L2, environment),
+                    backends: Vec::new(),
+                    gap: None,
+                    exclusion: Some(exclusion.clone()),
+                    companion_suites: Vec::new(),
                 });
             }
+            continue;
+        }
 
-            if area.browser && browser_environments.iter().any(|e| e == environment) {
+        for environment in environments {
+            for tier in &policy.tiers {
+                let (backends, gap) = match tier {
+                    Tier::L2 => {
+                        let gap = if policy
+                            .l2_backends
+                            .iter()
+                            .any(|backend| environment.capable(backend))
+                        {
+                            None
+                        } else {
+                            Some(
+                                match policy
+                                    .l2_backends
+                                    .iter()
+                                    .find_map(|backend| environment.gap_for(backend))
+                                {
+                                    Some(governed) => GapStatus::Governed(governed),
+                                    None => GapStatus::Ungoverned,
+                                },
+                            )
+                        };
+                        (policy.l2_backends.clone(), gap)
+                    }
+                    Tier::Browser => {
+                        // Same rule as L2: an environment that cannot host the
+                        // tier renders an explicit POLICY GAP (governed by the
+                        // `headless_browser` capability record), never a cell
+                        // that silently disappeared from the grid.
+                        let gap = if environment.capable("headless_browser") {
+                            None
+                        } else {
+                            Some(match environment.gap_for("headless_browser") {
+                                Some(governed) => GapStatus::Governed(governed),
+                                None => GapStatus::Ungoverned,
+                            })
+                        };
+                        (Vec::new(), gap)
+                    }
+                    _ => (Vec::new(), None),
+                };
+                let companion_suites = if *tier == Tier::L1
+                    && !policy.companion_suites.is_empty()
+                    && environment.capable("node_pnpm")
+                {
+                    policy.companion_suites.clone()
+                } else {
+                    Vec::new()
+                };
                 expected.push(ExpectedCell {
                     key: CellKey {
-                        area: area.area.clone(),
-                        environment: environment.clone(),
-                        tier: Tier::Browser,
+                        package: policy.package.clone(),
+                        environment: environment.name.clone(),
+                        tier: tier.clone(),
                     },
-                    shards: default_shards(),
-                    backends: Vec::new(),
-                    declared_gap: gap_for(&Tier::Browser, environment),
+                    backends,
+                    gap,
+                    exclusion: None,
+                    companion_suites,
                 });
             }
         }
@@ -758,54 +889,6 @@ struct ArtifactDir {
     path: PathBuf,
 }
 
-/// Identity recovered from an artifact directory name, used only when no
-/// manifest record covers a staged report.
-///
-/// Artifact names are `junit-<area>-<tier>-<os>-<index>`. Areas and OS labels
-/// both contain hyphens, so the parse anchors on the *tier* token — the only
-/// field drawn from a closed vocabulary — and takes everything before it as the
-/// area and everything after as `<os>[-<index>]`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct DegradedIdentity {
-    area: String,
-    tier: Tier,
-    environment: String,
-}
-
-fn parse_artifact_name(name: &str) -> Option<DegradedIdentity> {
-    let rest = name.strip_prefix("junit-")?;
-    let parts: Vec<&str> = rest.split('-').collect();
-
-    let tier_at = parts.iter().position(|part| {
-        matches!(
-            part.to_ascii_lowercase().as_str(),
-            "l1" | "l2" | "l3" | "browser" | "real" | "sanity"
-        )
-    })?;
-    if tier_at == 0 || tier_at + 1 >= parts.len() {
-        return None;
-    }
-
-    let area = parts[..tier_at].join("-");
-    let tier = Tier::parse(parts[tier_at]);
-    // A trailing all-digit token is `strategy.job-index`, not part of the OS
-    // label. `ubuntu-latest` and `windows-latest` never end in digits.
-    let mut tail = &parts[tier_at + 1..];
-    if tail.len() > 1 && tail[tail.len() - 1].chars().all(|ch| ch.is_ascii_digit()) {
-        tail = &tail[..tail.len() - 1];
-    }
-    let environment = tail.join("-");
-    if environment.is_empty() {
-        return None;
-    }
-
-    Some(DegradedIdentity {
-        area,
-        tier,
-        environment,
-    })
-}
-
 fn list_artifact_dirs(root: &Path) -> Result<Vec<ArtifactDir>> {
     let mut dirs = Vec::new();
     let entries = fs::read_dir(root)
@@ -859,37 +942,13 @@ fn read_manifest(path: &Path) -> Result<Vec<ManifestRecord>> {
     Ok(records)
 }
 
-/// Every staged XML under an artifact directory, keyed by its `<tier>/<pkg>.xml`
-/// relative path so a manifest record can be matched to it.
-fn staged_reports(root: &Path) -> Result<BTreeMap<String, PathBuf>> {
-    let mut found = BTreeMap::new();
-    let mut stack = vec![(root.to_path_buf(), Vec::<String>::new())];
-
-    while let Some((dir, prefix)) = stack.pop() {
-        let entries = match fs::read_dir(&dir) {
-            Ok(entries) => entries,
-            Err(_) => continue,
-        };
-        for entry in entries {
-            let entry = entry.context("failed to read artifact directory entry")?;
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let mut next = prefix.clone();
-            next.push(name.clone());
-            if entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
-                stack.push((entry.path(), next));
-            } else if name.to_ascii_lowercase().ends_with(".xml") {
-                found.insert(next.join("/"), entry.path());
-            }
-        }
-    }
-
-    Ok(found)
-}
-
 /// Turn one artifact directory into run records.
 ///
-/// The manifest is the identity source. A staged report with no manifest record
-/// falls back to the artifact directory name and is marked `degraded`.
+/// The manifest is the ONLY identity source. A staged report with no covering
+/// manifest record has no trustworthy package/environment identity at all —
+/// artifact-name parsing was retired with the area model — so it is dropped;
+/// `_stage_junit` writes a record for every invocation, including one whose
+/// report is absent.
 fn records_from_artifact(dir: &ArtifactDir) -> Result<Vec<RunRecord>> {
     let manifest_path = dir.path.join("manifest.jsonl");
     let manifest = if manifest_path.is_file() {
@@ -897,15 +956,11 @@ fn records_from_artifact(dir: &ArtifactDir) -> Result<Vec<RunRecord>> {
     } else {
         Vec::new()
     };
-    let reports = staged_reports(&dir.path)?;
-    let fallback = parse_artifact_name(&dir.name);
 
     let mut records = Vec::new();
-    let mut claimed: BTreeSet<String> = BTreeSet::new();
 
     for entry in &manifest {
         let relative = entry.xml.replace('\\', "/");
-        claimed.insert(relative.clone());
         let report_path = join_relative(&dir.path, &relative);
 
         let outcome = if entry.report_present {
@@ -914,61 +969,21 @@ fn records_from_artifact(dir: &ArtifactDir) -> Result<Vec<RunRecord>> {
             ReportOutcome::default()
         };
 
-        // The producer writes "" rather than inventing a value; recover from the
-        // artifact name only when it is genuinely absent.
-        let area = non_empty(&entry.area)
-            .or_else(|| fallback.as_ref().map(|id| id.area.clone()))
-            .unwrap_or_default();
-        let environment = non_empty(&entry.environment)
-            .or_else(|| fallback.as_ref().map(|id| id.environment.clone()))
-            .unwrap_or_default();
-        let shard = non_empty(&entry.shard).unwrap_or_else(|| "1/1".to_owned());
-        let identity_degraded = entry.area.trim().is_empty() || entry.environment.trim().is_empty();
+        // The producer writes "" rather than inventing a value; an empty
+        // environment marks the record as local-dev evidence, which surfaces
+        // as unscheduled rather than being guessed at.
+        let environment = non_empty(&entry.environment).unwrap_or_default();
+        let identity_degraded = entry.environment.trim().is_empty();
 
         records.push(RunRecord {
-            area,
+            package: entry.package.clone(),
             environment,
             tier: Tier::parse(&entry.tier),
-            shard,
-            package: entry.package.clone(),
             artifact: dir.name.clone(),
             degraded: identity_degraded,
             report_present: entry.report_present && outcome.parse_error.is_none(),
             exit_code: entry.exit_code,
             duration_s: entry.duration_s,
-            counts: outcome.report.counts,
-            failed_tests: outcome.report.failed_tests,
-            skipped_tests: outcome.report.skipped_tests,
-            parse_error: outcome.parse_error,
-            passed_identities: outcome.report.passed_tests,
-        });
-    }
-
-    for (relative, path) in &reports {
-        if claimed.contains(relative) {
-            continue;
-        }
-        let Some(identity) = fallback.clone() else {
-            continue;
-        };
-        let package = Path::new(relative)
-            .file_stem()
-            .map(|stem| stem.to_string_lossy().into_owned())
-            .unwrap_or_else(|| relative.clone());
-
-        let outcome = ReportOutcome::read(path);
-
-        records.push(RunRecord {
-            area: identity.area,
-            environment: identity.environment,
-            tier: identity.tier,
-            shard: UNKNOWN_SHARD.to_owned(),
-            package,
-            artifact: dir.name.clone(),
-            degraded: true,
-            report_present: outcome.parse_error.is_none(),
-            exit_code: 0,
-            duration_s: 0,
             counts: outcome.report.counts,
             failed_tests: outcome.report.failed_tests,
             skipped_tests: outcome.report.skipped_tests,
@@ -1046,9 +1061,6 @@ struct ClassifyInputs<'a> {
     expected: &'a [ExpectedCell],
     records: &'a [RunRecord],
     statuses: &'a [ProducerStatus],
-    /// environment → provisioned L2 backends. An environment absent from this
-    /// map has unknown provisioning, and no policy gap is asserted for it.
-    provisioned: &'a BTreeMap<String, BTreeSet<String>>,
     /// (environment, tier) → package → expected test identities.
     expected_tests: &'a BTreeMap<(String, Tier), BTreeMap<String, Vec<String>>>,
 }
@@ -1075,7 +1087,7 @@ fn classify(inputs: &ClassifyInputs<'_>) -> Vec<Cell> {
         let mut cell = classify_one(inputs, &key, None, &indices);
         cell.reasons.push(
             "produced evidence but policy did not schedule it for this run; \
-             areas.json or the affected scope is wrong"
+             the resolved package policy or the affected scope is wrong"
                 .to_owned(),
         );
         cells.insert(key, cell);
@@ -1095,7 +1107,6 @@ fn classify_one(
     let mut observed_skips = BTreeSet::new();
     let mut observed_tests = BTreeSet::new();
     let mut packages_with_evidence = BTreeSet::new();
-    let mut shards_seen = BTreeSet::new();
     let mut reasons = Vec::new();
     let mut has_unusable_record = false;
 
@@ -1106,7 +1117,6 @@ fn classify_one(
         observed_skips.extend(record.skipped_tests.iter().cloned());
         observed_tests.extend(record.failed_tests.iter().cloned());
         observed_tests.extend(record.skipped_tests.iter().cloned());
-        shards_seen.insert(record.shard.clone());
 
         if let Some(err) = &record.parse_error {
             has_unusable_record = true;
@@ -1134,27 +1144,20 @@ fn classify_one(
         }
         if record.degraded {
             reasons.push(format!(
-                "{}: no manifest record — identity recovered from the artifact name \
-                 and shard is unknown",
+                "{}: the manifest record carried no environment — a local-dev \
+                 staging tree, not CI evidence",
                 record.package
             ));
         }
     }
 
-    let scheduled = expectation.is_some();
-    let expected_shards: Vec<String> = expectation
-        .map(|cell| cell.shards.clone())
-        .unwrap_or_default();
-    let missing_shards: Vec<String> = expected_shards
-        .iter()
-        .filter(|shard| !shards_seen.contains(*shard))
-        .cloned()
-        .collect();
+    let exclusion = expectation.and_then(|cell| cell.exclusion.clone());
+    let scheduled = expectation.is_some() && exclusion.is_none();
 
     let expected_for_cell = inputs
         .expected_tests
         .get(&(key.environment.clone(), key.tier.clone()));
-    let mut skip_evidence_degraded = expected_for_cell.is_none();
+    let skip_evidence_degraded = expected_for_cell.is_none();
     let mut absent_skips = BTreeSet::new();
 
     if let Some(by_package) = expected_for_cell {
@@ -1186,49 +1189,41 @@ fn classify_one(
         .unwrap_or_default();
     let mut policy_gap = false;
 
-    let declared_gap = expectation.and_then(|cell| cell.declared_gap.clone());
+    let declared_gap = expectation.and_then(|cell| match &cell.gap {
+        Some(GapStatus::Governed(gap)) => Some(gap.clone()),
+        _ => None,
+    });
 
     if let Some(gap) = &declared_gap {
         policy_gap = true;
-        reasons.push(format!("declared policy gap: {}", gap.describe()));
-    } else if scheduled && !backends.is_empty() {
-        // An *undeclared* gap. `affected_scope.py` is supposed to reject this
-        // at config time; catching it here too means a config-side regression
-        // surfaces as a blocking cell rather than a green one.
-        match inputs.provisioned.get(&key.environment) {
-            Some(available) => {
-                if !backends.iter().any(|backend| available.contains(backend)) {
-                    policy_gap = true;
-                    reasons.push(format!(
-                        "UNDECLARED policy gap: tier requires backend(s) [{}] but {} \
-                         provisions [{}], and areas.json declares no gap for it",
-                        backends.join(", "),
-                        key.environment,
-                        available.iter().cloned().collect::<Vec<_>>().join(", ")
-                    ));
-                }
-            }
-            None => {
-                skip_evidence_degraded = true;
-                reasons.push(format!(
-                    "backend provisioning for {} is unknown; no policy-gap judgement made",
-                    key.environment
-                ));
-            }
-        }
+        reasons.push(format!("governed policy gap: {}", gap.describe()));
+    } else if matches!(expectation.and_then(|cell| cell.gap.as_ref()), Some(GapStatus::Ungoverned)) {
+        // An *ungoverned* gap: the package declares this tier on an environment
+        // the capability table records as plainly unable to host it, with no
+        // owner, reason, or expiry. `affected_scope.py` is supposed to keep
+        // such a table from landing; catching it here too means a config-side
+        // regression surfaces as a blocking cell rather than a green one.
+        policy_gap = true;
+        let requirement = match key.tier {
+            Tier::L2 => format!(
+                "tier requires backend(s) [{}] but {} cannot host any of them",
+                backends.join(", "),
+                key.environment
+            ),
+            Tier::Browser => format!(
+                "the browser tier but {} cannot host a headless browser",
+                key.environment
+            ),
+            _ => format!("the {} tier but {} cannot host it", key.tier, key.environment),
+        };
+        reasons.push(format!(
+            "UNGOVERNED policy gap: {requirement}, and environments.json records \
+             no governed unavailability for it"
+        ));
     }
 
-    // A cell may only be blamed on a job that actually gates it. Matching any
-    // failing job in the area blamed `lint` for claudine's MISSING L1 cells in
-    // run 30427703024 — but `needs: lint` was removed from the test job, so lint
-    // gates nothing. `check` had succeeded and the optional tiers were skipped,
-    // leaving lint as the only candidate, and it was blamed for a cause it could
-    // not have. A wrong reason is worse than no reason: it sends triage at the
-    // wrong job.
-    //
-    // Only the `needs:` edges `_area-ci.yml` actually declares are encoded here.
-    // Anything else gets no upstream attribution and falls back to the cell's
-    // own intrinsic reason, which is always computed below.
+    // A cell may only be blamed on a job that actually gates it. Only the
+    // `needs:` edges `_package-ci.yml` actually declares are encoded here.
     let gating_jobs: &[&str] = match key.tier {
         Tier::L2 | Tier::Browser => &["L1"],
         _ => &[],
@@ -1237,56 +1232,140 @@ fn classify_one(
         .statuses
         .iter()
         .find(|status| {
-            status.area == key.area
+            status.package == key.package
                 && gating_jobs.contains(&status.job.as_str())
                 && matches!(status.result.as_str(), "failure" | "cancelled")
         })
         .cloned();
 
-    let state = if !scheduled && indices.is_empty() {
+    // The producer's own word for this cell, when it has one: a producer
+    // status naming THIS package, tier, and environment. A `failure` here with
+    // a clean JUnit report is the companion-suite case — a green Rust report
+    // must never hide a failed companion suite (or fixture, or backend proof),
+    // so the status DOWNGRADES the cell below. It can never upgrade one.
+    let own_status = inputs.statuses.iter().find(|status| {
+        status.package == key.package
+            && Tier::parse(&status.job) == key.tier
+            && status.environment.as_deref() == Some(key.environment.as_str())
+    });
+
+    let mut state = if let Some(exclusion) = &exclusion {
+        if indices.is_empty() {
+            // `gates = false`: NOT SCHEDULED with its governance metadata —
+            // never conflated with NOTHING TO RUN, never a pass.
+            reasons.push(format!("not gating: {}", exclusion.describe()));
+            CellState::NotScheduled
+        } else {
+            // Evidence for a package policy excludes: someone ran it anyway.
+            // The counts are reported honestly and the verdict blocks on the
+            // disagreement (`cell-unscheduled-evidence`).
+            reasons.push(format!(
+                "produced evidence but the package is `gates = false` ({})",
+                exclusion.describe()
+            ));
+            classify_state_from_evidence(
+                &counts,
+                declared_gap.is_some(),
+                policy_gap,
+                indices,
+                has_unusable_record,
+                &mut reasons,
+                own_status,
+                upstream.as_ref(),
+            )
+        }
+    } else if !scheduled && indices.is_empty() {
         // Policy did not schedule it and nothing was uploaded for it, so the
-        // cell genuinely does not exist. Evidence deliberately does NOT reach
-        // here: a leg that ran and uploaded a report is scheduled in every
-        // sense that matters, whatever `areas.json` says, so it is classified
-        // by the ordinary rules below and `verdict` blocks on the disagreement.
-        // Deciding this on `counts.bad()` instead filed passing legs as
-        // `NOT SCHEDULED` while failing ones rendered `FAIL`, which is how six
-        // green WSL2 legs disappeared from run 30427703024.
+        // cell genuinely does not exist.
         CellState::NotScheduled
-    } else if counts.bad() == 0 && declared_gap.is_some() {
-        // A *declared* gap explains the absence of evidence, so MISSING would
+    } else {
+        classify_state_from_evidence(
+            &counts,
+            declared_gap.is_some(),
+            policy_gap,
+            indices,
+            has_unusable_record,
+            &mut reasons,
+            own_status,
+            upstream.as_ref(),
+        )
+    };
+
+    // R12: a DECLARED companion suite must leave success evidence. A skipped
+    // companion step — or no reported outcome at all — leaves the Rust JUnit
+    // report green while the suite never ran, so it downgrades the cell
+    // exactly as a failed companion does. Only green-reading states are
+    // downgraded; MISSING and FAIL already block.
+    let expected_companions = expectation
+        .map(|cell| cell.companion_suites.as_slice())
+        .unwrap_or(&[]);
+    if !expected_companions.is_empty()
+        && matches!(state, CellState::Pass | CellState::NothingToRun | CellState::Skip)
+    {
+        let outcome = own_status.and_then(|status| status.companion.as_deref());
+        if outcome != Some("success") {
+            reasons.push(format!(
+                "declared companion suite(s) [{}] produced no success evidence \
+                 (the producer reports `{}`); a green Rust JUnit report must not \
+                 hide a companion suite that never ran",
+                expected_companions.join(", "),
+                outcome.unwrap_or("no companion outcome"),
+            ));
+            state = CellState::Fail;
+        }
+    }
+
+    Cell {
+        key: key.clone(),
+        state,
+        counts: Counts {
+            skipped: counts.skipped + absent_skips.len() as u32,
+            ..counts
+        },
+        scheduled,
+        skipped_tests: all_skips.into_iter().collect(),
+        failed_tests: failed_tests.into_iter().collect(),
+        skip_evidence_degraded,
+        declared_gap,
+        reasons,
+        records: indices.to_vec(),
+    }
+}
+
+/// Resolve a cell's state from the evidence it produced. Handles the shared
+/// tail of [`classify_one`] for scheduled, unscheduled-with-evidence, and
+/// exclusion-violating cells alike.
+#[allow(clippy::too_many_arguments)]
+fn classify_state_from_evidence(
+    counts: &Counts,
+    has_declared_gap: bool,
+    policy_gap: bool,
+    indices: &[usize],
+    has_unusable_record: bool,
+    reasons: &mut Vec<String>,
+    own_status: Option<&ProducerStatus>,
+    upstream: Option<&ProducerStatus>,
+) -> CellState {
+    let mut state = if counts.bad() == 0 && has_declared_gap {
+        // A *governed* gap explains the absence of evidence, so MISSING would
         // be the wrong answer: nobody failed to upload anything. It still
         // blocks — the point of the state is that the cell cannot go green.
         // Actual failures still outrank it, handled below.
         CellState::PolicyGap
-    } else if indices.is_empty() || has_unusable_record || !missing_shards.is_empty() {
-        // The cell's own observation comes FIRST. The upstream edge is context,
-        // not cause, and a renderer showing only the leading reason must show
-        // what this cell actually saw. In run 30427703024 claudine's true reason
-        // — "no report for shard(s) 1/4, 2/4", i.e. two shards hit the job
-        // timeout — was computed but pushed behind a false upstream blame.
+    } else if indices.is_empty() || has_unusable_record {
+        // The cell's own observation comes FIRST. The upstream edge is
+        // context, not cause, and a renderer showing only the leading reason
+        // must show what this cell actually saw.
         if indices.is_empty() {
             reasons.push("scheduled but produced no report at all".to_owned());
         }
-        // The producer's own explanation, when it has one. "No report at all" is
-        // equally true of a dead guest and of a tier that ran no tests, and only
-        // the producer can tell them apart, so it says which.
-        if let Some(explained) = inputs.statuses.iter().find_map(|status| {
-            (status.area == key.area
-                && Tier::parse(&status.job) == key.tier
-                && status.environment.as_deref() == Some(key.environment.as_str()))
-            .then(|| status.detail.as_deref())
-            .flatten()
-        }) {
-            reasons.push(explained.to_owned());
+        // The producer's own explanation, when it has one. "No report at all"
+        // is equally true of a dead guest and of a tier that ran no tests, and
+        // only the producer can tell them apart, so it says which.
+        if let Some(detail) = own_status.and_then(|status| status.detail.as_deref()) {
+            reasons.push(detail.to_owned());
         }
-        if !missing_shards.is_empty() {
-            reasons.push(format!(
-                "no report for shard(s) {}",
-                missing_shards.join(", ")
-            ));
-        }
-        if let Some(status) = &upstream {
+        if let Some(status) = upstream {
             reasons.push(format!(
                 "upstream job `{}` concluded `{}`, so this leg never ran and \
                  GitHub never evaluated its matrix context",
@@ -1299,7 +1378,13 @@ fn classify_one(
     } else if policy_gap {
         CellState::PolicyGap
     } else if counts.total == 0 {
-        CellState::NotApplicable
+        // A scheduled package whose invocation selected ZERO tests. Not a pass
+        // (nothing executed), not a blocking missing result (the invocation
+        // succeeded and said so), and never conflated with NOT SCHEDULED.
+        reasons.push(
+            "the invocation selected zero tests; a package with no tests is not a pass".to_owned(),
+        );
+        CellState::NothingToRun
     } else if counts.passed == 0 {
         // Evidence exists but nothing executed. Never PASS.
         CellState::Skip
@@ -1307,34 +1392,31 @@ fn classify_one(
         CellState::Pass
     };
 
-    Cell {
-        key: key.clone(),
-        state,
-        counts: Counts {
-            skipped: counts.skipped + absent_skips.len() as u32,
-            ..counts
-        },
-        scheduled,
-        missing_shards,
-        skipped_tests: all_skips.into_iter().collect(),
-        failed_tests: failed_tests.into_iter().collect(),
-        skip_evidence_degraded,
-        declared_gap,
-        reasons,
-        records: indices.to_vec(),
+    // A producer status of `failure` for THIS cell downgrades any clean
+    // reading: the job failed although its JUnit shows no failing test, which
+    // is exactly the companion-suite / fixture / backend-proof case. Status
+    // evidence can worsen a cell, never improve it.
+    if matches!(state, CellState::Pass | CellState::NothingToRun | CellState::Skip)
+        && own_status.is_some_and(|status| status.result == "failure")
+    {
+        let detail = own_status
+            .and_then(|status| status.detail.as_deref())
+            .map(str::to_owned)
+            .unwrap_or_else(|| {
+                "the producer job concluded `failure` although its report shows no \
+                 failing test"
+                    .to_owned()
+            });
+        reasons.push(format!("producer reported failure: {detail}"));
+        state = CellState::Fail;
     }
+
+    state
 }
 
 /// Environment assumed for a producer status that does not name one. The lint
-/// job is Linux-only today (`_area-ci.yml`).
+/// job is Linux-only today (`_package-ci.yml`).
 const DEFAULT_STATUS_ENVIRONMENT: &str = "ubuntu-latest";
-
-/// Shard recorded for a staged report that no manifest record covers.
-///
-/// The staged path is `<tier>/<package>.xml` and carries no shard component, so
-/// shard identity exists *only* in the manifest. Inventing `1/1` here would let
-/// one shard of a four-shard area masquerade as the whole leg.
-const UNKNOWN_SHARD: &str = "unknown";
 
 /// Why a scheduled invocation staged no report.
 ///
@@ -1356,8 +1438,8 @@ fn missing_report_reason(exit_code: i64) -> String {
 
 /// Turn producer statuses for non-test jobs (today: `lint`, `check`) into
 /// cells, so a job that emits no JUnit can still be baselined and can still
-/// block, under the same stable `{area, environment, tier}` identity as a test
-/// tier.
+/// block, under the same stable `{package, environment, tier}` identity as a
+/// test tier.
 ///
 /// ## Notes
 ///
@@ -1368,11 +1450,12 @@ fn status_cells(
     statuses: &[ProducerStatus],
     scope: &BTreeSet<String>,
     existing: &[Cell],
+    policies: &[PackagePolicy],
 ) -> Vec<Cell> {
     let mut cells = Vec::new();
 
     for status in statuses {
-        if !scope.contains(&status.area) {
+        if !scope.contains(&status.package) {
             continue;
         }
         let tier = Tier::parse(&status.job);
@@ -1380,7 +1463,7 @@ fn status_cells(
             continue;
         }
         let key = CellKey {
-            area: status.area.clone(),
+            package: status.package.clone(),
             environment: status
                 .environment
                 .clone()
@@ -1410,12 +1493,35 @@ fn status_cells(
             ),
         };
 
+        // A declared companion suite lints too (the lint job runs the frontend
+        // lint on its Node-capable leg), so its success must be evidenced
+        // exactly as on the L1 cell: a skipped companion downgrades a green
+        // lint rather than hiding behind it (R12).
+        let (state, reason) = if status.job == "lint"
+            && state == CellState::Pass
+            && policies
+                .iter()
+                .any(|policy| policy.package == status.package && !policy.companion_suites.is_empty())
+            && status.companion.as_deref() != Some("success")
+        {
+            (
+                CellState::Fail,
+                Some(format!(
+                    "declared companion suite produced no success evidence (the \
+                     producer reports `{}`); a green lint must not hide a \
+                     companion suite that never ran",
+                    status.companion.as_deref().unwrap_or("no companion outcome"),
+                )),
+            )
+        } else {
+            (state, reason)
+        };
+
         cells.push(Cell {
             key,
             state,
             counts: Counts::default(),
             scheduled: true,
-            missing_shards: Vec::new(),
             skipped_tests: Vec::new(),
             failed_tests: Vec::new(),
             skip_evidence_degraded: false,
@@ -1453,7 +1559,9 @@ fn produced_a_result(inputs: &ClassifyInputs<'_>, indices: &[usize], test: &str)
 /// it.
 #[derive(Clone, Debug, Default, Deserialize)]
 struct Baseline {
-    #[serde(default = "default_schema_version")]
+    // Required, not defaulted: a version-less file must die here as a missing
+    // field rather than silently assume the current schema generation and
+    // skip the migration-error path on the next bump.
     schema_version: u32,
     #[serde(default)]
     failure: Vec<FailureEntry>,
@@ -1461,18 +1569,15 @@ struct Baseline {
     skip: Vec<SkipEntry>,
 }
 
-fn default_schema_version() -> u32 {
-    SCHEMA_VERSION
-}
-
 /// A known-red leg, keyed by stable identity — never by a GitHub display name.
+/// `deny_unknown_fields`: a stale area/shard key (`shard = "1/4"`, `area = …`)
+/// must be rejected, not silently parsed away (AC11).
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FailureEntry {
-    area: String,
+    package: String,
     environment: String,
     tier: Tier,
-    #[serde(default = "default_shard")]
-    shard: String,
     owner: String,
     reason: String,
     source_run: String,
@@ -1480,15 +1585,11 @@ struct FailureEntry {
     expiry: Option<String>,
 }
 
-fn default_shard() -> String {
-    "1/1".to_owned()
-}
-
 /// An approved skip budget. `tests` carries exact identities so one removed
 /// skip cannot mask one newly-added skip.
 #[derive(Clone, Debug, Deserialize)]
 struct SkipEntry {
-    area: String,
+    package: String,
     environment: String,
     tier: Tier,
     /// The backend whose absence justifies these skips. Recorded for triage and
@@ -1516,11 +1617,20 @@ fn load_baseline(path: &Path) -> Result<Baseline> {
             baseline.schema_version
         );
     }
+    if baseline.schema_version < SCHEMA_VERSION {
+        bail!(
+            "baseline {} is schema_version {} (area-keyed); this tool reads \
+             schema_version {SCHEMA_VERSION} (package-keyed). Re-key the entries to \
+             packages — see fixes/2026-08-06-cicd/plan.md (Phase 4)",
+            path.display(),
+            baseline.schema_version
+        );
+    }
     for entry in &baseline.failure {
-        validate_date(entry.expiry.as_deref(), "failure", &entry.area)?;
+        validate_date(entry.expiry.as_deref(), "failure", &entry.package)?;
     }
     for entry in &baseline.skip {
-        validate_date(entry.expiry.as_deref(), "skip", &entry.area)?;
+        validate_date(entry.expiry.as_deref(), "skip", &entry.package)?;
     }
 
     Ok(baseline)
@@ -1543,10 +1653,10 @@ fn is_iso_date(value: &str) -> bool {
         && parts.iter().all(|p| p.chars().all(|c| c.is_ascii_digit()))
 }
 
-fn validate_date(value: Option<&str>, kind: &str, area: &str) -> Result<()> {
+fn validate_date(value: Option<&str>, kind: &str, package: &str) -> Result<()> {
     let Some(value) = value else { return Ok(()) };
     if !is_iso_date(value) {
-        bail!("{kind} entry for `{area}` has an invalid expiry `{value}`; expected YYYY-MM-DD");
+        bail!("{kind} entry for `{package}` has an invalid expiry `{value}`; expected YYYY-MM-DD");
     }
     Ok(())
 }
@@ -1590,17 +1700,17 @@ impl Finding {
     }
 }
 
-/// Apply every §1.2 and §1.3 rule to a rollup.
+/// Apply every merge-gate rule to a rollup.
 ///
 /// ## Notes
 ///
-/// `scope` is the set of areas this run actually scheduled. An entry naming an
-/// area outside it is *ignored* — neither accepted as a pass nor counted as a
-/// block — because the run produced no information about it either way.
+/// `scope` is the set of packages this run actually scheduled. An entry naming
+/// a package outside it is *ignored* — neither accepted as a pass nor counted
+/// as a block — because the run produced no information about it either way.
 ///
 /// Two independent excusal paths feed the blocking-cell loop, and they never
-/// overlap: `.github/ci/ci-baseline.toml` excuses a `FAIL`, and an owned,
-/// unexpired `areas.json` policy gap excuses a `POLICY GAP` (see
+/// overlap: `.github/ci/ci-baseline.toml` excuses a `FAIL`, and a governed,
+/// unexpired capability-table gap excuses a `POLICY GAP` (see
 /// [`policy_gap_findings`]). Both leave the cell's state untouched and both
 /// report a `note`, so an excused cell is never invisible.
 fn verdict(rollup: &Rollup, baseline: &Baseline, today: Option<&str>) -> Vec<Finding> {
@@ -1611,14 +1721,14 @@ fn verdict(rollup: &Rollup, baseline: &Baseline, today: Option<&str>) -> Vec<Fin
 
     for entry in &baseline.failure {
         let key = CellKey {
-            area: entry.area.clone(),
+            package: entry.package.clone(),
             environment: entry.environment.clone(),
             tier: entry.tier.clone(),
         };
-        let subject = format!("{key} shard {}", entry.shard);
+        let subject = key.to_string();
 
-        if !scope.contains(&entry.area) {
-            out_of_scope.insert(entry.area.clone());
+        if !scope.contains(&entry.package) {
+            out_of_scope.insert(entry.package.clone());
             continue;
         }
 
@@ -1683,7 +1793,7 @@ fn verdict(rollup: &Rollup, baseline: &Baseline, today: Option<&str>) -> Vec<Fin
     if !out_of_scope.is_empty() {
         findings.push(Finding::note(
             "baseline-out-of-scope",
-            format!("{} area(s)", out_of_scope.len()),
+            format!("{} package(s)", out_of_scope.len()),
             format!(
                 "outside this run's affected scope; ignored, not treated as a pass: {}",
                 out_of_scope.iter().cloned().collect::<Vec<_>>().join(", ")
@@ -1691,13 +1801,12 @@ fn verdict(rollup: &Rollup, baseline: &Baseline, today: Option<&str>) -> Vec<Fin
         ));
     }
 
-    // A cell that produced evidence policy never scheduled means `areas.json`
-    // (or the rollup's copy of its defaults) disagrees with what CI actually
-    // ran. Blocking is what makes that self-correcting: the cell's own state is
-    // now honest about the tests, so if this did not block, a green leg the
-    // policy layer cannot see would report as an ordinary PASS and the
-    // divergence would stay invisible — which is exactly how it survived a
-    // whole run before.
+    // A cell that produced evidence policy never scheduled means the resolved
+    // package policy disagrees with what CI actually ran. Blocking is what
+    // makes that self-correcting: the cell's own state is now honest about the
+    // tests, so if this did not block, a green leg the policy layer cannot see
+    // would report as an ordinary PASS and the divergence would stay
+    // invisible.
     for cell in &rollup.cells {
         if cell.scheduled || cell.records.is_empty() {
             continue;
@@ -1707,7 +1816,7 @@ fn verdict(rollup: &Rollup, baseline: &Baseline, today: Option<&str>) -> Vec<Fin
             cell.key.to_string(),
             format!(
                 "rendered {} from a leg that ran, but policy scheduled no such cell; \
-                 areas.json or the affected scope is wrong",
+                 the resolved package policy or the affected scope is wrong",
                 cell.state
             ),
         ));
@@ -1763,24 +1872,25 @@ fn verdict(rollup: &Rollup, baseline: &Baseline, today: Option<&str>) -> Vec<Fin
 /// Three things forfeit acceptance, and each maps to a rule the plan already
 /// states for baselined failures:
 ///
-/// - **undeclared** — no `areas.json` record at all, so the gap was inferred
-///   from backend provisioning. This is the case that catches a tier being
-///   quietly switched off; it falls through to the generic blocking cell loop.
+/// - **ungoverned** — the capability table records the absence as a plain
+///   `false`, with no owner, reason, or expiry. This is the case that catches a
+///   tier being quietly switched off; it falls through to the generic blocking
+///   cell loop.
 /// - **incomplete** — no owner, reason, or expiry. An unattributable or undated
 ///   gap is a permanent exclusion wearing a temporary label.
-/// - **expired** — §1.3's expiry rule, applied to gaps.
+/// - **expired** — the expiry rule, applied to gaps.
 ///
 /// A gap whose cell produced real *failures* never reaches this function:
-/// `classify_one` ranks `Fail` above `PolicyGap`, so the cell is `FAIL` and is
+/// `classify` ranks `Fail` above `PolicyGap`, so the cell is `FAIL` and is
 /// judged by the baseline. A gap declaration can never suppress evidence.
 ///
-/// There is deliberately **no** `policy-gap-now-executing` rule, tempting as the
-/// analogy to `baseline-now-passing` is. A `require_level!` gate that skips
+/// There is deliberately **no** `policy-gap-now-executing` rule, tempting as
+/// the analogy to `baseline-now-passing` is. A `require_level!` gate that skips
 /// because its backend is absent early-returns, and nextest records that as a
 /// JUnit **pass** — so on this evidence a passing count is exactly what a
-/// correctly-declared gap looks like, and such a rule would block the case it
-/// was meant to protect. Detecting a gap that has genuinely closed needs plan
-/// §1.1's per-backend execution proof. Until then `expiry` is the only forcing
+/// correctly-governed gap looks like, and such a rule would block the case it
+/// was meant to protect. Detecting a gap that has genuinely closed needs
+/// per-backend execution proof. Until then `expiry` is the only forcing
 /// function, which is why an undated gap is rejected outright.
 ///
 /// ## Errors
@@ -1789,9 +1899,9 @@ fn verdict(rollup: &Rollup, baseline: &Baseline, today: Option<&str>) -> Vec<Fin
 /// That one fails the scope job at config time with the most actionable
 /// message, and it is the better place to *learn* about a lapsed gap. But it is
 /// not sufficient: `verdict` is the single required branch-protection check and
-/// runs `if: always()`, precisely so a failed, skipped, or never-scheduled scope
-/// job cannot suppress the verdict. If expiry lived only in the Python, an
-/// expired gap would be excused by the one check that actually gates merging
+/// runs `if: always()`, precisely so a failed, skipped, or never-scheduled
+/// scope job cannot suppress the verdict. If expiry lived only in the Python,
+/// an expired gap would be excused by the one check that actually gates merging
 /// whenever the check that catches it did not run.
 fn policy_gap_findings(rollup: &Rollup, today: Option<&str>) -> (Vec<Finding>, BTreeSet<CellKey>) {
     let mut findings = Vec::new();
@@ -1883,7 +1993,7 @@ fn skip_findings(
     let mut approved: BTreeMap<CellKey, BTreeMap<String, &SkipEntry>> = BTreeMap::new();
     for entry in &baseline.skip {
         let key = CellKey {
-            area: entry.area.clone(),
+            package: entry.package.clone(),
             environment: entry.environment.clone(),
             tier: entry.tier.clone(),
         };
@@ -1957,18 +2067,18 @@ fn skip_findings(
     let out_of_scope: BTreeSet<&String> = baseline
         .skip
         .iter()
-        .filter(|entry| !scope.contains(&entry.area))
-        .map(|entry| &entry.area)
+        .filter(|entry| !scope.contains(&entry.package))
+        .map(|entry| &entry.package)
         .collect();
     if !out_of_scope.is_empty() {
         findings.push(Finding::note(
             "skip-out-of-scope",
-            format!("{} area(s)", out_of_scope.len()),
+            format!("{} package(s)", out_of_scope.len()),
             format!(
                 "outside this run's affected scope; ignored: {}",
                 out_of_scope
                     .iter()
-                    .map(|area| area.as_str())
+                    .map(|package| package.as_str())
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
@@ -1987,7 +2097,7 @@ fn cell_text(value: &str) -> String {
     value.replace('|', "\\|").replace(['\n', '\r'], " ")
 }
 
-/// Render the area × environment × tier grid.
+/// Render the package × environment × tier grid.
 ///
 /// Plain GFM rather than the `renderable` Markdown tree renderer. `renderable`
 /// would work — its tree renderer emits GFM pipe tables with correct cell
@@ -2001,7 +2111,7 @@ fn render_grid(rollup: &Rollup) -> String {
 
     if rollup.scope_degraded {
         out.push_str(
-            "> **Scope was inferred from the artifacts on disk.** An area that produced \
+            "> **Scope was inferred from the artifacts on disk.** A package that produced \
              nothing at all is invisible to an inferred scope, which is precisely the case \
              `MISSING` exists to catch. Pass `--scope`.\n\n",
         );
@@ -2017,9 +2127,9 @@ fn render_grid(rollup: &Rollup) -> String {
             .collect();
         let environments: BTreeSet<&String> =
             cells.iter().map(|cell| &cell.key.environment).collect();
-        let areas: BTreeSet<&String> = cells.iter().map(|cell| &cell.key.area).collect();
+        let packages: BTreeSet<&String> = cells.iter().map(|cell| &cell.key.package).collect();
 
-        out.push_str(&format!("### {tier}\n\n| area |"));
+        out.push_str(&format!("### {tier}\n\n| package |"));
         for environment in &environments {
             out.push_str(&format!(" {} |", cell_text(environment)));
         }
@@ -2029,15 +2139,15 @@ fn render_grid(rollup: &Rollup) -> String {
         }
         out.push('\n');
 
-        for area in &areas {
-            out.push_str(&format!("| `{}` |", cell_text(area)));
+        for package in &packages {
+            out.push_str(&format!("| `{}` |", cell_text(package)));
             for environment in &environments {
                 let found = cells.iter().find(|cell| {
-                    cell.key.area == **area && cell.key.environment == **environment
+                    cell.key.package == **package && cell.key.environment == **environment
                 });
                 let text = match found {
                     Some(cell) => match cell.state {
-                        CellState::NotScheduled | CellState::NotApplicable => {
+                        CellState::NotScheduled | CellState::NothingToRun => {
                             cell.state.label().to_owned()
                         }
                         _ => format!(
@@ -2229,10 +2339,9 @@ impl Comparison {
 
 /// Compare two result documents cell by cell.
 ///
-/// Comparison is keyed on `{area, environment, tier}` and on test *identity*,
-/// never on shard: shards repartition as the test count moves, so a
-/// shard-keyed diff reports churn as change. Aggregating to the cell first is
-/// what makes the result stable across repartitioning.
+/// Comparison is keyed on `{package, environment, tier}` and on test
+/// *identity*, aggregated to the cell first so the result is stable across
+/// changes in how a suite's tests are distributed.
 fn compare(base: &Rollup, head: &Rollup) -> Comparison {
     let base_cells: BTreeMap<&CellKey, &Cell> =
         base.cells.iter().map(|cell| (&cell.key, cell)).collect();
@@ -2417,7 +2526,7 @@ fn render_comparison(comparison: &Comparison, base: &Rollup, head: &Rollup) -> S
 // ---------------------------------------------------------------------------
 
 const USAGE: &str = "\
-ci-rollup — package-area × environment × tier CI rollup and merge verdict
+ci-rollup — package × environment × tier CI rollup and merge verdict
 
 USAGE:
   ci-rollup rollup  --artifacts <dir> [options]
@@ -2426,18 +2535,12 @@ USAGE:
 
 ROLLUP OPTIONS:
   --artifacts <dir>              root holding the downloaded per-job artifacts
-  --areas <file>                 areas.json policy (default .github/ci/areas.json)
-  --scope <a,b,c>                areas this run scheduled; repeatable. Omitting it
+  --policy <file>                the scope job's policy artifact (scope.json), carrying
+                                 every impacted package's resolved CI policy
+  --environments <file>          environment capability table
+                                 (default .github/ci/environments.json)
+  --scope <a,b,c>                packages this run scheduled; repeatable. Omitting it
                                  infers scope from artifacts and marks the run degraded
-  --browser-environments <a,b>   environments that run the browser tier (default
-                                 ubuntu-latest). L1 and L2 environments come from
-                                 each area's `environments` in areas.json
-  --provisioned-backends <env>=<b1,b2>
-                                 L2 backends provisioned on an environment; repeatable.
-                                 Used only to catch an UNDECLARED policy gap — a
-                                 declared `policy_gaps` record in areas.json is
-                                 authoritative. An environment with no entry is
-                                 treated as unknown, not as unprovisioned
   --expected-manifest <file>     expected-test manifest generated ON the target
                                  environment; repeatable
   --out <file>                   write the machine-readable result document
@@ -2549,15 +2652,28 @@ fn run() -> Result<i32> {
 
 fn cmd_rollup(args: &Args) -> Result<i32> {
     let artifacts = PathBuf::from(args.required("artifacts")?);
-    let areas_path = args
-        .one("areas")
+    let policy_path = PathBuf::from(args.required("policy")?);
+    let environments_path = args
+        .one("environments")
         .map(PathBuf::from)
-        .unwrap_or_else(|| Path::new(".github").join("ci").join("areas.json"));
+        .unwrap_or_else(|| Path::new(".github").join("ci").join("environments.json"));
 
-    let areas_text = fs::read_to_string(&areas_path)
-        .with_context(|| format!("failed to read {}", areas_path.display()))?;
-    let areas: Vec<AreaPolicy> = serde_json::from_str(&areas_text)
-        .with_context(|| format!("invalid areas policy {}", areas_path.display()))?;
+    let policy_text = fs::read_to_string(&policy_path)
+        .with_context(|| format!("failed to read {}", policy_path.display()))?;
+    let policy_doc: PolicyDoc = serde_json::from_str(&policy_text)
+        .with_context(|| format!("invalid package policy {}", policy_path.display()))?;
+
+    let environments_text = fs::read_to_string(&environments_path)
+        .with_context(|| format!("failed to read {}", environments_path.display()))?;
+    let environments_doc: EnvironmentsDoc = serde_json::from_str(&environments_text)
+        .with_context(|| format!("invalid environments {}", environments_path.display()))?;
+    if environments_doc.schema_version != 1 {
+        bail!(
+            "environments {} has schema_version {}; expected 1",
+            environments_path.display(),
+            environments_doc.schema_version
+        );
+    }
 
     let mut records = Vec::new();
     for dir in list_artifact_dirs(&artifacts)? {
@@ -2571,24 +2687,21 @@ fn cmd_rollup(args: &Args) -> Result<i32> {
     let explicit_scope = args.list("scope");
     let scope_degraded = explicit_scope.is_empty();
     let scope: BTreeSet<String> = if scope_degraded {
-        records.iter().map(|record| record.area.clone()).collect()
+        records.iter().map(|record| record.package.clone()).collect()
     } else {
         explicit_scope.into_iter().collect()
     };
 
-    let browser_environments = tier_environments(args, "browser-environments");
-    let provisioned = parse_provisioned(args)?;
     let expected_tests = load_expected_manifests(args)?;
 
-    let expected = expected_cells(&areas, &scope, &browser_environments);
+    let expected = expected_cells(&policy_doc.policy, &scope, &environments_doc.environments);
     let mut cells = classify(&ClassifyInputs {
         expected: &expected,
         records: &records,
         statuses: &statuses,
-        provisioned: &provisioned,
         expected_tests: &expected_tests,
     });
-    cells.extend(status_cells(&statuses, &scope, &cells));
+    cells.extend(status_cells(&statuses, &scope, &cells, &policy_doc.policy));
     cells.sort_by(|left, right| left.key.cmp(&right.key));
 
     let rollup = Rollup {
@@ -2621,12 +2734,7 @@ fn cmd_verdict(args: &Args) -> Result<i32> {
         .with_context(|| format!("failed to read {}", results_path.display()))?;
     let rollup: Rollup = serde_json::from_str(&results_text)
         .with_context(|| format!("invalid result document {}", results_path.display()))?;
-    if rollup.schema_version > SCHEMA_VERSION {
-        bail!(
-            "result schema_version {} is newer than this tool understands ({SCHEMA_VERSION})",
-            rollup.schema_version
-        );
-    }
+    reject_old_schema(rollup.schema_version, &results_path)?;
 
     let baseline = load_baseline(&baseline_path)?;
     let today = args.one("today").map(str::to_owned).or_else(today_utc);
@@ -2663,43 +2771,31 @@ fn load_rollup(path: &Path) -> Result<Rollup> {
         .with_context(|| format!("failed to read {}", path.display()))?;
     let rollup: Rollup = serde_json::from_str(&text)
         .with_context(|| format!("invalid result document {}", path.display()))?;
-    if rollup.schema_version > SCHEMA_VERSION {
-        bail!(
-            "result schema_version {} in {} is newer than this tool understands ({SCHEMA_VERSION})",
-            rollup.schema_version,
-            path.display()
-        );
-    }
+    reject_old_schema(rollup.schema_version, path)?;
     Ok(rollup)
 }
 
-fn tier_environments(args: &Args, name: &str) -> Vec<String> {
-    let values = args.list(name);
-    if values.is_empty() {
-        vec![DEFAULT_TIER_ENVIRONMENTS.to_owned()]
-    } else {
-        values
+/// Refuse a result document from another schema generation, in both
+/// directions. Version 1 was area-keyed; version 2 keys every identity on the
+/// package. Reading one as the other would silently mis-key every cell, so the
+/// error names the migration rather than just the mismatch.
+fn reject_old_schema(version: u32, path: &Path) -> Result<()> {
+    if version > SCHEMA_VERSION {
+        bail!(
+            "result schema_version {} in {} is newer than this tool understands ({SCHEMA_VERSION})",
+            version,
+            path.display()
+        );
     }
-}
-
-fn parse_provisioned(args: &Args) -> Result<BTreeMap<String, BTreeSet<String>>> {
-    let mut provisioned: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    for raw in args.many("provisioned-backends") {
-        let (environment, backends) = raw.split_once('=').ok_or_else(|| {
-            anyhow!("`--provisioned-backends` expects `<environment>=<backend>[,<backend>]`, got `{raw}`")
-        })?;
-        let environment = environment.trim();
-        if environment.is_empty() {
-            bail!("`--provisioned-backends` has an empty environment in `{raw}`");
-        }
-        let entry = provisioned.entry(environment.to_owned()).or_default();
-        for backend in backends.split(',').map(str::trim) {
-            if !backend.is_empty() {
-                entry.insert(backend.to_owned());
-            }
-        }
+    if version < SCHEMA_VERSION {
+        bail!(
+            "result document {} is schema_version {version} (area-keyed); this tool reads \
+             schema_version {SCHEMA_VERSION} (package-keyed). Re-run the rollup that \
+             produced it — see fixes/2026-08-06-cicd/plan.md (Phase 4)",
+            path.display()
+        );
     }
-    Ok(provisioned)
+    Ok(())
 }
 
 type ExpectedTests = BTreeMap<(String, Tier), BTreeMap<String, Vec<String>>>;

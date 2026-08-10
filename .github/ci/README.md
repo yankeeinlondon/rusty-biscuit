@@ -1,21 +1,26 @@
-# CI area policy — `areas.json`
+# CI policy — packages and environments
 
-`areas.json` is the single policy surface for **every** package area in the repo.
-Each area `sniff repo package-areas` discovers has exactly one record, whether or
-not it gates in CI. Each record describes one area; `scripts/ci/affected_scope.py` validates every record
-against the schema below (via `validate_area_schema`) and fails loudly on a
-missing required field, an unknown field, an unsupported environment or runner
-OS, an unknown L2 backend, an unowned or lapsed exclusion, an uncovered L2 policy
-gap, or a mistyped value.
+CI selects, executes, and records work by **package** — a Cargo workspace
+member. Every result identity — artifact name, JUnit manifest record, rollup
+cell — is keyed on `{package, environment, tier}`.
+
+- **Package policy** lives in the package's own manifest, under
+  `[package.metadata.ci]`. `scripts/ci/affected_scope.py` reads and validates
+  it.
+- **Environment capabilities** live in `environments.json` (below). One
+  versioned, schema-validated table.
+- **Known-red legs** live in `ci-baseline.toml`, keyed by package.
+
+There is no per-directory policy store and no concept of a "package area" in
+CI. `just test` in a directory still runs that directory's packages for local
+use (R8); CI does not read that list.
 
 ## `environment` is not `os`
 
 Windows, macOS, and Linux are operating systems. **WSL2 is a distinct supported
-Linux environment that a Windows runner hosts.** Policy and every result identity
-— artifact name, JUnit manifest record, rollup cell — are keyed by
-**environment**; only `runs-on` and the native-package lookup are keyed by runner
-OS. Conflating the two merges a WSL leg into the native Windows cell without
-anyone noticing.
+Linux environment that a Windows runner hosts.** Policy and every result
+identity are keyed by **environment**; only `runs-on` and the native-package
+lookup are keyed by runner OS.
 
 | environment | hosted by runner label | notes |
 |---|---|---|
@@ -24,235 +29,178 @@ anyone noticing.
 | `macos-latest` | `macos-latest` | |
 | `wsl2-ubuntu` | `windows-latest` | runs through `wsl-bash`; see `.github/workflows/_wsl-ci.yml` |
 
-`affected_scope.py` derives three workflow inputs from the single `environments`
-field so the reusable workflow can never route `wsl2-ubuntu` into a `runs-on`
-matrix: `native_environments` (the environment names that *are* runner labels),
-`l2_environments` (those with a provisionable L2 backend), and `wsl` (a boolean).
+`affected_scope.py` derives the per-package workflow inputs from the
+environment capability table so the reusable workflow can never route
+`wsl2-ubuntu` into a `runs-on` matrix: `native_environments` (the environment
+names that *are* runner labels), `l2_environments`, `browser_environments`,
+`node_environments`, and `wsl` (a boolean).
 
 A WSL2 guest *is* Linux, so `_ensure-native-libs` keys off `uname -s` and reads
-the area's `ubuntu-latest` package list. `native` therefore stays a **runner OS**
-map and must not grow a `wsl2-ubuntu` key.
+the package's `ubuntu-latest` list. `native` therefore stays a **runner OS**
+map (keyed by `ubuntu-latest`/`macos-latest`/`windows-latest`) and must not
+grow a `wsl2-ubuntu` key.
 
 Cargo metadata — not this file — remains the source of truth for package
-membership. `areas.json` only assigns policy to the curated areas, and its `area`
-order must match the root `justfile` `areas :=` list.
+membership.
 
-## Fields
+## `environments.json`
 
-| Field | Type | Required | Default | Meaning |
-|-------|------|----------|---------|---------|
-| `area` | string | yes | — | Area directory; used for `cd`, cache keys, and ownership. |
-| `ci` | bool | no | `true` | Whether the area gates in the fan-out matrix. |
-| `check_args` | string | when `ci` | — | Args for the macOS compile-check `cargo check --all-targets` (e.g. `-p foo -p foo-cli`). |
-| `reason` | string | when not `ci` | — | Why the area does not gate, and what would unblock it. |
-| `owner` | string | when not `ci`, and on every policy gap | — | GitHub handle accountable for closing the exclusion or gap. |
-| `expiry` | string | when not `ci` unless `capability` | — | ISO `YYYY-MM-DD`. A **past** date fails the scope calculation. |
-| `exclusion_class` | string | when not `ci` | — | One of `capability` (permanent), `promotion-pending`, `time-bounded`. |
-| `environments` | string[] | no | `["ubuntu-latest","windows-latest","macos-latest"]` | Environments that run the full canonical L1 suite. |
-| `check_os` | string[] | no | `["windows-latest"]` | Runner OSes that only compile-check (`--all-targets`, warnings not denied). |
-| `policy_gaps` | object[] | no | `[]` | Tiers this area owns tests for that a declared environment cannot host. |
-| `shards` | string[] | no | `["1/1"]` | nextest `--partition count:i/N` specs; `["1/1"]` = no sharding. Sized from measured cold-run duration. |
-| `l2` | bool | no | `false` | Run the real-terminal (L2) tier on every environment with a provisioned backend. |
-| `browser` | bool | no | `false` | Run the headless-browser tier on Linux. |
-| `ai_provider_stubs` | bool | no | `false` | Install inert AI-provider CLI stubs for tests needing provider discovery. |
-| `backends` | string[] | no | `[]` | L2 terminal backends this area's tests require. One of: `tmux`, `wezterm`, `kitty`, `apple-terminal`. |
-| `native` | object | no | `{}` | Map of runner OS → system packages needed to build/test (e.g. `{"ubuntu-latest": ["libasound2-dev"]}`). |
-| `node` | bool | no | `false` | Whether this area's canonical `just test` also drives a JavaScript suite, so the leg needs Node + pnpm. |
+One versioned, schema-validated capability table. It defines, for each
+environment: the `runner` that hosts it, the `native_key` that maps it to a
+native-package installer, and a `capabilities` map over a closed vocabulary:
 
-Supported environments: `ubuntu-latest`, `windows-latest`, `macos-latest`,
-`wsl2-ubuntu`. Supported runner OS values (for `check_os` and `native`):
-`ubuntu-latest`, `windows-latest`, `macos-latest`.
+| capability | meaning |
+|---|---|
+| `tmux` | whether a headless L2 terminal backend can be provisioned here |
+| `headless_browser` | whether a headless browser can be hosted here |
+| `node_pnpm` | whether Node 22 + pnpm 10 are provisioned here |
+| `archive_only` | whether this environment runs from a prebuilt nextest archive (no Cargo) |
 
-### Retired fields
+A capability value is either a boolean or, for a **governed unavailability**, an
+object carrying `available: false` plus `reason`, `owner`, and `expiry`. A
+plain `false` is an **ungoverned** absence — the `POLICY GAP` cell it produces
+is never excused and blocks. The facts the eight per-area `policy_gaps`
+records used to restate — Windows has no tmux, the WSL2 leg is archive-only,
+and the browser tier is Linux-hosted — are now declared once, here, with full
+governance.
 
-Both are rejected **by name**, with an actionable message, rather than appearing
-in a generic unknown-field list.
+An L2 tier is hostable where ANY of its declared backends is: each backend is
+looked up as a capability under its own name (`tmux` today; `wezterm`,
+`kitty`, and `apple-terminal` get the same axis if they ever become
+CI-hostable), and a backend with no capability entry is hostable nowhere.
 
-- `soft_os` — it marked a test leg `continue-on-error`, which did not merely stop
-  the leg from blocking the merge, it removed the leg from the run's verdict, so
-  a permanently red platform read as a normal run. Every configured environment
-  now gates; a known failure is recorded in the results baseline instead, which
-  keeps the signal visible.
-- `full_os` — it named a *runner OS* list, but WSL2 is an environment a Windows
-  runner hosts rather than a runner label of its own. Replaced by `environments`.
+Capability only: package policy decides *which* tiers are expected, so an
+unsupported required tier becomes an explicit `POLICY GAP` in the grid rather
+than disappearing. `affected_scope.py::load_environments` validates the schema
+loudly; `affected_scope.py::package_ci_policy` cross-checks every package's
+declared native packages against the runner labels the table defines.
 
-### Why macOS runs the real suite now
+## `[package.metadata.ci]`
 
-macOS used to be compile-check-only, justified by "runner minutes bill ~10x".
-The repo is **public**, so standard runners are free and that justification is
-void. macOS is in the default `environments` list.
+Package policy lives in the package's own manifest, following the
+`[package.metadata.benchmarks]` pattern already used across this workspace:
 
-"macOS is healthy" remains an assumption to be measured, not asserted: `sniff`
-was the only area testing there and it fails on macOS today.
+```toml
+[package.metadata.ci]
+gates = false
+exclusion-class = "promotion-pending"
+owner = "@yankeeinlondon"
+reason = "…"
+expiry = "2027-01-31"
 
-### What the `check` job is for now
+[package.metadata.ci.native]
+ubuntu-latest = ["libasound2-dev"]
 
-It is no longer "the macOS floor". A compile-check is strictly weaker than a test
-run on the same environment, so it would be a wasted slot beside the new macOS
-test leg. What survives is `--all-targets`: benches and examples compile here and
-nowhere else, since the test leg builds only lib/bins/tests. The default
-`check_os` is `["windows-latest"]`, the platform nobody develops on.
-
-It does **not** deny warnings. That gate answers "does it compile", and
-promoting warnings destroyed the distinction: dead code reported as
-`error: could not compile <crate>`, a dependency's warning failed whichever area
-built it (`playa` went red for `biscuit-terminal`), and `just check` sets no
-`RUSTFLAGS` so nothing local could reproduce it. Platform-conditional dead code
-is normal in cross-platform Rust. `lint` still denies warnings via clippy, where
-`just lint` enforces the same bar locally; warning *counts* belong in the rollup
-with an owned baseline, the treatment skips already get.
-Same job count per area as before, aimed better. The trade-off is explicit:
-**macOS-only warning drift is no longer detected in CI.**
-
-### The `node` capability
-
-`homelab` is the only area whose canonical `just test` and `just lint` also drive
-a JavaScript suite — `homelab/server/frontend`, Vue + Vitest under jsdom, 22
-tests, plus an oxlint pass. pnpm is on no GitHub runner image, so until this flag
-existed `pnpm: command not found` killed the `test` recipe on every runner
-*after* all the Rust packages had passed. The suite had **never once run in CI**, and because the rollup parses
-Rust JUnit only, `homelab` rendered `PASS 222/0/0` on macOS, Linux, and Windows
-while every `homelab / test` job was red (measured, run 30427703024). The
-producer status artifact caught the failure and the verdict blocked, so the
-safety net held — but the grid was misleading, which is what success criterion 1
-forbids.
-
-`"node": true` is a declared capability, not an unconditional install.
-`affected_scope.py` derives `node_environments` from it exactly as it derives
-`l2_environments` from `"l2": true`, and `_area-ci.yml` uses that list to gate
-its pnpm/Node setup steps. Nothing in the workflow decides which environments
-qualify.
-
-`NODE_PROVISIONED_ENVIRONMENTS` is `{ubuntu-latest}` — **Linux only**, for the
-reason `lint` is Linux only. The suite runs under jsdom with no native
-dependency, so the other three environments would exercise identical code paths
-in exchange for three more toolchain installs. This is not an exception to "the
-same canonical recipe on every environment": the recipe is identical everywhere
-and self-gates on the capability, the way `require_level!` self-gates on a
-terminal backend.
-
-Two rules keep a missing capability from reading as success:
-
-- **The skip is loud and never silent.** Where pnpm is absent, `test-frontend`
-  and `lint-frontend` each print an unmissable block saying the suite or lint did
-  not run and why, then exit 0. A developer without pnpm is not blocked; nobody
-  can mistake the run for one that covered the frontend.
-- **A declared-but-missing capability hard-fails.** On the leg whose area
-  declared `node`, `_area-ci.yml` verifies reachability in a named step
-  (`pnpm --version`, mirroring the L2 tier's `tmux -V`) and exports
-  `BISCUIT_FRONTEND_REQUIRED=1`, which turns the recipe's loud skip into a
-  failure. Same asymmetry as the per-backend L2 requirement: a provisioned
-  capability hard-fails when missing, an inapplicable one skips cleanly.
-
-Both the `test` and `lint` jobs provision the toolchain, because both drive pnpm.
-`lint` is pinned to `ubuntu-latest` — exactly `NODE_PROVISIONED_ENVIRONMENTS` —
-so it gates on that environment appearing in `node-environments` rather than on a
-matrix value. Adding a pnpm-driven recipe to a job that does not provision Node
-reintroduces the original defect in that job alone, which is how `lint` kept
-failing after `test` was fixed.
-
-On developer hosts the toolchain comes from `just init`: `scripts/ensure-ci-tools.sh`
-requires Node 22+ (it does not install it — version managers own that binary) and
-installs pnpm through npm, elevating with `sudo` when npm's global prefix is
-root-owned.
-
-An area that sets `"node": true` but declares no environment in
-`NODE_PROVISIONED_ENVIRONMENTS` fails the scope calculation — the suite would
-skip on every leg while the area still reported PASS, which is the exact defect
-the flag exists to close. A drift test in `test_affected_scope.py` also requires
-declaration and justfile pnpm usage to agree in **both** directions.
-
-### Policy gaps
-
-A policy gap is a tier an area owns tests for that some declared environment
-cannot host. It exists so the rollup renders **POLICY GAP** for that cell instead
-of a green `0 run / N skipped`.
-
-```json
-"policy_gaps": [
-  {
-    "tier": "L2",
-    "environments": ["windows-latest"],
-    "reason": "tmux has no Windows port; WezTerm/Kitty need a live GUI session",
-    "owner": "@yankeeinlondon",
-    "expiry": "2027-01-31"
-  }
-]
+[package.metadata.ci.tests]
+tiers = ["L1", "L2"]
+l2-backends = ["tmux", "wezterm"]
+features = ["playa"]
+all-features = false
+l1-include-slow = false
+runner-tools = ["ai-provider-stubs", "darkmatter-md-fixture"]
+companion-suites = ["homelab-frontend"]
 ```
 
-`tier` is one of `L1`, `L2`, `browser`. Every listed environment must be one the
-area actually declares — a gap describes a cell that *is* scheduled but cannot
-execute. Validation is not merely structural: an area with `"l2": true` that runs
-on an environment outside `L2_PROVISIONED_ENVIRONMENTS` and has **no** matching
-gap record fails the scope calculation. That is what keeps Windows L2 from
-quietly becoming a green cell.
+A package with no CI metadata defaults to `gates = true` and the L1 tier —
+non-gating is never inferred from zero observed tests (AC15), because that
+would silently exempt a package and miss its first test.
 
-`L2_PROVISIONED_ENVIRONMENTS` is `{ubuntu-latest, macos-latest}`: tmux is the only
-backend headless CI can host and it installs on both (apt / brew). Windows has no
-tmux port and no proven alternative; `wsl2-ubuntu` runs from a `nextest archive`,
-which carries no broker binary and hosts no tmux server.
+### Fields
 
-#### A declared gap does not block the merge; everything else about it does
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `gates` | bool | `true` | whether the package fans out in CI |
+| `exclusion-class` | string | when `gates = false` | `capability`, `promotion-pending`, or `time-bounded` |
+| `owner` | string | when `gates = false` | GitHub handle accountable for closing the exclusion |
+| `reason` | string | when `gates = false` | why it does not gate, and what would unblock it |
+| `expiry` | ISO date | when `gates = false` unless `capability` | a **past** date fails the scope calculation |
 
-Acknowledged is not acceptable, and neither is invisible. Eight areas declare an
-owned Windows-L2 gap, so if a `POLICY GAP` cell blocked unconditionally the one
-required check could never go green and nothing could merge. `ci-rollup verdict`
-therefore treats an owned, unexpired gap the way it treats a baselined failure:
+`[package.metadata.ci.tests]`:
 
-- the cell still renders **POLICY GAP** in the grid, never `PASS`, `SKIP`, or
-  `N/A`, and is still listed under "Cells failing the summary gate"
-- the verdict reports it as a `note` (`policy-gap-accepted`) naming the owner and
-  expiry, so it stays legible in the summary
-- it does **not** block
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `tiers` | string[] | `["L1"]` | CI-gating tiers this package owns. Must include `L1`; `L2`/`browser` are opt-ins |
+| `l2-backends` | string[] | `[]` | L2 terminal backends this package's tests require; one of `tmux`, `wezterm`, `kitty`, `apple-terminal`. Required when `L2` is declared |
+| `features` | string[] | `[]` | forwarded to check, archive, and the canonical recipe consistently. Conflicts with `all-features` |
+| `all-features` | bool | `false` | run with `--all-features`. Conflicts with `features` |
+| `l1-include-slow` | bool | `false` | keep `slow_` tests inside the L1 selection (darkmatter's contract) |
+| `runner-tools` | string[] | `[]` | closed vocabulary: `ai-provider-stubs`, `darkmatter-md-fixture`, `node-22`, `pnpm-10`, `l2-parallel-self-spawn` |
+| `companion-suites` | string[] | `[]` | non-Cargo suites this package owns; closed vocabulary: `homelab-frontend` |
 
-Four things forfeit that acceptance and block at `BLOCK` severity:
+`[package.metadata.ci.native]`: a map of runner OS (`ubuntu-latest`,
+`windows-latest`, `macos-latest`) → system packages needed to build/test. The
+union of a selected package's `native` requirements across its dependency
+closure reaches every job that compiles or runs it — a dependent job that
+compiles `playa` needs ALSA even though it is not testing `playa` (R5).
 
-| Rule | Case |
-|---|---|
-| `cell-policy-gap` | **undeclared** — no `policy_gaps` record; the gap was inferred from backend provisioning. This is the case that catches a tier being quietly switched off |
-| `policy-gap-incomplete` | no `owner`, no `reason`, or a missing/malformed `expiry` |
-| `policy-gap-expired` | `expiry` is in the past |
-| `cell-failed` | the cell produced **real failures**. `FAIL` outranks `POLICY GAP`, so a gap declaration can never suppress genuine evidence |
+Validation (`affected_scope.py::validate_package_ci`) rejects unknown fields,
+invalid tier or tool names, conflicting `features`/`all-features`, expired
+exclusions, an L2 tier without backends, l2-backends without L2, and a
+companion suite whose canonical recipe does not exist in its owning directory's
+justfile.
 
-There is deliberately **no** "the tests passed, so the gap is stale" rule, close
-as the analogy to `baseline-now-passing` is. A `require_level!` gate that skips
-for want of a backend early-returns, and nextest records that as a JUnit
-**pass** — so on JUnit evidence alone a passing count is exactly what a
-correctly-declared gap looks like, and such a rule would block the case it was
-meant to protect. Detecting a gap that has genuinely closed needs plan §1.1's
-per-backend execution proof. Until that lands, `expiry` is the only forcing
-function, which is why an undated gap is rejected outright.
+### `runner-tools` is a closed vocabulary
 
-Expiry is checked in **two** places on purpose. `affected_scope.py`
-(`validate_expiry`) fails the scope job at config time with the most actionable
-message and is the better place to learn about a lapsed gap. But `ci-verdict`
-runs `if: always()` precisely so a failed or skipped scope job cannot suppress
-it — so if expiry lived only in the Python, an expired gap would be waved
-through by the only check that actually gates merging whenever the check that
-catches it did not run.
+Implemented by the reusable workflow (`_package-ci.yml`), not an arbitrary
+command surface:
 
-This is deliberately *not* `soft_os`. `continue-on-error` removed a leg from the
-run's verdict entirely (plan §1.4); an accepted policy gap stays in the grid, in
-the summary, and attributable to a person and a date.
+- **`ai-provider-stubs`** — inert AI-provider CLI stubs for tests that require
+  provider discovery (claudine-cli).
+- **`darkmatter-md-fixture`** — builds darkmatter's `md` binary into the
+  workspace target dir, preserving Claudine's clean-checkout fixture that a
+  direct `_test claudine-cli` would otherwise lose.
+- **`node-22` / `pnpm-10`** — the JavaScript toolchain a companion suite runs
+  under (homelab-frontend, owned by homelab-server).
+- **`l2-parallel-self-spawn`** — run the L2 tier in `_test_l2`'s parallel
+  self-spawn mode (`min(cores, 8)`), for suites dominated by self-isolating
+  tests (claudine-cli).
+
+### Companion suites
+
+`companion-suites` names non-Cargo test suites this package owns, from a
+closed vocabulary. `homelab-frontend` invokes the existing non-focusing
+frontend recipe (`homelab/justfile::test-frontend`) and attributes its
+producer status to `homelab-server`/L1. A companion suite must emit
+machine-readable evidence or a producer failure: a green Rust JUnit report
+must never hide a failed OR SKIPPED companion suite
+(the producer-status `failure` downgrades the cell in the rollup, and a
+companion outcome other than `success` — or none at all — downgrades it the
+same way).
 
 ### Exclusions must be owned and time-bounded
 
-An exclusion without an end date is a permanent one wearing a temporary label, so
-`"ci": false` requires `reason`, `owner`, and `exclusion_class`, plus `expiry`
-unless the class is `capability`. A **past** `expiry` fails the scope calculation
-loudly — close the item or move the date out with fresh justification.
+`gates = false` requires `reason`, `owner`, and `exclusion-class`, plus
+`expiry` unless the class is `capability`. A **past** `expiry` fails the scope
+calculation loudly.
 
-- `capability` — excluded because the environment genuinely cannot host it
-  (physical IoT hardware, say). Permanent, so it must **not** carry an `expiry`.
-- `promotion-pending` — a real area with real tests, blocked on work that is
-  identified. The `reason` must name the blocker precisely.
-- `time-bounded` — nothing to gate yet (zero or near-zero tests).
+- `capability` — excluded because the environment genuinely cannot host it.
+  Permanent, so it must **not** carry an `expiry`.
+- `promotion-pending` — a real package with real tests, blocked on identified
+  work.
+- `time-bounded` — nothing to gate yet (zero or near-zero tests). No current
+  package uses this class: a package with no tests gates and records
+  `NOTHING TO RUN` instead (AC15), which makes its first future test run
+  automatic.
+
+A `gates = false` package still appears in the grid as `NOT SCHEDULED` with its
+governance metadata — never a pass, never a silent absence, never conflated
+with `NOTHING TO RUN` (R10).
+
+## Native libraries
+
+`native` has exactly one installer: the root `justfile`'s
+`_ensure-native-libs`. CI runs `just _ensure-native-libs <packages...>` before
+every build, test, and lint command so a `-sys` crate never fails to compile
+for a missing system library, and `just init` runs the no-argument form (every
+workspace package's declarations) to cover a developer host. The dependency
+closure union is computed by the scope job and passed as an explicit list; the
+WSL guest has no Cargo but receives that same list. Non-Debian Linux hosts need
+the apt name mapped to `dnf` / `pacman` / `apk` in that recipe's table.
 
 ## The results baseline — `ci-baseline.toml`
 
-`ci-baseline.toml` records known-red legs and the approved skip budget. It
-replaces `baseline-failures.txt`, which listed GitHub *display names* and had no
-consumers at all. `scripts/ci-rollup.rs` enforces it:
+`ci-baseline.toml` records known-red legs and the approved skip budget, keyed
+by `{package, environment, tier}`. `scripts/ci-rollup.rs` enforces it:
 
 - a failure **not** listed blocks
 - a listed entry that is scheduled and **passes** blocks, forcing cleanup
@@ -261,172 +209,99 @@ consumers at all. `scripts/ci-rollup.rs` enforces it:
   blocking; it cannot be accepted as a known test failure
 - an entry past its `expiry` blocks
 
-Entries are keyed by `{area, environment, tier, shard}`, never by a job name.
-For a matrix leg skipped by `needs:`, GitHub reports the raw un-interpolated
-name expression, so `os` and `shard` are not recoverable from it at all.
-
-Every entry currently in the file was migrated mechanically from
-`baseline-failures.txt` and is marked **unverified**. See the header of
-`ci-baseline.toml` and `fixes/2026-07-27-refactor/ci-verdict-job.md`.
+Every entry needs `owner`, `reason`, and `source_run`. `expiry` is optional
+but strongly encouraged. See the file's header for the re-key status and the
+Phase 4 bridging run.
 
 ## `ci-verdict` — the single required check
 
 `ci.yml`'s `ci-verdict` job is the **only** check branch protection should
-require. Every producer — `check`, `lint`, `test`, `l2`, `browser`, `wsl2` —
-stays visibly red when it fails and must **not** be a required check: a required
-producer's failure blocks the merge directly, the baseline is never consulted,
-and the whole mechanism is bypassed.
+require. Every producer — `check`, `lint`, `test`, `l2`, `browser`, `wsl` —
+stays visibly red when it fails and must **not** be a required check: a
+required producer's failure blocks the merge directly, the baseline is never
+consulted, and the whole mechanism is bypassed.
 
-It runs `if: always()`, so a failed or cancelled producer cannot skip it, and it
-is passed `--scope` from the `scope` job. Scope is load-bearing: it is the only
-way `ci-rollup` learns an area was *scheduled* and produced *nothing*. Inferred
-scope reads the artifacts on disk, which by construction cannot see an area that
-produced no artifact at all — exactly the case `MISSING` exists to catch.
+It runs `if: always()`, so a failed or cancelled producer cannot skip it, and
+it is passed `--scope` (the affected package names) from the `scope` job and
+`--policy` (the scope job's resolved-package policy artifact). Scope is
+load-bearing: it is the only way `ci-rollup` learns a package was *scheduled*
+and produced *nothing*.
 
 ### Artifact contract
 
 Two artifact families, both walked by `ci-rollup rollup --artifacts`:
 
 ```
-junit-<area>-<tier>-<environment>-<index>/
+junit-<package>-<tier>-<environment>/
     manifest.jsonl            one JSON record per nextest invocation
     <tier>/<package>.xml      that invocation's verbatim JUnit document
 
-status-<area>-<job>/
-    status.json               {"area","job","environment","result"}
+status-<package>-<job>[-<environment>]/
+    status.json               {"package","job","environment","result"[,"detail"][,"companion"]}
 ```
 
 Every test job uploads the whole `target/nextest/ci-reports` **staging
 directory**, not `target/nextest/ci/test-results.xml` — that single path is
-overwritten by each nextest invocation, so a multi-package area published only
-its last package's report. **The manifest is the identity source.** The artifact
-directory name is parsed only when a staged XML has no covering manifest record,
-and such a record is flagged `degraded` with an unknown shard.
+overwritten by each nextest invocation. **The manifest is the identity
+source.** Artifact-name parsing was retired with the area model: a staged XML
+with no covering manifest record has no trustworthy identity and is dropped.
 
-`result` is GitHub's own `job.status`. The status step and its upload both carry
-`if: ${{ always() }}` so a **failed** job still reports itself; a job that
-reports nothing at all is `MISSING`, never a pass.
+`result` is GitHub's own `job.status`. The status step and its upload both
+carry `if: ${{ always() }}` so a **failed** job still reports itself; a job
+that reports nothing at all is `MISSING`, never a pass. A package that
+declares a companion suite also records the companion step's `companion`
+outcome on every run — not only on failure — because a *skipped* companion
+leaves no other evidence, and the rollup downgrades a green cell whose
+declared companion produced no success evidence (R12).
 
 ### `job` is read as a tier
 
 `ci-rollup` parses `status.json`'s `job` field with the same vocabulary as
 `tier`. That is why the test jobs publish `L1` / `L2` / `browser` rather than
-their GitHub job names:
-
-- a status naming a **test tier** explains a `MISSING` cell downstream of it (an
-  L2 leg deleted by a failed L1, say). It is matched on `area` alone, on purpose:
-  `lint` runs only on Linux, but `needs: lint` used to delete the test matrix for
-  *every* environment.
-- a status naming **anything else** (today `lint` and `check`) becomes a cell in
-  its own right, so a job that emits no JUnit can still be baselined and can
-  still block. This is what makes `tier = "lint"` a valid baseline key.
-
-Publishing `test` instead of `L1` would manufacture a phantom
-`<area>/<environment>/test` cell beside the real L1 one and count the same
+their GitHub job names. Publishing `test` would manufacture a phantom
+`<package>/<environment>/test` cell beside the real L1 one and count the same
 failure twice.
 
-### There is no per-area failure classifier
+## The cache key — per package
 
-`_area-ci.yml` used to carry a `classify` job that wrote one "first actionable
-failure class" line per area, because a reusable workflow's matrix legs cannot
-report an output back to the caller. The status artifacts carry the same fact per
-`{area, environment, tier}` — a resolution `classify` never had, since one
-area-level line could not tell a Windows-only failure from a Linux-only one.
+`Swatinem/rust-cache` is keyed per package and per job kind:
+`package-ci-<package>-check-<os>`, `package-ci-<package>-lint-ubuntu-latest`,
+and `package-ci-<package>-test-<environment>`. The L2, browser, and WSL
+archive jobs deliberately REUSE the `test` key for their environment: they
+compile the same crates as the L1 leg, so one warm cache serves every tier
+instead of three cold ones.
 
-It was removed rather than kept alongside, because the two disagree: a baselined
-known-red gate still fails its area workflow, so `classify` would print a failure
-line under a verdict that correctly reads CLEAR. `ci.yml`'s remaining advisory
-`summary` job now covers **only** the bootstrap stages and the specialized
-workflows, which are not areas and are invisible to the rollup until plan §3.5
-makes them emit the same result schema.
+The per-package unit made the old per-directory key wrong, and the choice is
+the single biggest influence on whether this work reduces runtime at all:
+compilation is ~85% of a test job. The implementation starts from a
+package-scoped key; Phase 6 measures it against a real run (including the
+cache-quota pressure of ~5 keys × 63 packages against GitHub's 10 GB repo
+quota) and records the selected strategy.
 
-### Not wired yet
+## Compile-check
 
-- **The expected-test manifest** (`--expected-manifest`). Without it, a test
-  present on the target environment that produced no result cannot be told apart
-  from one compiled out by `#[cfg]`, so `ci-rollup` records
-  `skip_evidence_degraded` rather than guessing. Wiring it needs a `just` recipe
-  that runs `cargo nextest list --message-format json` on each environment.
-- **The specialized workflows.** `messenger-desktop`, `rendezvous`, the Claudine
-  generator drift check, and coverage emit no `manifest.jsonl` and are not areas,
-  so their baseline entries are reported `baseline-out-of-scope` and ignored —
-  they neither block nor pass.
-- **`check` cells have no baseline entries.** `baseline-failures.txt` recorded
-  none, so the first full-scope run under this mechanism will surface any red
-  compile-check as a new blocker. That is the mechanism working; add owned,
-  dated entries or fix the warning.
+A package's compile-check stays `cargo check --all-targets -p <package>` (plus
+its declared feature flags), because there is no per-package canonical check
+recipe. `--all-targets` compiles benches and examples here and nowhere else.
+It deliberately does **not** deny warnings; `lint` does, through clippy, where
+`just lint` enforces the same bar locally.
 
-`native` has exactly one installer: the root `justfile`'s `_ensure-native-libs`.
-CI runs `just _ensure-native-libs <area>` before every build, test, and lint
-command so a `-sys` crate never fails to compile for a missing system library,
-and `just init` runs it with no argument to cover every area on a developer host.
-A new requirement is therefore declared once and installed by one implementation.
-Non-Debian Linux hosts need the apt name mapped to `dnf` / `pacman` / `apk` in
-that recipe's table.
+## Adding or changing a package's CI
 
-## Compile-check scope
-
-An area's `check_args` is narrowed at scope time to the packages the change can
-actually reach, so `cargo check --all-targets` covers the impacted subset rather
-than the area's full static list. Non-`-p` tokens are preserved verbatim —
-`sniff` and `messenger` carry `--features`, and dropping those would check a
-different configuration than the tests run under.
-
-If no configured package is impacted the configured value stands. An empty `-p`
-list is not a narrower check: `cargo check --all-targets` with no `-p` checks the
-entire workspace.
-
-There is no canary stage. It was removed after two failure modes, in order:
-gating the fan-out on it erased 20 areas' evidence for one unrelated failure,
-and then un-gating it left a `needs:` edge that still waited for *completion*, so
-a canary leg that could not get a runner stalled every area indefinitely — a
-worse outcome, because a stall leaves no failure to read. A sampled proxy earns
-its keep only when the real check is expensive; here it is `cargo check`.
-
-
-## Ownership completeness
-
-Every Cargo workspace member (per `cargo metadata`) must live under an area that
-has a record here. `validate_ownership` fails the scope calculation — naming the
-package — when one does not, so a package in a brand-new directory cannot land
-without someone deciding what its area is and whether it should gate.
-
-Areas that do not gate set `"ci": false` and give a `reason`, an `owner`, an
-`exclusion_class`, and (unless `capability`) an `expiry`. They still declare
-`native`, still confer ownership, and still appear to `just _ensure-native-libs`;
-they simply launch no area job.
-
-**None of the ten current exclusions is a capability exclusion.** An audit of all
-31 areas found no record that is permanently excluded on capability grounds, so
-every one is backlog and every one is time-bounded:
-
-- **`promotion-pending`** — real packages with real tests that run in **no** CI
-  job today: `tools` (63 tests), `biscuit-test-harness` (92),
-  `biscuit-browser-harness` (6 + 7 browser), `messenger` (564),
-  `biscuit-visualized` (71), `biscuit-clipboard` (201, across three packages —
-  `biscuit-clipboard-service` was covered by no record at all). The blocker is
-  the canonical `just` recipe set that `check-canonical` requires. Complete the
-  recipes, flip `ci` to `true`, and add the area to the root justfile's
-  `areas :=` list.
-
-  The old "exercised transitively by consumer areas" justification for the three
-  harness areas does not hold: a consumer's suite exercises the harness code paths
-  it happens to call, which is not the same as running the harness's own tests.
-- **`time-bounded`** — nothing to gate: `agent-sandbox` (0 tests), `reaper` (0,
-  despite carrying 10 of the 12 canonical recipes), `visualizer` (0), `tabby` (1).
-
-`homelab` remains the reference case for what a *legitimate* capability exclusion
-would look like — it targets physical IoT hardware — but it currently gates, so
-no record uses that class.
-
-Only gating areas appear in the root justfile's `areas :=` list;
-`validate_area_config` keeps the two in step.
-
-## Adding or changing an area
-
-1. Add/adjust the record here **and** keep the `area` order aligned with the root
-   `justfile` `areas :=` list.
-2. Shard-count, backend, native, and OS-policy changes require evidence
-   (measured durations, real backend/native requirements) — not guesses.
+1. Add/adjust the `[package.metadata.ci]` block in the package's own manifest.
+2. Tier/backend/native/feature changes require evidence (measured durations,
+   real backend/native requirements, the actual tier-test ownership) — not
+   guesses.
 3. `python3 scripts/ci/test_affected_scope.py` and
    `cargo nextest run -p test-toolkit --test ci_workflow_contracts` must pass.
+
+## CI's own tooling
+
+The merge-gate binary (`scripts/ci-rollup*.rs`), the scope calculator
+(`scripts/ci/`), and the policy store (`.github/ci/`) are not Cargo packages,
+so a change to them selects nothing. `affected_scope.py` maps those paths to a
+`ci_tooling` flag and `ci.yml` runs their own suites (the scope tests and the
+rollup's nextest suite) on a dedicated `ci-tooling` leg, classified in the
+advisory summary like the specialized workflows. The durable fix for the R11
+contract suite (`tools/test-toolkit`, `gates = false` promotion-pending,
+expiry 2026-10-31) is its promotion to a gating package.

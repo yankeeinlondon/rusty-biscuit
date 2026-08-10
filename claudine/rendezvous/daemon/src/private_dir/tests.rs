@@ -53,8 +53,7 @@ fn created_directories_are_owner_only() {
 
     ensure_private_dir(&target).expect("create private dir");
 
-    let sniff::os::StableUserId::UnixUid(me) =
-        sniff::os::current_user_id().expect("uid discovery")
+    let sniff::os::StableUserId::UnixUid(me) = sniff::os::current_user_id().expect("uid discovery")
     else {
         panic!("a Unix host must report a uid");
     };

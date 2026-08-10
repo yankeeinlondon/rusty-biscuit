@@ -7,8 +7,10 @@
 //!
 //! The identifier spellings here are shared vocabulary, not free choices.
 //! `scripts/ci/affected_scope.py::KNOWN_L2_BACKENDS` and the `backends` arrays
-//! in `.github/ci/areas.json` use the same strings, and CI passes them through
-//! to `BISCUIT_TEST_REQUIRED_BACKENDS` unmodified.
+//! in each package's `[package.metadata.ci.tests]` use the same strings, and
+//! CI's per-package L2 legs set `BISCUIT_TEST_REQUIRED_BACKENDS` to the
+//! package's declared backends intersected with the provisioned (CI-hostable)
+//! set — today tmux only.
 
 use std::collections::BTreeSet;
 use std::env;
@@ -49,7 +51,7 @@ impl Backend {
         Backend::AppleTerminal,
     ];
 
-    /// The stable machine identifier, shared with `areas.json` and
+    /// The stable machine identifier, shared with the package manifests and
     /// `affected_scope.py`.
     #[must_use]
     pub const fn as_str(self) -> &'static str {

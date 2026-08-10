@@ -24,17 +24,15 @@ pub mod sync;
 
 pub use batcher::{BatcherConfig, BatcherHandle, BatcherWorker};
 pub use discovery::{DiscoveredPeer, DiscoveryError, DiscoveryHandle};
-pub use peers::{PeerRecord, PeerRegistry, PeerRegistryWorkers};
 pub use local_transport::{shared_boot_count, spawn_local_server};
+pub use peers::{PeerRecord, PeerRegistry, PeerRegistryWorkers};
 pub use private_dir::{PrivateDirError, default_data_dir, ensure_private_dir};
 pub use projection::{Projection, ProjectionError, ProjectionRow};
+pub use quic::{ALPN_PROTOCOL, InboundConnection, QuicEndpoint, QuicError};
 pub use refresher::spawn_register_refresher;
 pub use register::{RegisterError, RegisterStore, owner_peer_id};
-pub use quic::{ALPN_PROTOCOL, InboundConnection, QuicEndpoint, QuicError};
 pub use server::{DaemonConfig, ServerError, ServerHandle};
 pub use service::RendezvousService;
 pub use session_log::{AppendOutcome, ExportedUpdate, SessionLogError, SessionLogManager};
 pub use storage::{PairingValue, Storage, StorageError};
-pub use sync::{
-    SYNC_PROTOCOL_VERSION, SyncChunkOutcome, SyncError, SyncOutcome, SyncService,
-};
+pub use sync::{SYNC_PROTOCOL_VERSION, SyncChunkOutcome, SyncError, SyncOutcome, SyncService};

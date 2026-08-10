@@ -3,7 +3,11 @@
 //! Verifies that `cursor_position` emits `CSI 6n` and correctly parses
 //! the CPR (`CSI row;col R`) response.
 //!
+//! The production query uses `/dev/tty` and is Unix-only.
+//!
 //! Run `cargo build -p biscuit-terminal --example discovery_probe` first.
+
+#![cfg(unix)]
 
 mod common;
 

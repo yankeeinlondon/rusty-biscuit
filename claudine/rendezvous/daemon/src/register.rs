@@ -538,7 +538,9 @@ impl RegisterStore {
             return Ok(None);
         };
         let value: LoroValue = doc.get_map(FIELDS_CONTAINER).get_deep_value();
-        Ok(Some(serde_json::to_value(&value).unwrap_or(JsonValue::Null)))
+        Ok(Some(
+            serde_json::to_value(&value).unwrap_or(JsonValue::Null),
+        ))
     }
 }
 

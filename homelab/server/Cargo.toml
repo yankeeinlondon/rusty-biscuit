@@ -40,3 +40,9 @@ serial_test = "3.2"
 [package.metadata.benchmarks]
 required = false
 reason = "HTTP server glue around homelab; no measurable hot paths."
+
+# CI policy: homelab-server owns the Vue + Vitest frontend companion suite
+# (homelab/server/frontend), which needs Node 22 and pnpm 10 on the runner.
+[package.metadata.ci.tests]
+runner-tools = ["node-22", "pnpm-10"]
+companion-suites = ["homelab-frontend"]

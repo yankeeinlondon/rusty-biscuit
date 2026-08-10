@@ -107,7 +107,9 @@ leaves the existing trap intact (it still fires, since `finish` ends in `exit`).
 
 `check-canonical` (root `justfile`) validated the canonical 12-recipe set for
 whatever `areas := "…"` listed — and that string was a verbatim copy of the
-`ci: true` records in `.github/ci/areas.json`. So the guard whose whole job is
+`ci: true` records in `.github/ci/areas.json` (the policy store at the time;
+CI policy now lives in each package's own `[package.metadata.ci]`). So the
+guard whose whole job is
 "catch a package area missing canonical recipes" was structurally incapable of
 seeing any *excluded* area, which is exactly where missing recipes accumulate:
 six areas sat at `ci: false` with "blocked on the canonical recipe set" as the

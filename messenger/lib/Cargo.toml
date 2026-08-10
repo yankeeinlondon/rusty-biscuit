@@ -109,3 +109,19 @@ required-features = ["desktop"]
 test = false
 doctest = false
 bench = false
+
+# CI exclusion: promotion is blocked on the canonical just recipe set. The
+# `desktop` feature selection and the Linux D-Bus headers are recorded so a
+# promotion changes exactly one field.
+[package.metadata.ci]
+gates = false
+exclusion-class = "promotion-pending"
+owner = "@yankeeinlondon"
+reason = "564 tests, covered only by the bespoke messenger-desktop specialized job (cargo test, not the canonical recipe, and outside the rollup). Promotion is blocked on the canonical just recipe set — messenger/ defines only test and lint. Its bespoke WSL1 job was deleted 2026-07-27; wsl2-ubuntu coverage arrives with promotion, via _wsl-ci.yml."
+expiry = "2026-10-31"
+
+[package.metadata.ci.tests]
+features = ["desktop"]
+
+[package.metadata.ci.native]
+ubuntu-latest = ["libdbus-1-dev"]

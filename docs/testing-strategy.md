@@ -193,19 +193,19 @@ exclusively.
 
 The tier taxonomy above decides *what* runs; this section decides *where* (which
 OS). `.github/workflows/ci.yml` calculates changed workspace packages and their
-reverse Cargo dependencies, maps them to the curated policy in
-`.github/ci/areas.json`, and fans the resulting matrix into the reusable
-`.github/workflows/_area-ci.yml`. Platform behavior is uniform without starting
-jobs for unrelated areas.
+reverse Cargo dependencies, reads each package's policy from its
+`[package.metadata.ci]`, and fans the resulting matrix into the reusable
+`.github/workflows/_package-ci.yml`. Platform behavior is uniform without starting
+jobs for unrelated packages.
 
 A bootstrap `preflight` job runs first (3 OSes for global CI/tooling changes, a
-scoped OS set for package-local changes) and gates the area fan-out via
-`needs: [scope, preflight]`. Within each area, `check` (macOS compile), `lint`
-(build + clippy), and `test` (L1 shards) are **independent** gates; only the
+scoped OS set for package-local changes) and gates the package fan-out via
+`needs: [scope, preflight]`. For each package, `check` (compile), `lint`
+(build + clippy), and `test` (L1) are **independent** gates; only the
 expensive `l2`/`browser` tiers stage behind `test`. Lint deliberately does not
-gate L1 — one clippy hint used to delete every L1 leg's evidence for the whole
-area, which is how Claudine's Windows tests never ran. Independent areas run in
-parallel (`fail-fast: false`).
+gate L1 — one clippy hint used to delete every L1 leg's evidence for a whole
+directory of packages, which is how Claudine's Windows tests never ran.
+Independent packages run in parallel (`fail-fast: false`).
 
 ### Toolchain
 
@@ -222,32 +222,41 @@ the latest stable toolchain (`RUSTUP_TOOLCHAIN=stable`) and runs
 
 | Concern | Linux (`ubuntu-latest`) | Windows (`windows-latest`) | macOS (`macos-latest`) |
 |---------|-------------------------|-----------------------------|--------------------------|
-| Compile (`cargo check --all-targets`) | via test job | via test job | dedicated `check` job |
-| L1 (`just test`) | full, shardable | full | compile-check only |
-| L2 (`test-l2`) | yes (tmux) | skips (harness absent) | opt-in |
-| Browser | yes | skips | opt-in |
+| Compile (`cargo check --all-targets`) | via test job | dedicated `check` job | via test job |
+| L1 (`just test`) | full | full | full |
+| L2 (`test-l2`) | yes (tmux) | POLICY GAP (no tmux) | yes (tmux) |
+| Browser | yes | POLICY GAP | POLICY GAP |
 | L3 (`level3_`) | opt-in (`RUN_LEVEL3=1`) | opt-in | opt-in |
 
-- **macOS is compile-checked on every PR, not full-tested** — GitHub macOS
-  minutes bill ~10× Linux. The `check` job still catches macOS-specific compile
-  breakage (`cfg(target_os = "macos")` paths) cheaply; full macOS L1 runs on the
-  nightly schedule or an on-demand label.
+`wsl2-ubuntu` is a fourth environment — a WSL2 guest hosted by a Windows
+runner — that runs the full L1 suite from a prebuilt nextest archive; its L2
+and browser tiers are governed POLICY GAPs.
+
+- **Every native environment runs full L1, and the dedicated `--all-targets`
+  compile-check runs on Windows** — `--all-targets` compiles benches and
+  examples there and nowhere else (the test legs build only
+  lib/bins/tests). The check job deliberately does not deny warnings; `lint`
+  does, through clippy.
 - **Windows runs full L1** — it is the platform most prone to silent API/type
   drift (the `HRESULT`, `PATH`-casing, and `VARIANT_BOOL` classes of bug that
   compile-only checks would miss at runtime). Windows-only tests stay gated
   (`#[ignore]` / `level3_`).
-- **L2/browser skip cleanly on non-Linux** via `require_level!`; no special
-  casing. `BISCUIT_TEST_LEVEL_REQUIRED=2` is set only on the Linux leg (where the
-  tmux harness is guaranteed) so a genuinely broken harness still hard-fails.
-- **Heavy areas shard** their L1 run via nextest `--partition count:i/N` across
-  parallel matrix jobs. Darkmatter keeps 4 shards (measured 6.7–8.2 min/shard);
-  Claudine runs a 4-shard L1 (`["1/4","2/4","3/4","4/4"]`), sized from a measured
-  cold run (~3964 tests, ~27 min unsharded → ~7 min/shard). L1 shards run with
-  `--no-fail-fast` so one slow or failing test cannot suppress the rest of a
-  shard's evidence, and per-shard JUnit is uploaded under collision-free names.
-  Combined with the build cache this keeps wall-clock under the 30-min ceiling.
+- **L2 runs on Linux and macOS (tmux)**; Windows and wsl2-ubuntu render a
+  governed POLICY GAP rather than a green 0-run cell. CI never sets
+  `BISCUIT_TEST_LEVEL_REQUIRED=2` (it would panic the GUI-backed gates a
+  headless runner cannot host). Instead the L2 leg provisions tmux, verifies
+  it with `tmux -V`, and sets `BISCUIT_TEST_REQUIRED_BACKENDS` to the
+  package's declared backends intersected with the provisioned set, so an
+  installed-but-never-exercised backend fails the `_test_l2` backend-proof
+  bracket.
+- **Sharding is removed** — no job passes `--partition`. Compiling the test
+  binaries is ~85% of a shard and every shard pays it in full (parallel jobs
+  cannot share a build cache), so four shards cost ~3.2× the compute to save
+  ~2.4 minutes of wall-clock. L1 runs with `--no-fail-fast` so one slow or
+  failing test cannot suppress the rest of the suite's evidence. See
+  `fixes/2026-08-06-cicd/spec.md` § Sharding for the measurement.
 - **CI selects the `ci` nextest profile** explicitly (`NEXTEST_PROFILE: ci` in
-  `_area-ci.yml`; nextest logs `nextest profile: ci`). In `.config/nextest.toml`
+  `_package-ci.yml`; nextest logs `nextest profile: ci`). In `.config/nextest.toml`
   `[profile.ci]` sets `retries = 0`, so a deterministic L1 failure runs exactly
   once; scoped `retries = 2` overrides remain only for the `test(/level2_/)` and
   `test(/browser_/)` tiers (documented resource contention). `[profile.default]`
@@ -257,23 +266,23 @@ the latest stable toolchain (`RUSTUP_TOOLCHAIN=stable`) and runs
   from CI on 2026-07-30 after measuring 0-6% hit rates (0.4-2.3% weighted by
   compile cost); it remains a per-host developer opt-in via
   `just install-kache`, pinned by `.github/kache-version`.
-- **Every configured L1 leg gates**: there is no `continue-on-error` on any area
-  gate. The retired `soft-os` input did not merely make a leg non-blocking — it
-  removed the leg from the run's verdict, so 14 permanently red Windows areas
-  read as a normal run. A known failure is recorded in the results baseline
-  instead, which keeps it counted and visible.
-- **Optional tiers**: Darkmatter enables the reusable Linux L2 and browser jobs;
-  Claudine enables Linux L2 and installs portable inert provider stubs for
-  discovery-dependent tests.
+- **Every configured L1 leg gates**: there is no `continue-on-error` on any
+  package gate. The retired `soft-os` input did not merely make a leg
+  non-blocking — it removed the leg from the run's verdict, so 14 permanently
+  red Windows directories read as a normal run. A known failure is recorded in
+  the results baseline instead, which keeps it counted and visible.
+- **Optional tiers**: declared in the owning package's manifest —
+  `biscuit-terminal` owns the library's browser tier, Darkmatter and Claudine
+  packages own L2 (tmux) tiers, and `claudine-cli` declares the
+  `ai-provider-stubs` runner tool for its discovery-dependent tests.
 - **Lint is the warning gate; `check` is not**: `RUSTFLAGS=-D warnings` is
   scoped to the `lint` job alone. It is deliberately **not** set for the test
   tiers, where it made a plain rustc warning fail the build so no test ran, nor
   for `check`, where it reported dead code as `error: could not compile`,
-  attributed a dependency's warning to whichever area built it, and could not be
+  attributed a dependency's warning to whichever package built it, and could not be
   reproduced by `just check`. The lint job's real authority is the recipe:
   `_lint` passes `-D warnings` to clippy directly, so the same bar applies
-  locally. Area-specific documentation, generated-artifact, and
-  typed-error guards wired into `just lint` remain blocking CI checks.
+  locally.
 - **Coverage uses the same dependency scope on PRs**: one `cargo llvm-cov`
   invocation selects every affected workspace package. A nightly/manual
   workflow makes one workspace-wide pass; coverage is not repeated after the
@@ -290,7 +299,7 @@ because it never builds the code in question.
 The live case is `sniff`'s `remote` (which implies `network`), gating the
 provider client and its Wiremock test, bench, and example targets:
 
-- Sniff's entry in `.github/ci/areas.json` adds `sniff/remote` to the
+- Sniff's `[package.metadata.ci.tests]` adds `remote` to the
   all-target compile check and runs the full L1 suite on macOS, Linux, and
   Windows. Its `just test` recipe executes the provider suites with `remote`
   enabled rather than merely compiling them.
@@ -319,7 +328,7 @@ so a scheduled failure is never read as an L1 regression.
 
 - Agents can always type `just sanity`, `just test`, `just test-l2` and get the
   same behavior regardless of which area they are in.
-- CI validates the curated `areas` list against `.github/ci/areas.json`, then
+- CI validates each package's `[package.metadata.ci]` against the schema, then
   runs only the dependency-derived subset.
 - Drift between packages is detectable: `just _check_canonical` either passes
   or names the missing recipes.
@@ -375,7 +384,7 @@ Rust and long wall-clock times.
 | Fuzz corpus stored in-repo (seed only) | Avoids Git LFS dependency. Only minimized crash inputs are committed back. |
 | tmux as default L2 backend | Most portable: headless, runs on any CI runner without GUI. |
 | `[package.metadata.benchmarks] required = false` convention | Grep-able opt-out for pure data crates. Enforced by reviewer discretion only. |
-| One dependency-aware `ci.yml` caller + reusable `_area-ci.yml` | Uniform platform behavior without starting jobs for unrelated areas. |
+| One dependency-aware `ci.yml` caller + reusable `_package-ci.yml` | Uniform platform behavior without starting jobs for unrelated packages. |
 | macOS compile-checked (not full-tested) on PRs | GitHub macOS runners bill ~10× Linux; the `check` job catches macOS compile drift cheaply while full L1 runs on Linux + Windows. |
 | Windows runs full L1 | Windows is the highest-risk platform for silent API/type drift; compile-only would miss runtime-shaped bugs. |
 | `Swatinem/rust-cache@v2` on every native leg | CI uses no rustc wrapper. `kache` was measured at 0-6% hit rate through the GitHub Actions cache backend and removed from CI on 2026-07-30; it stays a per-host developer opt-in with one version authority (`.github/kache-version`). |

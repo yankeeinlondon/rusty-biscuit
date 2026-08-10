@@ -189,8 +189,14 @@ fn concurrent_update_and_end_never_resurrect() {
     let (store, _tmp) = register_store();
     for round in 0..100 {
         let id = format!("A-{round}");
-        apply_session_event(&store, &id, Kind::Started, details(&[("agent", "claude")]), None)
-            .expect("start A");
+        apply_session_event(
+            &store,
+            &id,
+            Kind::Started,
+            details(&[("agent", "claude")]),
+            None,
+        )
+        .expect("start A");
 
         let barrier = Arc::new(Barrier::new(2));
         let s1 = store.clone();
@@ -337,7 +343,12 @@ fn reordered_same_producer_updates_are_causal() {
             &id,
             Kind::Updated,
             serde_json::Map::new(),
-            Some(core_status(SessionState::Active, ProducerId::Sink, Basis::Lifecycle, 20)),
+            Some(core_status(
+                SessionState::Active,
+                ProducerId::Sink,
+                Basis::Lifecycle,
+                20,
+            )),
         )
         .expect("active");
         // The late detached task re-delivers the stale waiting@10.
@@ -376,7 +387,12 @@ fn cross_producer_precedence_keeps_strongest() {
         "s",
         Kind::Started,
         details(&[("agent", "claude")]),
-        Some(core_status(SessionState::Active, ProducerId::Lifecycle, Basis::Lifecycle, 1)),
+        Some(core_status(
+            SessionState::Active,
+            ProducerId::Lifecycle,
+            Basis::Lifecycle,
+            1,
+        )),
     )
     .expect("start");
     apply_session_event(
@@ -431,7 +447,12 @@ fn two_producers_waiting_records_both_slots() {
         "s",
         Kind::Started,
         details(&[("agent", "claude")]),
-        Some(core_status(SessionState::Active, ProducerId::Lifecycle, Basis::Lifecycle, 1)),
+        Some(core_status(
+            SessionState::Active,
+            ProducerId::Lifecycle,
+            Basis::Lifecycle,
+            1,
+        )),
     )
     .expect("start");
     apply_session_event(
@@ -488,11 +509,19 @@ fn reserved_keys_in_details_are_ignored() {
         "s",
         Kind::Started,
         forged,
-        Some(core_status(SessionState::Active, ProducerId::Lifecycle, Basis::Lifecycle, 1)),
+        Some(core_status(
+            SessionState::Active,
+            ProducerId::Lifecycle,
+            Basis::Lifecycle,
+            1,
+        )),
     )
     .expect("start");
 
-    assert_eq!(entry_field(&store, "s", "agent"), Some(serde_json::json!("claude")));
+    assert_eq!(
+        entry_field(&store, "s", "agent"),
+        Some(serde_json::json!("claude"))
+    );
     assert_ne!(
         entry_field(&store, "s", "started_at_unix_ms"),
         Some(serde_json::json!(999)),
@@ -517,10 +546,18 @@ fn started_projects_active_from_lifecycle_slot() {
         "s",
         Kind::Started,
         details(&[("agent", "claude")]),
-        Some(core_status(SessionState::Active, ProducerId::Lifecycle, Basis::Lifecycle, 1)),
+        Some(core_status(
+            SessionState::Active,
+            ProducerId::Lifecycle,
+            Basis::Lifecycle,
+            1,
+        )),
     )
     .expect("start");
-    assert_eq!(entry_field(&store, "s", "status"), Some(serde_json::json!("active")));
+    assert_eq!(
+        entry_field(&store, "s", "status"),
+        Some(serde_json::json!("active"))
+    );
     assert_eq!(
         entry_field(&store, "s", "status_producer"),
         Some(serde_json::json!("lifecycle")),

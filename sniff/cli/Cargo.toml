@@ -58,3 +58,10 @@ predicates = "3"
 serial_test = "3"
 tempfile = "3"
 test-toolkit = { path = "../../tools/test-toolkit" }
+
+# CI policy: the L1 suite runs with the `test-fixtures` feature, and sniff-cli
+# owns the area's tmux-driven L2 tests (CI/CD status-cell styling).
+[package.metadata.ci.tests]
+tiers = ["L1", "L2"]
+l2-backends = ["tmux"]
+features = ["test-fixtures"]

@@ -2,7 +2,7 @@ name: rendezvous-tests
 
 # Native runtime gate for Rendezvous's local IPC control plane.
 #
-# This area does not use the shared `_area-ci.yml` building block, for two
+# This workflow does not use the shared `_package-ci.yml` building block, for two
 # reasons specific to what is under test here:
 #
 #   1. That block compile-checks macOS and runs the suite only on Linux and

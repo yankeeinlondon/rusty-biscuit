@@ -23,8 +23,8 @@ use rendezvous_core::sync::{SyncWireError, encode_frame};
 use rendezvous_core::{
     ChunkId, ChunkIdParseError, DocumentId, DocumentIdParseError, EnvelopeError, EnvelopeInbox,
     EnvelopeSealer, NodeIdentity, PayloadKind, SignedEnvelopeWire, SyncAdvertiseEnd,
-    SyncChunkAdvertise, SyncDelta, SyncEnd, SyncFrame, SyncHello,
-    identity::PUBLIC_KEY_LENGTH, sync_frame,
+    SyncChunkAdvertise, SyncDelta, SyncEnd, SyncFrame, SyncHello, identity::PUBLIC_KEY_LENGTH,
+    sync_frame,
 };
 
 use crate::register::{RegisterError, RegisterStore};
@@ -232,7 +232,8 @@ impl SyncService {
     where
         F: FnOnce(String) + Send + 'static,
     {
-        self.run_session(send, recv, None, Some(Box::new(on_peer_identified))).await
+        self.run_session(send, recv, None, Some(Box::new(on_peer_identified)))
+            .await
     }
 
     fn assert_paired(&self, peer_node_id: &str) -> Result<(), SyncError> {
@@ -394,10 +395,13 @@ impl SyncService {
         }
         let msg_id_hex = envelope.message_id_hex();
         let sender_hex = envelope.sender_node_id();
-        if self.storage.has_accepted_envelope(&sender_hex, &msg_id_hex)? {
-            return Err(SyncError::Envelope(
-                EnvelopeError::DuplicateMessageId(msg_id_hex),
-            ));
+        if self
+            .storage
+            .has_accepted_envelope(&sender_hex, &msg_id_hex)?
+        {
+            return Err(SyncError::Envelope(EnvelopeError::DuplicateMessageId(
+                msg_id_hex,
+            )));
         }
         Ok(inbox.accept(envelope)?.to_vec())
     }
@@ -552,7 +556,10 @@ impl SyncService {
             let mut chunk_outcomes: HashMap<String, SyncChunkOutcome> = HashMap::new();
             let mut advertisements: Vec<(String, Vec<u8>)> = Vec::new();
             for chunk in &local_chunks {
-                let vv = self.session_log.chunk_state_vector(chunk)?.unwrap_or_default();
+                let vv = self
+                    .session_log
+                    .chunk_state_vector(chunk)?
+                    .unwrap_or_default();
                 advertisements.push((chunk.as_path(), vv));
             }
             for doc in &local_registers {
@@ -568,10 +575,12 @@ impl SyncService {
                 };
                 let sent = write_frame(&mut send, &frame).await?;
                 outcome.sent_bytes += sent;
-                chunk_outcomes.entry(doc_path.clone()).or_insert(SyncChunkOutcome {
-                    chunk_id: doc_path,
-                    ..Default::default()
-                });
+                chunk_outcomes
+                    .entry(doc_path.clone())
+                    .or_insert(SyncChunkOutcome {
+                        chunk_id: doc_path,
+                        ..Default::default()
+                    });
             }
             let sent = write_frame(
                 &mut send,
@@ -626,17 +635,30 @@ impl SyncService {
             // Only push deltas for documents WE own. The remote will
             // push their own namespace deltas to us in the reading
             // phase.
-            for chunk in local_chunks.iter().filter(|c| c.owner_node_id == local_node_id) {
+            for chunk in local_chunks
+                .iter()
+                .filter(|c| c.owner_node_id == local_node_id)
+            {
                 let path = chunk.as_path();
                 let remote_vv = remote_state.get(&path).and_then(|v| {
-                    if v.is_empty() { None } else { Some(v.as_slice()) }
+                    if v.is_empty() {
+                        None
+                    } else {
+                        Some(v.as_slice())
+                    }
                 });
                 let Some(exported) = self.session_log.export_updates_since(chunk, remote_vv)?
                 else {
                     continue;
                 };
-                self.send_signed_delta(&mut send, &mut outcome, &mut chunk_outcomes, path, exported)
-                    .await?;
+                self.send_signed_delta(
+                    &mut send,
+                    &mut outcome,
+                    &mut chunk_outcomes,
+                    path,
+                    exported,
+                )
+                .await?;
             }
             for doc in local_registers
                 .iter()
@@ -644,13 +666,23 @@ impl SyncService {
             {
                 let path = doc.as_path();
                 let remote_vv = remote_state.get(&path).and_then(|v| {
-                    if v.is_empty() { None } else { Some(v.as_slice()) }
+                    if v.is_empty() {
+                        None
+                    } else {
+                        Some(v.as_slice())
+                    }
                 });
                 let Some(exported) = self.registers.export_updates_since(doc, remote_vv)? else {
                     continue;
                 };
-                self.send_signed_delta(&mut send, &mut outcome, &mut chunk_outcomes, path, exported)
-                    .await?;
+                self.send_signed_delta(
+                    &mut send,
+                    &mut outcome,
+                    &mut chunk_outcomes,
+                    path,
+                    exported,
+                )
+                .await?;
             }
             let sent = write_frame(
                 &mut send,
@@ -718,27 +750,27 @@ impl SyncService {
                                     ),
                                     DocumentId::Capability { .. }
                                     | DocumentId::Repos { .. }
-                                    | DocumentId::SessionsActive { .. } => {
-                                        service.receive_register(
+                                    | DocumentId::SessionsActive { .. } => service
+                                        .receive_register(
                                             &peer_node_id_hex,
                                             &doc,
                                             &delta_doc_id,
                                             &envelope,
                                             expected_kind,
                                             &mut inbox,
-                                        )
-                                    }
+                                        ),
                                 }
                             }
                         })
                         .await
                         .map_err(|e| SyncError::protocol(e.to_string()))??;
-                        let entry = chunk_outcomes.entry(doc_path.clone()).or_insert(
-                            SyncChunkOutcome {
-                                chunk_id: doc_path,
-                                ..Default::default()
-                            },
-                        );
+                        let entry =
+                            chunk_outcomes
+                                .entry(doc_path.clone())
+                                .or_insert(SyncChunkOutcome {
+                                    chunk_id: doc_path,
+                                    ..Default::default()
+                                });
                         entry.received_bytes += received;
                         entry.advanced = entry.advanced || advanced;
                     }

@@ -33,3 +33,13 @@ axum-test = "16"
 tempfile = "3"
 tower = "0.5"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
+
+# CI exclusion: ~79 service tests that currently run in no CI job. Promotion
+# is blocked on the canonical just recipe set and on confirming
+# headless-runner clipboard behavior.
+[package.metadata.ci]
+gates = false
+exclusion-class = "promotion-pending"
+owner = "@yankeeinlondon"
+reason = "~79 clipboard service (daemon) tests that currently run in NO CI job. Promotion is blocked on the canonical just recipe set and on confirming headless-runner clipboard behavior (no X11/Wayland display) — the service's HTTP surface is testable headless, but its clipboard writes go through the same display-dependent backend."
+expiry = "2026-10-31"

@@ -22,3 +22,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# The Tauri shell and its packaging tests need these native headers on Linux.
+[package.metadata.ci.native]
+ubuntu-latest = ["libgtk-3-dev", "libwebkit2gtk-4.1-dev", "libdbus-1-dev"]

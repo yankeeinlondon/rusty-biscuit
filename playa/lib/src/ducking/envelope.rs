@@ -150,7 +150,7 @@ mod tests {
         let steps = compute_fade_steps(1.0, 0.2, &config);
         let total_delay: u32 = steps.iter().map(|s| s.delay_ms).sum();
         // Should be close to ramp_ms (may have rounding differences)
-        assert!(total_delay >= 900 && total_delay <= 1100);
+        assert!((900..=1100).contains(&total_delay));
     }
 
     #[test]

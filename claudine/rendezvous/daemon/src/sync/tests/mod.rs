@@ -17,9 +17,9 @@ use crate::batcher::{BatcherConfig, BatcherWorker, spawn};
 use crate::projection::Projection;
 use crate::session_log::Clock;
 use loro::{ExportMode, LoroDoc};
-use rendezvous_core::{ChunkConfig, ChunkId, EnvelopeSealer, Entry, NodeIdentity};
-use std::sync::atomic::{AtomicI64, Ordering};
+use rendezvous_core::{ChunkConfig, ChunkId, Entry, EnvelopeSealer, NodeIdentity};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use tempfile::TempDir;
 
 const ENTRIES_CONTAINER: &str = "entries";
@@ -61,10 +61,13 @@ fn build_harness() -> Harness {
     let tmp = TempDir::new().expect("tempdir");
     let storage = Storage::open(tmp.path().join("session.redb")).expect("open storage");
     let projection = Projection::in_memory().expect("projection");
-    let worker = spawn(projection.clone(), BatcherConfig {
-        flush_interval: std::time::Duration::from_millis(20),
-        flush_size: 16,
-    });
+    let worker = spawn(
+        projection.clone(),
+        BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        },
+    );
 
     let identity = Arc::new(NodeIdentity::from_seed([10u8; 32]));
 
@@ -84,8 +87,7 @@ fn build_harness() -> Harness {
         .upsert_pairing(&peer_hex, 1_000, "test peer")
         .expect("pair");
 
-    let registers = RegisterStore::new(storage.clone(), Arc::clone(&identity))
-        .expect("registers");
+    let registers = RegisterStore::new(storage.clone(), Arc::clone(&identity)).expect("registers");
     let service = SyncService::new(manager.clone(), registers, storage.clone(), identity);
     let peer_sealer = EnvelopeSealer::new(peer_identity.clone());
 
@@ -118,7 +120,8 @@ fn make_valid_loro_snapshot(
             session_id.to_string(),
             chunk_index - 1,
         );
-        map.insert("previous_chunk_id", prev_chunk.as_path().as_str()).unwrap();
+        map.insert("previous_chunk_id", prev_chunk.as_path().as_str())
+            .unwrap();
     }
     let list = doc.get_list(ENTRIES_CONTAINER);
     let entry = Entry {
@@ -129,7 +132,8 @@ fn make_valid_loro_snapshot(
         message: message.into(),
         metadata: None,
     };
-    list.push(serde_json::to_string(&entry).unwrap().as_str()).unwrap();
+    list.push(serde_json::to_string(&entry).unwrap().as_str())
+        .unwrap();
     doc.commit();
     doc.export(ExportMode::Snapshot).unwrap()
 }
@@ -139,5 +143,8 @@ fn baseline_snapshot_count(harness: &Harness) -> u64 {
 }
 
 fn baseline_envelope_count(harness: &Harness) -> u64 {
-    harness.storage.accepted_envelope_count().expect("envelope count")
+    harness
+        .storage
+        .accepted_envelope_count()
+        .expect("envelope count")
 }

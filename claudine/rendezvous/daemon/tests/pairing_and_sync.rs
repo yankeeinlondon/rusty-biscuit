@@ -9,12 +9,12 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::{Duration, Instant};
 
 use rendezvous_client::connect;
+use rendezvous_core::local_endpoint::{LocalEndpoint, test_support::private_endpoint};
 use rendezvous_core::{
     AppendEntryRequest, ApprovePeerRequest, ConnectToPeerRequest, CreateInvitationRequest,
     ListChunkEntriesRequest, ListPairingsRequest, ListPeersRequest, ListSessionChunksRequest,
     PeerConnectionState, RendezvousClient, RevokePeerRequest, SyncWithPeerRequest,
 };
-use rendezvous_core::local_endpoint::{LocalEndpoint, test_support::private_endpoint};
 use rendezvous_daemon::local_transport::spawn_local_server;
 use rendezvous_daemon::server::{DaemonConfig, NetworkConfig, ServerHandle};
 use tempfile::TempDir;
@@ -34,10 +34,7 @@ fn daemon_config(tmp: &TempDir, name: &str) -> DaemonConfig {
         .with_networking(networking_config())
 }
 
-async fn boot_daemon(
-    tmp: &TempDir,
-    name: &str,
-) -> (ServerHandle, LocalEndpoint) {
+async fn boot_daemon(tmp: &TempDir, name: &str) -> (ServerHandle, LocalEndpoint) {
     let socket = private_endpoint(tmp.path(), name);
     let handle =
         spawn_local_server(socket.clone(), daemon_config(tmp, name)).expect("spawn daemon");
@@ -208,8 +205,7 @@ async fn pairings_can_be_listed_and_revoked() {
     let (alice, alice_sock) = boot_daemon(&tmp, "alice").await;
     let mut client = connect(&alice_sock).await.expect("connect");
 
-    let node_id =
-        "1111111111111111111111111111111111111111111111111111111111111111".to_string();
+    let node_id = "1111111111111111111111111111111111111111111111111111111111111111".to_string();
     client
         .approve_peer(ApprovePeerRequest {
             node_id: node_id.clone(),
@@ -256,13 +252,14 @@ async fn wait_for_messages(
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let messages = collect_messages_async(client, owner, session).await;
-        if expected.iter().all(|want| messages.iter().any(|m| m == *want)) {
+        if expected
+            .iter()
+            .all(|want| messages.iter().any(|m| m == *want))
+        {
             return;
         }
         if Instant::now() >= deadline {
-            panic!(
-                "timed out waiting for messages {expected:?}; saw {messages:?}",
-            );
+            panic!("timed out waiting for messages {expected:?}; saw {messages:?}",);
         }
         sleep(Duration::from_millis(100)).await;
     }

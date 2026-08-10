@@ -1,9 +1,8 @@
 # CI baseline — known-red legs and the approved skip budget.
 #
-# Replaces `baseline-failures.txt`, which listed 31 GitHub *display names* and
-# had zero consumers. Entries here are keyed by stable identity
-# (`area`, `environment`, `tier`, `shard`) and are enforced by
-# `ci-rollup verdict`, which is the single required branch-protection check.
+# Keyed by stable identity (`package`, `environment`, `tier`), never by a
+# GitHub display name or a shard. Enforced by `ci-rollup verdict`, which is the
+# single required branch-protection check.
 #
 # Why TOML: this file is hand-edited policy. An owner adds an entry, explains
 # why, and dates its expiry — all of which want comments and readable
@@ -23,193 +22,226 @@
 # Every entry needs `owner`, `reason`, and `source_run`. `expiry` is optional
 # but strongly encouraged.
 #
-# POLICY GAPS ARE NOT BASELINED HERE. A tier an area owns tests for that an
-# environment cannot host is declared in `areas.json` under `policy_gaps`, and
-# `ci-rollup verdict` applies the same shape of rule to it: an owned, unexpired
-# gap is accepted as a `note` and does not block, while an undeclared, unowned,
-# undated, expired, or now-executing one blocks. Do not add a `[[failure]]`
+# POLICY GAPS ARE NOT BASELINED HERE. A tier a package owns tests for that an
+# environment cannot host is governed once in `.github/ci/environments.json`,
+# and `ci-rollup verdict` applies the same shape of rule to it: a governed,
+# unexpired gap is accepted as a `note` and does not block, while an
+# ungoverned, unowned, undated, or expired one blocks. Do not add a `[[failure]]`
 # entry to paper over a POLICY GAP cell — it would not work anyway, because a
 # baselined entry is only accepted against a `FAIL`.
 #
 # ---------------------------------------------------------------------------
-# MIGRATION STATUS — READ BEFORE TRUSTING THIS FILE
+# RE-KEY STATUS — READ BEFORE TRUSTING THIS FILE
 # ---------------------------------------------------------------------------
-# Every `failure` entry below was carried over mechanically from
-# `baseline-failures.txt` and is **unverified**. That file was measured to be
-# stale in both directions (see `fixes/2026-07-27-refactor/measurement-2026-07-27.md`):
+# schema_version 2 keyed every identity on the package. This file was re-keyed
+# from the area-keyed v1 baseline by attributing each entry to the package the
+# recorded *example failing test* names (every JUnit-backed failing test carries
+# a `<package>::<module>::test` identity), with the shard dimension collapsed.
 #
-#   - `biscuit-speaks / lint` and `biscuit-terminal / lint` both PASS in run
-#     30323254931 despite being listed. They are carried across anyway rather
-#     than silently dropped; the verdict will report `baseline-now-passing` and
-#     block, which is the intended way to retire them.
-#   - the old file listed 7 lint blockers; only 5 areas were actually blocked.
-#   - it recorded nothing about `sniff`'s per-shard behaviour, and `darkmatter`
-#     is not uniformly red across its 4 shards.
+# Two entries are SYNTHETIC identities, not Cargo packages (`claudine-gen-drift`
+# and `coverage`): they stay here, never in any package scope, reported
+# `baseline-out-of-scope` until their specialized producers join the result
+# contract. They are carried forward without being renamed or dropped.
 #
-# Counts in the old file were per *job*, never per *test*. This file cannot be
-# trusted until it is re-measured against a full-scope run whose rollup was
-# produced by `ci-rollup rollup`.
+# Every entry below is a CANDIDATE pending the Phase 4 bridging run — the first
+# full-scope run that produces package-keyed results. `ci-rollup verdict` will
+# report `baseline-no-result` for a candidate whose package did not actually
+# fail on that environment, and `baseline-now-passing` for one whose failure no
+# longer reproduces. Both block, which is the intended way to retire a wrong
+# guess. Correct each against the bridging run's rollup before the cutover
+# merge; an unmatched scheduled entry blocks.
+#
+# Sources:
+#   - run 30791562395 (2026-08-03): entries with example failing tests, so the
+#     owning package is read directly off the test identity.
+#   - run 30323254931: the older area-keyed migration, unverified — candidates
+#     attributed by the owning area's known package shape, and marked so.
 #
 # `tier` values: `L1`, `L2`, `browser` (JUnit-producing test tiers) and `lint`
 # (a producer-status job that emits no JUnit; its cell comes from the
-# `status-<area>-lint` artifact).
+# `status-<package>-lint` artifact).
 
-schema_version = 1
+schema_version = 2
 
 # ---------------------------------------------------------------------------
 # Windows L1 failures
 # ---------------------------------------------------------------------------
 
+# Candidate from the area-keyed baseline (run 30323254931, unverified). The
+# biscuit-tui area ran biscuit-tui + biscuit-tui-cli; the CLI carries the
+# integration tests, so it is the candidate. Confirm or split on the bridging
+# run.
 [[failure]]
-area = "biscuit-tui"
+package = "biscuit-tui-cli"
 environment = "windows-latest"
 tier = "L1"
-shard = "1/1"
 owner = "@yankeeinlondon"
-reason = "migrated from baseline-failures.txt, unverified"
+reason = "migrated from the area-keyed baseline (run 30323254931), unverified; attributed to biscuit-tui-cli as the integration-test package. Candidate pending the Phase 4 bridging run"
 source_run = "30323254931"
 expiry = "2026-10-31"
 
 [[failure]]
-area = "sniff"
+package = "darkmatter-cli"
 environment = "windows-latest"
 tier = "L1"
-shard = "1/1"
 owner = "@yankeeinlondon"
-reason = "migrated from baseline-failures.txt, unverified"
+reason = "migrated from the area-keyed baseline (run 30323254931), unverified; four Windows shards collapsed into one darkmatter-cli candidate. Confirm or split on the Phase 4 bridging run"
 source_run = "30323254931"
 expiry = "2026-10-31"
 
+# Candidate (run 30323254931, unverified). sniff's Windows L1 failure, with no
+# recorded example test; attributed to sniff-cli (the snapshots suite that
+# fails on WSL). Confirm on the bridging run.
 [[failure]]
-area = "unchained-ai"
+package = "sniff-cli"
 environment = "windows-latest"
 tier = "L1"
-shard = "1/1"
 owner = "@yankeeinlondon"
-reason = "migrated from baseline-failures.txt, unverified"
+reason = "migrated from the area-keyed baseline (run 30323254931), unverified; attributed to sniff-cli (the snapshots suite). Candidate pending the Phase 4 bridging run"
 source_run = "30323254931"
 expiry = "2026-10-31"
 
-# `darkmatter` shards independently; the old file listed all four Windows
-# shards, but the measurement shows a sharded area is not uniformly red.
-# Re-measure before assuming any of these four is still needed.
-
+# Candidate (run 30323254931, unverified). The unchained-ai area's Windows L1
+# failure; the WSL evidence names model_id, so it is the candidate.
 [[failure]]
-area = "darkmatter"
-environment = "windows-latest"
+package = "claudine-cli"
+environment = "wsl2-ubuntu"
 tier = "L1"
-shard = "1/4"
 owner = "@yankeeinlondon"
-reason = "migrated from baseline-failures.txt, unverified"
-source_run = "30323254931"
-expiry = "2026-10-31"
+reason = "red on main at the time of sync; ~33 failing tests across the collapsed shards, e.g. claudine-cli::bin/claudine::commands::config_tui::tabs::services::tests::services_render_matches_snapshot"
+source_run = "30791562395"
+expiry = "2026-11-30"
 
+# darkmatter's WSL2 L1 failures split across two packages: the CLI's
+# harness-integrity / shim tests (shards 1/4, 3/4, 4/4) and the library's
+# cutover-reference rendering (shard 2/4, whose example names darkmatter::).
 [[failure]]
-area = "darkmatter"
-environment = "windows-latest"
+package = "darkmatter"
+environment = "wsl2-ubuntu"
 tier = "L1"
-shard = "2/4"
 owner = "@yankeeinlondon"
-reason = "migrated from baseline-failures.txt, unverified"
-source_run = "30323254931"
-expiry = "2026-10-31"
+reason = "red on main at the time of sync; shard 2/4 collapsed — 43 failing tests, e.g. darkmatter::cutover_reference::reference_centered_table"
+source_run = "30791562395"
+expiry = "2026-11-30"
 
 [[failure]]
-area = "darkmatter"
-environment = "windows-latest"
+package = "sniff-cli"
+environment = "wsl2-ubuntu"
 tier = "L1"
-shard = "3/4"
 owner = "@yankeeinlondon"
-reason = "migrated from baseline-failures.txt, unverified"
-source_run = "30323254931"
-expiry = "2026-10-31"
+reason = "red on main at the time of sync; 14 failing tests, e.g. sniff-cli::snapshots::cargo_monorepo_structure_json_snapshot"
+source_run = "30791562395"
+expiry = "2026-11-30"
 
 [[failure]]
-area = "darkmatter"
-environment = "windows-latest"
+package = "model_id"
+environment = "wsl2-ubuntu"
 tier = "L1"
-shard = "4/4"
 owner = "@yankeeinlondon"
-reason = "migrated from baseline-failures.txt, unverified"
-source_run = "30323254931"
-expiry = "2026-10-31"
-
-# ---------------------------------------------------------------------------
-# Linux L1 failures
-# ---------------------------------------------------------------------------
+reason = "red on main at the time of sync; 1 failing test, e.g. model_id::ui::ui"
+source_run = "30791562395"
+expiry = "2026-11-30"
 
 [[failure]]
-area = "sniff"
-environment = "ubuntu-latest"
-tier = "L1"
-shard = "1/1"
-owner = "@yankeeinlondon"
-reason = "migrated from baseline-failures.txt, unverified"
-source_run = "30323254931"
-expiry = "2026-10-31"
-
-[[failure]]
-area = "sniff"
+package = "biscuit-terminal-cli"
 environment = "macos-latest"
+tier = "L2"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 1 failing test, e.g. biscuit-terminal-cli::level2_apple_terminal_prose::level2_apple_terminal_double_underline_plain_text_visible"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+package = "biscuit-terminal-cli"
+environment = "ubuntu-latest"
+tier = "L2"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 1 failing test, e.g. biscuit-terminal-cli::level2_diagrams::level2_diagram_fallback_when_no_image_protocol"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+package = "claudine-cli"
+environment = "macos-latest"
+tier = "L2"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 3 failing tests, e.g. claudine-cli::level2_context_capture::level2_context_default_at_140_fills_cap_in_tmux"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+package = "claudine-cli"
+environment = "ubuntu-latest"
+tier = "L2"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 4 failing tests, e.g. claudine-cli::level2_context_capture::level2_context_default_at_140_fills_cap_in_tmux"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+package = "darkmatter-cli"
+environment = "macos-latest"
+tier = "L2"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 1 failing test, e.g. darkmatter-cli::level2_code_block_styling::level2_code_block_clears_inherited_dim_before_theme_colors"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+[[failure]]
+package = "darkmatter-cli"
+environment = "ubuntu-latest"
+tier = "L2"
+owner = "@yankeeinlondon"
+reason = "red on main at the time of sync; 1 failing test, e.g. darkmatter-cli::level2_schema_about::level2_schema_about_light_terminal_uses_dark_code_theme"
+source_run = "30791562395"
+expiry = "2026-11-30"
+
+# ---------------------------------------------------------------------------
+# L1 failures recorded against the claudine CLI on ubuntu
+# ---------------------------------------------------------------------------
+
+[[failure]]
+package = "claudine-cli"
+environment = "ubuntu-latest"
 tier = "L1"
-shard = "1/1"
 owner = "@yankeeinlondon"
-reason = "migrated from baseline-failures.txt, unverified. `sniff` is the only area with a macOS `full_os` override, so this is the only measured macOS evidence in the repo"
-source_run = "30323254931"
-expiry = "2026-10-31"
+reason = "red on main at the time of sync; 2 failing tests, e.g. claudine-cli::prompt_reporting::compose_frontmatter_verbose_shows_full_system_prompt"
+source_run = "30791562395"
+expiry = "2026-11-30"
 
 # ---------------------------------------------------------------------------
-# Lint failures
+# Specialized workflows — SYNTHETIC identities, NOT Cargo packages
 #
-# `lint` emits no JUnit. Its cell comes from the `status-<area>-lint` artifact
-# uploaded by the lint job, which is why it can be baselined at all.
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# Specialized workflows — NOT YET WIRED
-#
-# The old file carried two entries that are not areas at all:
-#
-#     Claudine generator and signals drift
-#     Coverage for affected packages
-#
-# Neither appears in `areas.json`, so neither feeds the rollup and neither can
-# be in an affected scope. They are recorded here so the migration is lossless
-# and so they are not forgotten, but until plan §3.5 makes those workflows emit
-# the same result schema, `ci-rollup verdict` reports them as
-# `baseline-out-of-scope` and IGNORES them — they neither block nor pass.
-#
-# Two further specialized workflows were measured red in run 30323254931 and
-# are equally outside the verdict:
-#
-#     messenger-desktop / messenger / desktop / WSL2 ubuntu   failure
-#     rendezvous / rendezvous / native (windows-latest)       failure
+# `claudine-gen-drift` and `coverage` are not packages. They are recorded here
+# so the migration from the area-keyed baseline is lossless, but they are never
+# in any package scope, so `ci-rollup verdict` reports them
+# `baseline-out-of-scope` and IGNORES them — they neither block nor pass. They
+# move into the package-keyed result contract only when their specialized
+# producers emit the same schema (plan §3.5, out of scope here).
 # ---------------------------------------------------------------------------
 
 [[failure]]
-area = "claudine-gen-drift"
+package = "claudine-gen-drift"
 environment = "ubuntu-latest"
 tier = "lint"
-shard = "1/1"
 owner = "@yankeeinlondon"
-reason = "migrated from baseline-failures.txt (`Claudine generator and signals drift`), unverified. Not an areas.json area — ignored by the verdict until plan §3.5 wires the specialized workflow into the same result schema"
+reason = "synthetic identity (the Claudine generator drift check), not a Cargo package; carried forward from the area-keyed baseline, ignored by the verdict until its producer emits package-keyed results"
 source_run = "30323254931"
 expiry = "2026-10-31"
 
 [[failure]]
-area = "coverage"
+package = "coverage"
 environment = "ubuntu-latest"
 tier = "lint"
-shard = "1/1"
 owner = "@yankeeinlondon"
-reason = "migrated from baseline-failures.txt (`Coverage for affected packages`), unverified. Not an areas.json area — ignored by the verdict until plan §3.5 wires it in"
+reason = "synthetic identity (coverage for affected packages), not a Cargo package; carried forward from the area-keyed baseline, ignored by the verdict until its producer emits package-keyed results"
 source_run = "30323254931"
 expiry = "2026-10-31"
 
 # ---------------------------------------------------------------------------
 # Approved skip budget
 #
-# Keyed by area, environment, tier, and backend. `tests` carries EXACT test
+# Keyed by package, environment, tier, and backend. `tests` carries EXACT test
 # identities (`<testsuite>::<testcase>`), not a count: comparing counts cannot
 # see a one-for-one swap where an approved skip is resolved and a different
 # test starts skipping in the same run.
@@ -222,16 +254,16 @@ expiry = "2026-10-31"
 # (2) requires `--expected-manifest`, generated ON the target environment. No
 # producer for it is wired yet (see `fixes/2026-07-27-refactor/ci-verdict-job.md`),
 # so today only (1) is observed and the verdict records
-# `skip-evidence-degraded` for every cell with a budget entry.
+# `skip_evidence_degraded` for every cell with a budget entry.
 #
-# EMPTY ON PURPOSE. `baseline-failures.txt` recorded no skips, and inventing
+# EMPTY ON PURPOSE. The area-keyed baseline recorded no skips, and inventing
 # entries from an un-measured guess would defeat the mechanism. Populate it
 # from the first full-scope run whose rollup was produced by `ci-rollup`.
 #
 # Shape:
 #
 #   [[skip]]
-#   area = "biscuit-terminal"
+#   package = "biscuit-terminal-cli"
 #   environment = "ubuntu-latest"
 #   tier = "L2"
 #   backend = "wezterm"
@@ -240,226 +272,6 @@ expiry = "2026-10-31"
 #   ]
 #   owner = "@yankeeinlondon"
 #   reason = "WezTerm needs WEZTERM_UNIX_SOCKET, i.e. a live GUI session; a headless runner cannot host it"
-#   source_run = "30323254931"
+#   source_run = "30791562395"
 #   expiry = "2026-10-31"
 # ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# Synced from main's own run 30791562395 (2026-08-03).
-#
-# `ci-verdict` is the sole required check and blocks on any FAIL not recorded
-# here, so every one of these was blocking every pull request in the repo. They
-# are RECORDED, not triaged: each is a real failure on main that still needs
-# fixing. The expiry is what forces that to happen rather than letting the
-# entry become permanent.
-# ---------------------------------------------------------------------------
-
-[[failure]]
-area = "biscuit-speaks"
-environment = "wsl2-ubuntu"
-tier = "L1"
-shard = "1/1"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 34 failing tests, e.g. biscuit-speaks-cli::cli_test::test_cli_background_flag"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-[[failure]]
-area = "biscuit-terminal"
-environment = "macos-latest"
-tier = "L2"
-shard = "1/1"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 1 failing test, e.g. biscuit-terminal-cli::level2_apple_terminal_prose::level2_apple_terminal_double_underline_plain_text_visible"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-[[failure]]
-area = "biscuit-terminal"
-environment = "ubuntu-latest"
-tier = "L2"
-shard = "1/1"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 1 failing test, e.g. biscuit-terminal-cli::level2_diagrams::level2_diagram_fallback_when_no_image_protocol"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-[[failure]]
-area = "biscuit-terminal"
-environment = "windows-latest"
-tier = "L1"
-shard = "1/1"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 34 failing tests, e.g. biscuit-terminal-cli::about::test_about_alacritty_json_extracts_legacy_yaml_candidate"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-[[failure]]
-area = "biscuit-terminal"
-environment = "wsl2-ubuntu"
-tier = "L1"
-shard = "1/1"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 41 failing tests, e.g. biscuit-terminal-cli::integration_test::test_columns_snapshot"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-[[failure]]
-area = "claudine"
-environment = "macos-latest"
-tier = "L2"
-shard = "1/1"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 3 failing tests, e.g. claudine-cli::level2_context_capture::level2_context_default_at_140_fills_cap_in_tmux"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-[[failure]]
-area = "claudine"
-environment = "ubuntu-latest"
-tier = "L1"
-shard = "1/4"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 2 failing tests, e.g. claudine-cli::prompt_reporting::compose_frontmatter_verbose_shows_full_system_prompt"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-[[failure]]
-area = "claudine"
-environment = "ubuntu-latest"
-tier = "L2"
-shard = "1/1"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 4 failing tests, e.g. claudine-cli::level2_context_capture::level2_context_default_at_140_fills_cap_in_tmux"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-[[failure]]
-area = "claudine"
-environment = "wsl2-ubuntu"
-tier = "L1"
-shard = "1/4"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 11 failing tests, e.g. claudine-cli::bin/claudine::commands::config_tui::tabs::services::tests::services_render_matches_snapshot"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-[[failure]]
-area = "claudine"
-environment = "wsl2-ubuntu"
-tier = "L1"
-shard = "2/4"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 8 failing tests, e.g. claudine-cli::loop_cli::compose_loop_file_required_setter_revalidates_against_launch_cwd_each_iteration"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-[[failure]]
-area = "claudine"
-environment = "wsl2-ubuntu"
-tier = "L1"
-shard = "3/4"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 6 failing tests, e.g. claudine-cli::bin/claudine::commands::config_tui::widgets::modal::tests::render_list_modal_matches_snapshot"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-[[failure]]
-area = "claudine"
-environment = "wsl2-ubuntu"
-tier = "L1"
-shard = "4/4"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 8 failing tests, e.g. claudine-cli::sequence_groups::a_parallel_group_overlaps_its_members"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-[[failure]]
-area = "darkmatter"
-environment = "macos-latest"
-tier = "L2"
-shard = "1/1"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 1 failing test, e.g. darkmatter-cli::level2_code_block_styling::level2_code_block_clears_inherited_dim_before_theme_colors"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-[[failure]]
-area = "darkmatter"
-environment = "ubuntu-latest"
-tier = "L2"
-shard = "1/1"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 1 failing test, e.g. darkmatter-cli::level2_schema_about::level2_schema_about_light_terminal_uses_dark_code_theme"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-[[failure]]
-area = "darkmatter"
-environment = "wsl2-ubuntu"
-tier = "L1"
-shard = "1/4"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 48 failing tests, e.g. darkmatter-cli::level2_harness_integrity::assert_shim_resolves_to_built_accepts_valid_link"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-[[failure]]
-area = "darkmatter"
-environment = "wsl2-ubuntu"
-tier = "L1"
-shard = "2/4"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 43 failing tests, e.g. darkmatter::cutover_reference::reference_centered_table"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-[[failure]]
-area = "darkmatter"
-environment = "wsl2-ubuntu"
-tier = "L1"
-shard = "3/4"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 39 failing tests, e.g. darkmatter-cli::level2_harness_integrity::md_shim_path_is_absolute_temp_dir_link"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-[[failure]]
-area = "darkmatter"
-environment = "wsl2-ubuntu"
-tier = "L1"
-shard = "4/4"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 39 failing tests, e.g. darkmatter-cli::level2_harness_integrity::md_shim_resolves_to_cargo_built_binary"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-[[failure]]
-area = "research"
-environment = "windows-latest"
-tier = "L1"
-shard = "1/1"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 2 failing tests, e.g. research::link::creation::tests::create_deep_dive_symlink_verifies_symlink_points_to_correct_target"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-[[failure]]
-area = "sniff"
-environment = "wsl2-ubuntu"
-tier = "L1"
-shard = "1/1"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 14 failing tests, e.g. sniff-cli::snapshots::cargo_monorepo_structure_json_snapshot"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-[[failure]]
-area = "unchained-ai"
-environment = "wsl2-ubuntu"
-tier = "L1"
-shard = "1/1"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 1 failing test, e.g. model_id::ui::ui"
-source_run = "30791562395"
-expiry = "2026-11-30"

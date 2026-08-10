@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Calculate dependency-aware CI scope for the Rusty Biscuit workspace."""
+"""Calculate dependency-aware CI scope for the Rusty Biscuit workspace.
+
+The package is the unit of selection, execution, and result identity. Package
+policy lives in each package's own Cargo manifest under `[package.metadata.ci]`;
+environment capabilities live in `.github/ci/environments.json`. Both are
+validated here, loudly, before any scope is emitted.
+"""
 
 from __future__ import annotations
 
@@ -13,11 +19,11 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[2]
-AREA_CONFIG = ROOT / ".github" / "ci" / "areas.json"
+ENVIRONMENTS_CONFIG = ROOT / ".github" / "ci" / "environments.json"
 GLOBAL_PATHS = {
     ".config/nextest.toml",
-    ".github/ci/areas.json",
-    ".github/workflows/_area-ci.yml",
+    ".github/ci/environments.json",
+    ".github/workflows/_package-ci.yml",
     ".github/workflows/_wsl-ci.yml",
     ".github/workflows/ci.yml",
     "Cargo.toml",
@@ -30,7 +36,7 @@ GLOBAL_PREFIXES = (".cargo/", ".github/actions/", "just/")
 # Deliberately NOT in GLOBAL_PATHS. Every dependency add or removal rewrites the
 # lockfile, so treating the filename as global escalated the most routine change
 # in the repo to a full-workspace run: measured on PR #39, dropping one
-# dev-dependency from one crate scheduled every area on every OS.
+# dev-dependency from one crate scheduled every package on every OS.
 #
 # The lockfile is the one global path whose blast radius is *derivable* — it
 # names the resolved graph, so the packages a change can reach can be read out
@@ -39,100 +45,66 @@ GLOBAL_PREFIXES = (".cargo/", ".github/actions/", "just/")
 # not recoverable from the file alone.
 LOCKFILE_PATH = "Cargo.lock"
 
+# CI's own tooling — the merge-gate binary (`scripts/ci-rollup*.rs`), the
+# scope calculator (`scripts/ci/`), and the policy store (`.github/ci/`) — is
+# not a Cargo package, so a change to it selects no package. It must still
+# exercise something: `ci.yml` runs the rollup and scope test suites on the
+# `ci_tooling` flag. (`scripts/ci/affected_scope.py` and
+# `.github/ci/environments.json` are additionally GLOBAL_PATHS, since every
+# package's scope depends on them.)
+CI_TOOLING_PREFIXES = ("scripts/", ".github/ci/")
+
 # Bootstrap-preflight breadth (D3). A global CI/tooling change validates every
 # runner OS before fan-out; a package-local change validates only the scope host
-# plus the runner OSes its selected areas' environments actually land on.
+# plus the runner OSes its selected packages' environments actually land on.
 ALL_RUNNER_OS = ["macos-latest", "ubuntu-latest", "windows-latest"]
 SCOPE_HOST_OS = "ubuntu-latest"
 
-# `environment` is not `os`. Windows, macOS, and Linux are operating systems;
-# WSL2 is a distinct supported Linux environment that a Windows runner HOSTS.
-# Policy and every result identity are keyed by environment; only `runs-on` and
-# the native-package lookup are keyed by runner OS. Conflating the two silently
-# merges two environments into one rollup cell.
-SUPPORTED_RUNNER_OS = {"ubuntu-latest", "windows-latest", "macos-latest"}
-SUPPORTED_ENVIRONMENTS = SUPPORTED_RUNNER_OS | {"wsl2-ubuntu"}
-
-# Which runner label hosts each environment. Only entries whose environment
-# differs from its host need listing; the three native ones map to themselves.
-ENVIRONMENT_RUNNER_OS: dict[str, str] = {"wsl2-ubuntu": "windows-latest"}
-
-# Environments where a headless L2 terminal backend can be provisioned. tmux is
-# the only one CI can host, and it installs on Linux (apt) and macOS (brew).
-# Windows has no tmux port and no proven alternative (plan 2.3), so an L2 tier
-# there is a POLICY GAP, never a green `0 run / N skipped` cell. `wsl2-ubuntu`
-# is absent because the WSL leg runs from a `nextest archive` (plan 2.2), which
-# carries no broker binary and hosts no tmux server.
-L2_PROVISIONED_ENVIRONMENTS = {"ubuntu-latest", "macos-latest"}
-
-# Environments where Node + pnpm are provisioned for an area whose canonical
-# `just test` also drives a JavaScript suite (`"node": true`).
-#
-# Linux only, for the reason `lint` is Linux only: the one such suite today
-# (`homelab/server/frontend`, Vue + Vitest) runs under jsdom with no native
-# dependency, so four environments would execute identical code paths and buy
-# four toolchain installs. This does NOT reduce tests within an area — the
-# recipe is identical on every environment and self-gates on the capability the
-# way `require_level!` self-gates on a terminal backend.
-NODE_PROVISIONED_ENVIRONMENTS = {"ubuntu-latest"}
-
-# Per-area policy defaults, shared by config loading and preflight OS derivation
-# so a test that passes minimal area records still resolves environment policy.
-AREA_DEFAULTS: dict[str, Any] = {
-    "ci": True,
-    # Every area runs the same canonical L1 recipe on all three native
-    # environments. macOS used to be compile-check-only because "runner minutes
-    # bill ~10x"; the repo is public, so standard runners are free and that
-    # justification is void.
-    "environments": ["ubuntu-latest", "windows-latest", "macos-latest", "wsl2-ubuntu"],
-    # Compile-only gate, and the ONLY place `RUSTFLAGS: -D warnings` is enforced
-    # outside the Linux `lint` job. Pointed at Windows: `lint` already denies
-    # warnings on Linux, and macOS is the primary development host where warning
-    # drift is caught locally. Windows is nobody's dev box, so it is where
-    # warning drift actually hides.
-    "check_os": ["windows-latest"],
-    "shards": ["1/1"],
-    "l2": False,
-    "browser": False,
-    "ai_provider_stubs": False,
-    # Capability policy (D8/D9/D11). `backends`: L2 terminal backends this area's
-    # tests require. `native`: runner OS -> system packages needed to build/test.
-    # `node`: whether this area's canonical `just test` also drives a JavaScript
-    # suite, so the leg needs Node + pnpm. `policy_gaps`: tiers this area owns
-    # tests for that no environment can currently host — recorded so the rollup
-    # renders POLICY GAP, never green.
-    "backends": [],
-    "native": {},
-    "node": False,
-    "policy_gaps": [],
-}
-
-# Single policy surface (D10). Every area record is validated against this
-# schema so a typo, an unsupported environment, or an unknown field fails loudly
-# instead of silently mis-scoping CI.
 KNOWN_L2_BACKENDS = {"tmux", "wezterm", "kitty", "apple-terminal"}
 KNOWN_TIERS = {"L1", "L2", "browser"}
 EXCLUSION_CLASSES = {"capability", "promotion-pending", "time-bounded"}
-REQUIRED_AREA_FIELDS = {"area"}
-OPTIONAL_AREA_FIELDS = {"check_args", "reason", "owner", "expiry", "exclusion_class"}
-ALLOWED_AREA_FIELDS = REQUIRED_AREA_FIELDS | OPTIONAL_AREA_FIELDS | set(AREA_DEFAULTS)
-POLICY_GAP_FIELDS = {"tier", "environments", "reason", "owner", "expiry"}
 
-# Retired policy fields, named so a stale record gets an actionable message
-# instead of appearing in a generic unknown-field list.
-RETIRED_AREA_FIELDS: dict[str, str] = {
-    "soft_os": (
-        "it made a test leg continue-on-error, which did not merely stop the leg "
-        "from blocking — it removed the leg from the run's verdict entirely. "
-        "Record a known failure in the results baseline instead, which keeps the "
-        "signal"
-    ),
-    "full_os": (
-        "it named a runner OS list, but WSL2 is an environment a Windows runner "
-        "HOSTS rather than a runner label of its own. Use 'environments', whose "
-        "values are ubuntu-latest, windows-latest, macos-latest, and wsl2-ubuntu"
-    ),
+# `runner-tools` is a CLOSED vocabulary implemented by the reusable workflow,
+# not an arbitrary command surface. `darkmatter-md-fixture` preserves
+# Claudine's clean-checkout `md` binary setup; `ai-provider-stubs` keeps
+# claudine-cli's inert provider-discovery stubs; `node-22`/`pnpm-10` provision
+# the JavaScript toolchain a companion suite runs under.
+KNOWN_RUNNER_TOOLS = {
+    "ai-provider-stubs",
+    "darkmatter-md-fixture",
+    "node-22",
+    "pnpm-10",
+    "l2-parallel-self-spawn",
+    "neovim",
 }
+
+# Companion suites are non-Cargo test suites owned by a package. Each name maps
+# to the justfile (by directory) and recipe that executes it; the recipe must
+# exist, or the suite would be declared and silently never run.
+COMPANION_SUITES = {"homelab-frontend": ("homelab", "test-frontend")}
+
+# `[package.metadata.ci]` field vocabulary. Unknown fields fail loudly — a typo
+# here silently mis-scopes CI otherwise.
+CI_FIELDS = {"gates", "exclusion-class", "owner", "reason", "expiry", "native", "tests"}
+CI_TEST_FIELDS = {
+    "tiers",
+    "l2-backends",
+    "features",
+    "all-features",
+    "l1-include-slow",
+    "runner-tools",
+    "companion-suites",
+}
+EXCLUSION_FIELDS = {"exclusion-class", "owner", "reason", "expiry"}
+
+# The compile-check OS was never overridden by any of the 31 area records — a
+# constant, not configuration. It stays `--all-targets` on Windows: benches and
+# examples compile there and nowhere else.
+CHECK_OS = ["windows-latest"]
+
+# GitHub Actions ceiling for a single matrix. The package matrix must stay
+# under it even on a full-scope run.
+MATRIX_LIMIT = 256
 
 
 def load_metadata(root: Path) -> dict[str, Any]:
@@ -142,38 +114,20 @@ def load_metadata(root: Path) -> dict[str, Any]:
         check=True,
         capture_output=True,
         text=True,
+        # Cargo emits UTF-8; without this, Windows decodes with the locale
+        # codec (cp1252), the reader thread dies on the first non-cp1252 byte,
+        # and `result.stdout` is None.
+        encoding="utf-8",
     )
     return json.loads(result.stdout)
-
-
-def validate_native_map(label: str, native: Any) -> None:
-    """Validate a `native` OS -> system-package declaration.
-
-    Shared by curated areas and by exempt packages: a package's system libraries
-    are a property of the package, so an exempt package declares them the same
-    way an owned one does. `_ensure-native-libs` reads both files.
-
-    ## Errors
-
-    Raises ``RuntimeError`` naming the offending declaration.
-    """
-    if not isinstance(native, dict):
-        raise RuntimeError(f"{label} field 'native' must be an OS->packages map")
-    for os_name, packages in native.items():
-        if os_name not in SUPPORTED_RUNNER_OS:
-            raise RuntimeError(f"{label} field 'native' names unsupported OS '{os_name}'")
-        if not isinstance(packages, list) or not all(isinstance(p, str) for p in packages):
-            raise RuntimeError(
-                f"{label} field 'native.{os_name}' must be a list of package names"
-            )
 
 
 def validate_expiry(label: str, field: str, value: Any, today: date) -> None:
     """Validate a time-bounded policy date.
 
-    An exclusion or policy gap without an end date is a permanent one wearing a
-    temporary label. A *past* end date must fail the scope calculation loudly
-    rather than lapse quietly, which is the whole point of bounding it.
+    An exclusion or capability gap without an end date is a permanent one
+    wearing a temporary label. A *past* end date must fail the scope calculation
+    loudly rather than lapse quietly, which is the whole point of bounding it.
 
     ## Errors
 
@@ -195,296 +149,481 @@ def validate_expiry(label: str, field: str, value: Any, today: date) -> None:
         )
 
 
-def validate_policy_gaps(label: str, area: dict[str, Any], today: date) -> None:
-    """Validate an area's declared policy gaps and prove every gap is covered.
+# ---------------------------------------------------------------------------
+# Environment capabilities — .github/ci/environments.json
+# ---------------------------------------------------------------------------
 
-    A policy gap is a tier the area owns tests for that some declared
-    environment cannot host. It exists so the rollup can render POLICY GAP for
-    that cell instead of a green `0 run / N skipped`.
-
-    ## Errors
-
-    Raises ``RuntimeError`` naming the area, the gap, and the offending field.
-    """
-    gaps = area.get("policy_gaps", [])
-    if not isinstance(gaps, list):
-        raise RuntimeError(f"{label} field 'policy_gaps' must be a list of gap records")
-
-    environments = area.get("environments", AREA_DEFAULTS["environments"])
-    for index, gap in enumerate(gaps):
-        gap_label = f"{label} policy_gaps[{index}]"
-        if not isinstance(gap, dict):
-            raise RuntimeError(f"{gap_label} must be an object")
-
-        missing = POLICY_GAP_FIELDS - gap.keys()
-        if missing:
-            raise RuntimeError(f"{gap_label} is missing required field(s): {sorted(missing)}")
-        unknown = gap.keys() - POLICY_GAP_FIELDS
-        if unknown:
-            raise RuntimeError(f"{gap_label} has unknown field(s): {sorted(unknown)}")
-
-        if gap["tier"] not in KNOWN_TIERS:
-            raise RuntimeError(
-                f"{gap_label} names unknown tier '{gap['tier']}'; known tiers: "
-                f"{sorted(KNOWN_TIERS)}"
-            )
-        for field in ("reason", "owner"):
-            if not isinstance(gap[field], str) or not gap[field].strip():
-                raise RuntimeError(f"{gap_label} must give a non-empty '{field}'")
-        validate_expiry(gap_label, "expiry", gap["expiry"], today)
-
-        gap_environments = gap["environments"]
-        if not isinstance(gap_environments, list) or not gap_environments:
-            raise RuntimeError(f"{gap_label} must list at least one environment")
-        invalid = [env for env in gap_environments if env not in SUPPORTED_ENVIRONMENTS]
-        if invalid:
-            raise RuntimeError(
-                f"{gap_label} names unsupported environment(s): {invalid}; supported: "
-                f"{sorted(SUPPORTED_ENVIRONMENTS)}"
-            )
-        undeclared = [env for env in gap_environments if env not in environments]
-        if undeclared:
-            raise RuntimeError(
-                f"{gap_label} names environment(s) the area does not run: {undeclared}. "
-                "A gap describes a cell that IS scheduled but cannot execute; an "
-                "environment the area never runs needs no gap record."
-            )
-
-    # An L2 tier with tests but no provisionable backend must be declared, or the
-    # cell renders as an unremarkable green skip (plan 1.1/2.3).
-    if area.get("ci", AREA_DEFAULTS["ci"]) and area.get("l2", AREA_DEFAULTS["l2"]):
-        covered = {
-            environment
-            for gap in gaps
-            if gap.get("tier") == "L2"
-            for environment in gap.get("environments", [])
-        }
-        uncovered = [
-            environment
-            for environment in environments
-            if environment not in L2_PROVISIONED_ENVIRONMENTS and environment not in covered
-        ]
-        if uncovered:
-            raise RuntimeError(
-                f"{label} sets \"l2\": true and runs on {uncovered}, where no L2 backend "
-                "can be provisioned. Declare a 'policy_gaps' entry with tier \"L2\" for "
-                "those environments so the rollup shows POLICY GAP instead of a green "
-                "`0 run / N skipped` cell."
-            )
+# Every L2 backend is a capability under its own name, so a package whose
+# suite drives only GUI emulators renders a governed POLICY GAP instead of an
+# ungoverned block.
+KNOWN_CAPABILITIES = {
+    "tmux",
+    "wezterm",
+    "kitty",
+    "apple-terminal",
+    "headless_browser",
+    "node_pnpm",
+    "archive_only",
+}
 
 
-def validate_area_schema(areas: list[dict[str, Any]], today: date | None = None) -> None:
-    """Validate each raw area record against the capability-policy schema (D10).
+def load_environments(path: Path, today: date | None = None) -> list[dict[str, Any]]:
+    """Load and validate the environment capability table.
+
+    One versioned, schema-validated table: runner labels, native-package
+    installer keys, and whether an environment can host tmux, a headless
+    browser, Node/pnpm, or archive-only execution. Capability only — package
+    policy decides which tiers are expected, so an unsupported required tier is
+    an explicit POLICY GAP downstream, never a silent absence.
+
+    A capability value is either a boolean or, for a governed unavailability,
+    an object carrying `available: false` plus `reason`, `owner`, and `expiry`
+    — the two facts the eight per-area `policy_gaps` records used to restate
+    (Windows has no tmux; the WSL2 leg is archive-only), declared once.
 
     ## Errors
 
-    Raises ``RuntimeError`` naming the offending area and field for a missing
-    required field, a retired field, an unknown field, an unsupported
-    environment or runner OS, an unknown L2 backend, an unowned or lapsed
-    exclusion, an uncovered L2 policy gap, or a mistyped value.
+    Raises ``RuntimeError`` naming the offending environment and field.
     """
     today = today or date.today()
+    with path.open(encoding="utf-8") as config_file:
+        document = json.load(config_file)
 
-    for index, area in enumerate(areas):
-        label = area.get("area", f"<record {index}>")
+    if not isinstance(document, dict) or not isinstance(document.get("environments"), list):
+        raise RuntimeError(f"{path}: must be an object with an 'environments' list")
+    if document.get("schema_version") != 1:
+        raise RuntimeError(f"{path}: schema_version must be 1")
 
-        missing = REQUIRED_AREA_FIELDS - area.keys()
-        if missing:
-            raise RuntimeError(f"area '{label}' is missing required field(s): {sorted(missing)}")
-
-        # Types before semantics: every rule below reads these flags, so a
-        # mistyped one must be reported as the typo it is rather than as the
-        # policy violation its truthiness happens to produce.
-        for field in ("l2", "browser", "ai_provider_stubs", "ci", "node"):
-            if field in area and not isinstance(area[field], bool):
-                raise RuntimeError(f"area '{label}' field '{field}' must be a boolean")
-
-        # An area either gates in the fan-out matrix (and needs the compile-check
-        # arguments) or explicitly does not (and must say why, who owns it, and
-        # when the exclusion runs out). Both are declared here so every area
-        # sniff discovers has exactly one record.
-        in_matrix = area.get("ci", AREA_DEFAULTS["ci"])
-        if in_matrix and not area.get("check_args", "").strip():
-            raise RuntimeError(f"area '{label}' is in the CI matrix and must define 'check_args'")
-        if not in_matrix:
-            for field in ("reason", "owner"):
-                if not area.get(field, "").strip():
-                    raise RuntimeError(
-                        f"area '{label}' sets \"ci\": false and must give a non-empty "
-                        f"'{field}'"
-                    )
-            exclusion_class = area.get("exclusion_class", "")
-            if exclusion_class not in EXCLUSION_CLASSES:
-                raise RuntimeError(
-                    f"area '{label}' sets \"ci\": false and must give an "
-                    f"'exclusion_class' from {sorted(EXCLUSION_CLASSES)}"
-                )
-            # A capability exclusion (physical hardware, say) is permanent by
-            # nature; everything else is backlog and must be time-bounded.
-            if exclusion_class == "capability":
-                if "expiry" in area:
-                    raise RuntimeError(
-                        f"area '{label}' is excluded on capability grounds, which is "
-                        "permanent; drop 'expiry' or choose another exclusion_class"
-                    )
-            elif "expiry" not in area:
-                raise RuntimeError(
-                    f"area '{label}' sets \"ci\": false with exclusion_class "
-                    f"'{exclusion_class}' and must give an 'expiry' date"
-                )
-
-        for field, guidance in RETIRED_AREA_FIELDS.items():
-            if field in area:
-                raise RuntimeError(f"area '{label}' uses retired field '{field}': {guidance}")
-
-        unknown = area.keys() - ALLOWED_AREA_FIELDS
+    environments = document["environments"]
+    names: set[str] = set()
+    for index, environment in enumerate(environments):
+        label = environment.get("name", f"<record {index}>") if isinstance(environment, dict) else f"<record {index}>"
+        if not isinstance(environment, dict):
+            raise RuntimeError(f"environments[{index}] must be an object")
+        unknown = environment.keys() - {"name", "runner", "native_key", "capabilities"}
         if unknown:
+            raise RuntimeError(f"environment '{label}' has unknown field(s): {sorted(unknown)}")
+        for field in ("name", "runner", "native_key"):
+            if not isinstance(environment.get(field), str) or not environment[field].strip():
+                raise RuntimeError(f"environment '{label}' must give a non-empty '{field}'")
+        if environment["name"] in names:
+            raise RuntimeError(f"duplicate environment '{environment['name']}'")
+        names.add(environment["name"])
+
+        capabilities = environment.get("capabilities")
+        if not isinstance(capabilities, dict):
+            raise RuntimeError(f"environment '{label}' must define a 'capabilities' object")
+        unknown_caps = capabilities.keys() - KNOWN_CAPABILITIES
+        if unknown_caps:
             raise RuntimeError(
-                f"area '{label}' has unknown field(s): {sorted(unknown)}; "
-                f"allowed fields are {sorted(ALLOWED_AREA_FIELDS)}"
+                f"environment '{label}' has unknown capabilities: {sorted(unknown_caps)}; "
+                f"known: {sorted(KNOWN_CAPABILITIES)}"
+            )
+        missing_caps = KNOWN_CAPABILITIES - capabilities.keys()
+        if missing_caps:
+            raise RuntimeError(
+                f"environment '{label}' must declare every capability; missing: "
+                f"{sorted(missing_caps)}"
+            )
+        for capability, value in capabilities.items():
+            cap_label = f"environment '{label}' capability '{capability}'"
+            if isinstance(value, bool):
+                continue
+            if capability == "archive_only":
+                raise RuntimeError(f"{cap_label} must be a boolean")
+            if not isinstance(value, dict) or value.get("available") is not False:
+                raise RuntimeError(
+                    f"{cap_label} must be a boolean or an object with 'available': false"
+                )
+            unknown_gap = value.keys() - {"available", "reason", "owner", "expiry"}
+            if unknown_gap:
+                raise RuntimeError(f"{cap_label} has unknown field(s): {sorted(unknown_gap)}")
+            for field in ("reason", "owner"):
+                if not isinstance(value.get(field), str) or not value[field].strip():
+                    raise RuntimeError(
+                        f"{cap_label} is a governed unavailability and must give a "
+                        f"non-empty '{field}'"
+                    )
+            validate_expiry(cap_label, "expiry", value.get("expiry"), today)
+
+    runner_labels = {environment["runner"] for environment in environments}
+    for environment in environments:
+        if environment["native_key"] not in runner_labels:
+            raise RuntimeError(
+                f"environment '{environment['name']}' native_key "
+                f"'{environment['native_key']}' is not a runner label "
+                f"({sorted(runner_labels)})"
+            )
+        if environment["capabilities"]["archive_only"] is True and environment["runner"] == environment["name"]:
+            raise RuntimeError(
+                f"environment '{environment['name']}' is archive-only but names itself as "
+                "its runner; an archive-only environment is hosted by another runner"
             )
 
-        if "expiry" in area:
-            validate_expiry(f"area '{label}'", "expiry", area["expiry"], today)
-
-        if "environments" in area:
-            invalid = [
-                env for env in area["environments"] if env not in SUPPORTED_ENVIRONMENTS
-            ]
-            if invalid:
-                raise RuntimeError(
-                    f"area '{label}' field 'environments' names unsupported "
-                    f"environment(s): {invalid}; supported: "
-                    f"{sorted(SUPPORTED_ENVIRONMENTS)}"
-                )
-
-        # `check_os` really is a runner-OS list: a compile-check produces no test
-        # results, so it has no environment identity to key a rollup cell to.
-        if "check_os" in area:
-            invalid = [os for os in area["check_os"] if os not in SUPPORTED_RUNNER_OS]
-            if invalid:
-                raise RuntimeError(
-                    f"area '{label}' field 'check_os' names unsupported runner OS(es): "
-                    f"{invalid}; supported: {sorted(SUPPORTED_RUNNER_OS)}"
-                )
-
-        for backend in area.get("backends", []):
-            if backend not in KNOWN_L2_BACKENDS:
-                raise RuntimeError(
-                    f"area '{label}' requires unknown L2 backend '{backend}'; "
-                    f"known backends: {sorted(KNOWN_L2_BACKENDS)}"
-                )
-
-        # A declared `node` capability that no declared environment can host is a
-        # silent gap by construction: `node_environments` resolves empty, the
-        # recipe self-skips on every leg, and the area reads green having run
-        # none of its JavaScript tests. That is precisely the failure this flag
-        # exists to prevent, so it fails at config time.
-        if area.get("ci", AREA_DEFAULTS["ci"]) and area.get("node", AREA_DEFAULTS["node"]):
-            environments = area.get("environments", AREA_DEFAULTS["environments"])
-            if not any(
-                environment in NODE_PROVISIONED_ENVIRONMENTS for environment in environments
-            ):
-                raise RuntimeError(
-                    f"area '{label}' sets \"node\": true but runs on {environments}, none of "
-                    f"which provisions pnpm ({sorted(NODE_PROVISIONED_ENVIRONMENTS)}). Its "
-                    "JavaScript suite would skip on every leg while the area still reported "
-                    "PASS. Declare an environment that can host it, or drop the capability."
-                )
-
-        # A WSL2 guest IS Linux, so it consumes the `ubuntu-latest` package list
-        # (`_ensure-native-libs` keys off `uname -s`). `native` therefore stays a
-        # runner-OS map and must not grow a `wsl2-ubuntu` key.
-        validate_native_map(f"area '{label}'", area.get("native", {}))
-
-        validate_policy_gaps(f"area '{label}'", area, today)
+    return environments
 
 
-def environment_policy(area: dict[str, Any]) -> dict[str, Any]:
-    """Split an area's declared environments into the shapes a workflow can use.
+def capability(environment: dict[str, Any], name: str) -> bool:
+    """Whether an environment can host a capability, boolean or governed object."""
+    value = environment["capabilities"][name]
+    if isinstance(value, bool):
+        return value
+    return bool(value.get("available"))
 
-    ``_area-ci.yml`` puts ``native_environments`` straight into a ``runs-on``
-    matrix, which is only sound because those three environment names ARE runner
-    labels. ``wsl2-ubuntu`` is deliberately hoisted into its own boolean so it
-    can never reach that matrix: a WSL job runs on `windows-latest` and executes
-    through `wsl-bash`, so native dependency installation, paths, shells,
-    caching, and artifact collection would otherwise take the Windows branch.
 
-    ## Returns
+def capability_gap(environment: dict[str, Any], name: str) -> dict[str, str] | None:
+    """The governance record for a governed unavailability, if one exists."""
+    value = environment["capabilities"][name]
+    if isinstance(value, dict) and value.get("available") is False:
+        return {"owner": value["owner"], "reason": value["reason"], "expiry": value["expiry"]}
+    return None
 
-    ``{"native_environments": [...], "l2_environments": [...],
-    "node_environments": [...], "wsl": bool}``.
+
+def backend_hostable(environment: dict[str, Any], backend: str) -> bool:
+    """Whether an environment can host an L2 backend.
+
+    The capability is looked up under the backend's own name (`tmux`,
+    `wezterm`, `kitty`, `apple-terminal`), giving every declared backend an
+    environment axis rather than hardcoding `tmux`. A backend with no
+    capability entry is not hostable there.
     """
-    environments = list(area.get("environments", AREA_DEFAULTS["environments"]))
+    value = environment["capabilities"].get(backend)
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    return bool(value.get("available"))
+
+
+# ---------------------------------------------------------------------------
+# Package CI policy — [package.metadata.ci] in each Cargo manifest
+# ---------------------------------------------------------------------------
+
+
+def validate_native_map(label: str, native: Any, runner_labels: set[str]) -> None:
+    """Validate a `native` OS -> system-package declaration.
+
+    ## Errors
+
+    Raises ``RuntimeError`` naming the offending declaration.
+    """
+    if not isinstance(native, dict):
+        raise RuntimeError(f"{label} field 'native' must be an OS->packages map")
+    for os_name, packages in native.items():
+        if os_name not in runner_labels:
+            raise RuntimeError(
+                f"{label} field 'native' names unsupported OS '{os_name}'; "
+                f"runner labels: {sorted(runner_labels)}"
+            )
+        if not isinstance(packages, list) or not all(isinstance(p, str) for p in packages):
+            raise RuntimeError(
+                f"{label} field 'native.{os_name}' must be a list of package names"
+            )
+
+
+def validate_package_ci(
+    name: str,
+    ci: dict[str, Any],
+    runner_labels: set[str],
+    root: Path,
+    today: date,
+) -> None:
+    """Validate one package's `[package.metadata.ci]` block.
+
+    ## Errors
+
+    Raises ``RuntimeError`` on an unknown field, an invalid tier or tool name,
+    conflicting `features`/`all-features`, an expired or unowned exclusion, an
+    L2 tier without backends, or a companion suite with no registered canonical
+    recipe.
+    """
+    label = f"package '{name}' [package.metadata.ci]"
+    unknown = ci.keys() - CI_FIELDS
+    if unknown:
+        raise RuntimeError(
+            f"{label} has unknown field(s): {sorted(unknown)}; allowed: {sorted(CI_FIELDS)}"
+        )
+
+    gates = ci.get("gates", True)
+    if not isinstance(gates, bool):
+        raise RuntimeError(f"{label} field 'gates' must be a boolean")
+
+    declared_exclusion = EXCLUSION_FIELDS & ci.keys()
+    if gates and declared_exclusion:
+        raise RuntimeError(
+            f"{label} sets exclusion field(s) {sorted(declared_exclusion)} while "
+            "'gates' is true; exclusion governance only exists for a non-gating package"
+        )
+    if not gates:
+        for field in ("reason", "owner"):
+            if not isinstance(ci.get(field), str) or not ci[field].strip():
+                raise RuntimeError(
+                    f"{label} sets 'gates = false' and must give a non-empty '{field}'"
+                )
+        exclusion_class = ci.get("exclusion-class", "")
+        if exclusion_class not in EXCLUSION_CLASSES:
+            raise RuntimeError(
+                f"{label} sets 'gates = false' and must give an 'exclusion-class' "
+                f"from {sorted(EXCLUSION_CLASSES)}"
+            )
+        # A capability exclusion (physical hardware, say) is permanent by
+        # nature; everything else is backlog and must be time-bounded.
+        if exclusion_class == "capability":
+            if "expiry" in ci:
+                raise RuntimeError(
+                    f"{label} is excluded on capability grounds, which is permanent; "
+                    "drop 'expiry' or choose another exclusion-class"
+                )
+        elif "expiry" not in ci:
+            raise RuntimeError(
+                f"{label} sets 'gates = false' with exclusion-class '{exclusion_class}' "
+                "and must give an 'expiry' date"
+            )
+    if "expiry" in ci:
+        validate_expiry(label, "expiry", ci["expiry"], today)
+
+    validate_native_map(label, ci.get("native", {}), runner_labels)
+
+    tests = ci.get("tests", {})
+    if not isinstance(tests, dict):
+        raise RuntimeError(f"{label} field 'tests' must be an object")
+    unknown_tests = tests.keys() - CI_TEST_FIELDS
+    if unknown_tests:
+        raise RuntimeError(
+            f"{label}.tests has unknown field(s): {sorted(unknown_tests)}; "
+            f"allowed: {sorted(CI_TEST_FIELDS)}"
+        )
+
+    tiers = tests.get("tiers", ["L1"])
+    if not isinstance(tiers, list) or not all(isinstance(t, str) for t in tiers):
+        raise RuntimeError(f"{label}.tests field 'tiers' must be a list of tier names")
+    invalid_tiers = [tier for tier in tiers if tier not in KNOWN_TIERS]
+    if invalid_tiers:
+        raise RuntimeError(
+            f"{label}.tests names unknown tier(s) {invalid_tiers}; known: "
+            f"{sorted(KNOWN_TIERS)}. L3 and 'real' are opt-in local tiers, not CI tiers."
+        )
+    if len(set(tiers)) != len(tiers):
+        raise RuntimeError(f"{label}.tests field 'tiers' has duplicates: {tiers}")
+    if "L1" not in tiers:
+        raise RuntimeError(
+            f"{label}.tests declares {tiers} without L1; a gating package always runs "
+            "L1 — 'gates = false' is how a package opts out"
+        )
+
+    backends = tests.get("l2-backends", [])
+    if not isinstance(backends, list) or not all(isinstance(b, str) for b in backends):
+        raise RuntimeError(f"{label}.tests field 'l2-backends' must be a list of backend names")
+    invalid_backends = [b for b in backends if b not in KNOWN_L2_BACKENDS]
+    if invalid_backends:
+        raise RuntimeError(
+            f"{label}.tests requires unknown L2 backend(s) {invalid_backends}; "
+            f"known: {sorted(KNOWN_L2_BACKENDS)}"
+        )
+    if "L2" in tiers and not backends:
+        raise RuntimeError(
+            f"{label}.tests declares the L2 tier without 'l2-backends'; name the "
+            "terminal backends its tests require"
+        )
+    if "L2" not in tiers and backends:
+        raise RuntimeError(
+            f"{label}.tests declares 'l2-backends' without the L2 tier"
+        )
+
+    features = tests.get("features", [])
+    all_features = tests.get("all-features", False)
+    if not isinstance(features, list) or not all(isinstance(f, str) for f in features):
+        raise RuntimeError(f"{label}.tests field 'features' must be a list of feature names")
+    if not isinstance(all_features, bool):
+        raise RuntimeError(f"{label}.tests field 'all-features' must be a boolean")
+    if features and all_features:
+        raise RuntimeError(
+            f"{label}.tests sets both 'features' and 'all-features'; they conflict — "
+            "pick one feature contract for check, archive, and test"
+        )
+    if not isinstance(tests.get("l1-include-slow", False), bool):
+        raise RuntimeError(f"{label}.tests field 'l1-include-slow' must be a boolean")
+
+    tools = tests.get("runner-tools", [])
+    if not isinstance(tools, list) or not all(isinstance(t, str) for t in tools):
+        raise RuntimeError(f"{label}.tests field 'runner-tools' must be a list of tool names")
+    invalid_tools = [t for t in tools if t not in KNOWN_RUNNER_TOOLS]
+    if invalid_tools:
+        raise RuntimeError(
+            f"{label}.tests names unknown runner tool(s) {invalid_tools}; the "
+            f"vocabulary is closed: {sorted(KNOWN_RUNNER_TOOLS)}"
+        )
+
+    suites = tests.get("companion-suites", [])
+    if not isinstance(suites, list) or not all(isinstance(s, str) for s in suites):
+        raise RuntimeError(
+            f"{label}.tests field 'companion-suites' must be a list of suite names"
+        )
+    for suite in suites:
+        registered = COMPANION_SUITES.get(suite)
+        if registered is None:
+            raise RuntimeError(
+                f"{label}.tests names unknown companion suite '{suite}'; registered: "
+                f"{sorted(COMPANION_SUITES)}"
+            )
+        directory, recipe = registered
+        justfile = root / directory / "justfile"
+        # A recipe DEFINITION, not a substring: `test-frontend-watch:` must not
+        # satisfy the check for `test-frontend`.
+        recipe_defined = justfile.is_file() and re.search(
+            rf"^{re.escape(recipe)}(?::|\s)",
+            justfile.read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+        if not recipe_defined:
+            raise RuntimeError(
+                f"companion suite '{suite}' expects the canonical recipe '{recipe}' in "
+                f"{directory}/justfile, which does not exist"
+            )
+
+
+def package_ci_policy(
+    packages: dict[str, dict[str, Any]],
+    runner_labels: set[str],
+    root: Path,
+    today: date | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Resolve every workspace package's CI policy from its own manifest.
+
+    A package with no `[package.metadata.ci]` defaults to `gates = true` and
+    the L1 tier. Non-gating is never inferred from zero observed tests.
+    """
+    today = today or date.today()
+    policy: dict[str, dict[str, Any]] = {}
+    for package in packages.values():
+        name = package["name"]
+        ci = (package.get("metadata") or {}).get("ci") or {}
+        if not isinstance(ci, dict):
+            raise RuntimeError(f"package '{name}' [package.metadata.ci] must be an object")
+        validate_package_ci(name, ci, runner_labels, root, today)
+
+        tests = ci.get("tests", {})
+        record: dict[str, Any] = {
+            "package": name,
+            "gates": ci.get("gates", True),
+            "tiers": tests.get("tiers", ["L1"]),
+            "l2_backends": tests.get("l2-backends", []),
+            "features": tests.get("features", []),
+            "all_features": tests.get("all-features", False),
+            "l1_include_slow": tests.get("l1-include-slow", False),
+            "runner_tools": tests.get("runner-tools", []),
+            "companion_suites": tests.get("companion-suites", []),
+            "native": ci.get("native", {}),
+        }
+        if not record["gates"]:
+            record["exclusion"] = {
+                "exclusion_class": ci["exclusion-class"],
+                "owner": ci["owner"],
+                "reason": ci["reason"],
+                "expiry": ci.get("expiry"),
+            }
+        policy[name] = record
+    return policy
+
+
+# ---------------------------------------------------------------------------
+# Workspace graph
+# ---------------------------------------------------------------------------
+
+
+def workspace_packages(metadata: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    members = set(metadata["workspace_members"])
     return {
-        "native_environments": [
-            environment for environment in environments if environment in SUPPORTED_RUNNER_OS
-        ],
-        "l2_environments": (
-            [
-                environment
-                for environment in environments
-                if environment in L2_PROVISIONED_ENVIRONMENTS
-            ]
-            if area.get("l2", AREA_DEFAULTS["l2"])
-            else []
-        ),
-        # Same derivation as `l2_environments`: the area declares a capability,
-        # not a runner list, and the intersection with what CI can provision is
-        # computed here rather than hard-coded in workflow YAML.
-        "node_environments": (
-            [
-                environment
-                for environment in environments
-                if environment in NODE_PROVISIONED_ENVIRONMENTS
-            ]
-            if area.get("node", AREA_DEFAULTS["node"])
-            else []
-        ),
-        "wsl": "wsl2-ubuntu" in environments,
+        package["id"]: package
+        for package in metadata["packages"]
+        if package["id"] in members
     }
 
 
-def load_area_config(path: Path) -> list[dict[str, Any]]:
-    with path.open(encoding="utf-8") as config_file:
-        areas = json.load(config_file)
+def package_directories(
+    root: Path, packages: dict[str, dict[str, Any]]
+) -> list[tuple[PurePosixPath, str]]:
+    directories = []
+    for package_id, package in packages.items():
+        manifest = Path(package["manifest_path"]).resolve()
+        relative = manifest.parent.relative_to(root.resolve())
+        directories.append((PurePosixPath(relative.as_posix()), package_id))
+    return sorted(directories, key=lambda item: len(item[0].parts), reverse=True)
 
-    validate_area_schema(areas)
-    return [{**AREA_DEFAULTS, **area} for area in areas]
 
-
-def validate_ownership(
-    metadata: dict[str, Any],
-    root: Path,
-    area_config: list[dict[str, Any]],
-) -> None:
-    """Every Cargo workspace member must fall under exactly one declared area (D10).
-
-    Every area has a record in `areas.json`, whether or not it gates in the CI
-    matrix — a `"ci": false` record declares the area and states why it is not
-    gated. So ownership is simply: the package's directory maps to a declared
-    area. A package in a brand-new directory fails here until someone decides
-    what that area is and whether it should gate.
-
-    ## Errors
-
-    Raises ``RuntimeError`` naming the offending packages.
+def dependent_closure(
+    seeds: set[str], metadata: dict[str, Any], packages: dict[str, dict[str, Any]]
+) -> set[str]:
+    """Reverse-dependency closure: the changed packages plus everything that
+    depends on them, transitively. Narrowing the fan-out must never narrow this.
     """
-    packages = workspace_packages(metadata)
-    area_names = {area["area"] for area in area_config}
+    reverse_dependencies: dict[str, set[str]] = {
+        package_id: set() for package_id in packages
+    }
+    for node in metadata["resolve"]["nodes"]:
+        if node["id"] not in packages:
+            continue
+        for dependency in node.get("deps", []):
+            dependency_id = dependency["pkg"]
+            if dependency_id in reverse_dependencies:
+                reverse_dependencies[dependency_id].add(node["id"])
 
-    unmapped = sorted(
-        package["name"]
-        for package in packages.values()
-        if owner_area(package, root, area_names) is None
-    )
-    if unmapped:
-        raise RuntimeError(
-            "workspace packages fall under no declared area: "
-            f"{unmapped}. Add the area to .github/ci/areas.json — with "
-            'the full policy if it should gate, or with "ci": false and a '
-            "reason if it should not."
-        )
+    affected = set(seeds)
+    pending = list(seeds)
+    while pending:
+        package_id = pending.pop()
+        for dependent in reverse_dependencies.get(package_id, set()):
+            if dependent not in affected:
+                affected.add(dependent)
+                pending.append(dependent)
+    return affected
+
+
+def build_closure(
+    seed: str, metadata: dict[str, Any], packages: dict[str, dict[str, Any]]
+) -> set[str]:
+    """Forward dependency closure for build provisioning.
+
+    Testing a package compiles its own dev-dependencies and, transitively, the
+    normal and build dependencies of everything reached. Dev-dependencies of
+    *dependencies* are never built, so they do not propagate. Target
+    restrictions are deliberately not evaluated: a library needed on one
+    platform is installed on all, which is the safe direction and matches how
+    the declarations were consumed before.
+
+    The closure comes from the workspace-unified `cargo metadata` resolve, not
+    from any job's declared feature set: an OPTIONAL edge (e.g.
+    biscuit-speaks -> playa) is present here only because some member enables
+    it. If every enabling edge disappears, the union silently loses the
+    optional package's native requirements. `test_affected_scope.py` pins the
+    known instance (biscuit-speaks -> playa) against the real metadata so the
+    coupling fails loudly instead of silently.
+    """
+    nodes = {node["id"]: node for node in metadata["resolve"]["nodes"]}
+
+    def edges(package_id: str, include_dev: bool) -> list[str]:
+        node = nodes.get(package_id)
+        if node is None:
+            return []
+        reached = []
+        for dependency in node.get("deps", []):
+            kinds = {kind.get("kind") for kind in dependency.get("dep_kinds", [])}
+            if include_dev or kinds != {"dev"}:
+                reached.append(dependency["pkg"])
+        return reached
+
+    closure = {seed}
+    pending = [seed]
+    first = True
+    while pending:
+        current = pending.pop()
+        for dependency in edges(current, include_dev=first and current == seed):
+            if dependency in packages and dependency not in closure:
+                closure.add(dependency)
+                pending.append(dependency)
+        if current == seed:
+            first = False
+    return closure
 
 
 def validate_no_shadow_workspaces(metadata: dict[str, Any], root: Path) -> None:
@@ -492,7 +631,7 @@ def validate_no_shadow_workspaces(metadata: dict[str, Any], root: Path) -> None:
 
     A nested ``[workspace]`` whose members are also root members makes the same
     package resolve into two different workspaces depending on the current
-    directory. Cargo picks the nearest ancestor workspace root, so ``cd <area> &&
+    directory. Cargo picks the nearest ancestor workspace root, so ``cd <dir> &&
     cargo test`` then gets a different target directory, a different lockfile
     (hence different dependency versions than the root build ships), and
     different config discovery — which is how ``.config/nextest.toml``'s ``ci``
@@ -645,140 +784,31 @@ def lockfile_impacted_names(
     return impacted & workspace_names
 
 
-def scoped_check_args(configured: str, impacted: set[str]) -> str:
-    """Narrow an area's `check_args` to the packages this run actually impacts.
-
-    The compile check gates that area's tests, so checking packages the change
-    cannot reach costs runner time and can fail the gate on something the branch
-    did not touch. Non-`-p` tokens are preserved verbatim — two areas carry
-    `--features`, and dropping those would check a different configuration than
-    the one the tests run under.
-
-    ## Notes
-
-    Falls back to `configured` when no configured package is impacted. An empty
-    `-p` list is not a narrower check: `cargo check --all-targets` with no `-p`
-    checks the entire workspace, so emitting one would silently invert this.
-    """
-    tokens = configured.split()
-    packages: list[str] = []
-    passthrough: list[str] = []
-
-    index = 0
-    while index < len(tokens):
-        token = tokens[index]
-        if token == "-p" and index + 1 < len(tokens):
-            packages.append(tokens[index + 1])
-            index += 2
-            continue
-        if token.startswith("-p="):
-            packages.append(token[len("-p=") :])
-            index += 1
-            continue
-        passthrough.append(token)
-        index += 1
-
-    selected = [package for package in packages if package in impacted]
-    if not selected:
-        return configured
-
-    narrowed: list[str] = []
-    for package in selected:
-        narrowed += ["-p", package]
-    return " ".join(narrowed + passthrough)
-
-
-def curated_areas(root: Path) -> list[str]:
-    justfile = (root / "justfile").read_text(encoding="utf-8")
-    match = re.search(r'^areas := "([^"]+)"$', justfile, re.MULTILINE)
-    if match is None:
-        raise RuntimeError("unable to read the curated area list from justfile")
-    return match.group(1).split()
-
-
-def validate_area_config(root: Path, areas: list[dict[str, Any]]) -> None:
-    """Check the justfile's curated list against the area records.
-
-    The two lists answer different questions and are deliberately not equal.
-    The justfile's ``areas :=`` names every package area that owns tests, so
-    ``check-canonical`` can verify its recipe set; ``ci: true`` names the areas
-    the matrix actually fans out to. An area with a complete recipe set that is
-    not yet promoted appears in the first and not the second — that gap is the
-    promotion backlog, and collapsing it would force a choice between gating an
-    area prematurely and leaving its recipes unverified.
-
-    ## Errors
-
-    Raises ``RuntimeError`` when a gating area is absent from the justfile (CI
-    would fan out to recipes nothing validates) or when a justfile area has no
-    record at all (its CI disposition was never decided).
-    """
-    declared = {area["area"] for area in areas}
-    gating = [area["area"] for area in areas if area.get("ci", True)]
-    curated = curated_areas(root)
-
-    ungoverned = [area for area in gating if area not in curated]
-    if ungoverned:
-        raise RuntimeError(
-            f"areas gate CI but are missing from the justfile's `areas :=` list: {ungoverned}. "
-            "`just check-canonical` would never verify their recipe set."
-        )
-
-    undeclared = [area for area in curated if area not in declared]
-    if undeclared:
-        raise RuntimeError(
-            f"areas are in the justfile's `areas :=` list but have no record in areas.json: "
-            f"{undeclared}. Add a record with `ci: true`, or `ci: false` plus an owner and expiry."
-        )
-
-
-def workspace_packages(metadata: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    members = set(metadata["workspace_members"])
-    return {
-        package["id"]: package
-        for package in metadata["packages"]
-        if package["id"] in members
-    }
-
-
-def package_directories(
-    root: Path, packages: dict[str, dict[str, Any]]
-) -> list[tuple[PurePosixPath, str]]:
-    directories = []
-    for package_id, package in packages.items():
-        manifest = Path(package["manifest_path"]).resolve()
-        relative = manifest.parent.relative_to(root.resolve())
-        directories.append((PurePosixPath(relative.as_posix()), package_id))
-    return sorted(directories, key=lambda item: len(item[0].parts), reverse=True)
-
-
-def owner_area(package: dict[str, Any], root: Path, area_names: set[str]) -> str | None:
-    manifest = Path(package["manifest_path"]).resolve()
-    relative = manifest.relative_to(root.resolve())
-    top_level = relative.parts[0]
-    return top_level if top_level in area_names else None
-
-
 def changed_package_ids(
     files: list[str],
     root: Path,
     packages: dict[str, dict[str, Any]],
-    area_names: set[str],
     lock_impacted: set[str] | None = None,
-) -> tuple[set[str], set[str], bool]:
+) -> tuple[set[str], bool]:
+    """Map changed paths to the packages they can reach.
+
+    A file inside a package's directory selects that package. A file that is
+    under no package directory selects every package beneath its top-level
+    directory (a shared justfile, a fixture at the directory root) — pure path
+    scoping, not policy. Anything else (`docs/`, a root README) selects nothing.
+    """
     directories = package_directories(root, packages)
     seeds: set[str] = set()
-    explicit_areas: set[str] = set()
 
     for raw_file in files:
         normalized = raw_file.replace("\\", "/").removeprefix("./")
         if normalized in GLOBAL_PATHS or normalized.startswith(GLOBAL_PREFIXES):
-            return set(packages), area_names, True
+            return set(packages), True
 
         if normalized == LOCKFILE_PATH:
             # Undecidable diff — no base lockfile, or one side did not parse.
             if lock_impacted is None:
-                return set(packages), area_names, True
+                return set(packages), True
             for package_id, package in packages.items():
                 if package["name"] in lock_impacted:
                     seeds.add(package_id)
@@ -796,54 +826,144 @@ def changed_package_ids(
             continue
 
         top_level = changed.parts[0]
-        if top_level in area_names:
-            explicit_areas.add(top_level)
-            for package_id, package in packages.items():
-                if owner_area(package, root, area_names) == top_level:
-                    seeds.add(package_id)
+        for directory, package_id in directories:
+            if directory.parts and directory.parts[0] == top_level:
+                seeds.add(package_id)
 
-    return seeds, explicit_areas, False
+    return seeds, False
 
 
-def dependent_closure(
-    seeds: set[str], metadata: dict[str, Any], packages: dict[str, dict[str, Any]]
-) -> set[str]:
-    reverse_dependencies: dict[str, set[str]] = {
-        package_id: set() for package_id in packages
+# ---------------------------------------------------------------------------
+# Scope assembly
+# ---------------------------------------------------------------------------
+
+
+def feature_args(record: dict[str, Any], package: str) -> str:
+    """The Cargo feature flags a package's check/test/archive invocations share.
+
+    One feature contract, forwarded consistently to compile-check, archive
+    construction, and the canonical test recipe — a package must not
+    compile-check one feature set and test another.
+    """
+    if record["all_features"]:
+        return "--all-features"
+    if record["features"]:
+        return f"--features {','.join(record['features'])}"
+    return ""
+
+
+def matrix_record(
+    record: dict[str, Any],
+    native: dict[str, list[str]],
+    environments: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """The workflow-facing shape of one gating package's policy."""
+    features = feature_args(record, record["package"])
+    check_args = f"-p {record['package']}" + (f" {features}" if features else "")
+
+    native_environments = [
+        environment["name"]
+        for environment in environments
+        if not capability(environment, "archive_only")
+        and environment["runner"] == environment["name"]
+    ]
+    return {
+        "package": record["package"],
+        "check_args": check_args,
+        "test_args": features,
+        "l1_include_slow": record["l1_include_slow"],
+        "tiers": record["tiers"],
+        "l2_backends": record["l2_backends"],
+        "runner_tools": record["runner_tools"],
+        "companion_suites": record["companion_suites"],
+        "native": native,
+        "native_environments": native_environments,
+        "check_os": CHECK_OS,
+        "l2_environments": (
+            [
+                environment["name"]
+                for environment in environments
+                if any(
+                    backend_hostable(environment, backend)
+                    for backend in record["l2_backends"]
+                )
+            ]
+            if "L2" in record["tiers"]
+            else []
+        ),
+        "browser_environments": (
+            [
+                environment["name"]
+                for environment in environments
+                if capability(environment, "headless_browser")
+            ]
+            if "browser" in record["tiers"]
+            else []
+        ),
+        "node_environments": (
+            [
+                environment["name"]
+                for environment in environments
+                if capability(environment, "node_pnpm")
+            ]
+            if record["companion_suites"]
+            or {"node-22", "pnpm-10"} & set(record["runner_tools"])
+            else []
+        ),
+        "wsl": any(
+            capability(environment, "archive_only") for environment in environments
+        ),
     }
-    for node in metadata["resolve"]["nodes"]:
-        if node["id"] not in packages:
-            continue
-        for dependency in node.get("deps", []):
-            dependency_id = dependency["pkg"]
-            if dependency_id in reverse_dependencies:
-                reverse_dependencies[dependency_id].add(node["id"])
 
-    affected = set(seeds)
-    pending = list(seeds)
-    while pending:
-        package_id = pending.pop()
-        for dependent in reverse_dependencies.get(package_id, set()):
-            if dependent not in affected:
-                affected.add(dependent)
-                pending.append(dependent)
-    return affected
+
+def estimate_jobs(matrix: list[dict[str, Any]]) -> int:
+    """The expanded job-count estimate for the package fan-out.
+
+    An estimate, not an exact count: each `wsl` entry spawns two jobs (the
+    Linux archive builder plus the Windows-hosted guest), and the reusable
+    workflows may add legs this does not model. The enforced limit is the
+    matrix length (checked against MATRIX_LIMIT), not this number.
+    """
+    return sum(
+        len(entry["check_os"])
+        + len(entry["native_environments"])
+        + (2 if entry["wsl"] else 0)
+        + 1  # lint
+        + len(entry["l2_environments"])
+        + len(entry["browser_environments"])
+        for entry in matrix
+    )
+
+
+def policy_record(record: dict[str, Any]) -> dict[str, Any]:
+    """The rollup-facing shape of one impacted package's policy."""
+    shaped = {
+        "package": record["package"],
+        "gates": record["gates"],
+        "tiers": record["tiers"],
+        "l2_backends": record["l2_backends"],
+        # The rollup needs to know a companion suite was DECLARED: a green
+        # Rust JUnit report must not hide a companion that never ran (R12).
+        "companion_suites": record["companion_suites"],
+    }
+    if not record["gates"]:
+        shaped["exclusion"] = record["exclusion"]
+    return shaped
 
 
 def calculate_scope(
     files: list[str],
     root: Path,
     metadata: dict[str, Any],
-    area_config: list[dict[str, Any]],
+    environments: list[dict[str, Any]],
+    policy: dict[str, dict[str, Any]],
     force_all: bool = False,
     base_lockfile: str | None = None,
 ) -> dict[str, Any]:
     packages = workspace_packages(metadata)
-    area_names = {area["area"] for area in area_config}
 
     if force_all:
         affected_ids = set(packages)
-        affected_areas = area_names
         full_scope = True
     else:
         lock_impacted = None
@@ -860,54 +980,80 @@ def calculate_scope(
                 {package["name"] for package in packages.values()},
             )
 
-        seeds, explicit_areas, full_scope = changed_package_ids(
-            files, root, packages, area_names, lock_impacted
-        )
+        seeds, full_scope = changed_package_ids(files, root, packages, lock_impacted)
         affected_ids = dependent_closure(seeds, metadata, packages)
-        affected_areas = set(explicit_areas)
-        for package_id in affected_ids:
-            area = owner_area(packages[package_id], root, area_names)
-            if area is not None:
-                affected_areas.add(area)
 
-    # `ci: false` areas are declared for ownership but never fan out. A change
-    # inside one still selects its packages (so reverse-dependency closure and
-    # coverage see it) -- it just launches no area job.
-    selected_areas = [
-        {**area, **environment_policy(area)}
-        for area in area_config
-        if area["area"] in affected_areas and area.get("ci", True)
-    ]
-    selected_packages = sorted(packages[package_id]["name"] for package_id in affected_ids)
+    impacted = sorted(packages[package_id]["name"] for package_id in affected_ids)
 
-    # The compile check gates the tests, so it must cover exactly the packages
-    # this run can reach — no wider, or the gate fails on code the branch never
-    # touched. A full-scope run is already every package, so narrowing is a
-    # no-op there and the configured value stands.
-    impacted_names = set(selected_packages)
-    for area in selected_areas:
-        if area.get("check_args"):
-            area["check_args"] = scoped_check_args(area["check_args"], impacted_names)
+    matrix = []
+    for name in impacted:
+        record = policy[name]
+        if not record["gates"]:
+            # A `gates = false` package is still selected (reverse-dependency
+            # closure and coverage see it) — it just launches no jobs.
+            continue
+        package_id = next(
+            package_id for package_id in affected_ids if packages[package_id]["name"] == name
+        )
+        closure = build_closure(package_id, metadata, packages)
+        native: dict[str, list[str]] = {}
+        for member_id in closure:
+            member = policy[packages[member_id]["name"]]
+            for os_name, declared in member["native"].items():
+                bucket = native.setdefault(os_name, [])
+                for entry in declared:
+                    if entry not in bucket:
+                        bucket.append(entry)
+        # Sorted so scope.json is byte-stable across runs (set-iteration order
+        # is PYTHONHASHSEED-dependent); nothing consumes the order, but noisy
+        # diffs obscure real scope changes.
+        native = {os_name: sorted(bucket) for os_name, bucket in native.items()}
+        matrix.append(matrix_record(record, native, environments))
+
+    job_estimate = estimate_jobs(matrix)
+    if len(matrix) > MATRIX_LIMIT:
+        raise RuntimeError(
+            f"the package matrix has {len(matrix)} entries, over GitHub's "
+            f"{MATRIX_LIMIT}-job matrix ceiling; the fan-out must be grouped"
+        )
 
     change_class, preflight_os, preflight_reason = classify_preflight(
-        files, selected_areas, full_scope, force_all
+        files, matrix, full_scope, force_all, environments
+    )
+
+    top_dirs = {
+        Path(packages[package_id]["manifest_path"]).parent.relative_to(root.resolve()).parts[0]
+        for package_id in affected_ids
+    }
+
+    flags = {
+        directory: directory in top_dirs
+        for directory in ("claudine", "darkmatter", "sniff", "biscuit-tui", "playa")
+    }
+    flags["ci_tooling"] = any(
+        raw.replace("\\", "/").removeprefix("./").startswith(CI_TOOLING_PREFIXES)
+        for raw in files
     )
 
     return {
-        "areas": selected_areas,
-        "packages": selected_packages,
+        "packages": impacted,
         "full_scope": full_scope,
         "change_class": change_class,
         "preflight_os": preflight_os,
         "preflight_reason": preflight_reason,
+        "matrix": matrix,
+        "policy": [policy_record(policy[name]) for name in impacted],
+        "job_estimate": job_estimate,
+        "flags": flags,
     }
 
 
 def classify_preflight(
     files: list[str],
-    selected_areas: list[dict[str, Any]],
+    matrix: list[dict[str, Any]],
     full_scope: bool,
     force_all: bool,
+    environments: list[dict[str, Any]],
 ) -> tuple[str, list[str], str]:
     """Classify the change and derive its bootstrap-preflight OS matrix (D3).
 
@@ -929,24 +1075,32 @@ def classify_preflight(
             )
         return "full", list(ALL_RUNNER_OS), reason
 
-    if selected_areas:
-        # Preflight runs on RUNNER labels, so each environment is resolved to the
-        # runner that hosts it — `wsl2-ubuntu` preflights on `windows-latest`.
+    if matrix:
+        # Preflight runs on RUNNER labels, so each environment is resolved to
+        # the runner that hosts it — `wsl2-ubuntu` preflights on
+        # `windows-latest`.
+        runner_of = {environment["name"]: environment["runner"] for environment in environments}
         os_set = {SCOPE_HOST_OS}
-        for area in selected_areas:
-            for environment in area.get("environments", AREA_DEFAULTS["environments"]):
-                os_set.add(ENVIRONMENT_RUNNER_OS.get(environment, environment))
+        for entry in matrix:
+            for environment in entry["native_environments"]:
+                os_set.add(runner_of.get(environment, environment))
+            if entry["wsl"]:
+                os_set.update(
+                    runner_of[environment["name"]]
+                    for environment in environments
+                    if capability(environment, "archive_only")
+                )
         reason = (
-            f"package-local change across {len(selected_areas)} area(s); "
+            f"package-local change across {len(matrix)} package(s); "
             "preflight covers the scope host plus the runner OS hosting each "
-            "area's required environments"
+            "package's required environments"
         )
         return "package", sorted(os_set), reason
 
     return (
         "documentation",
         [SCOPE_HOST_OS],
-        "no build/test areas affected; preflight runs on the scope host only",
+        "no build/test packages affected; preflight runs on the scope host only",
     )
 
 
@@ -966,11 +1120,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    area_config = load_area_config(AREA_CONFIG)
-    validate_area_config(ROOT, area_config)
+    environments = load_environments(ENVIRONMENTS_CONFIG)
+    runner_labels = {environment["runner"] for environment in environments}
     metadata = load_metadata(ROOT)
-    validate_ownership(metadata, ROOT, area_config)
     validate_no_shadow_workspaces(metadata, ROOT)
+    policy = package_ci_policy(workspace_packages(metadata), runner_labels, ROOT)
     base_lockfile = None
     if args.base_lockfile:
         candidate = Path(args.base_lockfile)
@@ -978,7 +1132,7 @@ def main() -> None:
             base_lockfile = candidate.read_text(encoding="utf-8")
 
     scope = calculate_scope(
-        args.files, ROOT, metadata, area_config, args.all, base_lockfile
+        args.files, ROOT, metadata, environments, policy, args.all, base_lockfile
     )
     print(json.dumps(scope, separators=(",", ":")))
 

@@ -22,3 +22,12 @@ test-toolkit = { path = "../tools/test-toolkit" }
 [package.metadata.benchmarks]
 required = false
 reason = "Test/dev infrastructure crate; no measurable hot paths."
+
+# CI exclusion: 6 L1 tests plus 7 browser-tier tests that currently run in no
+# CI job. Promotion is blocked on the canonical just recipe set.
+[package.metadata.ci]
+gates = false
+exclusion-class = "promotion-pending"
+owner = "@yankeeinlondon"
+reason = "6 L1 tests plus 7 browser-tier tests that currently run in NO CI job. Promotion is blocked on the canonical just recipe set (check-canonical) for biscuit-browser-harness/, and on deciding whether it also gates the browser tier."
+expiry = "2026-10-31"

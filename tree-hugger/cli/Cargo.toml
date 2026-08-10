@@ -26,3 +26,8 @@ predicates = "3.1"
 serial_test = "3"
 tempfile = "3.15"
 test-toolkit = { path = "../../tools/test-toolkit" }
+
+# CI policy: tree-hugger-cli owns the area's L2 (real-terminal) tier tests.
+[package.metadata.ci.tests]
+tiers = ["L1", "L2"]
+l2-backends = ["tmux", "wezterm", "kitty"]

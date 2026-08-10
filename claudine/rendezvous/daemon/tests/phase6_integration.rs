@@ -16,12 +16,12 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use rendezvous_client::connect;
+use rendezvous_core::local_endpoint::{LocalEndpoint, test_support::private_endpoint};
 use rendezvous_core::{
     AppendEntryRequest, ApprovePeerRequest, ChunkConfig, ConnectToPeerRequest,
-    CreateInvitationRequest, ListChunkEntriesRequest, ListSessionChunksRequest, PeerConnectionState,
-    QueryProjectionRequest, RendezvousClient, SyncWithPeerRequest,
+    CreateInvitationRequest, ListChunkEntriesRequest, ListSessionChunksRequest,
+    PeerConnectionState, QueryProjectionRequest, RendezvousClient, SyncWithPeerRequest,
 };
-use rendezvous_core::local_endpoint::{LocalEndpoint, test_support::private_endpoint};
 use rendezvous_daemon::local_transport::spawn_local_server;
 use rendezvous_daemon::server::{DaemonConfig, NetworkConfig, ServerHandle};
 use tempfile::TempDir;
@@ -41,10 +41,7 @@ fn base_config(data_dir: PathBuf) -> DaemonConfig {
         .with_networking(networking_config())
 }
 
-async fn boot_daemon(
-    tmp: &TempDir,
-    name: &str,
-) -> (ServerHandle, LocalEndpoint) {
+async fn boot_daemon(tmp: &TempDir, name: &str) -> (ServerHandle, LocalEndpoint) {
     let data_dir = tmp.path().join(name);
     boot_daemon_with(tmp, name, base_config(data_dir)).await
 }
@@ -231,7 +228,10 @@ async fn two_nodes_converge_across_namespaces() {
     // Chunk catalogs for Alice's namespace must match.
     let alice_chunks = collect_chunk_ids(&mut alice_client, &alice_node, "s1").await;
     let bob_replica_chunks = collect_chunk_ids(&mut bob_client, &alice_node, "s1").await;
-    assert_eq!(alice_chunks, bob_replica_chunks, "chunk catalogs must converge");
+    assert_eq!(
+        alice_chunks, bob_replica_chunks,
+        "chunk catalogs must converge"
+    );
 
     alice.shutdown().await.expect("alice shutdown");
     bob.shutdown().await.expect("bob shutdown");
@@ -273,7 +273,10 @@ async fn chunk_rotation_propagates_through_sync() {
         alice_chunks.len() >= 3,
         "expected at least three chunks on Alice, got {alice_chunks:?}",
     );
-    assert!(alice_chunks[0].starts_with("session/"), "chunk ids must be deterministic");
+    assert!(
+        alice_chunks[0].starts_with("session/"),
+        "chunk ids must be deterministic"
+    );
 
     alice_client
         .sync_with_peer(SyncWithPeerRequest {
@@ -305,8 +308,7 @@ async fn restart_replays_state_and_resumes_sync() {
     let bob_dir = tmp.path().join("bob");
 
     // Phase 1: boot both daemons, pair, write on Alice's side only.
-    let (alice, alice_sock) =
-        boot_daemon_with(&tmp, "alice", base_config(alice_dir.clone())).await;
+    let (alice, alice_sock) = boot_daemon_with(&tmp, "alice", base_config(alice_dir.clone())).await;
     let (bob, bob_sock) = boot_daemon_with(&tmp, "bob", base_config(bob_dir.clone())).await;
     let alice_node = alice.node_id();
     let bob_node = bob.node_id();
@@ -326,7 +328,11 @@ async fn restart_replays_state_and_resumes_sync() {
     // Phase 2: re-spawn Alice on the same data directory.
     let (alice2, alice_sock2) =
         boot_daemon_with(&tmp, "alice", base_config(alice_dir.clone())).await;
-    assert_eq!(alice2.node_id(), alice_node, "identity must persist across restart");
+    assert_eq!(
+        alice2.node_id(),
+        alice_node,
+        "identity must persist across restart"
+    );
 
     let mut alice_client2 = connect(&alice_sock2).await.expect("alice2 client");
 
@@ -483,7 +489,10 @@ async fn paired_peer_cannot_write_foreign_namespace() {
 
     // Before sync, Bob has no replica of Alice's data.
     let before = collect_messages(&mut bob_client, &alice_node, "owned").await;
-    assert!(before.is_empty(), "bob should not have alice's data yet; got {before:?}");
+    assert!(
+        before.is_empty(),
+        "bob should not have alice's data yet; got {before:?}"
+    );
 
     // Sync succeeds (Alice pushes her own namespace data).
     alice_client
@@ -618,7 +627,10 @@ async fn poc_demo_end_to_end_flow() {
 
     // Bob should see his own entry.
     let bob_own = collect_messages(&mut bob_client, &bob_node, "main").await;
-    assert!(bob_own.contains(&"bob-0".to_string()), "bob missing own entry");
+    assert!(
+        bob_own.contains(&"bob-0".to_string()),
+        "bob missing own entry"
+    );
 
     // Alice should have a replica of Bob's entry.
     let alice_replica = collect_messages(&mut alice_client, &bob_node, "main").await;
@@ -740,9 +752,7 @@ async fn wait_for_messages(
             return;
         }
         if Instant::now() >= deadline {
-            panic!(
-                "timed out waiting for messages {expected:?}; saw {messages:?}",
-            );
+            panic!("timed out waiting for messages {expected:?}; saw {messages:?}",);
         }
         sleep(Duration::from_millis(100)).await;
     }
@@ -899,7 +909,11 @@ async fn repos_register_converges_across_mesh() {
             .env("GIT_COMMITTER_EMAIL", "test@example.com")
             .output()
             .expect("run git");
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     };
     git(&["init", "--quiet", "--initial-branch=main"]);
@@ -909,8 +923,7 @@ async fn repos_register_converges_across_mesh() {
     git(&["commit", "--quiet", "-m", "init"]);
     let head = git(&["rev-parse", "HEAD"]);
 
-    let alice_config =
-        base_config(tmp.path().join("alice")).with_repo_scan_roots(vec![scan_root]);
+    let alice_config = base_config(tmp.path().join("alice")).with_repo_scan_roots(vec![scan_root]);
     let (alice, alice_socket) = boot_daemon_with(&tmp, "alice", alice_config).await;
     let (bob, bob_socket) = boot_daemon(&tmp, "bob").await;
     let mut alice_client = connect(&alice_socket).await.expect("alice client");

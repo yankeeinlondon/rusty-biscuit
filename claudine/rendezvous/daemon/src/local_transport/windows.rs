@@ -19,17 +19,19 @@
 //! security theater rather than a boundary.
 
 use std::ffi::{OsStr, OsString};
+use std::future::Future;
 use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use rendezvous_core::local_endpoint::LocalEndpoint;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tokio::net::windows::named_pipe::{NamedPipeServer, PipeMode, ServerOptions};
+use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeServer, PipeMode, ServerOptions};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::server::Connected;
+use windows::Win32::Foundation::ERROR_PIPE_BUSY;
 use windows::Win32::Security::SECURITY_ATTRIBUTES;
 
 use crate::private_dir::{SecurityDescriptor, current_user_descriptor};
@@ -58,7 +60,7 @@ pub(super) fn serve(
     // the name, this fails rather than quietly adding an instance to somebody
     // else's pipe and racing them for connections.
     let first = create_instance(&name, &descriptor, true)
-        .map_err(|source| create_error(&endpoint, source))?;
+        .map_err(|source| create_error(&endpoint, &name, source))?;
 
     let (tx, rx) = mpsc::channel(ACCEPT_BACKLOG);
     let task = tokio::spawn(accept_loop(name, descriptor, first, tx));
@@ -187,13 +189,21 @@ fn create_instance(
     }
 }
 
-fn create_error(endpoint: &LocalEndpoint, source: io::Error) -> ServerError {
+fn create_error(endpoint: &LocalEndpoint, name: &OsStr, source: io::Error) -> ServerError {
     match source.kind() {
         // `first_pipe_instance` refused: the name belongs to a daemon that is
         // already running.
         io::ErrorKind::AddrInUse | io::ErrorKind::AlreadyExists => ServerError::EndpointInUse {
             endpoint: endpoint.to_string(),
         },
+        // Windows reports ERROR_ACCESS_DENIED when `first_pipe_instance`
+        // collides. A successful or busy probe distinguishes that collision
+        // from an endpoint this user genuinely cannot access.
+        io::ErrorKind::PermissionDenied if existing_pipe_is_reachable(name) => {
+            ServerError::EndpointInUse {
+                endpoint: endpoint.to_string(),
+            }
+        }
         io::ErrorKind::PermissionDenied => ServerError::AccessDenied {
             endpoint: endpoint.to_string(),
             source,
@@ -202,6 +212,13 @@ fn create_error(endpoint: &LocalEndpoint, source: io::Error) -> ServerError {
             endpoint: endpoint.to_string(),
             source,
         },
+    }
+}
+
+fn existing_pipe_is_reachable(name: &OsStr) -> bool {
+    match ClientOptions::new().open(name) {
+        Ok(_) => true,
+        Err(error) => error.raw_os_error() == Some(ERROR_PIPE_BUSY.0.cast_signed()),
     }
 }
 
@@ -214,11 +231,18 @@ impl EndpointCleanup for PipeCleanup {
     fn release(&mut self) -> Result<(), ServerError> {
         // The acceptor is parked in `connect()` on an instance nothing will
         // ever connect to, so it will not notice the receiver closing on its
-        // own. Aborting drops that instance; the name goes with the last
-        // handle. There is no filesystem entry to remove and therefore no
-        // cleanup that can fail.
+        // own. Aborting requests cancellation; graceful shutdown waits for
+        // the task below so the instance handle is gone before it returns.
+        // There is no filesystem entry to remove and therefore no cleanup
+        // that can fail.
         self.task.abort();
         Ok(())
+    }
+
+    fn wait_released(&mut self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        Box::pin(async move {
+            let _ = (&mut self.task).await;
+        })
     }
 }
 

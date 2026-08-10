@@ -42,12 +42,12 @@ if ($Operation -eq "install") {
         "-LogPath `"$LogPath`""
     ) -join " "
     $action = New-ScheduledTaskAction -Execute $powerShell -Argument $arguments -WorkingDirectory $RepoRoot
-    $trigger = New-ScheduledTaskTrigger -Weekly -WeeksInterval 1 -DaysOfWeek Sunday, Wednesday -At 4am
+    $trigger = New-ScheduledTaskTrigger -Daily -DaysInterval 1 -At 4am
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 2)
     $userId = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
     $principal = New-ScheduledTaskPrincipal -UserId $userId -LogonType S4U -RunLevel Limited
     Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description "Keep rusty-biscuit Cargo artifacts within the Windows storage budget." -Force | Out-Null
-    Write-Output "Installed scheduled task '$taskName' (Sunday and Wednesday at 04:00)."
+    Write-Output "Installed scheduled task '$taskName' (daily at 04:00)."
     exit 0
 }
 
@@ -58,10 +58,13 @@ if ($Operation -eq "uninstall") {
 }
 
 if ($Operation -eq "status") {
+    # Out-String renders now rather than leaving objects for the formatter to
+    # lay out at pipeline end -- the `exit` below discards anything still
+    # buffered there, which silently swallows the whole report.
     Get-ScheduledTask -TaskName $taskName -ErrorAction Stop |
-        Select-Object TaskName, State, Description
+        Select-Object TaskName, State, Description | Format-List | Out-String
     Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction Stop |
-        Select-Object LastRunTime, LastTaskResult, NextRunTime
+        Select-Object LastRunTime, LastTaskResult, NextRunTime | Format-List | Out-String
     exit 0
 }
 

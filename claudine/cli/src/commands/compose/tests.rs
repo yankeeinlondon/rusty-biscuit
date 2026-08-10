@@ -421,13 +421,19 @@ fn sigint_during_prep_sets_interrupt_flag_and_renders_notice() {
         libc::kill(libc::getpid(), libc::SIGINT);
     }
 
-    // Give the kernel a moment to deliver the signal.
-    std::thread::sleep(std::time::Duration::from_millis(50));
-
-    assert!(
-        crate::output::user_interrupt_observed(),
-        "SIGINT should set the user-interrupt flag"
-    );
+    // Poll for the flag rather than sleeping a fixed interval: under
+    // full-suite contention the thread the kernel delivers the signal to
+    // may not be scheduled within a small fixed window, which flaked the
+    // previous 50ms sleep. The deadline is generous; a working handler
+    // sets the flag in well under a millisecond.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !crate::output::user_interrupt_observed() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "SIGINT should set the user-interrupt flag"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
 
     // The notice formatting should produce a non-empty string containing
     // the prompt argument.

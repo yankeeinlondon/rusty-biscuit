@@ -29,12 +29,10 @@ fn nextest_config() -> String {
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()))
 }
 
-/// The CI profile must NOT blanket-retry: a deterministic compile/assertion/
-/// timeout failure would otherwise run up to 4× (D6). Retries survive only as a
-/// narrow, documented override for the resource-sensitive real-terminal tier,
-/// and CI must emit JUnit.
+/// The CI profile must not retry failures, either globally or through a tier
+/// override. A test that passes only on retry still represents a failed run.
 #[test]
-fn ci_profile_retry_policy_is_scoped_not_blanket() {
+fn ci_profile_disables_all_retries() {
     let config = nextest_config();
     let ci_start = config
         .find("[profile.ci]")
@@ -49,10 +47,21 @@ fn ci_profile_retry_policy_is_scoped_not_blanket() {
         ci_head.contains("retries = 0"),
         "[profile.ci] must set `retries = 0` so a deterministic L1 failure runs once"
     );
-    assert!(
-        config.contains("test(/level2_/)") && config.contains("retries = 2"),
-        "a scoped retry override must remain for the resource-sensitive L2 tier"
-    );
+    for tier in ["level2_", "browser_"] {
+        let marker = format!("filter = 'test(/{tier}/)'");
+        let override_start = config[ci_start..]
+            .find(&marker)
+            .map(|relative| ci_start + relative)
+            .unwrap_or_else(|| panic!("[profile.ci] must define the {tier} override"));
+        let override_end = config[override_start..]
+            .find("[[profile.ci.overrides]]")
+            .map(|relative| override_start + relative)
+            .unwrap_or(config.len());
+        assert!(
+            config[override_start..override_end].contains("retries = 0"),
+            "the {tier} CI override must keep retries disabled"
+        );
+    }
     assert!(
         config.contains(r#"junit = { path = "test-results.xml" }"#),
         "the CI profile must emit JUnit for dashboards and per-shard artifacts"

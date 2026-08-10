@@ -134,9 +134,14 @@ fn clean_check_report_summary_matches_phase_1_snapshot() {
     let output = run_gen(fixture.path(), &["check"]);
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("generator output must be UTF-8");
+    // The models-catalog staleness WARNING is wall-clock dependent (the
+    // fixture copies the real committed artifact, whose `generated_at` ages),
+    // so it cannot appear in a fixed snapshot. Its trigger and wording are
+    // pinned by the clock-parameterized unit tests in `artifact.rs`.
     let summary = stdout
         .lines()
         .filter(|line| !line.starts_with(' '))
+        .filter(|line| !line.starts_with("WARNING: models-catalog artifact is stale"))
         .collect::<Vec<_>>()
         .join("\n");
 

@@ -89,3 +89,7 @@ tokio = { version = "1", features = ["rt", "macros"] }
 [package.metadata.benchmarks]
 required = false
 reason = "Audio playback dispatch dominated by OS-native player processes; no measurable in-process hot paths."
+
+# CI policy: playa links ALSA and PulseAudio on Linux.
+[package.metadata.ci.native]
+ubuntu-latest = ["libasound2-dev", "libpulse-dev"]

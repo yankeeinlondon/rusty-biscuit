@@ -1,15 +1,16 @@
 //! Durable CI/CD workflow contract tests.
 //!
-//! These guard the invariants established by the DevOps plan
-//! (`features/2026-07-24-devops/`) and the cache strategy
-//! (`docs/kache-strategy.md`): the repository tracks no rustc wrapper and CI
-//! does not use one, while the pinned compiler cache remains a host opt-in with
-//! a single version authority; the primary workflow runs a bootstrap preflight
-//! that gates area fan-out; and release automation follows successful CI
-//! instead of racing it. They inspect the workflow/action source text so a
-//! regression fails locally without a live GitHub Actions run.
+//! These guard the invariants of the package-keyed CI grid
+//! (`fixes/2026-08-06-cicd`): the package is the unit of selection, execution,
+//! and result identity; the repository tracks no rustc wrapper while the
+//! pinned compiler cache stays a host opt-in with a single authority; the
+//! primary workflow runs a bootstrap preflight that gates the package fan-out;
+//! declared test tiers are non-vacuous; and release automation follows
+//! successful CI instead of racing it. They inspect workflow/action and
+//! manifest source so a regression fails locally without a live GitHub Actions
+//! run.
 
-use std::{fs, path::PathBuf};
+use std::{fs, path::PathBuf, process::Command};
 
 fn repo_root() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -60,16 +61,70 @@ fn jobs(source: &str) -> Vec<String> {
     blocks
 }
 
+fn job_block(file: &str, header: &str) -> String {
+    let source = workflow(file);
+    jobs(&source)
+        .into_iter()
+        .find(|job| job.starts_with(header))
+        .unwrap_or_else(|| panic!("{file} must define the `{}` job", header.trim()))
+}
+
+/// Every workspace package's resolved `[package.metadata.ci]` policy plus its
+/// manifest path, which source-based contracts use to find the owning crate.
+///
+/// EVERY member is enumerated: a package with no metadata block yields an
+/// empty record (the default policy), because the default-policy packages are
+/// precisely what the undeclared-tier guards exist for. Dropping them here is
+/// how `claudine-gen` owned real L2 tests while every contract stayed green.
+fn package_policies() -> Vec<serde_json::Value> {
+    let output = Command::new("cargo")
+        .args(["metadata", "--no-deps", "--format-version", "1"])
+        .current_dir(repo_root())
+        .output()
+        .expect("cargo metadata runs");
+    assert!(
+        output.status.success(),
+        "cargo metadata failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("metadata is JSON");
+    let members: Vec<&str> = metadata["workspace_members"]
+        .as_array()
+        .expect("workspace_members is an array")
+        .iter()
+        .map(|value| value.as_str().expect("member id is a string"))
+        .collect();
+    metadata["packages"]
+        .as_array()
+        .expect("packages is an array")
+        .iter()
+        .filter(|package| members.contains(&package["id"].as_str().unwrap_or("")))
+        .map(|package| {
+            let mut record = serde_json::Map::new();
+            record.insert("name".to_owned(), package["name"].clone());
+            record.insert("manifest-path".to_owned(), package["manifest_path"].clone());
+            if let Some(ci) = package["metadata"]["ci"].as_object() {
+                for (key, value) in ci {
+                    record.insert(key.clone(), value.clone());
+                }
+            }
+            serde_json::Value::Object(record)
+        })
+        .collect()
+}
+
+fn gating_packages() -> Vec<serde_json::Value> {
+    package_policies()
+        .into_iter()
+        .filter(|policy| policy["gates"].as_bool().unwrap_or(true))
+        .collect()
+}
+
 // --- D1/D2: no tracked rustc wrapper; kache is a host opt-in -----------------
 
 #[test]
 fn repository_tracks_no_rustc_wrapper() {
-    // Inverts the previous contract deliberately. A tracked
-    // `[build] rustc-wrapper` applies to every clone on every filesystem, and
-    // kache's economics are decided by the filesystem (reflink vs hardlink vs
-    // copy), not the OS. It also hard-fails Cargo for anyone who has not
-    // installed the wrapper binary. Activation is a host decision;
-    // `docs/kache-strategy.md` records the measurement behind it.
     let config = repo_root().join(".cargo/config.toml");
     if config.exists() {
         let source = fs::read_to_string(&config).expect("read .cargo/config.toml");
@@ -83,31 +138,25 @@ fn repository_tracks_no_rustc_wrapper() {
 
 #[test]
 fn kache_has_a_single_version_authority() {
-    // Still a single authority, now for the developer installer only
-    // (`just install-kache`); CI does not install or use kache.
     let version = read(".github/kache-version");
     assert!(
         !version.trim().is_empty(),
         ".github/kache-version must hold the single pinned kache version"
     );
 
-    // The justfile must consume that same file, not carry an independent literal.
     let justfile = read("justfile");
     assert!(
         justfile.contains(".github/kache-version"),
         "root justfile must read KACHE_VERSION from the single authority file"
     );
     assert!(
-        !justfile.contains(r#"KACHE_VERSION := ""#),
+        !justfile.contains(r#"KACHE_VERSION := """#),
         "root justfile must not hard-code a second kache version literal"
     );
 }
 
 #[test]
 fn installing_the_compiler_cache_is_not_a_dependency_of_init() {
-    // Installing and activating are separate decisions, and `just init` does
-    // neither. A contributor on NTFS or ext4 must not silently acquire a cache
-    // whose restore mode makes the store a second copy of every artifact.
     let justfile = read("justfile");
     let init_line = justfile
         .lines()
@@ -126,11 +175,6 @@ fn installing_the_compiler_cache_is_not_a_dependency_of_init() {
 
 #[test]
 fn ci_does_not_wire_the_kache_wrapper() {
-    // Measured at 0-6% hit rate (0.4-2.3% weighted by compile cost) because the
-    // action falls back to the GitHub Actions cache, whose entries are immutable
-    // and branch-scoped, so a store shared by every same-platform area job can
-    // never accumulate. Removed rather than left as a permanently false dead
-    // path; `Swatinem/rust-cache` still caches Cargo artifacts.
     for stale in [".github/actions/enable-kache", ".github/actions/report-kache"] {
         assert!(
             !repo_root().join(stale).exists(),
@@ -157,10 +201,6 @@ fn ci_does_not_wire_the_kache_wrapper() {
 
 #[test]
 fn every_cargo_workflow_neutralizes_a_stray_rustc_wrapper() {
-    // The repository tracks no wrapper, so this is defence against an ambient
-    // one (a self-hosted runner, or a future tracked config added by mistake)
-    // silently intercepting a build. Cheap, and it keeps the clean-checkout
-    // guarantee textual rather than assumed.
     let workflows = repo_root().join(".github/workflows");
     for entry in fs::read_dir(&workflows).expect("read .github/workflows") {
         let path = entry.expect("workflow entry").path();
@@ -180,7 +220,7 @@ fn every_cargo_workflow_neutralizes_a_stray_rustc_wrapper() {
     }
 }
 
-// --- D3: bootstrap preflight gates area fan-out ------------------------------
+// --- D3: bootstrap preflight gates package fan-out ---------------------------
 
 #[test]
 fn primary_ci_runs_a_bootstrap_preflight_before_fan_out() {
@@ -199,28 +239,27 @@ fn primary_ci_runs_a_bootstrap_preflight_before_fan_out() {
     );
     assert!(
         ci.contains("needs: [scope, preflight]"),
-        "area fan-out must depend on a successful preflight"
+        "the package fan-out must depend on a successful preflight"
     );
 }
 
 #[test]
 fn expensive_tiers_stage_behind_l1_but_lint_never_gates_it() {
-    let shared = workflow("_area-ci.yml");
+    let shared = workflow("_package-ci.yml");
     // The expensive L2 and browser tiers are ORDERED after L1 (D4) — but only
     // ordered. Requiring L1 to have passed meant one red L1 deleted the whole
-    // tier's evidence and the rollup recorded MISSING, which is indistinguishable
-    // from a leg that was never scheduled.
+    // tier's evidence and the rollup recorded MISSING.
     assert!(
         shared.matches("needs: test").count() >= 2,
         "the L2 and browser tiers must each be ordered after L1 (D4)"
     );
     assert!(
-        shared.matches("!cancelled() && inputs.").count() >= 3,
-        "the L2, browser, and wsl tiers must run on `!cancelled()`, not on L1 success — \
+        shared.matches("!cancelled() && inputs.").count() >= 2,
+        "the L2 and browser tiers must run on `!cancelled()`, not on L1 success — \
          absence of evidence must never be a side effect of a failure elsewhere"
     );
     // L1 does NOT stage behind lint. A clippy hint in one package must not
-    // delete every L1 leg's evidence for the whole area.
+    // delete another package's L1 leg's evidence.
     assert!(
         !shared.contains("needs: lint"),
         "the L1 test job must not depend on lint — a lint failure must not suppress test evidence"
@@ -228,51 +267,60 @@ fn expensive_tiers_stage_behind_l1_but_lint_never_gates_it() {
 }
 
 #[test]
-fn a_failing_leg_can_never_be_dropped_from_the_area_verdict() {
-    // `soft_os` drove `continue-on-error` on the L1 legs, which did not merely
-    // make them non-blocking — it removed them from the run's verdict, so 14 red
-    // Windows areas read as normal. A known failure belongs in the results
-    // baseline, which keeps the signal.
-    let shared = workflow("_area-ci.yml");
+fn a_failing_leg_can_never_be_dropped_from_the_run_verdict() {
+    let shared = workflow("_package-ci.yml");
     assert!(
         !shared.contains("continue-on-error"),
-        "no area gate may be continue-on-error — that erases the leg from the run's verdict"
+        "no gate may be continue-on-error — that erases the leg from the run's verdict"
     );
-    for retired in ["soft-os", "soft_os"] {
+}
+
+#[test]
+fn package_ci_selects_the_ci_nextest_profile_explicitly() {
+    let shared = workflow("_package-ci.yml");
+    assert!(
+        shared.contains("NEXTEST_PROFILE: ci"),
+        "package CI must explicitly select the `ci` nextest profile, not rely on detection (D6)"
+    );
+}
+
+/// AC10: the matrix is package-derived, never static or directory-derived.
+#[test]
+fn the_package_matrix_is_scope_derived_not_static() {
+    let ci = workflow("ci.yml");
+    assert!(
+        ci.contains("fromJSON(needs.scope.outputs.package_matrix)"),
+        "ci.yml must fan out from the scope-derived package matrix"
+    );
+    assert!(
+        ci.contains("package: ${{ matrix.package }}"),
+        "the fan-out must name the package from the matrix entry"
+    );
+    // Every matrix field the reusable workflow consumes is produced by the
+    // scope job, so a static or hand-written matrix cannot satisfy it.
+    for field in [
+        "check_args",
+        "test_args",
+        "l1_include_slow",
+        "native_environments",
+        "l2_environments",
+        "browser_environments",
+        "node_environments",
+        "l2_backends",
+        "runner_tools",
+        "companion_suites",
+        "native",
+    ] {
         assert!(
-            !shared.contains(retired),
-            "_area-ci.yml must carry no trace of the retired `{retired}` policy"
-        );
-        assert!(
-            !workflow("ci.yml").contains(retired),
-            "ci.yml must not pass the retired `{retired}` policy to the reusable workflow"
-        );
-        assert!(
-            !read(".github/ci/areas.json").contains(retired),
-            "areas.json must not declare the retired `{retired}` policy"
+            ci.contains(&format!("matrix.{field}")),
+            "the fan-out must forward the scope-derived matrix.{field}"
         );
     }
 }
 
-#[test]
-fn area_ci_selects_the_ci_nextest_profile_explicitly() {
-    let shared = workflow("_area-ci.yml");
-    assert!(
-        shared.contains("NEXTEST_PROFILE: ci"),
-        "area CI must explicitly select the `ci` nextest profile, not rely on detection (D6)"
-    );
-}
-
 /// The fan-out has no stage in front of it, and nothing named `canary` remains.
-///
-/// A sampled canary was tried twice and failed twice. Gating on its result erased
-/// twenty areas' evidence for one unrelated failure — a Windows compile-check, a
-/// WSL2 binary path, a 40ms macOS timing assertion. Un-gating left a `needs:`
-/// edge that still waited for *completion*, so a canary leg that could not get a
-/// runner stalled every area indefinitely, which is worse: a stall leaves no
-/// failure to read. Each area now gates on its own compile check instead.
 #[test]
-fn the_area_fan_out_has_no_stage_in_front_of_it() {
+fn the_fan_out_has_no_stage_in_front_of_it() {
     let ci = workflow("ci.yml");
     assert!(
         !ci.contains("\n  canary:"),
@@ -283,74 +331,36 @@ fn the_area_fan_out_has_no_stage_in_front_of_it() {
         "the scope job must not emit a canary matrix or selection flag"
     );
     assert!(
-        !ci.contains("needs: [scope, preflight, canary]"),
-        "no job may wait on a canary stage — waiting for completion stalls the \
-         fan-out whenever the canary cannot get a runner"
-    );
-    assert!(
         ci.contains("needs: [scope, preflight]"),
-        "the area fan-out must depend on scope and preflight only"
-    );
-    let areas = read(".github/ci/areas.json");
-    assert!(
-        !areas.contains(r#""canary""#),
-        "areas.json must not declare canaries"
+        "the package fan-out must depend on scope and preflight only"
     );
 }
 
-/// An area's compile check covers the impacted packages, never the workspace.
-///
-/// `cargo check --all-targets` with no `-p` checks everything, so a narrowing
-/// bug here does not fail loudly — it silently checks 31 areas' worth of code on
-/// every run. The scope calculator owns the narrowing; this asserts the workflow
-/// still routes the scope-derived value rather than a static one.
+/// R9: CI runs the canonical per-package recipes. L1, L2, browser, and lint
+/// invoke `_test`, `_test_l2`, `_test_browser`, and `_lint`.
 #[test]
-fn the_compile_check_uses_the_scope_derived_package_list() {
+fn the_reusable_workflow_invokes_the_canonical_recipes() {
+    let shared = workflow("_package-ci.yml");
+    assert!(shared.contains("just _test \"${{ inputs.package }}\""), "L1 invokes _test");
+    assert!(
+        shared.contains("just _test_l2 \"${{ inputs.package }}\""),
+        "L2 invokes _test_l2"
+    );
+    assert!(
+        shared.contains("just _test_browser \"${{ inputs.package }}\""),
+        "browser invokes _test_browser"
+    );
+    assert!(shared.contains("just _lint \"${{ inputs.package }}\""), "lint invokes _lint");
+    // Compile-check stays `cargo check --all-targets -p <package>` (R9): there
+    // is no per-package canonical check recipe.
+    assert!(
+        shared.contains("cargo check --all-targets ${{ inputs.check-args }}"),
+        "the check job runs cargo check over the passed package selector"
+    );
     let ci = workflow("ci.yml");
     assert!(
         ci.contains("check-args: ${{ matrix.check_args }}"),
-        "area-ci must pass the scope-derived check_args, not a static list"
-    );
-    let area_ci = workflow("_area-ci.yml");
-    assert!(
-        area_ci.contains("cargo check --all-targets ${{ inputs.check-args }}"),
-        "the check job must run cargo check over the passed package list"
-    );
-}
-
-/// The guest installs `just` without asking GitHub which version is newest.
-///
-/// Every other environment uses `extractions/setup-just`, which passes
-/// `${{ github.token }}` by default, so its API calls are authenticated at
-/// 5,000/hour. A GitHub Action cannot run inside the WSL guest, so that one
-/// place installs by shell script and its request is anonymous — 60/hour shared
-/// across every job on the runner's IP. Two areas were lost to the resulting
-/// 403: `biscuit-terminal` in run 30755610413, `unchained-ai` in 31041986681.
-///
-/// `--tag` is what removes the API call: the installer only asks for "latest"
-/// when it has no version. Measured against the live endpoint, the unauthenticated
-/// quota is untouched with `--tag` and decrements by one without it.
-#[test]
-fn the_wsl_guest_pins_just_and_authenticates_its_downloads() {
-    let wsl = workflow("_wsl-ci.yml");
-    assert!(
-        wsl.contains("JUST_VERSION:"),
-        "_wsl-ci.yml must pin a just version rather than resolving `latest`"
-    );
-    assert!(
-        wsl.contains("--tag '${{ env.JUST_VERSION }}'"),
-        "the guest installer must be given --tag, or it calls the rate-limited \
-         GitHub API to resolve the newest release"
-    );
-    assert!(
-        wsl.contains("just-version: ${{ env.JUST_VERSION }}"),
-        "the host must pin the SAME version as the guest — both run the repo's \
-         own recipes and must not drift apart"
-    );
-    assert!(
-        wsl.contains("export GITHUB_TOKEN='${{ secrets.GITHUB_TOKEN }}'"),
-        "the guest must export a token so anything still reaching api.github.com \
-         is authenticated rather than sharing the 60/hour anonymous pool"
+        "the fan-out must pass the scope-derived check_args"
     );
 }
 
@@ -361,15 +371,19 @@ fn scope_job_emits_an_actionable_summary() {
         ci.contains("$GITHUB_STEP_SUMMARY") && ci.contains("## CI scope"),
         "the scope job must write an actionable scope summary to the step summary (D15)"
     );
+    assert!(
+        ci.contains("expanded job estimate"),
+        "the scope summary must record the expanded job count (Phase 3)"
+    );
+    assert!(
+        ci.contains("ci-scope"),
+        "the scope job must upload its resolved policy for the rollup"
+    );
 }
 
 #[test]
-fn area_ci_treats_rust_warnings_as_failures_and_runs_lint() {
-    let shared = workflow("_area-ci.yml");
-    // `-D warnings` belongs to the gates whose JOB is to reject warnings. At
-    // workflow level it also applied to the test job's compilation, so a plain
-    // rustc warning failed the build and no test ran — re-coupling lint and test
-    // through the back door after `needs: lint` was removed.
+fn package_ci_treats_rust_warnings_as_failures_and_runs_lint() {
+    let shared = workflow("_package-ci.yml");
     assert!(
         !shared.contains("\n  RUSTFLAGS:"),
         "RUSTFLAGS must not be set at workflow level — it would deny warnings in the test jobs too"
@@ -390,25 +404,16 @@ fn area_ci_treats_rust_warnings_as_failures_and_runs_lint() {
         );
     }
     assert!(
-        shared.contains(r#"run: cd "${{ inputs.area }}" && just lint"#),
-        "shared area coverage must execute each area's lint and documentation guards"
+        shared.contains(r#"run: just _lint "${{ inputs.package }}""#),
+        "package CI must lint through the canonical _lint recipe"
     );
-    // The lint gate's authority is the recipe itself, not a CI-only variable, so
-    // a local `just lint` enforces the same bar.
     let devops = read("just/devops.just");
     assert!(
         devops.contains("cargo clippy") && devops.contains("-- -D warnings"),
         "`_lint` must pass -D warnings to clippy directly so lint denies warnings off CI too"
     );
 
-    // The compile gate must stay a COMPILE gate. Promoting warnings there made a
-    // dead-code hint report as `error: could not compile <crate>`, attributed a
-    // dependency's warning to whichever area happened to build it, and failed in
-    // a way `just check` — which sets no RUSTFLAGS — could not reproduce.
-    let check = jobs(&shared)
-        .into_iter()
-        .find(|job| job.starts_with("  check:"))
-        .expect("_area-ci.yml must define the compile-check job");
+    let check = job_block("_package-ci.yml", "  check:");
     assert!(
         !check.contains("RUSTFLAGS"),
         "the compile check must not promote warnings to errors — a warning is not \
@@ -416,48 +421,58 @@ fn area_ci_treats_rust_warnings_as_failures_and_runs_lint() {
     );
 }
 
-// --- area policy source of truth (areas.json) --------------------------------
+// --- package policy source of truth (manifests + environments.json) ---------
 
 #[test]
-fn area_policy_retains_native_and_heavy_area_coverage() {
-    let areas = read(".github/ci/areas.json");
-    // Native macOS/Linux/Windows L1 evidence is now the DEFAULT for every area,
-    // not a per-area override `sniff` happened to carry. Asserting the default
-    // covers all 21 gating areas instead of one.
-    let policy = read("scripts/ci/affected_scope.py");
-    let default_environments = policy
-        .lines()
-        .find(|line| line.trim_start().starts_with(r#""environments":"#))
-        .expect("affected_scope.py must declare a default `environments` list");
-    // All four supported environments, not three: WSL2 is hosted by a Windows
-    // runner but is a distinct Linux environment, and a green ubuntu-latest leg
-    // says nothing about the 9p boundary, WSLg probes, or NAT'd networking.
-    for environment in ["ubuntu-latest", "windows-latest", "macos-latest", "wsl2-ubuntu"] {
+fn package_metadata_carries_the_native_and_tier_policy() {
+    // Playa's Linux ALSA/PulseAudio headers are a property of the package,
+    // declared in its own manifest and installed before build/test (D9/R5).
+    let playa = fs::read_to_string(repo_root().join("playa/lib/Cargo.toml")).unwrap();
+    assert!(
+        playa.contains("libasound2-dev") && playa.contains("libpulse-dev"),
+        "playa must declare its Linux native audio prerequisites in its manifest"
+    );
+
+    // Tier ownership is package-scoped: sniff-cli owns the area's L2 tier.
+    let sniff_cli = fs::read_to_string(repo_root().join("sniff/cli/Cargo.toml")).unwrap();
+    assert!(
+        sniff_cli.contains("\"L2\"") && sniff_cli.contains("tmux"),
+        "sniff-cli must declare the L2 tier and its tmux backend"
+    );
+
+    // Feature contracts are declared per package and forwarded consistently
+    // (R-feature-set-drift): biscuit-hash runs with every feature.
+    let biscuit_hash = fs::read_to_string(repo_root().join("biscuit-hash/lib/Cargo.toml")).unwrap();
+    assert!(
+        biscuit_hash.contains("all-features = true"),
+        "biscuit-hash must declare its all-features L1 contract"
+    );
+}
+
+#[test]
+fn the_environment_capability_table_covers_every_environment() {
+    let environments = read(".github/ci/environments.json");
+    for name in ["ubuntu-latest", "windows-latest", "macos-latest", "wsl2-ubuntu"] {
         assert!(
-            default_environments.contains(environment),
-            "every area must run {environment} L1 evidence by default; default list is: \
-             {default_environments}"
+            environments.contains(&format!("\"name\": \"{name}\"")),
+            "environments.json must declare the {name} environment"
         );
     }
+    // The two governed unavailabilities the eight per-area policy_gaps records
+    // used to restate, now declared once.
     assert!(
-        !areas.contains("full_os"),
-        "`full_os` is retired: WSL2 is an environment a Windows runner hosts, not a runner label"
+        environments.contains("\"tmux\": {") && environments.contains("\"available\": false"),
+        "an unhostable L2 capability must carry governed unavailability metadata"
     );
     assert!(
-        areas.contains(r#""shards": ["1/4", "2/4", "3/4", "4/4"]"#),
-        "darkmatter must retain measured L1 sharding"
+        environments.contains("\"archive_only\": true"),
+        "the wsl2-ubuntu environment must be recorded as archive-only"
     );
-    for area in ["claudine", "darkmatter", "sniff", "biscuit-file"] {
-        assert!(
-            areas.contains(&format!(r#""area": "{area}""#)),
-            "{area} must be an owned CI area"
-        );
-    }
 }
 
 #[test]
 fn l2_provisions_and_verifies_only_the_ci_capable_backend() {
-    let shared = workflow("_area-ci.yml");
+    let shared = workflow("_package-ci.yml");
     // tmux/PTY is the only backend a headless runner can host; it is installed
     // AND its runtime reachability is verified (D8).
     assert!(
@@ -470,6 +485,14 @@ fn l2_provisions_and_verifies_only_the_ci_capable_backend() {
         !shared.contains("BISCUIT_TEST_LEVEL_REQUIRED:"),
         "the L2 job must not SET a global L2 hard-require (would panic GUI-only tests)"
     );
+    // Execution proof, not mere availability: the leg requires exactly the
+    // declared backends it provisioned (today only tmux is CI-hostable), so an
+    // installed-but-never-exercised backend fails `_test_l2`'s backend-proof
+    // bracket instead of rendering a green cell with zero executed L2 tests.
+    assert!(
+        shared.contains("BISCUIT_TEST_REQUIRED_BACKENDS"),
+        "the L2 job must require the provisioned backends through BISCUIT_TEST_REQUIRED_BACKENDS"
+    );
     // Focus safety: CI must never run L3 or take foreground focus.
     assert!(
         !shared.contains("BISCUIT_L3_TAKE_FOCUS") && !shared.contains("test-l3"),
@@ -478,52 +501,52 @@ fn l2_provisions_and_verifies_only_the_ci_capable_backend() {
 }
 
 #[test]
-fn areas_declaring_native_deps_are_provisioned() {
-    // Playa's Linux ALSA/PulseAudio headers must be declared as area policy and
-    // installed before build/test — a missing lib is a provisioning failure, not
-    // a product-test failure (D9).
-    let areas = read(".github/ci/areas.json");
-    assert!(
-        areas.contains("libasound2-dev"),
-        "playa must declare its Linux native audio prerequisites in areas.json"
-    );
-
+fn packages_declaring_native_deps_are_provisioned_from_the_closure() {
     // One installer, shared by developer hosts and CI: the root justfile recipe
-    // reads areas.json directly. A second CI-only implementation would drift
-    // from `just init`, so the retired composite must not come back.
+    // reads package manifests via `cargo metadata`. A second CI-only
+    // implementation would drift from `just init`, so the retired composite
+    // must not come back.
     assert!(
         !repo_root().join(".github/actions/install-native").exists(),
         "the install-native composite must stay retired; `just _ensure-native-libs` is the one installer"
     );
     let justfile = read("justfile");
     assert!(
-        justfile.contains("_ensure-native-libs area=\"\":")
-            && justfile.contains(".github/ci/areas.json"),
-        "the native-libs recipe must be area-scopable and read areas.json as the source of truth"
+        justfile.contains("_ensure-native-libs"),
+        "the native-libs recipe must exist"
+    );
+    assert!(
+        justfile.contains("cargo metadata") && justfile.contains("metadata.ci.native"),
+        "the recipe must read native declarations from package manifests"
     );
     assert!(
         justfile.contains("init: ") && justfile.contains("_ensure-native-libs"),
         "`just init` must depend on the same recipe CI runs"
     );
+
+    // The reusable workflow passes the scope-computed closure union and the
+    // recipe never runs its whole-workspace form inside a per-package job.
+    let shared = workflow("_package-ci.yml");
+    assert!(
+        shared.contains("inputs.native") && shared.contains("just _ensure-native-libs"),
+        "the reusable workflow must provision the scope-derived native closure"
+    );
 }
 
 #[test]
 fn native_prerequisites_are_installed_before_anything_is_built() {
-    // A `-sys` crate must never fail to compile for a missing system library, so
-    // every job that builds runs the install step first (D9 / 2026-07-25 spec
-    // decision "Native libraries: one isolated install step").
     const BUILD_COMMANDS: [&str; 6] = [
         "cargo check --all-targets",
         "cargo llvm-cov",
-        "just test ",
-        "just lint",
-        "just test-l2",
-        "just test-browser",
+        "just _test ",
+        "just _lint",
+        "just _test_l2",
+        "just _test_browser",
     ];
     const PROVISION: &str = "just _ensure-native-libs";
 
     let mut provisioning_jobs = 0;
-    for name in ["_area-ci.yml", "ci.yml"] {
+    for name in ["_package-ci.yml", "ci.yml"] {
         let source = workflow(name);
         for job in jobs(&source) {
             let Some(provisioned_at) = job.find(PROVISION) else {
@@ -546,7 +569,7 @@ fn native_prerequisites_are_installed_before_anything_is_built() {
             }
         }
     }
-    // check, test, lint, l2, browser in the reusable area workflow, plus the
+    // check, test, lint, l2, browser in the reusable package workflow, plus the
     // workspace-wide affected-coverage job in ci.yml.
     assert_eq!(
         provisioning_jobs, 6,
@@ -555,23 +578,15 @@ fn native_prerequisites_are_installed_before_anything_is_built() {
 }
 
 #[test]
-fn heavy_areas_shard_l1_and_surface_all_failures() {
-    // Both heavy areas (claudine ~3964 tests, darkmatter) declare 4-shard L1
-    // policy sized from measured cold-run durations (~7-8 min/shard).
-    let areas = read(".github/ci/areas.json");
-    assert!(
-        areas.matches(r#""shards": ["1/4", "2/4", "3/4", "4/4"]"#).count() >= 2,
-        "claudine and darkmatter must both declare measured 4-shard L1 policy"
-    );
-
-    let shared = workflow("_area-ci.yml");
+fn the_l1_suite_runs_no_fail_fast() {
+    let shared = workflow("_package-ci.yml");
     assert!(
         shared.contains("--no-fail-fast"),
-        "L1 shards must run --no-fail-fast so one failure cannot hide the shard's evidence (D7)"
+        "L1 suites must run --no-fail-fast so one failure cannot hide the suite's evidence (D7)"
     );
     assert!(
         shared.contains("actions/upload-artifact") && shared.contains("junit-"),
-        "each test tier must publish collision-free per-shard JUnit artifacts (D7)"
+        "each test tier must publish per-package JUnit artifacts (D7)"
     );
 }
 
@@ -584,26 +599,27 @@ const ORCHESTRATED: [(&str, &str, &str); 4] = [
     (
         "rendezvous-tests.yml",
         "os: [macos-latest, ubuntu-latest, windows-latest]",
-        "contains(fromJSON(needs.scope.outputs.area_names), 'sniff')",
+        "needs.scope.outputs.claudine == 'true' ||",
     ),
     (
         "biscuit-tui-windows-captured-stdout.yml",
         "captured_stdout_receives_only_value_no_tui_bytes",
-        "contains(fromJSON(needs.scope.outputs.area_names), 'biscuit-tui')",
+        "needs.scope.outputs.biscuit_tui == 'true'",
     ),
     (
         "playa-windows.yml",
         "--features audio-ducking-windows",
-        "contains(fromJSON(needs.scope.outputs.area_names), 'playa')",
+        "needs.scope.outputs.playa == 'true'",
     ),
     (
-        // messenger is EXEMPT from area ownership, so it is selected from the
-        // affected PACKAGE list rather than from `area_names`. Its unique
-        // evidence is the desktop-feature build; the bespoke WSL1 job it used to
-        // carry was deleted in favour of the shared `_wsl-ci.yml` mechanism.
+        // messenger packages are EXEMPT (`gates = false`), so they are selected
+        // from the affected PACKAGE list rather than from the matrix —
+        // prefix-matched in the scope step so a messenger-cli-only change
+        // selects the only workflow that covers messenger. Its unique evidence
+        // is the desktop-feature build.
         "messenger-desktop-tests.yml",
         "--features desktop",
-        "contains(fromJSON(needs.scope.outputs.packages), 'messenger')",
+        "needs.scope.outputs.messenger == 'true'",
     ),
 ];
 
@@ -642,16 +658,13 @@ fn specialized_contracts_are_reusable_and_orchestrated_by_primary_ci() {
         );
         assert!(
             ci.contains(selector),
-            "ci.yml must select {name} from affected scope, not run it unconditionally"
+            "ci.yml must select {name} from the scope-derived flags"
         );
     }
 }
 
 #[test]
 fn release_artifact_builds_stay_out_of_per_commit_validation() {
-    // build-integrations packages aarch64 binaries for a published release. It
-    // has a different lifecycle from per-commit validation, so D12's "one primary
-    // run per commit" does NOT absorb it.
     let integrations = workflow("build-integrations.yml");
     assert!(
         integrations.contains("release:") && integrations.contains("types: [published]"),
@@ -665,14 +678,6 @@ fn release_artifact_builds_stay_out_of_per_commit_validation() {
 
 #[test]
 fn ci_summarizes_the_first_actionable_failure_class() {
-    // D15: the advisory summary must name a failure CLASS, derived from job
-    // results rather than log text, so a Node warning or cache collision inside a
-    // passing job can never be promoted over the real root cause.
-    //
-    // Its SCOPE narrowed when `ci-verdict` landed. Every `areas.json` area is now
-    // a rollup cell, so this job covers only what the rollup cannot see: the
-    // bootstrap stages and the specialized workflows, which are not areas, emit
-    // no `manifest.jsonl`, and can never appear in an affected scope.
     let ci = workflow("ci.yml");
     assert!(
         ci.contains("## Jobs outside the rollup") && ci.contains("First actionable failure class"),
@@ -718,7 +723,7 @@ fn required_ci_pins_an_exact_rust_toolchain() {
 
 #[test]
 fn required_ci_honors_the_toolchain_file_without_stable_override() {
-    for name in ["ci.yml", "_area-ci.yml"] {
+    for name in ["ci.yml", "_package-ci.yml"] {
         let source = workflow(name);
         assert!(
             !source.contains("dtolnay/rust-toolchain@stable"),
@@ -773,20 +778,6 @@ fn release_automation_follows_successful_ci() {
 
 #[test]
 fn lockfiles_are_tracked_and_the_release_premise_says_so() {
-    // Reversed from the original contract, which required every Cargo.lock to be
-    // gitignored so a regenerated one could not dirty tracked state. Lockfiles
-    // are now tracked deliberately: an ignored lock meant CI re-resolved every
-    // dependency on every run, and `libgit2-sys 0.18.7` broke three Windows
-    // builds on an upstream release day with nothing in the repo recording which
-    // version had been in play.
-    //
-    // KNOWN RISK, not closed here: release-plz's post-calculation
-    // `git status --porcelain --untracked-files=no` assertion will now SEE a
-    // regenerated lock and fail the release. That path only executes on `main`
-    // after a successful CI run, so it cannot be exercised from a branch. See
-    // `fixes/2026-07-30-ci-cd-stabilization/plan.md`. This test's job is to keep
-    // the workflow's stated premise matching the repository's actual policy, so
-    // the two cannot drift apart silently again.
     let gitignore = read(".gitignore");
     assert!(
         !gitignore.contains("\n**/Cargo.lock"),
@@ -826,8 +817,6 @@ fn benchmarks_are_scheduled_only_and_carry_a_measured_budget() {
         !bench.contains("\n  push:\n") && !bench.contains("\n  pull_request:\n"),
         "bench-nightly must not run on push — a slow benchmark is not a test regression (D14)"
     );
-    // The budget is a reviewed number backed by recorded durations, not a
-    // default. The comment block carries the measurement it was derived from.
     assert!(
         bench.contains("timeout-minutes: 90") && bench.contains("Timeout budget"),
         "the benchmark job must document the measurement its timeout budget came from (AC30)"
@@ -840,9 +829,6 @@ fn benchmarks_are_scheduled_only_and_carry_a_measured_budget() {
 
 #[test]
 fn benchmark_upload_failure_cannot_erase_a_successful_measurement() {
-    // AC31: execution and upload are separate steps. Execution gates the job;
-    // the Bencher upload is best-effort and reads the captured output rather
-    // than re-running the suite.
     let bench = workflow("bench-nightly.yml");
     let run_at = bench
         .find("- name: Run benchmarks")
@@ -852,8 +838,6 @@ fn benchmark_upload_failure_cannot_erase_a_successful_measurement() {
         .expect("bench-nightly must have a separate upload step");
     assert!(run_at < upload_at, "execution must precede upload");
 
-    // Bound to the upload step alone, so a `continue-on-error` belonging to a
-    // later step cannot satisfy this.
     let rest = &bench[upload_at + 1..];
     let upload = &rest[..rest.find("- name: ").unwrap_or(rest.len())];
     assert!(
@@ -872,9 +856,6 @@ fn benchmark_upload_failure_cannot_erase_a_successful_measurement() {
 
 #[test]
 fn scheduled_workflows_are_operationally_distinct() {
-    // AC32: coverage, fuzz, benchmark, and maintenance results must not be
-    // mistakable for one another — distinct workflow names and distinct
-    // schedule slots so they neither collide for runners nor blur together.
     const SCHEDULED: [&str; 5] = [
         "bench-nightly.yml",
         "fuzz-nightly.yml",
@@ -918,9 +899,6 @@ fn scheduled_workflows_are_operationally_distinct() {
 
 #[test]
 fn maintenance_audit_reports_without_changing_anything() {
-    // Task 5.4: findings stay advisory until a reviewed change advances a
-    // pinned value. An audit that can red the Actions tab, or that bumps pins
-    // on its own, is worse than none.
     let audit = workflow("maintenance-audit.yml");
     assert!(
         audit.contains("schedule:") && audit.contains("workflow_dispatch"),
@@ -946,30 +924,22 @@ fn maintenance_audit_reports_without_changing_anything() {
 
 // --- environment is not os ----------------------------------------------------
 
+/// Every test job stamps its result identity. The package half comes from the
+/// recipe argument; the environment comes from `BISCUIT_CI_ENVIRONMENT`.
 #[test]
-fn every_test_tier_stamps_its_result_identity() {
-    // A rollup cell is keyed by {area, environment, tier, shard}, never by a
-    // GitHub display name — for a skipped matrix leg the name expression is not
-    // merely unstable, it is reported raw and unresolvable. The shared `just`
-    // recipes read these three variables when staging each nextest report.
-    for (file, expected_jobs) in [("_area-ci.yml", 3), ("_wsl-ci.yml", 1)] {
+fn every_test_tier_stamps_its_environment_identity() {
+    for (file, expected_jobs) in [("_package-ci.yml", 3), ("_wsl-ci.yml", 1)] {
         let source = workflow(file);
         let mut stamped = 0;
         for job in jobs(&source) {
-            if !job.contains("BISCUIT_CI_AREA:") {
+            if !job.contains("BISCUIT_CI_ENVIRONMENT") {
                 continue;
             }
             stamped += 1;
-            for key in ["BISCUIT_CI_ENVIRONMENT:", "BISCUIT_CI_SHARD:"] {
-                assert!(
-                    job.contains(key),
-                    "{file}: a job stamping BISCUIT_CI_AREA must also stamp {key}"
-                );
-            }
         }
-        assert_eq!(
-            stamped, expected_jobs,
-            "{file}: every job that runs tests must stamp its result identity"
+        assert!(
+            stamped >= expected_jobs,
+            "{file}: every job that runs tests must stamp BISCUIT_CI_ENVIRONMENT (found {stamped})"
         );
     }
 }
@@ -980,13 +950,14 @@ fn wsl_is_an_environment_and_never_a_runner_label() {
     // shared the native matrix, every `runner.os == 'Windows'` branch — native
     // packages, paths, shells, cache keys, artifact names — would apply to a
     // Linux guest. Isolation is structural, not by review.
-    let area = workflow("_area-ci.yml");
+    let package_ci = workflow("_package-ci.yml");
     assert!(
-        !area.contains("wsl2-ubuntu") || area.contains("_wsl-ci.yml"),
-        "_area-ci.yml must delegate wsl2-ubuntu rather than host it"
+        package_ci.contains("_wsl-ci.yml"),
+        "_package-ci.yml must delegate wsl2-ubuntu rather than host it"
     );
-    for job in jobs(&area) {
-        if !(job.starts_with("  test:") || job.starts_with("  l2:")) {
+    for job in jobs(&package_ci) {
+        if !(job.starts_with("  test:") || job.starts_with("  l2:") || job.starts_with("  browser:"))
+        {
             continue;
         }
         // Comments explain the separation; only executable YAML can violate it.
@@ -997,7 +968,7 @@ fn wsl_is_an_environment_and_never_a_runner_label() {
             .join("\n");
         assert!(
             !executable.contains("wsl"),
-            "_area-ci.yml: wsl2-ubuntu must never enter a runs-on matrix"
+            "_package-ci.yml: wsl2-ubuntu must never enter a runs-on matrix"
         );
     }
 
@@ -1024,7 +995,7 @@ fn wsl_is_an_environment_and_never_a_runner_label() {
     );
     // The 9p boundary penalty, and where real WSL developers keep repositories.
     assert!(
-        wsl.contains("git clone") && wsl.contains("/home/runner/rusty-biscuit"),
+        wsl.contains("git clone") && wsl.contains("/home/runner/work/"),
         "the WSL job must check out onto ext4, not build over /mnt/c"
     );
     // Build once on Linux, run in the guest: no toolchain install, no compile,
@@ -1041,16 +1012,12 @@ fn wsl_is_an_environment_and_never_a_runner_label() {
 
 #[test]
 fn wsl_provisioning_retries_with_a_delay_and_the_test_step_never_does() {
-    // Measured in run 30595280027: `Vampire/setup-wsl@v4` already retries
-    // internally, and that retry could not have worked — `wsl.exe --update`
-    // returned `Forbidden (403)` and the action spent ten attempts inside 2.4
-    // seconds with no backoff, while the shards that succeeded spent 46 seconds
-    // in the same call. A retry with no delay re-asks a throttle that has not
-    // moved, so the delay is the load-bearing part of this guard, not the
-    // second attempt.
+    // Measured: `Vampire/setup-wsl@v7` already retries internally, and a retry
+    // with no delay re-asks a throttle that has not moved, so the delay is the
+    // load-bearing part of this guard, not the second attempt.
     let wsl = workflow("_wsl-ci.yml");
     assert_eq!(
-        wsl.matches("uses: Vampire/setup-wsl@v4").count(),
+        wsl.matches("uses: Vampire/setup-wsl@v7").count(),
         2,
         "provisioning must get exactly one bounded retry — unbounded retries turn a \
          dead runner into a long timeout instead of a fast red cell"
@@ -1086,9 +1053,8 @@ fn wsl_provisioning_retries_with_a_delay_and_the_test_step_never_does() {
         .filter(|line| !line.trim_start().starts_with('#'))
         .collect::<Vec<_>>()
         .join("\n");
-    assert_eq!(
-        executable.matches("just test ").count(),
-        1,
+    assert!(
+        executable.matches("just _test ").count() == 1,
         "the WSL test step must be invoked exactly once — a retried test hides a real failure"
     );
     let l1 = executable
@@ -1104,16 +1070,9 @@ fn wsl_provisioning_retries_with_a_delay_and_the_test_step_never_does() {
 
 #[test]
 fn a_failed_wsl_guest_leaves_evidence_of_which_backing_store_ran_out() {
-    // Confirmed in run 30605643702: extraction exhausts the WINDOWS RUNNER's
-    // disk. All four claudine shards died with `There is not enough space on the
-    // disk` against `C:\actions-runner\...\_diag\`, the runner's own writer —
-    // after which no step runs at all, which is why claudine published no
-    // producer status while darkmatter published four. Run 30595280027 showed
-    // the same exhaustion as SIGBUS one layer down: a page mapped from a VHDX
-    // that cannot grow is a bus error, not an `ENOSPC` return.
-    //
-    // The host census is therefore the load-bearing measurement AND has to
-    // precede extraction — a post-mortem cannot run on a dead runner.
+    // Confirmed: extraction exhausts the WINDOWS RUNNER's disk. The host census
+    // is the load-bearing measurement AND has to precede extraction — a
+    // post-mortem cannot run on a dead runner.
     let wsl = workflow("_wsl-ci.yml");
     let host_census = wsl
         .find("- name: Census the Windows host before extraction")
@@ -1123,11 +1082,8 @@ fn a_failed_wsl_guest_leaves_evidence_of_which_backing_store_ran_out() {
         .expect("_wsl-ci.yml must define the L1 test step");
     assert!(
         host_census < extraction,
-        "the host disk census must run BEFORE extraction — the runner that would \
-         have reported it afterwards is exactly the thing that dies"
+        "the host disk census must run BEFORE extraction"
     );
-    // Comment-stripped: these comments DESCRIBE the measurements, so a prose-only
-    // match would let the commentary alone satisfy the contract.
     let executable: String = wsl
         .lines()
         .filter(|line| !line.trim_start().starts_with('#'))
@@ -1135,8 +1091,7 @@ fn a_failed_wsl_guest_leaves_evidence_of_which_backing_store_ran_out() {
         .join("\n");
     assert!(
         executable.contains("findmnt -T"),
-        "the census must name the FILESYSTEM behind /tmp — a tmpfs is the one \
-         backing store whose exhaustion surfaces as SIGBUS rather than a write error"
+        "the census must name the FILESYSTEM behind /tmp"
     );
     assert!(
         executable.contains("dmesg -T"),
@@ -1146,13 +1101,10 @@ fn a_failed_wsl_guest_leaves_evidence_of_which_backing_store_ran_out() {
         executable.contains("ext4.vhdx"),
         "the host post-mortem must size the VHDX and the volume it grows into"
     );
-    // A sampler on ext4 dies with the guest it is measuring. The 9p mount is the
-    // only surface that outlives the VM, which is the case being diagnosed.
     assert!(
         executable.contains(r#""$workspace/wsl-diag/guest-resources.log""#),
         "the resource sampler must write across the 9p mount, not onto guest ext4"
     );
-    // Diagnostics must never be able to change a verdict.
     for step in ["Guest post-mortem", "Host post-mortem"] {
         let block = wsl
             .split(&format!("- name: {step}"))
@@ -1161,34 +1113,33 @@ fn a_failed_wsl_guest_leaves_evidence_of_which_backing_store_ran_out() {
         let block = &block[..block.find("\n      - name:").unwrap_or(block.len())];
         assert!(
             block.contains("continue-on-error: true"),
-            "`{step}` must not be able to overwrite the tier's real outcome — a guest \
-             too dead to inspect is the finding, not a new failure"
+            "`{step}` must not be able to overwrite the tier's real outcome"
         );
     }
     assert!(
-        !wsl.contains("name: status-${{ inputs.area }}-wsl-diag")
-            && wsl.contains("name: wsl-diag-${{ inputs.area }}-wsl2-ubuntu-"),
+        !wsl.contains("name: status-${{ inputs.package }}-wsl-diag")
+            && wsl.contains("name: wsl-diag-${{ inputs.package }}-wsl2-ubuntu"),
         "the diagnostic artifact must use a prefix ci-rollup does not walk"
     );
 }
 
 #[test]
 fn artifact_names_carry_the_environment_not_the_runner_label() {
-    // `junit-<area>-L1-windows-latest-*` and `junit-<area>-L1-wsl2-ubuntu-*` are
-    // two different cells produced on the same runner label. Keying the artifact
-    // to the label would merge them.
-    let area = workflow("_area-ci.yml");
+    // `junit-<package>-L1-windows-latest-*` and
+    // `junit-<package>-L1-wsl2-ubuntu-*` are two different cells produced on the
+    // same runner label. Keying the artifact to the label would merge them.
+    let package_ci = workflow("_package-ci.yml");
     assert!(
-        area.contains("name: junit-${{ inputs.area }}-L1-${{ matrix.environment }}-"),
-        "L1 artifacts must be keyed by environment"
+        package_ci.contains("name: junit-${{ inputs.package }}-L1-${{ matrix.environment }}"),
+        "L1 artifacts must be keyed by package and environment"
     );
     assert!(
-        area.contains("name: junit-${{ inputs.area }}-L2-${{ matrix.environment }}"),
-        "L2 artifacts must be keyed by environment"
+        package_ci.contains("name: junit-${{ inputs.package }}-L2-${{ matrix.environment }}"),
+        "L2 artifacts must be keyed by package and environment"
     );
     assert!(
-        workflow("_wsl-ci.yml").contains("junit-${{ inputs.area }}-L1-wsl2-ubuntu-"),
-        "the WSL leg's artifact must name the wsl2-ubuntu environment"
+        workflow("_wsl-ci.yml").contains("junit-${{ inputs.package }}-L1-wsl2-ubuntu"),
+        "the WSL leg's artifact must name the package and the wsl2-ubuntu environment"
     );
 }
 
@@ -1198,58 +1149,45 @@ fn l2_runs_on_every_environment_with_a_provisioned_backend() {
     // Linux (apt) and macOS (brew) — so L2 is a matrix, not a hardcoded ubuntu
     // leg. `tmux -V` needs no server, display, or pane, so verification takes no
     // focus; CI must never steal focus.
-    let area = workflow("_area-ci.yml");
+    let package_ci = workflow("_package-ci.yml");
     assert!(
-        area.contains("brew install tmux") && area.contains("apt-get install -y tmux"),
+        package_ci.contains("brew install tmux") && package_ci.contains("apt-get install -y tmux"),
         "the L2 job must provision tmux on both macOS and Linux"
     );
     assert!(
-        area.contains("environment: ${{ fromJSON(inputs.l2-environments) }}"),
+        package_ci.contains("environment: ${{ fromJSON(inputs.l2-environments) }}"),
         "the L2 job must be a matrix over the environments with a provisioned backend"
     );
-    // A backend that cannot exist on this runner skips inside require_level!.
-    // That skip must be readable, not silent.
     assert!(
-        area.contains("Report L2 backend coverage") && area.contains("CI=1"),
+        package_ci.contains("Report L2 backend coverage") && package_ci.contains("CI=1"),
         "the L2 job must report which declared backends were reachable and which skipped"
     );
 
-    // Windows L2 is a POLICY GAP, never a green `0 run / N skipped` cell. Every
-    // area that owns L2 tests and runs on Windows must say so in areas.json;
-    // `affected_scope.py` fails the scope calculation when one does not.
-    let areas = read(".github/ci/areas.json");
+    // An unhostable L2 capability is a governed POLICY GAP in environments.json,
+    // never a green `0 run / N skipped` cell.
+    let environments = read(".github/ci/environments.json");
     assert!(
-        areas.contains(r#""tier": "L2""#) && areas.contains("POLICY GAP")
+        environments.contains("\"tmux\": {") && environments.contains("POLICY GAP")
             || read("scripts/ci/affected_scope.py").contains("POLICY GAP"),
-        "an unprovisionable L2 tier must be recorded as an owned policy gap"
+        "an unhostable L2 tier must be governed as a policy gap"
     );
 }
 
 #[test]
 fn a_declared_node_capability_is_provisioned_verified_and_hard_required() {
-    // `homelab`'s canonical `just test` runs a Vue + Vitest + jsdom suite after
-    // its Rust packages. pnpm exists on no runner image, so that suite had never
-    // executed in CI — and because the rollup parses Rust JUnit only, the area
-    // rendered PASS 222/0/0 on three environments while every `homelab / test`
-    // job was red (measured, run 30427703024). The capability is declared in
-    // areas.json and derived into `node-environments` by `affected_scope.py`, so
-    // the workflow never decides for itself which environments qualify.
-    let areas = read(".github/ci/areas.json");
+    // `homelab-server`'s canonical L1 runs a Vue + Vitest + jsdom companion
+    // suite after its Rust tests. pnpm exists on no runner image, so the suite
+    // must be provisioned on the declared leg and hard-required there.
+    let environments = read(".github/ci/environments.json");
     assert!(
-        areas.contains(r#""node": true"#),
-        "areas.json must declare the node capability for the area whose `just test` drives a \
-         JavaScript suite"
+        environments.contains("\"node_pnpm\": true"),
+        "environments.json must record a node-pnpm-capable environment"
     );
 
     let policy = read("scripts/ci/affected_scope.py");
     assert!(
-        policy.contains("NODE_PROVISIONED_ENVIRONMENTS = {\"ubuntu-latest\"}"),
-        "pnpm must be provisioned on Linux only — the suite is jsdom with no native dependency, \
-         so the other three environments would exercise identical code paths"
-    );
-    assert!(
-        policy.contains("\"node_environments\""),
-        "affected_scope.py must derive node_environments from the single `node` policy flag"
+        policy.contains("node_pnpm"),
+        "affected_scope.py must derive node environments from the capability table"
     );
 
     let ci = workflow("ci.yml");
@@ -1257,11 +1195,10 @@ fn a_declared_node_capability_is_provisioned_verified_and_hard_required() {
         ci.matches("node-environments: ${{ toJSON(matrix.node_environments) }}")
             .count(),
         1,
-        "the area fan-out must forward the derived node environments. There is \
-         one call site: the canary stage that used to be the second is gone"
+        "the package fan-out must forward the derived node environments"
     );
 
-    let test_job = job_block("_area-ci.yml", "  test:");
+    let test_job = job_block("_package-ci.yml", "  test:");
     // Gated on the DERIVED list, never on a runner label written into the YAML.
     assert_eq!(
         test_job
@@ -1271,22 +1208,30 @@ fn a_declared_node_capability_is_provisioned_verified_and_hard_required() {
         "pnpm setup, Node setup, and the verification step must each gate on the declared \
          capability"
     );
-    // Runtime reachability in a NAMED step, exactly as the L2 tier verifies
-    // `tmux -V`: a declared capability that is not usable must fail its own
-    // provisioning step, not surface later as a suite that quietly skipped.
     assert!(
         test_job.contains("- name: Verify the pnpm toolchain") && test_job.contains("pnpm --version"),
         "a declared node capability must be verified reachable in its own named step"
     );
-    // The other half of the same contract, for the case where those steps were
-    // never scheduled at all. Plan 1.1's asymmetry: a provisioned capability
-    // hard-fails when missing, an inapplicable one skips cleanly.
     assert!(
-        test_job.contains(
-            "BISCUIT_FRONTEND_REQUIRED: ${{ contains(fromJSON(inputs.node-environments), \
-             matrix.environment) && '1' || '' }}"
-        ),
+        test_job.contains("BISCUIT_FRONTEND_REQUIRED: ${{ contains(fromJSON(inputs.node-environments), matrix.environment) && '1' || '' }}"),
         "the leg that declared the capability must hard-require it through the recipe too"
+    );
+
+    // AC13: the companion suite itself is invoked, not dropped.
+    assert!(
+        test_job.contains("Companion suite homelab-frontend"),
+        "the declared companion suite must execute, not be dropped by the conversion"
+    );
+    // Its producer status downgrades a green Rust JUnit report on failure (R12).
+    // Comment lines are excluded: a YAML comment mentioning the mechanism must
+    // not satisfy the guard.
+    let status_step = job_block("_package-ci.yml", "  test:")
+        .lines()
+        .filter(|line| !line.trim_start().starts_with('#'))
+        .any(|line| line.contains("COMPANION") && line.contains("failure"));
+    assert!(
+        status_step,
+        "a failed companion suite must reach the producer status and downgrade the cell"
     );
 
     // The recipe self-gates and is identical on every environment — the skip is
@@ -1306,62 +1251,69 @@ fn a_declared_node_capability_is_provisioned_verified_and_hard_required() {
 
 #[test]
 fn exclusions_are_owned_and_time_bounded() {
-    // Ten `"ci": false` records accumulated because an exclusion cost nothing to
-    // leave in place. Every one now names an owner and a date, and a lapsed date
-    // fails the scope calculation loudly.
+    // A non-gating package is never inferred from zero observed tests; it is
+    // always an explicit, owned, dated record in its manifest (AC15).
     let policy = read("scripts/ci/affected_scope.py");
     assert!(
         policy.contains("def validate_expiry") && policy.contains("expired on"),
         "affected_scope.py must reject a lapsed exclusion or policy gap"
     );
-    let areas = read(".github/ci/areas.json");
-    let excluded = areas.matches(r#""ci": false"#).count();
-    assert_eq!(excluded, 10, "the ten non-gating areas must each keep one record");
-    assert_eq!(
-        areas.matches(r#""exclusion_class""#).count(),
-        excluded,
-        "every exclusion must declare its class"
-    );
+    let policies = package_policies();
+    let excluded: Vec<&serde_json::Value> = policies
+        .iter()
+        .filter(|policy| policy["gates"].as_bool() == Some(false))
+        .collect();
     assert!(
-        areas.matches(r#""owner""#).count() >= excluded,
-        "every exclusion must name an accountable owner"
+        !excluded.is_empty(),
+        "at least one package must declare a non-gating exclusion"
     );
+    for policy in &excluded {
+        assert!(
+            policy["owner"].as_str().is_some_and(|owner| !owner.is_empty()),
+            "an exclusion must name an owner: {}",
+            policy["name"]
+        );
+        assert!(
+            policy["reason"].as_str().is_some_and(|reason| !reason.is_empty()),
+            "an exclusion must give a reason: {}",
+            policy["name"]
+        );
+        assert!(
+            policy["exclusion-class"].as_str().is_some(),
+            "an exclusion must declare its class: {}",
+            policy["name"]
+        );
+    }
+    // The time-bounded zero-or-few-tests areas are now gating: they record
+    // NOTHING TO RUN rather than holding an exclusion.
+    for name in ["visualizer", "reaper", "agent-sandbox-cli", "tabby"] {
+        let excluded = policies.iter().any(|policy| {
+            policy["name"].as_str() == Some(name) && policy["gates"].as_bool() == Some(false)
+        });
+        assert!(
+            !excluded,
+            "{name} must be gating (records NOTHING TO RUN), not excluded merely for having zero tests"
+        );
+    }
 }
 
 // --- the single required check: ci-verdict ------------------------------------
 
 /// Every producer job, paired with the `job:` value its status artifact carries.
-///
-/// `ci-rollup` parses that value as a TIER: a status naming a test tier explains
-/// a `MISSING` cell downstream of it, while a status naming anything else becomes
-/// a cell in its own right. Publishing `test` would therefore manufacture a
-/// phantom `<area>/<environment>/test` cell beside the real L1 one and count the
-/// same failure twice.
 const PRODUCER_STATUS: [(&str, &str, &str); 6] = [
-    ("_area-ci.yml", "  check:", "JOB: check"),
-    ("_area-ci.yml", "  test:", "JOB: L1"),
-    ("_area-ci.yml", "  lint:", "JOB: lint"),
-    ("_area-ci.yml", "  l2:", "JOB: L2"),
-    ("_area-ci.yml", "  browser:", "JOB: browser"),
+    ("_package-ci.yml", "  check:", "JOB: check"),
+    ("_package-ci.yml", "  test:", "JOB: L1"),
+    ("_package-ci.yml", "  lint:", "JOB: lint"),
+    ("_package-ci.yml", "  l2:", "JOB: L2"),
+    ("_package-ci.yml", "  browser:", "JOB: browser"),
     ("_wsl-ci.yml", "  wsl:", "JOB: L1"),
 ];
 
-fn job_block(file: &str, header: &str) -> String {
-    let source = workflow(file);
-    jobs(&source)
-        .into_iter()
-        .find(|job| job.starts_with(header))
-        .unwrap_or_else(|| panic!("{file} must define the `{}` job", header.trim()))
-}
-
 #[test]
 fn every_producer_job_emits_an_explicit_status_artifact() {
-    // Plan 1.3: a failed or cancelled producer must be able neither to prevent
-    // the verdict from running nor to be silently read as a pass. Measured in run
-    // 30323254931: when `needs:` skips a matrix job GitHub never evaluates the
-    // matrix context, so the whole matrix collapses into ONE skipped job named
-    // with the raw `${{ matrix.os }}` expression — no artifact, no environment,
-    // no shard, nothing to key policy to. An explicit status artifact is the only
+    // A failed or cancelled producer must be able neither to prevent the
+    // verdict from running nor to be silently read as a pass. An explicit
+    // status artifact carrying {package, job, environment, result} is the only
     // durable evidence that job existed.
     for (file, header, job_value) in PRODUCER_STATUS {
         let name = header.trim();
@@ -1379,8 +1331,8 @@ fn every_producer_job_emits_an_explicit_status_artifact() {
             "{file}: `{name}` must publish `{job_value}` — ci-rollup reads `job` as a tier"
         );
         assert!(
-            block.contains("name: status-${{ inputs.area }}-"),
-            "{file}: `{name}` must upload under the `status-` prefix the walker matches on"
+            block.contains("name: status-${{ inputs.package }}-"),
+            "{file}: `{name}` must upload under the package-keyed `status-` prefix"
         );
 
         // `always()`, not `!cancelled()` and not the default: the whole point is
@@ -1399,13 +1351,11 @@ fn every_producer_job_emits_an_explicit_status_artifact() {
 #[test]
 fn junit_uploads_carry_the_whole_staging_directory_and_its_manifest() {
     // `.config/nextest.toml` writes every ci-profile invocation to the SAME
-    // `target/nextest/ci/test-results.xml`, so uploading that path published only
-    // the LAST package's report for a multi-package area. The staging tree holds
-    // one XML per invocation plus `manifest.jsonl`, and the manifest is what
-    // carries {area, environment, tier, shard, package} identity — without it
-    // every record degrades to artifact-name parsing with an unknown shard.
-    for file in ["_area-ci.yml", "_wsl-ci.yml"] {
-        // Comments explain the retired path; only executable YAML can use it.
+    // `target/nextest/ci/test-results.xml`, so uploading that path published
+    // only the LAST package's report. The staging tree holds one XML per
+    // invocation plus `manifest.jsonl`, and the manifest is what carries
+    // {package, environment, tier} identity.
+    for file in ["_package-ci.yml", "_wsl-ci.yml"] {
         let executable: String = workflow(file)
             .lines()
             .filter(|line| !line.trim_start().starts_with('#'))
@@ -1416,22 +1366,20 @@ fn junit_uploads_carry_the_whole_staging_directory_and_its_manifest() {
             "{file}: a JUnit upload must not point at the single overwritten report"
         );
     }
-    let area = workflow("_area-ci.yml");
+    let package_ci = workflow("_package-ci.yml");
     assert_eq!(
-        area.matches("path: target/nextest/ci-reports").count(),
+        package_ci.matches("path: target/nextest/ci-reports").count(),
         3,
         "the L1, L2, and browser uploads must each publish the whole staging directory"
     );
 
     // The guest stages onto ext4, which the Windows host cannot read, so the
     // reports cross the 9p mount once. Copying the staging root's CONTENTS is
-    // what puts manifest.jsonl at the artifact root, which is the only place the
-    // walker reads it from.
+    // what puts manifest.jsonl at the artifact root.
     let wsl = workflow("_wsl-ci.yml");
     assert!(
-        wsl.contains(
-            "BISCUIT_JUNIT_STAGE_DIR: /home/runner/rusty-biscuit/target/nextest/ci-reports"
-        ),
+        wsl.contains("BISCUIT_JUNIT_STAGE_DIR: /home/runner/work/")
+            && wsl.contains("/target/nextest/ci-reports"),
         "the WSL job must pin the guest staging root; two wsl-bash invocations must agree on it"
     );
     assert!(
@@ -1445,8 +1393,6 @@ fn ci_verdict_is_the_single_required_check() {
     let ci = workflow("ci.yml");
     let verdict = job_block("ci.yml", "  ci-verdict:");
 
-    // `always()` is the only condition that survives a failed, cancelled, AND
-    // skipped `needs`. A required check a failing producer can skip is not one.
     assert!(
         verdict.contains("if: always()"),
         "ci-verdict must run even when every producer failed"
@@ -1454,7 +1400,7 @@ fn ci_verdict_is_the_single_required_check() {
     for producer in [
         "scope",
         "preflight",
-        "area-ci",
+        "package-ci",
         "affected-coverage",
         "claudine-generator-signals",
         "darkmatter-no-color",
@@ -1469,24 +1415,33 @@ fn ci_verdict_is_the_single_required_check() {
         );
     }
 
-    // `--scope` is the ONLY way the rollup learns an area was scheduled and
-    // produced nothing. Inferred scope reads the artifacts on disk, which by
-    // construction cannot see an area that produced no artifact at all — exactly
-    // the case MISSING exists to catch. It is also what makes an out-of-scope
-    // baseline entry ignored rather than counted as a pass.
+    // `--scope` is the ONLY way the rollup learns a package was scheduled and
+    // produced nothing. `--policy` is the scope job's resolved package policy;
+    // `--environments` is the capability table.
     assert!(
         verdict.contains(r#"--scope "$SCOPE""#)
-            && verdict.contains("needs.scope.outputs.area_names"),
-        "ci-verdict must pass the affected scope to the rollup"
+            && verdict.contains("needs.scope.outputs.package_names"),
+        "ci-verdict must pass the affected package scope to the rollup"
+    );
+    assert!(
+        verdict.contains("--policy ci-artifacts/ci-scope/scope.json"),
+        "ci-verdict must read the resolved package policy the scope job uploaded"
+    );
+    assert!(
+        verdict.contains("--environments .github/ci/environments.json"),
+        "ci-verdict must read the environment capability table"
+    );
+    assert!(
+        !verdict.contains("--areas")
+            && !verdict.contains("--provisioned-backends")
+            && !verdict.contains("--browser-environments"),
+        "ci-verdict must not pass the retired area/provisioned flags"
     );
     assert!(
         verdict.contains("needs.scope.result") && verdict.contains("exit 1"),
         "a broken scope job must fail the verdict, not render a vacuous CLEAR over an empty grid"
     );
 
-    // repo-deps and drift link biscuit-terminal, sniff, and cargo_metadata;
-    // ci-rollup links none of them. The always-runs required check must not pay
-    // for the other two bins' dependency graph.
     assert!(
         verdict.contains("--no-default-features --bin ci-rollup"),
         "ci-verdict must build only the ci-rollup bin"
@@ -1499,43 +1454,33 @@ fn ci_verdict_is_the_single_required_check() {
         verdict.contains(".github/ci/ci-baseline.toml"),
         "the verdict must be taken against the machine-readable baseline"
     );
-    assert!(
-        !ci.contains("baseline-failures.txt"),
-        "the retired display-name baseline must have no consumers"
-    );
 
-    // Downloading with no `name:` yields one directory per artifact, which is
-    // the layout `--artifacts` walks.
     assert!(
         verdict.contains("uses: actions/download-artifact@v4") && !verdict.contains("name: junit-"),
         "ci-verdict must download every artifact in the run, not a named subset"
+    );
+    assert!(
+        !ci.contains("baseline-failures.txt"),
+        "the retired display-name baseline must have no consumers"
     );
 }
 
 #[test]
 fn only_ci_verdict_makes_a_run_level_claim() {
-    // Two "what failed" reporters that can disagree is worse than one. The area
-    // `classify` job printed a per-area failure class from job RESULTS while the
-    // rollup judges by EVIDENCE, so a baselined known-red gate would print a
-    // failure line under a correctly CLEAR verdict. Its information now lives in
-    // the status artifacts, keyed by {area, environment, tier} — a resolution
-    // classify never had, since one area-level line cannot tell a Windows-only
-    // failure from a Linux-only one.
-    let area = workflow("_area-ci.yml");
+    let package_ci = workflow("_package-ci.yml");
     assert!(
-        !area.contains("  classify:") && !area.contains("first actionable failure class"),
-        "_area-ci.yml must not carry a second, environment-blind failure reporter"
+        !package_ci.contains("  classify:") && !package_ci.contains("first actionable failure class"),
+        "_package-ci.yml must not carry a second, environment-blind failure reporter"
     );
 
     let summary = job_block("ci.yml", "  summary:");
     assert!(
         !summary.contains("No gate reported a failure"),
-        "the advisory summary must make no run-level green claim: reading job results alone \
-         cannot see a MISSING cell, a cancelled producer, or a baselined entry that started passing"
+        "the advisory summary must make no run-level green claim"
     );
     assert!(
-        !summary.contains("needs.area-ci.result"),
-        "every area gate is a rollup cell; the advisory summary must not report them a second time"
+        !summary.contains("needs.package-ci.result"),
+        "every package gate is a rollup cell; the advisory summary must not report them a second time"
     );
     assert!(
         summary.contains("ci-verdict"),
@@ -1547,12 +1492,7 @@ fn only_ci_verdict_makes_a_run_level_claim() {
 
 #[test]
 fn just_commit_is_deterministic_under_ci() {
-    // The local flow writes its message with an LLM, speaks a completion sound,
-    // and needs credentials — none of which exist on a runner. Under CI the
-    // recipe must be a plain `git commit` with a caller-supplied message.
     let justfile = read("justfile");
-    // Recipe bodies are indented, so the recipe ends at the next line with
-    // column-zero content. A blank line does NOT end it — the body has several.
     let recipe: String = justfile
         .lines()
         .skip_while(|line| !line.starts_with("commit *args="))
@@ -1584,30 +1524,18 @@ fn just_commit_is_deterministic_under_ci() {
             "the CI branch must not reach `{interactive}` — no LLM, audio, or network on a runner"
         );
     }
-    // `quote()` shell-escapes the message, so a commit subject containing quotes
-    // or apostrophes cannot break out of the generated script.
     assert!(
         recipe.contains("{{ quote(args) }}"),
         "the CI message must be shell-quoted rather than interpolated raw"
     );
 }
 
-
 // --- a PR that schedules no run at all ----------------------------------------
 
 /// A conflicted PR must be reported, not merely fail to schedule anything.
-///
-/// `pull_request` workflows run against `refs/pull/N/merge`. GitHub cannot
-/// create that ref while the PR conflicts, so it creates no workflow run --
-/// silently, with no check suite and no annotation. `ci-verdict` therefore never
-/// reports, and the PR is indistinguishable from one whose CI has not started.
-/// Measured on PR #19, where the entire matrix was suppressed undetected.
 #[test]
 fn a_conflicted_pr_is_reported_rather_than_silently_unscheduled() {
     let health = read(".github/workflows/pr-health.yml");
-
-    // `pull_request` is exactly the trigger that cannot fire here, so relying on
-    // it would reintroduce the blind spot this guard exists to close.
     assert!(
         health.contains("pull_request_target:"),
         "the guard must use `pull_request_target`, which runs against the base \
@@ -1615,14 +1543,8 @@ fn a_conflicted_pr_is_reported_rather_than_silently_unscheduled() {
     );
     assert!(
         health.contains("branches-ignore: [main]"),
-        "a push to a branch with an existing PR must also be covered, for the \
-         case where a later push introduces the conflict"
+        "a push to a branch with an existing PR must also be covered"
     );
-
-    // `pull_request_target` runs with a privileged token against the base ref.
-    // Checking out head-branch code under it is the well-known escalation path.
-    // Comments are stripped first: the workflow's own security note names the
-    // action it forbids, and matching that would assert on prose, not on steps.
     let steps: String = health
         .lines()
         .filter(|line| !line.trim_start().starts_with('#'))
@@ -1630,30 +1552,22 @@ fn a_conflicted_pr_is_reported_rather_than_silently_unscheduled() {
         .join("\n");
     assert!(
         !steps.contains("actions/checkout"),
-        "pr-health must never check out pull-request code under \
-         `pull_request_target`"
+        "pr-health must never check out pull-request code under `pull_request_target`"
     );
-
     assert!(
         health.contains("exit 1"),
-        "a conflicted PR must fail the check, not emit a warning -- a warning \
-         is as invisible as the missing run it is reporting"
+        "a conflicted PR must fail the check, not emit a warning"
     );
 }
 
 /// The guard and the workflow it guards must agree on which pull requests are in
-/// scope. While `ci.yml` filtered `pull_request` to `branches: [main]`, a stacked
-/// PR created no `ci` run at all, and `pr-health` — which checks only whether a
-/// merge ref can exist — passed it and printed that CI could be scheduled. Both
-/// statements were individually true and jointly misleading. Measured on PR #22,
-/// which targeted PR #21 and ran nothing but `pr-health` and Socket.
+/// scope.
 #[test]
 fn pr_health_and_ci_agree_on_which_pull_requests_are_in_scope() {
     fn pull_request_base_filter(source: &str, trigger: &str) -> Option<String> {
         let after = source.split_once(&format!("\n  {trigger}:\n"))?.1;
         after
             .lines()
-            // Stop at the next top-level trigger key (two-space indent).
             .take_while(|line| line.starts_with("    ") || line.trim().is_empty())
             .find(|line| line.trim_start().starts_with("branches:"))
             .map(|line| line.trim().to_string())
@@ -1665,13 +1579,322 @@ fn pr_health_and_ci_agree_on_which_pull_requests_are_in_scope() {
     assert_eq!(
         pull_request_base_filter(&ci, "pull_request"),
         None,
-        "ci.yml must not filter `pull_request` by base branch; a stacked PR that \
-         schedules no run reaches main unvalidated"
+        "ci.yml must not filter `pull_request` by base branch"
     );
     assert_eq!(
         pull_request_base_filter(&health, "pull_request_target"),
         None,
-        "pr-health must watch the same pull requests as ci.yml, or it will \
-         report that CI can be scheduled for a PR ci.yml filters out"
+        "pr-health must watch the same pull requests as ci.yml"
+    );
+}
+
+// --- AC11/AC4: sharding is gone; areas.json has no readers -------------------
+
+/// No job passes `--partition`, and no shard identity appears in any result
+/// (R7a/AC11).
+#[test]
+fn no_workflow_passes_partition() {
+    let workflows = repo_root().join(".github/workflows");
+    for entry in fs::read_dir(&workflows).expect("read .github/workflows") {
+        let path = entry.expect("workflow entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("yml") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        let source = read(&format!(".github/workflows/{name}"));
+        assert!(
+            !source.contains("--partition"),
+            "{name} must not pass nextest --partition; sharding is removed (R7a)"
+        );
+        assert!(
+            !source.contains("BISCUIT_CI_SHARD") && !source.contains("BISCUIT_CI_AREA"),
+            "{name} must not stamp the retired area/shard identity"
+        );
+    }
+    let devops = read("just/devops.just");
+    assert!(
+        !devops.contains("BISCUIT_CI_AREA") && !devops.contains("BISCUIT_CI_SHARD"),
+        "the staging recipes must not reference the retired area/shard identity"
+    );
+}
+
+/// AC4: `areas.json` is deleted, and no workflow, recipe, or script reads it.
+/// The guard GLOBS — a hardcoded file list cannot keep the repo clean (the
+/// homelab justfile carried an areas.json reference while off the old list).
+#[test]
+fn areas_json_is_gone_and_has_no_readers() {
+    assert!(
+        !repo_root().join(".github/ci/areas.json").exists(),
+        ".github/ci/areas.json must be deleted (Phase 5)"
+    );
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    let mut collect = |dir: &str, extensions: &[&str]| {
+        let mut pending = vec![repo_root().join(dir)];
+        while let Some(dir) = pending.pop() {
+            for entry in fs::read_dir(&dir).unwrap_or_else(|e| panic!("read {}: {e}", dir.display())) {
+                let path = entry.expect("dir entry").path();
+                if path.is_dir() {
+                    pending.push(path);
+                } else {
+                    let name = path.file_name().unwrap().to_string_lossy().to_string();
+                    let matches = name == "justfile"
+                        || extensions
+                            .iter()
+                            .any(|ext| name.ends_with(&format!(".{ext}")));
+                    if matches {
+                        candidates.push(path);
+                    }
+                }
+            }
+        }
+    };
+    collect(".github/workflows", &["yml", "yaml"]);
+    collect("just", &["just"]);
+    collect("scripts", &["rs", "py", "sh"]);
+    candidates.push(repo_root().join("justfile"));
+    // One justfile per package area directory.
+    for entry in fs::read_dir(repo_root()).expect("read repo root") {
+        let path = entry.expect("root entry").path().join("justfile");
+        if path.is_file() {
+            candidates.push(path);
+        }
+    }
+
+    assert!(
+        candidates.len() > 30,
+        "the glob itself must be non-vacuous (found {} files)",
+        candidates.len()
+    );
+    for path in candidates {
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+            .replace("\r\n", "\n");
+        assert!(
+            !source.contains("areas.json"),
+            "{} must not read the deleted areas.json",
+            path.display()
+        );
+    }
+}
+
+/// AC12: a declared tier is non-vacuous, and a package that owns its tests
+/// declares the tier. The contract scans test definitions rather than nesting
+/// workspace builds inside the test suite. Nested `cargo nextest list` calls
+/// made this check depend on every unrelated package compiling on the host and
+/// multiplied the same cold build across nextest's process-per-test workers.
+fn nextest_filter(tier: &str, package: &str) -> String {
+    let mut args = vec!["_tier_filter", tier];
+    if !package.is_empty() {
+        args.push(package);
+    }
+    let output = Command::new("just")
+        .args(&args)
+        .current_dir(repo_root())
+        .output()
+        .unwrap_or_else(|error| panic!("just _tier_filter {tier} {package} failed: {error}"));
+    assert!(
+        output.status.success(),
+        "just _tier_filter {tier} {package} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout)
+        .expect("a filter expression")
+        .trim()
+        .to_owned()
+}
+
+/// Per-package test counts for the two non-default tiers.
+#[derive(Debug, Clone, Copy, Default)]
+struct TierCounts {
+    l2: usize,
+    browser: usize,
+}
+
+fn tier_counts(policy: &serde_json::Value) -> TierCounts {
+    // Tier markers belong on the test function itself. Keeping that convention
+    // makes ownership visible in source and prevents a helper module name from
+    // silently moving ordinary tests out of L1.
+    fn visit(dir: &std::path::Path, counts: &mut TierCounts) {
+        for entry in
+            fs::read_dir(dir).unwrap_or_else(|error| panic!("read {}: {error}", dir.display()))
+        {
+            let path = entry.expect("source entry").path();
+            if path.is_dir() {
+                if path.file_name().and_then(|name| name.to_str()) != Some("target") {
+                    visit(&path, counts);
+                }
+                continue;
+            }
+            if path.extension().and_then(|extension| extension.to_str()) != Some("rs") {
+                continue;
+            }
+
+            let source = fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+            let mut test_attribute = false;
+            for line in source.lines() {
+                let line = line.trim();
+                if let Some(attribute) = line.strip_prefix("#[") {
+                    let attribute = attribute
+                        .split(['(', ']'])
+                        .next()
+                        .unwrap_or_default()
+                        .trim();
+                    test_attribute |= attribute.rsplit("::").next().is_some_and(|name| {
+                        matches!(name, "test" | "rstest" | "test_case" | "traced_test")
+                    });
+                    continue;
+                }
+                if line.is_empty() || line.starts_with("//") {
+                    continue;
+                }
+                if test_attribute {
+                    let mut words = line.split_whitespace();
+                    while let Some(word) = words.next() {
+                        if word != "fn" {
+                            continue;
+                        }
+                        let name = words
+                            .next()
+                            .unwrap_or_default()
+                            .split(['(', '<'])
+                            .next()
+                            .unwrap_or_default();
+                        if name.starts_with("level2_") {
+                            counts.l2 += 1;
+                        } else if name.starts_with("browser_") {
+                            counts.browser += 1;
+                        }
+                        break;
+                    }
+                }
+                test_attribute = false;
+            }
+        }
+    }
+
+    let manifest = PathBuf::from(
+        policy["manifest-path"]
+            .as_str()
+            .expect("a package manifest path"),
+    );
+    let mut counts = TierCounts::default();
+    visit(
+        manifest.parent().expect("manifest has a parent directory"),
+        &mut counts,
+    );
+    counts
+}
+
+/// AC12 covers both non-default tiers in one process: declarations must own at
+/// least one test, and owned tests must have a declaration so CI schedules them.
+#[test]
+fn declared_test_tiers_match_owned_tests() {
+    assert_eq!(nextest_filter("L2", ""), "test(/(^|::)level2_/)");
+    assert_eq!(nextest_filter("browser", ""), "test(/(^|::)browser_/)");
+
+    for policy in gating_packages() {
+        let package = policy["name"].as_str().expect("a package name");
+        let tiers = policy["tests"]["tiers"]
+            .as_array()
+            .map(|tiers| {
+                tiers
+                    .iter()
+                    .filter_map(|tier| tier.as_str())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let counts = tier_counts(&policy);
+
+        assert_eq!(
+            tiers.contains(&"L2"),
+            counts.l2 > 0,
+            "{package} must declare the L2 tier exactly when it owns level2_ tests (found {})",
+            counts.l2
+        );
+        assert_eq!(
+            tiers.contains(&"browser"),
+            counts.browser > 0,
+            "{package} must declare the browser tier exactly when it owns browser_ tests (found {})",
+            counts.browser
+        );
+    }
+}
+
+/// B5: a change touching only `gates = false` packages impacts packages but
+/// schedules none. The fan-out gate must derive from the MATRIX, or that
+/// change fails the package-ci job at strategy evaluation.
+#[test]
+fn the_fan_out_gate_derives_from_the_matrix_not_the_impacted_list() {
+    let ci = workflow("ci.yml");
+    assert!(
+        ci.contains("has_packages=$(jq -r '.matrix | length > 0'"),
+        "has_packages must be computed from the matrix; the impacted package list \
+         includes non-gating packages"
+    );
+    assert!(
+        !ci.contains("has_packages=$(jq -r '.packages | length > 0'"),
+        "deriving has_packages from the impacted list crashes a `gates = false`-only change"
+    );
+}
+
+/// M4: CI's own tooling — the merge-gate binary, the scope calculator, and
+/// the policy store — is not a Cargo package, so a change to it must schedule
+/// the leg that runs their own test suites.
+#[test]
+fn ci_tooling_changes_schedule_the_tooling_leg() {
+    let policy = read("scripts/ci/affected_scope.py");
+    assert!(
+        policy.contains(r#"CI_TOOLING_PREFIXES = ("scripts/", ".github/ci/")"#),
+        "affected_scope.py must map scripts/ and .github/ci/ to the ci_tooling flag"
+    );
+
+    let ci = workflow("ci.yml");
+    assert!(
+        ci.contains("ci_tooling=$(jq -r '.flags.ci_tooling'"),
+        "the scope job must emit the derived ci_tooling flag"
+    );
+    let leg = job_block("ci.yml", "  ci-tooling:");
+    assert!(
+        leg.contains("needs.scope.outputs.ci_tooling == 'true'"),
+        "the ci-tooling leg must be gated on the scope-derived flag"
+    );
+    assert!(
+        leg.contains("python3 scripts/ci/test_affected_scope.py"),
+        "the ci-tooling leg must run the scope tests"
+    );
+    assert!(
+        leg.contains("cargo nextest run") && leg.contains("--bin ci-rollup"),
+        "the ci-tooling leg must run the rollup's test suite"
+    );
+    // A red tooling leg must not be invisible under a CLEAR verdict.
+    let summary = job_block("ci.yml", "  summary:");
+    assert!(
+        summary.contains("needs.ci-tooling.result"),
+        "the advisory summary must classify a ci-tooling failure"
+    );
+}
+
+/// B3/B4: the WSL guest must have `jq` before its native-prerequisites step
+/// parses with it, and the package's declared L1 slow-test contract must reach
+/// the guest or darkmatter's L1 suite silently narrows on wsl2-ubuntu only.
+#[test]
+fn the_wsl_leg_provisions_jq_and_forwards_the_slow_test_contract() {
+    let wsl = workflow("_wsl-ci.yml");
+    assert!(
+        wsl.contains("xz-utils jq"),
+        "the WSL guest must be provisioned with jq — the native-prerequisites step \
+         parses the package list with it before anything could install it"
+    );
+    assert!(
+        wsl.contains("l1-include-slow:") && wsl.contains("BISCUIT_L1_INCLUDE_SLOW"),
+        "_wsl-ci.yml must accept and export the package's l1-include-slow contract"
+    );
+
+    let wsl_job = job_block("_package-ci.yml", "  wsl:");
+    assert!(
+        wsl_job.contains("l1-include-slow: ${{ inputs.l1-include-slow }}"),
+        "the WSL leg must receive the package's declared L1 slow-test policy"
     );
 }

@@ -24,16 +24,24 @@ fn owner_doc_with_first_entry(owner: &str, session: &str) -> loro::LoroDoc {
     map.insert("chunk_index", 0i64).unwrap();
     map.insert("created_at_unix_ms", 5_000_i64).unwrap();
     let list = doc.get_list(ENTRIES_CONTAINER);
-    list.push(serde_json::to_string(&remote_entry(0, "first")).unwrap().as_str())
-        .unwrap();
+    list.push(
+        serde_json::to_string(&remote_entry(0, "first"))
+            .unwrap()
+            .as_str(),
+    )
+    .unwrap();
     doc.commit();
     doc
 }
 
 fn push_entry(doc: &loro::LoroDoc, sequence: u64, message: &str) {
     let list = doc.get_list(ENTRIES_CONTAINER);
-    list.push(serde_json::to_string(&remote_entry(sequence, message)).unwrap().as_str())
-        .unwrap();
+    list.push(
+        serde_json::to_string(&remote_entry(sequence, message))
+            .unwrap()
+            .as_str(),
+    )
+    .unwrap();
     doc.commit();
 }
 
@@ -53,7 +61,10 @@ fn export_updates_since_sends_replace_when_peer_is_behind_shallow_root() {
     let head_vv = doc.oplog_vv();
     let frontier = doc.oplog_frontiers();
     let shallow = doc.export(ExportMode::shallow_snapshot(&frontier)).unwrap();
-    harness.storage.save_snapshot(&chunk, &shallow).expect("persist shallow chunk");
+    harness
+        .storage
+        .save_snapshot(&chunk, &shallow)
+        .expect("persist shallow chunk");
 
     // Peer behind the shallow root: delta history is gone, so the only
     // safe answer is a snapshot the peer adopts wholesale.
@@ -94,13 +105,21 @@ fn apply_remote_replace_adopts_rebased_snapshot() {
 
     let doc = owner_doc_with_first_entry("rebase-owner", "rebase-session");
     let initial = doc.export(ExportMode::Snapshot).unwrap();
-    assert!(harness.manager.apply_remote_update(&chunk, &initial).expect("initial"));
+    assert!(
+        harness
+            .manager
+            .apply_remote_update(&chunk, &initial)
+            .expect("initial")
+    );
 
     push_entry(&doc, 1, "second");
     let frontier = doc.oplog_frontiers();
     let shallow = doc.export(ExportMode::shallow_snapshot(&frontier)).unwrap();
 
-    let advanced = harness.manager.apply_remote_replace(&chunk, &shallow).expect("replace");
+    let advanced = harness
+        .manager
+        .apply_remote_replace(&chunk, &shallow)
+        .expect("replace");
     assert!(advanced);
     let messages: Vec<String> = harness
         .manager
@@ -112,7 +131,10 @@ fn apply_remote_replace_adopts_rebased_snapshot() {
     assert_eq!(messages, vec!["first".to_string(), "second".to_string()]);
 
     // Re-delivering the same replace is a no-op, not a regression.
-    let advanced = harness.manager.apply_remote_replace(&chunk, &shallow).expect("idempotent");
+    let advanced = harness
+        .manager
+        .apply_remote_replace(&chunk, &shallow)
+        .expect("idempotent");
     assert!(!advanced);
 
     harness.worker.shutdown();
@@ -125,7 +147,12 @@ fn apply_remote_replace_rejects_rewritten_prefix() {
 
     let doc = owner_doc_with_first_entry("forge-owner", "forge-session");
     let initial = doc.export(ExportMode::Snapshot).unwrap();
-    assert!(harness.manager.apply_remote_update(&chunk, &initial).expect("initial"));
+    assert!(
+        harness
+            .manager
+            .apply_remote_update(&chunk, &initial)
+            .expect("initial")
+    );
 
     // Forged replacement with identical metadata but a rewritten
     // history: replace may extend the entry list, never mutate it.
@@ -136,12 +163,18 @@ fn apply_remote_replace_rejects_rewritten_prefix() {
     map.insert("chunk_index", 0i64).unwrap();
     map.insert("created_at_unix_ms", 5_000_i64).unwrap();
     let list = forged.get_list(ENTRIES_CONTAINER);
-    list.push(serde_json::to_string(&remote_entry(0, "REWRITTEN")).unwrap().as_str())
-        .unwrap();
+    list.push(
+        serde_json::to_string(&remote_entry(0, "REWRITTEN"))
+            .unwrap()
+            .as_str(),
+    )
+    .unwrap();
     forged.commit();
     let forged_snapshot = forged.export(ExportMode::Snapshot).unwrap();
 
-    let result = harness.manager.apply_remote_replace(&chunk, &forged_snapshot);
+    let result = harness
+        .manager
+        .apply_remote_replace(&chunk, &forged_snapshot);
     assert!(
         matches!(result, Err(SessionLogError::SchemaValidation { .. })),
         "rewritten prefix must be rejected; got {result:?}"
@@ -165,7 +198,12 @@ fn apply_remote_update_rejects_disconnected_history() {
 
     let doc = owner_doc_with_first_entry("gap-owner", "gap-session");
     let initial = doc.export(ExportMode::Snapshot).unwrap();
-    assert!(harness.manager.apply_remote_update(&chunk, &initial).expect("initial"));
+    assert!(
+        harness
+            .manager
+            .apply_remote_update(&chunk, &initial)
+            .expect("initial")
+    );
 
     // The owner advances twice, but the delta is exported only from the
     // intermediate version — its causal dependencies never reach us.
@@ -192,4 +230,3 @@ fn apply_remote_update_rejects_disconnected_history() {
 
     harness.worker.shutdown();
 }
-

@@ -1433,6 +1433,7 @@ fn test_graph_expression_dot_fallback_uses_dot_info_string() {
     assert!(stdout.contains("digraph { A -> B; }"));
 }
 
+#[cfg(not(windows))]
 #[test]
 #[serial_test::serial(visualization)]
 fn test_graph_expression_meta_outputs_render_metadata_in_a_pty() {
@@ -2239,6 +2240,7 @@ fn public_docs_do_not_advertise_removed_atomic_tokens() {
     }
 }
 
+#[cfg(not(windows))]
 #[test]
 fn test_actual_terminal_query_integration() {
     use expectrl::{Expect, Session};

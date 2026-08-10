@@ -406,7 +406,8 @@ mod live_pipe {
     /// A pipe with exactly one instance, already connected to a client — the
     /// saturated state a daemon presents while it is between accepts.
     ///
-    /// The returned client must be held: dropping it frees the instance.
+    /// The returned client must be held to keep the instance saturated. To
+    /// reuse the instance, the server must disconnect it and listen again.
     fn saturated(name: &OsString) -> (tokio::net::windows::named_pipe::NamedPipeServer, tokio::net::windows::named_pipe::NamedPipeClient) {
         let server = ServerOptions::new()
             .first_pipe_instance(true)
@@ -446,10 +447,13 @@ mod live_pipe {
 
         // Free the instance after a couple of backoffs, so the loop has to
         // actually retry rather than win on its first attempt.
-        tokio::spawn(async move {
+        let relisten = tokio::spawn(async move {
+            server.connect().await.expect("observe the occupying client");
             tokio::time::sleep(Duration::from_millis(120)).await;
             drop(occupier);
-            drop(server);
+            server.disconnect().expect("release the occupied instance");
+            server.connect().await.expect("accept the retrying client");
+            server
         });
 
         let endpoint = LocalEndpoint::WindowsNamedPipe(name.clone());
@@ -470,6 +474,7 @@ mod live_pipe {
             "a pipe that frees up within the budget must connect; got {:?}",
             opened.err()
         );
+        relisten.await.expect("relisten task must finish");
     }
 
     /// Deadline exhaustion against a pipe that never frees: bounded means

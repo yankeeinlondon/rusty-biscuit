@@ -49,16 +49,24 @@ fn discovery_probe_path() -> PathBuf {
     // we want        <target_dir>/<profile>/examples/discovery_probe
     let mut dir = exe.parent().unwrap().to_path_buf(); // deps/
     dir = dir.parent().unwrap().to_path_buf(); // <profile>/
-    dir.join("examples").join("discovery_probe")
+    dir.join("examples")
+        .join(format!("discovery_probe{}", std::env::consts::EXE_SUFFIX))
 }
 
 /// Base environment variables that prevent hangs and unwanted side-effects
 /// in the spawned probe.
 ///
-/// * `NO_COLOR=1` – disables color output so assertions don't have to
-///   cope with SGR sequences.
+/// * `NO_COLOR=1` on non-Windows hosts disables color output so assertions need not
+///   cope with unrelated SGR sequences.
+/// * `PROBE_FORCE_TTY=true` on Windows because ConPTY child handles are not
+///   recognized by Rust's `IsTerminal` implementation. `NO_COLOR` is omitted
+///   there because the prose probes exercise non-color SGR capabilities.
 pub fn anti_hang_env() -> Vec<(&'static str, &'static str)> {
-    vec![("NO_COLOR", "1")]
+    #[cfg(not(windows))]
+    let env = vec![("NO_COLOR", "1")];
+    #[cfg(windows)]
+    let env = vec![("PROBE_FORCE_TTY", "true")];
+    env
 }
 
 /// Spawn the `discovery_probe` example binary in a PTY with the given
@@ -78,6 +86,16 @@ pub fn spawn_with_env(envs: &[(&str, &str)]) -> OsSession {
             bin.display()
         );
     }
+    #[cfg(windows)]
+    let mut cmd = {
+        let shell =
+            std::env::var_os("ComSpec").unwrap_or_else(|| r"C:\Windows\System32\cmd.exe".into());
+        let mut cmd = Command::new(shell);
+        cmd.args(["/d", "/s", "/c"]);
+        cmd.arg(format!("\"\"{}\" > CONOUT$ 2>&1\"", bin.display()));
+        cmd
+    };
+    #[cfg(not(windows))]
     let mut cmd = Command::new(&bin);
 
     // Remove terminal-specific env vars that would override TERM_PROGRAM
@@ -110,7 +128,14 @@ pub fn spawn_with_env(envs: &[(&str, &str)]) -> OsSession {
         cmd.env(k, v);
     }
 
-    expectrl::Session::spawn(cmd).expect("failed to spawn discovery_probe in PTY")
+    let mut session =
+        expectrl::Session::spawn(cmd).expect("failed to spawn discovery_probe in PTY");
+    #[cfg(windows)]
+    session
+        .get_process_mut()
+        .resize(160, 40)
+        .expect("failed to size discovery_probe ConPTY");
+    session
 }
 
 /// Convenience: spawn with only the anti-hang environment.

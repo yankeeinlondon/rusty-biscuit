@@ -25,7 +25,7 @@ pub mod tabs;
 pub use app::{TerminalApp, get_terminal_app};
 pub use color::{ColorDepth, ColorMode, color_depth, color_mode};
 pub use connection::{Connection, MoshClient, SshClient, detect_connection};
-pub use dimensions::{dimensions, is_tty, terminal_height, terminal_width};
+pub use dimensions::{dimensions, is_tty, set_tty_override, terminal_height, terminal_width};
 pub use image::{
     DetectionMethod, ImageSupport, ImageSupportResult, image_support, image_support_with_reason,
 };

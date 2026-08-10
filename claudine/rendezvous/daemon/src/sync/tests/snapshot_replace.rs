@@ -25,7 +25,8 @@ fn make_owner_doc(owner_node_id: &str, session_id: &str, message: &str) -> LoroD
         message: message.into(),
         metadata: None,
     };
-    list.push(serde_json::to_string(&entry).unwrap().as_str()).unwrap();
+    list.push(serde_json::to_string(&entry).unwrap().as_str())
+        .unwrap();
     doc.commit();
     doc
 }
@@ -39,11 +40,9 @@ fn snapshot_replace_swaps_replica_after_owner_rebase() {
 
     let doc = make_owner_doc(&peer_hex, "rebase-session", "first");
     let initial = doc.export(ExportMode::Snapshot).unwrap();
-    let envelope = harness.peer_sealer.seal(
-        chunk.as_path(),
-        PayloadKind::Snapshot,
-        initial,
-    );
+    let envelope = harness
+        .peer_sealer
+        .seal(chunk.as_path(), PayloadKind::Snapshot, initial);
     harness
         .service
         .receive_delta(
@@ -67,15 +66,14 @@ fn snapshot_replace_swaps_replica_after_owner_rebase() {
         message: "second".into(),
         metadata: None,
     };
-    list.push(serde_json::to_string(&entry).unwrap().as_str()).unwrap();
+    list.push(serde_json::to_string(&entry).unwrap().as_str())
+        .unwrap();
     doc.commit();
     let frontier = doc.oplog_frontiers();
     let shallow = doc.export(ExportMode::shallow_snapshot(&frontier)).unwrap();
-    let envelope = harness.peer_sealer.seal(
-        chunk.as_path(),
-        PayloadKind::SnapshotReplace,
-        shallow,
-    );
+    let envelope = harness
+        .peer_sealer
+        .seal(chunk.as_path(), PayloadKind::SnapshotReplace, shallow);
 
     let advanced = harness
         .service
@@ -109,11 +107,9 @@ fn replace_frame_with_mismatched_envelope_kind_rejected() {
     let snapshot = make_valid_loro_snapshot("kind", &peer_hex, "replace-kind-session", 0);
     // Envelope signed as a plain Snapshot, but the frame claims
     // replace semantics: the signature-covered kind wins.
-    let envelope = harness.peer_sealer.seal(
-        chunk.as_path(),
-        PayloadKind::Snapshot,
-        snapshot,
-    );
+    let envelope = harness
+        .peer_sealer
+        .seal(chunk.as_path(), PayloadKind::Snapshot, snapshot);
 
     let snapshots_before = baseline_snapshot_count(&harness);
     let envelopes_before = baseline_envelope_count(&harness);

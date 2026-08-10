@@ -219,3 +219,12 @@ harness = false
 [[bench]]
 name = "clean_hot_paths"
 harness = false
+
+# CI policy: darkmatter's L1 contract keeps `slow_` tests, and the library owns
+# L2 (render-tree terminal) and browser (headless) tier tests. Its L2 suite
+# drives WezTerm only (tmux is the CLI's backend); a backend declared here
+# that no lib test executes fails backend-proof.
+[package.metadata.ci.tests]
+tiers = ["L1", "L2", "browser"]
+l2-backends = ["wezterm"]
+l1-include-slow = true

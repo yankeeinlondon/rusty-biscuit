@@ -552,6 +552,7 @@ mod tests {
         assert!(check_symlink_exists(&dir));
     }
 
+    #[cfg(unix)]
     #[test]
     fn check_symlink_exists_returns_true_for_working_symlink() {
         let temp = TempDir::new().unwrap();
@@ -566,6 +567,7 @@ mod tests {
         assert!(check_symlink_exists(&link));
     }
 
+    #[cfg(unix)]
     #[test]
     fn check_symlink_exists_returns_true_for_broken_symlink() {
         let temp = TempDir::new().unwrap();
@@ -607,6 +609,7 @@ mod tests {
         assert!(!check_is_symlink(&missing));
     }
 
+    #[cfg(unix)]
     #[test]
     fn check_is_symlink_returns_true_for_working_symlink() {
         let temp = TempDir::new().unwrap();
@@ -621,6 +624,7 @@ mod tests {
         assert!(check_is_symlink(&link));
     }
 
+    #[cfg(unix)]
     #[test]
     fn check_is_symlink_returns_true_for_broken_symlink() {
         let temp = TempDir::new().unwrap();
@@ -646,6 +650,7 @@ mod tests {
         assert!(!check_is_broken_symlink(&file));
     }
 
+    #[cfg(unix)]
     #[test]
     fn check_is_broken_symlink_returns_false_for_working_symlink() {
         let temp = TempDir::new().unwrap();
@@ -660,6 +665,7 @@ mod tests {
         assert!(!check_is_broken_symlink(&link));
     }
 
+    #[cfg(unix)]
     #[test]
     fn check_is_broken_symlink_returns_true_for_broken_symlink() {
         let temp = TempDir::new().unwrap();
@@ -700,6 +706,7 @@ mod tests {
         assert!(check_local_definition_exists(&file));
     }
 
+    #[cfg(unix)]
     #[test]
     fn check_local_definition_exists_returns_false_for_symlink() {
         let temp = TempDir::new().unwrap();
@@ -714,6 +721,7 @@ mod tests {
         assert!(!check_local_definition_exists(&link));
     }
 
+    #[cfg(unix)]
     #[test]
     fn check_local_definition_exists_returns_false_for_broken_symlink() {
         let temp = TempDir::new().unwrap();
@@ -814,6 +822,7 @@ mod tests {
         assert_eq!(action, SkillAction::NoneLocalDefinition);
     }
 
+    #[cfg(unix)]
     #[test]
     fn determine_action_returns_already_linked_for_working_symlink() {
         let temp = TempDir::new().unwrap();
@@ -833,6 +842,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn determine_action_returns_already_linked_for_broken_symlink() {
         let temp = TempDir::new().unwrap();
@@ -884,6 +894,7 @@ mod tests {
         assert!(matches!(action, SkillAction::FailedOther(_)));
     }
 
+    #[cfg(unix)]
     #[test]
     fn determine_action_handles_symlink_pointing_to_tmp() {
         let temp = TempDir::new().unwrap();
@@ -1028,6 +1039,7 @@ mod tests {
         assert!(temp.path().join("subdir").exists());
     }
 
+    #[cfg(unix)]
     #[test]
     fn scan_and_remove_stale_symlinks_ignores_working_symlinks() {
         let temp = TempDir::new().unwrap();
@@ -1048,6 +1060,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn scan_and_remove_stale_symlinks_removes_broken_symlinks() {
         let temp = TempDir::new().unwrap();
@@ -1077,6 +1090,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn scan_and_remove_stale_symlinks_handles_multiple_broken_symlinks() {
         let temp = TempDir::new().unwrap();

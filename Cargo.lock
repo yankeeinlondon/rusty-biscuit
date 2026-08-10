@@ -1415,6 +1415,7 @@ dependencies = [
  "tracing-test",
  "unic-langid",
  "unicode-width 0.2.2",
+ "url",
  "viuer",
 ]
 
@@ -13603,6 +13604,7 @@ name = "test-toolkit"
 version = "0.1.0"
 dependencies = [
  "clap 4.6.1",
+ "serde_json",
  "serial_test",
  "sysinfo",
  "tempfile",
