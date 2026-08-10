@@ -112,10 +112,9 @@ impl DuckGuard {
             .restored
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_ok()
+            && let Some(tx) = &self.restore_tx
         {
-            if let Some(tx) = &self.restore_tx {
-                let _ = tx.send(RestoreMessage::Restore).await;
-            }
+            let _ = tx.send(RestoreMessage::Restore).await;
         }
     }
 
@@ -132,12 +131,11 @@ impl Drop for DuckGuard {
             .restored
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_ok()
+            && let Some(tx) = self.restore_tx.take()
         {
-            if let Some(tx) = self.restore_tx.take() {
-                // Fire-and-forget: send restoration request
-                // We can't await here, but the channel is buffered so this won't block
-                let _ = tx.try_send(RestoreMessage::Restore);
-            }
+            // Fire-and-forget: send restoration request
+            // We can't await here, but the channel is buffered so this won't block
+            let _ = tx.try_send(RestoreMessage::Restore);
         }
     }
 }
@@ -205,9 +203,6 @@ mod tests {
 
     #[tokio::test]
     async fn guard_drop_triggers_restore() {
-        let restored = Arc::new(AtomicBool::new(false));
-        let restored_clone = restored.clone();
-
         {
             let backend = Box::new(NoopBackend::new());
             let config = DuckConfig::default();

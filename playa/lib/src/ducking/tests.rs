@@ -181,7 +181,7 @@ mod windows_policy_tests {
     #[test]
     fn wasapi_session_excluding_our_pid() {
         let our_pid = 12345u32;
-        let sessions = vec![
+        let sessions = [
             SessionVolume::new(
                 SessionId::WasapiSession {
                     pid: our_pid,
@@ -233,7 +233,7 @@ mod windows_policy_tests {
         ]);
 
         // Simulate live sessions: only "alive" still exists
-        let live_keys = vec!["alive".to_string()];
+        let live_keys = ["alive".to_string()];
 
         // Filter snapshot to only sessions that still exist
         let restorable: Vec<_> = snapshot
@@ -297,7 +297,7 @@ mod windows_policy_tests {
 
     #[test]
     fn wasapi_inactive_sessions_excluded_from_snapshot() {
-        let all_sessions = vec![
+        let all_sessions = [
             SessionVolume::new(
                 SessionId::WasapiSession {
                     pid: 100,
@@ -336,7 +336,7 @@ mod windows_policy_tests {
             false,
         )]);
 
-        let live_keys_at_restore = vec!["original".to_string(), "new-session".to_string()];
+        let live_keys_at_restore = ["original".to_string(), "new-session".to_string()];
 
         let restorable: Vec<_> = snapshot
             .entries
@@ -413,7 +413,7 @@ mod windows_policy_tests {
 
     #[test]
     fn wasapi_volume_map_prefers_last_entry_for_duplicate_key() {
-        let entries = vec![
+        let entries = [
             SessionVolume::new(
                 SessionId::WasapiSession {
                     pid: 100,
@@ -489,7 +489,7 @@ mod windows_policy_tests {
 
     #[test]
     fn wasapi_build_volume_map_skips_empty_keys() {
-        let entries = vec![
+        let entries = [
             SessionVolume::new(
                 SessionId::WasapiSession {
                     pid: 100,

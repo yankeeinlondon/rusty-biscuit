@@ -67,7 +67,7 @@ pub fn create_backend() -> Box<dyn DuckingBackend> {
         if backend.is_available() {
             return Box::new(backend);
         }
-        return Box::new(NoopBackend::new());
+        Box::new(NoopBackend::new())
     }
 
     #[cfg(all(target_os = "windows", not(feature = "audio-ducking-windows")))]
@@ -150,7 +150,7 @@ pub fn backend_name() -> &'static str {
         if backend.is_available() {
             return "windows-wasapi";
         }
-        return "noop";
+        "noop"
     }
 
     #[cfg(all(target_os = "windows", not(feature = "audio-ducking-windows")))]

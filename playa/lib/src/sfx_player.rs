@@ -192,10 +192,8 @@ pub fn play_sfx(bytes: &[u8], options: &PlaybackOptions) -> Result<(), SfxPlayba
     // Windows: play through WASAPI with AudioCategory_SoundEffects.
     #[cfg(all(target_os = "windows", feature = "sfx-native-audio"))]
     {
-        if options.speed.is_none() {
-            if windows_sfx::play_sfx_with_category(bytes, options).is_ok() {
-                return Ok(());
-            }
+        if options.speed.is_none() && windows_sfx::play_sfx_with_category(bytes, options).is_ok() {
+            return Ok(());
         }
     }
 
