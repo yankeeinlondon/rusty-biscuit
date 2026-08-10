@@ -37,7 +37,7 @@ just test     # workspace test recipe for the visualizer crate
 just lint     # cargo clippy -p visualizer
 
 just dev      # cargo tauri dev   (requires `cargo install tauri-cli`)
-just bundle   # cargo tauri build (requires the Tauri CLI + real icons)
+just bundle   # cargo tauri build (requires the Tauri CLI + platform tooling)
 ```
 
 `just run` works without the Tauri CLI because the static `dist/` frontend is
@@ -45,7 +45,8 @@ embedded into the binary at compile time.
 
 ## Notes
 
-- Placeholder icons are committed so the crate compiles; replace them with real
-  artwork via `cargo tauri icon <source.png>` before distribution.
+- Placeholder PNG, ICO, and ICNS icons are committed so the crate compiles on
+  every desktop platform; replace them with real artwork via
+  `cargo tauri icon <source.png>` before distribution.
 - Capabilities start narrow (`core:default` only); broaden deliberately per the
   spec's security boundaries.
