@@ -73,5 +73,6 @@ biscuit-test-harness = { path = "../../biscuit-test-harness" }
 # recipe ran L2 only for the library and CLI, so these had never run as L2.
 [package.metadata.ci.tests]
 tiers = ["L1", "L2"]
-l2-backends = ["tmux", "wezterm"]
+l2-backends = ["tmux"]
+runner-tools = ["neovim"]
 l1-include-slow = true

@@ -71,7 +71,7 @@ on:
         type: string
         default: '[]'
       runner-tools:
-        description: "JSON array from the closed runner-tool vocabulary: ai-provider-stubs, darkmatter-md-fixture, node-22, pnpm-10, l2-parallel-self-spawn."
+        description: "JSON array from the closed runner-tool vocabulary: ai-provider-stubs, darkmatter-md-fixture, node-22, pnpm-10, l2-parallel-self-spawn, neovim."
         type: string
         default: '[]'
       companion-suites:
@@ -578,6 +578,29 @@ jobs:
           # `tmux -V` needs no server, no display, and no pane, so it takes no
           # focus. CI must never steal focus.
           tmux -V
+      # `neovim` runner tool: dmls's L2 suite runs a real Neovim (headless and
+      # inside tmux). Without the binary every gate skips, and backend-proof
+      # then rightly fails the tier for producing no tmux evidence.
+      - name: Provision neovim
+        if: contains(fromJSON(inputs.runner-tools), 'neovim')
+        shell: bash
+        env:
+          ENVIRONMENT: ${{ matrix.environment }}
+        run: |
+          set -euo pipefail
+          case "$ENVIRONMENT" in
+            ubuntu-latest)
+              sudo apt-get update && sudo apt-get install -y neovim
+              ;;
+            macos-latest)
+              brew list neovim >/dev/null 2>&1 || brew install neovim
+              ;;
+            *)
+              echo "no neovim provisioning path for environment '$ENVIRONMENT'" >&2
+              exit 1
+              ;;
+          esac
+          nvim --version | head -1
       - name: Report L2 backend coverage
         shell: bash
         env:

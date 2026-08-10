@@ -227,7 +227,8 @@ feature set and test another accidentally.
 
 `runner-tools` is a closed vocabulary implemented by the reusable workflow, not
 an arbitrary command surface. It contains `ai-provider-stubs`,
-`darkmatter-md-fixture`, `node-22`, `pnpm-10`, and `l2-parallel-self-spawn`.
+`darkmatter-md-fixture`, `node-22`, `pnpm-10`, `l2-parallel-self-spawn`, and
+`neovim` (dmls's L2 suite drives a real Neovim inside tmux).
 The fixture entry preserves Claudine's clean-checkout `md` binary setup, which
 a direct `_test claudine` invocation would otherwise lose. The self-spawn
 entry preserves claudine-cli's measured `min(cores, 8)` parallel L2 mode — its

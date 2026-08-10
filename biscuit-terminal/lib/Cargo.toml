@@ -103,8 +103,10 @@ name = "render_tree"
 harness = false
 
 # CI policy: L1 runs with the `image` feature; biscuit-terminal owns L2
-# (real-terminal) and browser (headless) tier tests.
+# (real-terminal) and browser (headless) tier tests. The library's own L2
+# tests drive WezTerm only (tmux/kitty/apple-terminal are the CLI's); a
+# backend declared here that no lib test executes fails backend-proof.
 [package.metadata.ci.tests]
 tiers = ["L1", "L2", "browser"]
-l2-backends = ["tmux", "wezterm", "kitty", "apple-terminal"]
+l2-backends = ["wezterm"]
 features = ["image"]

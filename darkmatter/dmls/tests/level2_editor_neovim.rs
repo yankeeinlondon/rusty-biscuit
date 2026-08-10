@@ -47,7 +47,7 @@ use std::time::{Duration, Instant};
 use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serde::Deserialize;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 /// One deterministic token site per assertion target; distinct identifier
 /// names (`title` / `east` / `cond` / `nope`) keep needle lookups unambiguous.
@@ -380,11 +380,12 @@ fn wait_for_frame(
 
 #[test]
 fn level2_neovim_tmux_renders_recipe_colors_and_repaints() {
-    require_level!(
-        Level::L2,
-        nvim_available() && TmuxHarness::available(),
-        "nvim+tmux"
-    );
+    // Two gates, not one composite: a composite gate carries no backend
+    // identity, so it can neither satisfy nor block
+    // BISCUIT_TEST_REQUIRED_BACKENDS — and this is the only test that proves
+    // dmls's declared tmux backend actually executes in CI.
+    require_level!(Level::L2, nvim_available(), "nvim");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let (_dir, root) = stage_workspace();
 
     let init = fs::read_to_string(fixture_path("init.lua"))

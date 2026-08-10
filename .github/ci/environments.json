@@ -9,7 +9,25 @@
         "tmux": true,
         "headless_browser": true,
         "node_pnpm": true,
-        "archive_only": false
+        "archive_only": false,
+        "wezterm": {
+          "available": false,
+          "reason": "GUI terminal emulator: WezTerm/Kitty/Apple Terminal need a live desktop session (or a cold-started remote-control server) that no CI runner provides. Packages whose L2 suites drive only these backends render POLICY GAP here and are covered by local test-l2 runs.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2027-01-31"
+        },
+        "kitty": {
+          "available": false,
+          "reason": "GUI terminal emulator: WezTerm/Kitty/Apple Terminal need a live desktop session (or a cold-started remote-control server) that no CI runner provides. Packages whose L2 suites drive only these backends render POLICY GAP here and are covered by local test-l2 runs.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2027-01-31"
+        },
+        "apple-terminal": {
+          "available": false,
+          "reason": "GUI terminal emulator: WezTerm/Kitty/Apple Terminal need a live desktop session (or a cold-started remote-control server) that no CI runner provides. Packages whose L2 suites drive only these backends render POLICY GAP here and are covered by local test-l2 runs.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2027-01-31"
+        }
       }
     },
     {
@@ -30,7 +48,25 @@
           "expiry": "2027-01-31"
         },
         "node_pnpm": false,
-        "archive_only": false
+        "archive_only": false,
+        "wezterm": {
+          "available": false,
+          "reason": "GUI terminal emulator: WezTerm/Kitty/Apple Terminal need a live desktop session (or a cold-started remote-control server) that no CI runner provides. Packages whose L2 suites drive only these backends render POLICY GAP here and are covered by local test-l2 runs.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2027-01-31"
+        },
+        "kitty": {
+          "available": false,
+          "reason": "GUI terminal emulator: WezTerm/Kitty/Apple Terminal need a live desktop session (or a cold-started remote-control server) that no CI runner provides. Packages whose L2 suites drive only these backends render POLICY GAP here and are covered by local test-l2 runs.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2027-01-31"
+        },
+        "apple-terminal": {
+          "available": false,
+          "reason": "GUI terminal emulator: WezTerm/Kitty/Apple Terminal need a live desktop session (or a cold-started remote-control server) that no CI runner provides. Packages whose L2 suites drive only these backends render POLICY GAP here and are covered by local test-l2 runs.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2027-01-31"
+        }
       }
     },
     {
@@ -46,7 +82,25 @@
           "expiry": "2027-01-31"
         },
         "node_pnpm": false,
-        "archive_only": false
+        "archive_only": false,
+        "wezterm": {
+          "available": false,
+          "reason": "GUI terminal emulator: WezTerm/Kitty/Apple Terminal need a live desktop session (or a cold-started remote-control server) that no CI runner provides. Packages whose L2 suites drive only these backends render POLICY GAP here and are covered by local test-l2 runs.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2027-01-31"
+        },
+        "kitty": {
+          "available": false,
+          "reason": "GUI terminal emulator: WezTerm/Kitty/Apple Terminal need a live desktop session (or a cold-started remote-control server) that no CI runner provides. Packages whose L2 suites drive only these backends render POLICY GAP here and are covered by local test-l2 runs.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2027-01-31"
+        },
+        "apple-terminal": {
+          "available": false,
+          "reason": "GUI terminal emulator: WezTerm/Kitty/Apple Terminal need a live desktop session (or a cold-started remote-control server) that no CI runner provides. Packages whose L2 suites drive only these backends render POLICY GAP here and are covered by local test-l2 runs.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2027-01-31"
+        }
       }
     },
     {
@@ -56,7 +110,7 @@
       "capabilities": {
         "tmux": {
           "available": false,
-          "reason": "the WSL2 leg runs a prebuilt nextest archive (plan 2.2): the guest has no cargo or rustc, so it cannot build the biscuit-harness-broker binary the L2 tier needs, and no terminal server runs there. Installing tmux in the guest would satisfy which(\"tmux\") while executing zero L2 tests — the non-evidence plan 1.1 rejects. Closes when the broker ships inside the archive and the guest starts a tmux server; tractable without solving the Windows backend problem, hence the earlier expiry.",
+          "reason": "the WSL2 leg runs a prebuilt nextest archive (plan 2.2): the guest has no cargo or rustc, so it cannot build the biscuit-harness-broker binary the L2 tier needs, and no terminal server runs there. Installing tmux in the guest would satisfy which(\"tmux\") while executing zero L2 tests \u2014 the non-evidence plan 1.1 rejects. Closes when the broker ships inside the archive and the guest starts a tmux server; tractable without solving the Windows backend problem, hence the earlier expiry.",
           "owner": "@yankeeinlondon",
           "expiry": "2026-12-31"
         },
@@ -67,7 +121,25 @@
           "expiry": "2026-12-31"
         },
         "node_pnpm": false,
-        "archive_only": true
+        "archive_only": true,
+        "wezterm": {
+          "available": false,
+          "reason": "GUI terminal emulator; the WSL2 guest runs a prebuilt archive with no desktop session. Same class as the tmux gap.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2026-12-31"
+        },
+        "kitty": {
+          "available": false,
+          "reason": "GUI terminal emulator; the WSL2 guest runs a prebuilt archive with no desktop session. Same class as the tmux gap.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2026-12-31"
+        },
+        "apple-terminal": {
+          "available": false,
+          "reason": "GUI terminal emulator; the WSL2 guest runs a prebuilt archive with no desktop session. Same class as the tmux gap.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2026-12-31"
+        }
       }
     }
   ]

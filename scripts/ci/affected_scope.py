@@ -75,6 +75,7 @@ KNOWN_RUNNER_TOOLS = {
     "node-22",
     "pnpm-10",
     "l2-parallel-self-spawn",
+    "neovim",
 }
 
 # Companion suites are non-Cargo test suites owned by a package. Each name maps
@@ -152,7 +153,18 @@ def validate_expiry(label: str, field: str, value: Any, today: date) -> None:
 # Environment capabilities — .github/ci/environments.json
 # ---------------------------------------------------------------------------
 
-KNOWN_CAPABILITIES = {"tmux", "headless_browser", "node_pnpm", "archive_only"}
+# Every L2 backend is a capability under its own name, so a package whose
+# suite drives only GUI emulators renders a governed POLICY GAP instead of an
+# ungoverned block.
+KNOWN_CAPABILITIES = {
+    "tmux",
+    "wezterm",
+    "kitty",
+    "apple-terminal",
+    "headless_browser",
+    "node_pnpm",
+    "archive_only",
+}
 
 
 def load_environments(path: Path, today: date | None = None) -> list[dict[str, Any]]:
