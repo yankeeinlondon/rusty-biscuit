@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Refuse storage-heavy Cargo work before Windows runs out of target-volume space.
+# Reclaim rebuildable Cargo artifacts before refusing storage-heavy Windows work.
 set -euo pipefail
 
 case "$(uname -s)" in
@@ -14,6 +14,18 @@ if [[ ! "$minimum_gib" =~ ^[0-9]+$ ]]; then
 fi
 if (( minimum_gib == 0 )); then
     exit 0
+fi
+
+auto_sweep="${BISCUIT_BUILD_AUTO_SWEEP:-1}"
+if [[ ! "$auto_sweep" =~ ^[01]$ ]]; then
+    echo "BISCUIT_BUILD_AUTO_SWEEP must be 0 or 1, got: $auto_sweep" >&2
+    exit 2
+fi
+
+sweep_max_gb="${BISCUIT_BUILD_SWEEP_MAX_GB:-80}"
+if [[ ! "$sweep_max_gb" =~ ^[0-9]+$ ]] || (( sweep_max_gb < 1 || sweep_max_gb > 1000 )); then
+    echo "BISCUIT_BUILD_SWEEP_MAX_GB must be an integer from 1 to 1000, got: $sweep_max_gb" >&2
+    exit 2
 fi
 
 if ! command -v jq >/dev/null 2>&1; then
@@ -39,13 +51,17 @@ while [[ ! -e "$probe_path" ]]; do
     probe_path="$parent"
 done
 
-read -r target_fs total_kib used_kib free_kib < <(
-    df -Pk "$probe_path" | awk 'END { print $1, $2, $3, $4 }'
-)
-if [[ ! "$free_kib" =~ ^[0-9]+$ ]]; then
-    echo "Cannot determine free space for Cargo target directory: $target_dir" >&2
-    exit 2
-fi
+measure_space() {
+    read -r target_fs total_kib used_kib free_kib < <(
+        df -Pk "$probe_path" | awk 'END { print $1, $2, $3, $4 }'
+    )
+    if [[ ! "$free_kib" =~ ^[0-9]+$ ]]; then
+        echo "Cannot determine free space for Cargo target directory: $target_dir" >&2
+        exit 2
+    fi
+}
+
+measure_space
 
 # BasePath is the only authority for a relocated distribution; `wsl --list`
 # never reports it. MSYS_NO_PATHCONV is load-bearing -- without it Git Bash
@@ -122,6 +138,32 @@ report_wsl_vhdx() {
 }
 
 required_kib=$(( minimum_gib * 1024 * 1024 ))
+reclaim_report=""
+if (( free_kib < required_kib && auto_sweep == 1 )); then
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    sweep_script="$script_dir/windows-cargo-sweep.ps1"
+    if command -v cygpath >/dev/null 2>&1; then
+        sweep_script="$(cygpath -w "$sweep_script")"
+    fi
+
+    echo "Cargo target volume is below ${minimum_gib} GiB free; attempting the ${sweep_max_gb} GB Windows artifact cap." >&2
+    if powershell.exe -NoProfile -ExecutionPolicy Bypass \
+        -File "$sweep_script" -Operation run -MaxSizeGB "$sweep_max_gb"; then
+        reclaim_report="Automatic Cargo artifact reclaim completed, but did not restore the required headroom."
+    else
+        reclaim_exit=$?
+        reclaim_report="Automatic Cargo artifact reclaim failed with exit ${reclaim_exit}."
+    fi
+    measure_space
+    if (( free_kib >= required_kib )); then
+        awk -v f="$free_kib" -v m="$minimum_gib" 'BEGIN {
+            printf "Cargo storage preflight restored %.1f GiB free (required: %d GiB).\n",
+                   f / 1048576, m
+        }' >&2
+        exit 0
+    fi
+fi
+
 if (( free_kib < required_kib )); then
     read -r total_gib used_gib free_gib < <(
         awk -v t="$total_kib" -v u="$used_kib" -v f="$free_kib" 'BEGIN {
@@ -135,10 +177,11 @@ Cargo storage preflight failed.
   volume:   ${total_gib} GiB total, ${used_gib} GiB used, ${free_gib} GiB free
   required: ${minimum_gib} GiB
 ${wsl_report}
+${reclaim_report}
 
-'just sweep' trims Cargo artifacts; lower its cap with SWEEP_MAX_SIZE when the
-target tree itself is the bulk of the volume. Set BISCUIT_BUILD_MIN_FREE_GIB=0
-only for an intentional emergency override.
+'just windows-sweep' trims the native Cargo target to its 80 GB cap. Automatic
+reclaim can be disabled with BISCUIT_BUILD_AUTO_SWEEP=0. Set
+BISCUIT_BUILD_MIN_FREE_GIB=0 only for an intentional emergency override.
 EOF
     exit 1
 fi

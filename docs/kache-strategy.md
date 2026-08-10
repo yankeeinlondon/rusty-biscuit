@@ -163,13 +163,22 @@ untouched.
 It skips safely while Cargo, rustc, Clippy, or a linker is active, caps the
 resolved target tree at 80 GB, and logs before/after capacity to
 `%LOCALAPPDATA%\rusty-biscuit\logs\cargo-sweep.log`. Run
-`just install-windows-sweep` once to register the current-user task for Sunday
-and Wednesday at 04:00; inspect it with `just windows-sweep-status`.
+`just install-windows-sweep` once to register the current-user task for every
+day at 04:00; inspect it with `just windows-sweep-status`. The daily task is a
+backstop: this target has grown by more than 50 GiB between two scheduled runs,
+so schedule frequency alone cannot guarantee headroom.
 
 The shared Cargo gate recipes also run `scripts/storage-preflight.sh`. It is a
-no-op off Windows and refuses to start below 50 GiB free on Cargo's actual
-target volume. `BISCUIT_BUILD_MIN_FREE_GIB` changes the threshold; zero is an
-explicit emergency disable.
+no-op off Windows. Below 50 GiB free on Cargo's actual target volume, it first
+runs the native 80 GB artifact cap and measures again; it refuses to start only
+when that reclaim cannot restore the required headroom. With the current volume
+layout, the cap restores roughly 83 GiB free and leaves about 33 GiB of
+hysteresis before another reclaim. A higher floor would repeatedly discard and
+rebuild artifacts without fixing the underlying capacity shortage.
+`BISCUIT_BUILD_MIN_FREE_GIB` changes the threshold,
+`BISCUIT_BUILD_SWEEP_MAX_GB` changes the automatic cap, and
+`BISCUIT_BUILD_AUTO_SWEEP=0` disables automatic reclaim. Setting the minimum to
+zero remains the explicit emergency override.
 
 ### WSL2 vhdx reclamation
 
@@ -238,12 +247,21 @@ to 150–200GB. If nothing ever approaches 120GB, it can come down.
 - `cargo-sweep` **stays** alongside kache. Not redundant: kache's per-crate keying degrades ~100×
   on a huge tree (~18 s/crate on a 957k-file `target/deps` vs ~30–170 ms clean).
 
-The 280 GiB native-Windows build volume also carries a roughly 140 GiB WSL
-VHDX, so its 80 GB cap is intentionally lower than the 120 GB general default.
-A dry run against a 141 GiB target measured 76.68 GiB reclaimable. That host's
-ignored `.cargo/config.toml` also sets `build.incremental = false`; keep the
-setting consistent because toggling it inside one target temporarily retains
-both artifact variants.
+The 280 GiB native-Windows build volume also carries a large WSL VHDX, so its
+80 GB cap is intentionally lower than the 120 GB general default. A dry run
+against a 141 GiB target measured 76.68 GiB reclaimable. That host's ignored
+`.cargo/config.toml` also sets `build.incremental = false`; keep the setting
+consistent because toggling it inside one target temporarily retains both
+artifact variants.
+
+This is a capacity guard, not a substitute for capacity. The long-term Windows
+layout should place Cargo's target on its own ReFS Dev Drive rather than beside
+the WSL VHDX. A separate volume isolates the two independently growing working
+sets and gives kache the ReFS block-cloning semantics required to avoid a second
+physical copy. Existing NTFS volumes cannot be converted in place; provision a
+new volume, format it as a Dev Drive, and then update the host-only
+`.cargo/config.toml` target directory. Keep kache disabled while the target and
+store remain on NTFS.
 
 ### WSL VHD maintenance
 

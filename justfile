@@ -974,14 +974,14 @@ _ensure-cargo-sweep:
 sweep *args="": _ensure-cargo-sweep
     @scripts/sweep.sh {{ args }}
 
-# verify the Cargo target volume has enough free space for another Windows gate
+# restore the native Cargo target cap if needed, then verify Windows headroom
 storage-check: _storage_preflight
 
 # run the native Windows 80 GB sweep policy now
 windows-sweep:
     @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows-cargo-sweep.ps1 -Operation run
 
-# install the native Windows sweep policy in Task Scheduler
+# install the daily native Windows sweep policy in Task Scheduler
 install-windows-sweep:
     @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows-cargo-sweep.ps1 -Operation install
 
