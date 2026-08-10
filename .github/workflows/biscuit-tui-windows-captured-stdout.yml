@@ -38,9 +38,10 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v2
 
-      - name: Install native prerequisites
-        shell: bash
-        run: just _ensure-native-libs biscuit-tui
+      # No native step: biscuit-tui declares no `[package.metadata.ci.native]`
+      # requirements on any OS. `_ensure-native-libs` now takes literal package
+      # names, not an area name — passing `biscuit-tui` made it hunt a host
+      # package by that name and fail.
 
       - name: Set up the pinned Rust toolchain
         run: rustup show

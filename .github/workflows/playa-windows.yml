@@ -39,9 +39,11 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v2
 
-      - name: Install native prerequisites
-        shell: bash
-        run: just _ensure-native-libs playa
+      # No native step: playa's `[package.metadata.ci.native]` declares only
+      # ubuntu-latest packages (ALSA/Pulse dev headers); Windows audio is
+      # OS-native. `_ensure-native-libs` now takes literal package names, not
+      # an area name — passing `playa` made it hunt a host package by that
+      # name and fail.
 
       - name: Set up the pinned Rust toolchain
         run: rustup show
