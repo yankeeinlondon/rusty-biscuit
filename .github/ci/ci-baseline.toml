@@ -81,19 +81,6 @@ source_run = "30323254931"
 expiry = "2026-10-31"
 
 [[failure]]
-package = "biscuit-terminal-cli"
-environment = "windows-latest"
-tier = "L1"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 34 failing tests, e.g. biscuit-terminal-cli::about::test_about_alacritty_json_extracts_legacy_yaml_candidate"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-# Candidate (run 30323254931, unverified). darkmatter's four Windows L1 shards
-# collapsed into one package entry; the CLI carries the L2-harness-integrity
-# and rendered-table tests that dominate the WSL evidence. The library may also
-# fail on Windows — split on the bridging run if it does.
-[[failure]]
 package = "darkmatter-cli"
 environment = "windows-latest"
 tier = "L1"
@@ -117,45 +104,6 @@ expiry = "2026-10-31"
 # Candidate (run 30323254931, unverified). The unchained-ai area's Windows L1
 # failure; the WSL evidence names model_id, so it is the candidate.
 [[failure]]
-package = "model_id"
-environment = "windows-latest"
-tier = "L1"
-owner = "@yankeeinlondon"
-reason = "migrated from the area-keyed baseline (run 30323254931), unverified; attributed to model_id (the WSL evidence names model_id::ui::ui). Candidate pending the Phase 4 bridging run"
-source_run = "30323254931"
-expiry = "2026-10-31"
-
-# ---------------------------------------------------------------------------
-# Linux / macOS L1 failures
-# ---------------------------------------------------------------------------
-
-# Candidate (run 30323254931, unverified). sniff's Linux L1 failure.
-[[failure]]
-package = "sniff-cli"
-environment = "ubuntu-latest"
-tier = "L1"
-owner = "@yankeeinlondon"
-reason = "migrated from the area-keyed baseline (run 30323254931), unverified; attributed to sniff-cli. Candidate pending the Phase 4 bridging run"
-source_run = "30323254931"
-expiry = "2026-10-31"
-
-# Candidate (run 30323254931, unverified). sniff was the only area with a
-# macOS `full_os` override, so this is the only measured macOS evidence in the
-# repo. Attributed to sniff-cli.
-[[failure]]
-package = "sniff-cli"
-environment = "macos-latest"
-tier = "L1"
-owner = "@yankeeinlondon"
-reason = "migrated from the area-keyed baseline (run 30323254931), unverified; the only macOS evidence in the repo, attributed to sniff-cli. Candidate pending the Phase 4 bridging run"
-source_run = "30323254931"
-expiry = "2026-10-31"
-
-# ---------------------------------------------------------------------------
-# WSL2 L1 failures (the area-keyed shards collapse to one package entry each)
-# ---------------------------------------------------------------------------
-
-[[failure]]
 package = "biscuit-speaks-cli"
 environment = "wsl2-ubuntu"
 tier = "L1"
@@ -164,17 +112,6 @@ reason = "red on main at the time of sync; 34 failing tests, e.g. biscuit-speaks
 source_run = "30791562395"
 expiry = "2026-11-30"
 
-[[failure]]
-package = "biscuit-terminal-cli"
-environment = "wsl2-ubuntu"
-tier = "L1"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 41 failing tests, e.g. biscuit-terminal-cli::integration_test::test_columns_snapshot"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-# claudine's four WSL2 L1 shards (11 + 8 + 6 + 8 failing) collapse into one
-# claudine-cli entry; every recorded example test names claudine-cli.
 [[failure]]
 package = "claudine-cli"
 environment = "wsl2-ubuntu"
@@ -187,15 +124,6 @@ expiry = "2026-11-30"
 # darkmatter's WSL2 L1 failures split across two packages: the CLI's
 # harness-integrity / shim tests (shards 1/4, 3/4, 4/4) and the library's
 # cutover-reference rendering (shard 2/4, whose example names darkmatter::).
-[[failure]]
-package = "darkmatter-cli"
-environment = "wsl2-ubuntu"
-tier = "L1"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; shards 1/4, 3/4, 4/4 collapsed — ~126 failing tests, e.g. darkmatter-cli::level2_harness_integrity::assert_shim_resolves_to_built_accepts_valid_link"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
 [[failure]]
 package = "darkmatter"
 environment = "wsl2-ubuntu"
@@ -222,19 +150,6 @@ owner = "@yankeeinlondon"
 reason = "red on main at the time of sync; 1 failing test, e.g. model_id::ui::ui"
 source_run = "30791562395"
 expiry = "2026-11-30"
-
-[[failure]]
-package = "research"
-environment = "windows-latest"
-tier = "L1"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 2 failing tests, e.g. research::link::creation::tests::create_deep_dive_symlink_verifies_symlink_points_to_correct_target"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-# ---------------------------------------------------------------------------
-# L2 failures
-# ---------------------------------------------------------------------------
 
 [[failure]]
 package = "biscuit-terminal-cli"

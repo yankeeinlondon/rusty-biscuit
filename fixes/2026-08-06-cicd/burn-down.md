@@ -1,87 +1,85 @@
-# Native-environment burn-down — the low-hanging fruit list
+# Burn-down — morning report after the authoritative full-scope run
 
-Source: full-scope run 31184682085 (attempt 2, commit `69d704c69`), the last
-run with complete native-environment evidence. wsl2 evidence is arriving via
-the seven targeted `_wsl-ci` dispatches and is NOT in this document.
+Source: run **31366269515** (full scope on `a3b0e25cd`, completed overnight
+2026-08-10). 595 jobs, 470 result cells: **352 PASS · 27 FAIL · 34 governed
+POLICY GAP · 20 NOTHING TO RUN · 36 NOT SCHEDULED · 1 MISSING**.
 
-Counts: **macOS 8 · ubuntu 14 · windows 58** failing tests — but they cluster
-into far fewer causes. Fix causes, not tests.
+Trajectory: 102 failed jobs (attempt 2) → **33**. The WSL guest column went
+from 63 dead legs to 8 real test-level failures; darkmatter-cli and
+biscuit-terminal are now fully green on wsl2 (the insta and archive fixes,
+confirmed at scale). The L2 backend-evidence corrections landed clean: no
+zero-fail L2 cells remain, and dmls's neovim tests executed in CI for the
+first time (2 of 3 pass).
 
-## Not fruit — CI-side, already owned (do not chase as test bugs)
+## Baseline: corrected and verified
 
-- **6 L2 cells FAIL with zero failing tests** (`biscuit-terminal`,
-  `darkmatter`, `dmls` × ubuntu/macos): the new backend-proof guard fails the
-  job — "no evidence at …/backend-executions.jsonl" while the suite starts ~2
-  tests and skips ~2996. CI L2 wiring issue (evidence-file path / shared-pane
-  provisioning), not test regressions. Owner: the CI branch work.
-- **All wsl2 cells in attempt 2/3** — died pre-test (`$NATIVE` unbound);
-  fixed on the branch; dispatches under way.
+The seven `baseline-now-passing` entries flagged by the verdict are pruned
+(biscuit-terminal-cli windows+wsl2, darkmatter-cli wsl2, model_id windows,
+sniff-cli ubuntu+macos, research windows). Every remaining entry was
+confirmed against this run's package-keyed evidence — the Phase 4 candidate
+baseline is now **verified**, 17 entries. Re-running the verdict locally
+against this run's results with the corrected baseline yields exactly the 13
+blockers below and zero baseline noise.
 
-## One fixture, 52 failures (25 windows + 27 wsl2)
+## The 13 remaining blockers
 
-`biscuit-terminal/lib/tests/common/pty.rs:46-52` — `discovery_probe_path()`
-joins `"discovery_probe"` **without `std::env::consts::EXE_SUFFIX`**:
+### Lint (3) — trivial clippy, introduced by the fix rounds
 
-- **Windows (25 tests)**: the example IS built (`discovery_probe.exe`), the
-  extension-less `exists()` check fails, every PTY-fixture test panics at
-  `pty.rs:75`. One-line fix. (After it, these tests meet PTY-on-Windows
-  reality for the first time — treat whatever appears next as new
-  information, the fixture bug was masking it.)
-- **wsl2 (27 tests)**: `cargo nextest archive` does not carry examples; the
-  guest has no cargo to build one. Fix: include the example in the archive
-  (`[profile.ci.archive] include` + build it in the archive step), matching
-  the guest's `target/<triple>/debug/examples/` resolution.
-
-Affected suites (the "OSC-looking" cluster): `level1_osc_queries`,
-`level1_clipboard`, `level1_cursor`, `level1_mode_2027`,
-`level1_apple_terminal_prose`, `level1_terminal_init`,
-`level1_terminal_osc_cache`.
-
-## Cross-OS failures (same test, all three OSes)
-
-| Test | Note |
+| Cell | Error |
 |---|---|
-| `claudine-gen::generate_ux::clean_check_report_summary_matches_phase_1_snapshot` | Known: the archived review moved files the gen baseline test reads (memory: claudine-gen baseline broken on HEAD) |
-| `sniff::filesystem::repo::standard::tests::resolve_acting_binary_returns_none_when_binary_missing` | Fails identically on ubuntu/windows/macos — suspect the runner environment satisfies a lookup the test expects to miss |
+| `biscuit-terminal/lint` | `variable does not need to be mutable` in test `level1_apple_terminal_prose` |
+| `sniff/lint` | `unused import: super::*`, `unused variable: helpers`, `call to set_readonly(false)` in test `merge_conflict_prediction` |
+| `sniff-cli/lint` | `this if statement can be collapsed` in test `snapshots` |
 
-## macOS (8) — beyond the cross-OS two
+### sniff L1 (4 cells) — one cross-OS test + two env-specific
 
-- `sniff::hardware::gpu::tests::test_detect_gpus_on_macos` — GPU detection on
-  a virtualized runner; likely env-dependent assertion.
-- `claudine-cli` L2 `level2_context_capture` ×3 (also ×4 on ubuntu) — the
-  140-cap fill family; capture-under-tmux styling.
-- `biscuit-terminal-cli` L2 `level2_apple_terminal_double_underline_plain_text_visible`
-  — Apple Terminal harness on a headless runner.
-- `darkmatter-cli` L2 `level2_code_block_clears_inherited_dim_before_theme_colors`
-  — known baseline family.
+- `resolve_acting_binary_returns_none_when_binary_missing` fails on
+  **ubuntu, windows, macos** (identical) — the runner environment satisfies a
+  lookup the test expects to miss.
+- macos additionally: `hardware::gpu::test_detect_gpus_on_macos`.
+- wsl2: `list_worktrees_propagates_registry_error` + git_parity twin.
 
-## ubuntu (14) — beyond cross-OS and the L2 families
+### Windows L1 (2 cells) — remaining functional work
 
-- `claudine-cli` L1 ×6: `sequence_perf` ×2, `wrap_perf` ×2,
-  `prompt_reporting::compose_frontmatter_verbose_shows_full_system_prompt`,
-  `shipped_prompts::shipped_implement_prompt_runs_real_router_target` — the
-  known ubuntu L1 baseline family (timing/perf-sensitive under runner load).
-- `biscuit-terminal-cli` L2 `level2_diagram_fallback_when_no_image_protocol`.
-- `darkmatter-cli` L2 `level2_schema_about_light_terminal_uses_dark_code_theme`.
+- `rendezvous-daemon`: `the_pipe_dacl_names_this_user_and_nobody_else`,
+  `private_dir::the_current_user_descriptor_names_this_account_and_nobody_else`
+  (down from 10 in the previous round).
+- `unchained-ai`: `pty_runner::test_ansi_stripping`, `test_run_echo_command`.
 
-## windows (58) — beyond the 25 fixture + cross-OS
+### WSL2 L1 (2 cells) — today's burn-down territory
 
-| Cluster | Tests | Suspected cause |
-|---|---|---|
-| `rendezvous-daemon` ×10, `rendezvous-client` ×1 | named-pipe DACL/acceptor/server/phase6 | First-ever CI exposure of the Windows transport half (these packages were never in the old grid); real functional work |
-| `biscuit-terminal` filesystem ×3, discovery resolver ×2 | path-safety + XDG override tests | Windows path semantics |
-| `biscuit-terminal-cli` ×4 | about/integration (PTY + config paths) | Windows paths / PTY |
-| `research` ×2 | symlink creation verification | Windows symlink privilege on runners (needs privilege or junction fallback) |
-| `unchained-ai` ×3 | `pty_runner` echo/ansi/interactive | PTY (ConPTY) behavior on runners |
-| `sniff-cli` ×4 | 2 insta snapshots + 2 worktree-verbose | Windows path forms in output (`runneradmin` home, backslashes) |
-| `sniff-cli`/`sniff` lint ×2 (cells) | lint FAIL with 0 test fails | clippy `-D warnings` on ubuntu lint leg — read the lint log, not tests |
-| `biscuit-tui-cli` ×1 | `bash_script_passes_syntax_check` | bash discovery on Windows runner |
-| `darkmatter-cli` ×1 | `schema_validate_legacy_pretty_output_is_byte_identical` | 8.3 short path (`RUNNER~1`) in emitted file:// link — Ken has the fix |
-| `reaper`/`visualizer` check cells | compile-check FAIL, 0 tests | `cargo check --all-targets` on windows — read the check log |
+- `claudine`: 4 tests (`shell_expansion_failed_via_real_markdown…`,
+  `direct_composition_runs_shell_in_configured_working_directory`,
+  `validate_permissions_readonly_file`,
+  `non_repository_session_runs_shell_in_launch_cwd`).
+- `claudine-contract`:
+  `shadow_home_copy_failure_logs_error_and_returns_secret_free_message`.
 
-## Sequencing note
+(The baselined wsl2 entries — biscuit-speaks-cli 2, claudine-cli 17,
+darkmatter 11, sniff-cli 1, model_id 1 — are excused but are also today's
+material; fixing them prunes the baseline further.)
 
-The 4.5-hour full-scope run happens once, after this list is burned down —
-per Ken 2026-08-07. Until then: fix locally per OS, verify with targeted
-means (stripped-PATH binary runs, Docker, `_wsl-ci` dispatches, single-leg
-`workflow_dispatch`), and let pushes cancel any incidental full runs.
+### First-execution (1 cell)
+
+- `dmls/ubuntu/L2`:
+  `level2_neovim_decodes_semantic_token_families_and_positions` — 1 of the 3
+  neovim tests, first time ever executed in CI. The other two pass (including
+  the tmux rendering test, which also proves the backend-evidence chain
+  end-to-end).
+
+### Infrastructure flake (1 cell)
+
+- `biscuit-contract/windows/L1` **MISSING**: the job died at "Install protoc"
+  with `socket hang up` — a transient download failure, nothing to fix. A
+  re-run of that single job (or the next full run) clears it. MISSING blocked
+  instead of passing, which is the guard working.
+
+## Also green and worth knowing
+
+- The POLICY GAP machinery renders all 34 gaps governed (tmux/browser/GUI
+  backends), each with owner and expiry — none block.
+- Synthetic baseline identities (`claudine-gen-drift`, `coverage`) report
+  out-of-scope, neither blocking nor passing.
+- Specialized legs (`playa-windows`, `biscuit-tui-captured-stdout`,
+  `rendezvous native windows`, `coverage`) remain red outside the verdict —
+  unchanged, covered by the retirement spec.
