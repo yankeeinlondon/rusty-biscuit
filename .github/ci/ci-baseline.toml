@@ -104,15 +104,6 @@ expiry = "2026-10-31"
 # Candidate (run 30323254931, unverified). The unchained-ai area's Windows L1
 # failure; the WSL evidence names model_id, so it is the candidate.
 [[failure]]
-package = "biscuit-speaks-cli"
-environment = "wsl2-ubuntu"
-tier = "L1"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 34 failing tests, e.g. biscuit-speaks-cli::cli_test::test_cli_background_flag"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-[[failure]]
 package = "claudine-cli"
 environment = "wsl2-ubuntu"
 tier = "L1"
