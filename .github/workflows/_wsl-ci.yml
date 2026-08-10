@@ -333,6 +333,21 @@ jobs:
               exit 1
               ;;
           esac
+      # The default wsl-bash user is root, and root ignores file permissions —
+      # which silently inverts every permission-denial test fixture (a readonly
+      # file that must fail validation validates; a copy rigged to fail
+      # succeeds). Real WSL2 development happens as an ordinary user, so the
+      # tests run as one. Provisioning steps stay root; only the test step
+      # drops privileges.
+      - name: Create the unprivileged test user
+        shell: wsl-bash {0}
+        run: |
+          set -euo pipefail
+          id -u biscuit >/dev/null 2>&1 || useradd -m -s /bin/bash biscuit
+          # Passwordless sudo so recipes that self-elevate (apt installs in
+          # `_ensure-native-libs`) keep working if ever invoked as the user.
+          echo 'biscuit ALL=(ALL) NOPASSWD:ALL' >/etc/sudoers.d/biscuit
+          chmod 0440 /etc/sudoers.d/biscuit
       - name: Clone the repository onto ext4
         shell: wsl-bash {0}
         run: |
@@ -352,6 +367,9 @@ jobs:
           git clone --no-hardlinks "$workspace" "${{ env.GUEST_ROOT }}"
           git -C "${{ env.GUEST_ROOT }}" checkout --detach "$revision"
           cp "$workspace/nextest-archive/nextest-archive.tar.zst" /home/runner/
+          # The test step runs as `biscuit` (see the user-creation step); the
+          # tree it executes in must be writable by that user, not root.
+          chown -R biscuit:biscuit /home/runner
       - name: Install just and cargo-nextest in the guest
         shell: wsl-bash {0}
         run: |
@@ -489,6 +507,14 @@ jobs:
         shell: wsl-bash {0}
         run: |
           set -euo pipefail
+          # Drop to the unprivileged user: root ignores file permissions, which
+          # inverts permission-denial fixtures (claudine's readonly-file and
+          # shadow-home-copy tests, sniff's worktree-registry test). `env`
+          # preserves the wrapper environment while giving the user its own
+          # HOME, which tests that write under HOME rely on.
+          if [ "$(id -u)" -eq 0 ]; then
+            exec runuser -u biscuit -- env HOME=/home/biscuit USER=biscuit LOGNAME=biscuit bash "$0"
+          fi
           # Re-exported from the job-level `env:` block through GitHub expression
           # interpolation rather than read from the guest environment: whether
           # `wsl-bash` forwards a given variable depends on WSLENV, and the
