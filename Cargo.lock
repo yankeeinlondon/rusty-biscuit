@@ -1415,6 +1415,7 @@ dependencies = [
  "tracing-test",
  "unic-langid",
  "unicode-width 0.2.2",
+ "url",
  "viuer",
 ]
 

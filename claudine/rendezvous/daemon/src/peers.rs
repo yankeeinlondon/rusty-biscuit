@@ -7,8 +7,8 @@
 //! [`PeerRegistry::connect`] (or an inbound handshake) flips its
 //! connection state.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -17,11 +17,11 @@ use std::time::Duration;
 
 use parking_lot::RwLock;
 use rendezvous_core::{PeerConnectionState, PeerInfo, PeerSource};
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::{Semaphore, mpsc};
 use tokio::task::{JoinHandle, JoinSet};
 
 use crate::discovery::DiscoveredPeer;
-use crate::quic::{InboundConnection, QuicError, QuicEndpoint};
+use crate::quic::{InboundConnection, QuicEndpoint, QuicError};
 use crate::sync::{SyncError, SyncService};
 
 /// Cadence of the periodic re-sync worker. Chosen so at least two
@@ -329,12 +329,10 @@ impl PeerRegistry {
 
         let connect_future = endpoint.connect(socket_addr, "rendezvous");
         let result = match connect_future {
-            Ok(connecting) => {
-                tokio::time::timeout(Duration::from_secs(5), connecting)
-                    .await
-                    .map_err(|_| QuicError::Connection(quinn::ConnectionError::TimedOut))
-                    .and_then(|res| res.map_err(QuicError::Connection))
-            }
+            Ok(connecting) => tokio::time::timeout(Duration::from_secs(5), connecting)
+                .await
+                .map_err(|_| QuicError::Connection(quinn::ConnectionError::TimedOut))
+                .and_then(|res| res.map_err(QuicError::Connection)),
             Err(err) => Err(QuicError::Connect(err)),
         };
 
@@ -352,10 +350,7 @@ impl PeerRegistry {
                     let registry = self.clone();
                     let node_for_sync = node_id.clone();
                     tokio::spawn(async move {
-                        match service
-                            .sync_initiator(&conn_for_sync, &node_for_sync)
-                            .await
-                        {
+                        match service.sync_initiator(&conn_for_sync, &node_for_sync).await {
                             Ok(outcome) => {
                                 registry.record_sync_success(&node_for_sync);
                                 tracing::info!(
@@ -462,7 +457,9 @@ impl PeerRegistry {
             map.values()
                 .filter(|rec| rec.state == PeerConnectionState::Connected)
                 .filter_map(|rec| {
-                    rec.connection.clone().map(|conn| (rec.node_id.clone(), conn))
+                    rec.connection
+                        .clone()
+                        .map(|conn| (rec.node_id.clone(), conn))
                 })
                 .collect()
         };
@@ -597,8 +594,7 @@ impl PeerRegistry {
             rec.reconnect_attempts = rec.reconnect_attempts.saturating_add(1);
             rec.state = PeerConnectionState::Disconnected;
             let backoff = reconnect_backoff(rec.reconnect_attempts);
-            rec.reconnect_after_unix_ms =
-                unix_now_ms().saturating_add(backoff.as_millis() as i64);
+            rec.reconnect_after_unix_ms = unix_now_ms().saturating_add(backoff.as_millis() as i64);
         }
     }
 
@@ -613,14 +609,14 @@ impl PeerRegistry {
     fn record_discovery(&self, peer: DiscoveredPeer) {
         let mut map = self.inner.peers.write();
         let now = unix_now_ms();
-        let entry = map
-            .entry(peer.node_id.clone())
-            .or_insert_with(|| PeerRecord::new_discovered(
+        let entry = map.entry(peer.node_id.clone()).or_insert_with(|| {
+            PeerRecord::new_discovered(
                 peer.node_id.clone(),
                 peer.socket_addr,
                 PeerSource::Mdns,
                 now,
-            ));
+            )
+        });
         entry.socket_addr = peer.socket_addr;
         entry.last_seen_unix_ms = now;
         if entry.source == PeerSource::Unspecified {
@@ -670,13 +666,9 @@ impl PeerRegistry {
                             let temp_key = temp_key.clone();
                             tokio::spawn(async move {
                                 if let Err(error) = service
-                                    .sync_responder_with_callback(
-                                        send,
-                                        recv,
-                                        move |real_node_id| {
-                                            registry.rekey_inbound(&temp_key, &real_node_id);
-                                        },
-                                    )
+                                    .sync_responder_with_callback(send, recv, move |real_node_id| {
+                                        registry.rekey_inbound(&temp_key, &real_node_id);
+                                    })
                                     .await
                                 {
                                     tracing::debug!(
@@ -731,12 +723,7 @@ impl PeerRegistry {
             });
     }
 
-    fn update_state(
-        &self,
-        node_id: &str,
-        state: PeerConnectionState,
-        error: Option<String>,
-    ) {
+    fn update_state(&self, node_id: &str, state: PeerConnectionState, error: Option<String>) {
         let mut map = self.inner.peers.write();
         if let Some(rec) = map.get_mut(node_id) {
             rec.state = state;
@@ -746,7 +733,11 @@ impl PeerRegistry {
     }
 
     fn mark_failed(&self, node_id: &str, error: &str) {
-        self.update_state(node_id, PeerConnectionState::Failed, Some(error.to_string()));
+        self.update_state(
+            node_id,
+            PeerConnectionState::Failed,
+            Some(error.to_string()),
+        );
     }
 
     fn snapshot(&self, node_id: &str) -> PeerInfo {
@@ -902,7 +893,11 @@ impl Jitter {
         let seed = hasher.finish();
         Self {
             // Guard against the degenerate all-zero state.
-            state: if seed == 0 { 0x9E37_79B9_7F4A_7C15 } else { seed },
+            state: if seed == 0 {
+                0x9E37_79B9_7F4A_7C15
+            } else {
+                seed
+            },
         }
     }
 

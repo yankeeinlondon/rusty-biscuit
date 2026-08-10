@@ -922,6 +922,8 @@ mod tests {
         assert_eq!(term.os, OsType::MacOS);
         #[cfg(target_os = "linux")]
         assert_eq!(term.os, OsType::Linux);
+        #[cfg(target_os = "windows")]
+        assert_eq!(term.os, OsType::Windows);
     }
 
     #[test]

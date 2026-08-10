@@ -92,6 +92,15 @@
 
     _Tags: regex, parsing_
 
+### URL Handling
+
+- [url](https://github.com/servo/rust-url) _v2.5_
+
+    _Standards-compliant file URL construction for filesystem hyperlinks,
+    including Windows drive-letter and separator normalization._
+
+    _Tags: url, filesystem, hyperlinks_
+
 ### Serialization
 
 - [serde](https://github.com/serde-rs/serde) _v1.0_ [docs](https://serde.rs)

@@ -46,7 +46,11 @@ struct Cli {
     /// Directory to scan (bounded depth) for git checkouts feeding the
     /// repos/{node_id} register. Repeatable; also settable as a
     /// colon-separated list via the environment.
-    #[arg(long = "repo-root", env = "RENDEZVOUS_REPO_ROOTS", value_delimiter = ':')]
+    #[arg(
+        long = "repo-root",
+        env = "RENDEZVOUS_REPO_ROOTS",
+        value_delimiter = ':'
+    )]
     repo_roots: Vec<PathBuf>,
 
     #[arg(long = "in-memory-projection")]
@@ -129,7 +133,9 @@ async fn run() -> Result<(), ServerError> {
 
 /// The endpoint from an explicit `--endpoint` / `$RENDEZVOUS_ENDPOINT` value,
 /// or the per-user default.
-fn resolve_endpoint(explicit: Option<&std::ffi::OsStr>) -> Result<LocalEndpoint, LocalEndpointError> {
+fn resolve_endpoint(
+    explicit: Option<&std::ffi::OsStr>,
+) -> Result<LocalEndpoint, LocalEndpointError> {
     match explicit {
         Some(value) => LocalEndpoint::from_override(value),
         None => default_local_endpoint(),

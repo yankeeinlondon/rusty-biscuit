@@ -1,5 +1,28 @@
 use terminal_size::{Height, Width, terminal_size};
 
+use std::sync::atomic::{AtomicU8, Ordering};
+
+const TTY_OVERRIDE_UNSET: u8 = 0;
+const TTY_OVERRIDE_FALSE: u8 = 1;
+const TTY_OVERRIDE_TRUE: u8 = 2;
+
+static TTY_OVERRIDE: AtomicU8 = AtomicU8::new(TTY_OVERRIDE_UNSET);
+
+/// Overrides TTY detection for diagnostic probes in the current process.
+///
+/// Ordinary callers should rely on [`is_tty`]. This hook exists for a PTY
+/// host whose child handles carry terminal traffic but are not recognized by
+/// [`std::io::IsTerminal`], as happens with Windows ConPTY test processes.
+#[doc(hidden)]
+pub fn set_tty_override(value: Option<bool>) {
+    let value = match value {
+        Some(false) => TTY_OVERRIDE_FALSE,
+        Some(true) => TTY_OVERRIDE_TRUE,
+        None => TTY_OVERRIDE_UNSET,
+    };
+    TTY_OVERRIDE.store(value, Ordering::Relaxed);
+}
+
 /// Check whether this process is attached to a TTY on **either** stdout
 /// **or** stderr.
 ///
@@ -30,7 +53,11 @@ use terminal_size::{Height, Width, terminal_size};
 /// ```
 pub fn is_tty() -> bool {
     use std::io::IsTerminal;
-    std::io::stdout().is_terminal() || std::io::stderr().is_terminal()
+    match TTY_OVERRIDE.load(Ordering::Relaxed) {
+        TTY_OVERRIDE_FALSE => false,
+        TTY_OVERRIDE_TRUE => true,
+        _ => std::io::stdout().is_terminal() || std::io::stderr().is_terminal(),
+    }
 }
 
 /// Get the terminal width in columns.

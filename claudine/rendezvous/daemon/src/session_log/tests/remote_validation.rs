@@ -37,11 +37,8 @@ fn existing_entry_message_mutation_rejected_as_append_only_violation() {
         message: "mutated".into(),
         metadata: None,
     };
-    list.insert(
-        0,
-        serde_json::to_string(&mutated_entry).unwrap().as_str(),
-    )
-    .unwrap();
+    list.insert(0, serde_json::to_string(&mutated_entry).unwrap().as_str())
+        .unwrap();
     doc.commit();
     let snapshot2 = doc.export(ExportMode::Snapshot).unwrap();
 
@@ -100,11 +97,8 @@ fn existing_entry_deletion_with_replacement_rejected_as_append_only_violation() 
         message: "replaced".into(),
         metadata: None,
     };
-    list.insert(
-        0,
-        serde_json::to_string(&replacement).unwrap().as_str(),
-    )
-    .unwrap();
+    list.insert(0, serde_json::to_string(&replacement).unwrap().as_str())
+        .unwrap();
     doc.commit();
     let snapshot2 = doc.export(ExportMode::Snapshot).unwrap();
 
@@ -174,16 +168,10 @@ fn existing_entry_reordering_rejected_as_append_only_violation() {
         message: "alpha".into(),
         metadata: None,
     };
-    list.insert(
-        0,
-        serde_json::to_string(&swapped_b).unwrap().as_str(),
-    )
-    .unwrap();
-    list.insert(
-        1,
-        serde_json::to_string(&swapped_a).unwrap().as_str(),
-    )
-    .unwrap();
+    list.insert(0, serde_json::to_string(&swapped_b).unwrap().as_str())
+        .unwrap();
+    list.insert(1, serde_json::to_string(&swapped_a).unwrap().as_str())
+        .unwrap();
     doc.commit();
     let snapshot2 = doc.export(ExportMode::Snapshot).unwrap();
 
@@ -316,4 +304,3 @@ fn existing_chunk_0_with_integer_previous_chunk_id_rejected() {
 
     harness.worker.shutdown();
 }
-

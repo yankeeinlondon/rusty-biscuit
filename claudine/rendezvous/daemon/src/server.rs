@@ -13,8 +13,10 @@
 //! the storage and network stack, because there is only one place to construct
 //! them.
 
+use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::Arc;
 
 use rendezvous_core::local_endpoint::{LocalEndpoint, LocalEndpointError};
@@ -267,8 +269,13 @@ pub enum ServerError {
 /// somebody has to unlink, a named pipe is closed with its handles — so the
 /// shared shutdown path holds the rule as a token rather than knowing it.
 pub(crate) trait EndpointCleanup: Send {
-    /// Release the endpoint. Called at most once, from shutdown or drop.
+    /// Start releasing the endpoint. Called at most once, from shutdown or drop.
     fn release(&mut self) -> Result<(), ServerError>;
+
+    /// Wait until an asynchronously released endpoint is no longer bound.
+    fn wait_released(&mut self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        Box::pin(std::future::ready(()))
+    }
 }
 
 /// Owns a running daemon: its endpoint, its workers, and a oneshot shutdown
@@ -366,6 +373,7 @@ impl ServerHandle {
         }
         if let Some(mut cleanup) = self.cleanup.take() {
             cleanup.release()?;
+            cleanup.wait_released().await;
         }
         Ok(())
     }

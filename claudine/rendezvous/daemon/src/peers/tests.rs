@@ -54,8 +54,14 @@ fn ok_advances_last_synced_while_failures_do_not() {
     reg.apply_resync_outcome("slow", ResyncOutcome::TimedOut);
 
     let map = reg.inner.peers.read();
-    assert!(map["ok"].last_synced_unix_ms > 0, "success stamps last_synced");
-    assert_eq!(map["soft"].last_synced_unix_ms, 0, "soft error must not stamp");
+    assert!(
+        map["ok"].last_synced_unix_ms > 0,
+        "success stamps last_synced"
+    );
+    assert_eq!(
+        map["soft"].last_synced_unix_ms, 0,
+        "soft error must not stamp"
+    );
     assert_eq!(map["slow"].last_synced_unix_ms, 0, "timeout must not stamp");
     assert_eq!(map["soft"].last_error.as_deref(), Some("boom"));
     // A wedged/soft-failing peer stays Connected (the connection is

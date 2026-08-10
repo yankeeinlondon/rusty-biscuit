@@ -31,8 +31,9 @@ tts-audio = { max-threads = 4 }
 claudine-windows-l1 = { max-threads = 4 }
 
 [profile.default]
-# Retry failed tests up to 3 times to mitigate flakiness in PTY tests or timing issues
-retries = 3
+# A test that passes only on retry is still a failed test run. Keep retries
+# disabled so timing and resource-contention defects remain visible locally.
+retries = 0
 # Mark tests slower than 5s as slow; terminate after 6×5s = 30s. Many integration
 # tests spawn the claudine binary plus git/composition/system-prompt resolution
 # and finish in 5–10s isolated but get squeezed past 15s under heavy parallel
@@ -81,15 +82,6 @@ test-group = 'claudine-windows-l1'
 [[profile.default.overrides]]
 filter = 'test(=compose_loop_rate_limit_pause_waits_then_continues)'
 slow-timeout = { period = "30s", terminate-after = 3 }
-
-# The CI/CD tier-contract tests shell out to `cargo nextest list`. The four
-# tier sweeps share one memoized, workspace-wide listing per tier, but on a
-# COLD host those two listings still build every gating package's test
-# binaries (the undeclared-tier REJECTION tests must see default-policy
-# packages, which is exactly what they guard), so the leash stays generous.
-[[profile.default.overrides]]
-filter = 'test(/_is_non_vacuous/) + test(/_tier_is_rejected/)'
-slow-timeout = { period = "60s", terminate-after = 20 }
 
 # These stdout parity tests launch the claudine CLI twice (perf and non-perf).
 # They are below the default timeout isolated, but can exceed 30s under
@@ -200,7 +192,7 @@ test-group = 'tts-audio'
 # provider through the full lifecycle). The default 5s×6 = 30s termination
 # ceiling is *below* that internal deadline, so a healthy-but-heavily-contended
 # run gets killed by nextest at 30s before its own deadline can settle — which,
-# under `retries = 3`, surfaces as "timed out on all four attempts" even though
+# previously, with retries enabled, surfaced as repeated timeouts even though
 # nothing is actually hung. Raise the termination ceiling to 30s×3 = 90s so a
 # contended run is governed by its own 40s deadline + assertion, while a
 # genuine deadlock still trips the longer window.
@@ -241,26 +233,16 @@ leak-timeout = { period = "5s", result = "fail" }
 # JUnit XML for CI dashboards.
 junit = { path = "test-results.xml" }
 
-# Scoped retry — real-terminal (L2) tier only. tmux/PTY spawn and WezTerm/Kitty
-# remote-control round-trips are inherently timing-sensitive under CI contention;
-# this is a documented resource-contention retry, not a blanket flake mask (D6).
+# Keep the resource-sensitive real-terminal tier retry-free too: transient PTY
+# or remote-control failures must remain visible to the CI gate.
 [[profile.ci.overrides]]
 filter = 'test(/level2_/)'
-retries = 2
+retries = 0
 
-# Scoped retry — browser tier only. Headless-Chrome multi-process startup/teardown
-# is timing-sensitive; the tier already runs -j 1 (see `_test_browser`) so retries
-# never compound resource pressure.
+# The browser tier runs serially (see `_test_browser`) but does not retry.
 [[profile.ci.overrides]]
 filter = 'test(/browser_/)'
-retries = 2
-
-# See the default-profile note: the tier-contract tests shell out to
-# `cargo nextest list`; the shared sweep's two workspace-wide listings build
-# every gating package's test binaries on a cold host.
-[[profile.ci.overrides]]
-filter = 'test(/_is_non_vacuous/) + test(/_tier_is_rejected/)'
-slow-timeout = { period = "60s", terminate-after = 20 }
+retries = 0
 
 [[profile.ci.overrides]]
 filter = 'test(=compose_loop_rate_limit_pause_waits_then_continues)'

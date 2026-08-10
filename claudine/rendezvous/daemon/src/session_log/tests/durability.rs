@@ -14,7 +14,10 @@ fn sign_chunk_snapshot_round_trips_through_verify() {
         .sign_chunk_snapshot(&outcome.chunk)
         .expect("sign")
         .expect("snapshot exists");
-    assert_eq!(envelope.sender, harness.manager.identity().public_key_bytes());
+    assert_eq!(
+        envelope.sender,
+        harness.manager.identity().public_key_bytes()
+    );
     let payload = envelope.verify().expect("verify");
     assert!(!payload.is_empty());
     harness.worker.shutdown();
@@ -37,10 +40,13 @@ fn signed_envelopes_from_different_identities_have_different_senders() {
     let tmp = TempDir::new().expect("tempdir");
     let storage = Storage::open(tmp.path().join("session.redb")).expect("storage");
     let projection_a = Projection::in_memory().expect("projection_a");
-    let worker_a = spawn(projection_a.clone(), BatcherConfig {
-        flush_interval: std::time::Duration::from_millis(20),
-        flush_size: 16,
-    });
+    let worker_a = spawn(
+        projection_a.clone(),
+        BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        },
+    );
     let manager_a = SessionLogManager::with_clock(
         storage.clone(),
         worker_a.handle(),
@@ -55,10 +61,13 @@ fn signed_envelopes_from_different_identities_have_different_senders() {
         .expect("append");
 
     let projection_b = Projection::in_memory().expect("projection_b");
-    let worker_b = spawn(projection_b.clone(), BatcherConfig {
-        flush_interval: std::time::Duration::from_millis(20),
-        flush_size: 16,
-    });
+    let worker_b = spawn(
+        projection_b.clone(),
+        BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        },
+    );
     let manager_b = SessionLogManager::with_clock(
         storage,
         worker_b.handle(),
@@ -91,10 +100,13 @@ fn rebuild_projection_from_storage_populates_duckdb() {
     let tmp = TempDir::new().expect("tempdir");
     let storage = Storage::open(tmp.path().join("session.redb")).expect("storage");
     let projection1 = Projection::in_memory().expect("projection1");
-    let worker1 = spawn(projection1.clone(), BatcherConfig {
-        flush_interval: std::time::Duration::from_millis(20),
-        flush_size: 16,
-    });
+    let worker1 = spawn(
+        projection1.clone(),
+        BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        },
+    );
     let manager1 = SessionLogManager::with_clock(
         storage.clone(),
         worker1.handle(),
@@ -114,10 +126,13 @@ fn rebuild_projection_from_storage_populates_duckdb() {
     drop(manager1);
 
     let projection2 = Projection::in_memory().expect("projection2");
-    let worker2 = spawn(projection2.clone(), BatcherConfig {
-        flush_interval: std::time::Duration::from_millis(20),
-        flush_size: 16,
-    });
+    let worker2 = spawn(
+        projection2.clone(),
+        BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        },
+    );
     let _manager2 = SessionLogManager::with_clock(
         storage,
         worker2.handle(),
@@ -155,10 +170,13 @@ fn sealer_counter_persists_across_restart() {
     let node_id = identity.node_id();
 
     let projection1 = Projection::in_memory().expect("projection1");
-    let worker1 = spawn(projection1.clone(), BatcherConfig {
-        flush_interval: std::time::Duration::from_millis(20),
-        flush_size: 16,
-    });
+    let worker1 = spawn(
+        projection1.clone(),
+        BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        },
+    );
     let manager1 = SessionLogManager::with_clock(
         storage.clone(),
         worker1.handle(),
@@ -180,13 +198,19 @@ fn sealer_counter_persists_across_restart() {
     worker1.shutdown();
     drop(manager1);
 
-    assert_eq!(storage.load_outbound_counter(&node_id).expect("load"), counter1 + 1);
+    assert_eq!(
+        storage.load_outbound_counter(&node_id).expect("load"),
+        counter1 + 1
+    );
 
     let projection2 = Projection::in_memory().expect("projection2");
-    let worker2 = spawn(projection2.clone(), BatcherConfig {
-        flush_interval: std::time::Duration::from_millis(20),
-        flush_size: 16,
-    });
+    let worker2 = spawn(
+        projection2.clone(),
+        BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        },
+    );
     let manager2 = SessionLogManager::with_clock(
         storage.clone(),
         worker2.handle(),
@@ -202,7 +226,10 @@ fn sealer_counter_persists_across_restart() {
         .expect("sign")
         .expect("envelope");
     let counter2 = u64::from_be_bytes(env2.message_id[24..].try_into().unwrap());
-    assert!(counter2 > counter1, "counter after restart ({counter2}) must exceed pre-restart ({counter1})");
+    assert!(
+        counter2 > counter1,
+        "counter after restart ({counter2}) must exceed pre-restart ({counter1})"
+    );
     worker2.shutdown();
 }
 
@@ -218,9 +245,10 @@ fn failed_persist_does_not_leave_entry_in_memory() {
 
     harness.storage.inject_save_failure();
 
-    let result = harness
-        .manager
-        .append_entry("node-a", "session-1", "test", "info", "should-fail", None);
+    let result =
+        harness
+            .manager
+            .append_entry("node-a", "session-1", "test", "info", "should-fail", None);
     assert!(result.is_err(), "append must fail when persistence fails");
 
     let entries = harness
@@ -380,10 +408,16 @@ fn accepted_envelope_failure_prevents_snapshot_persistence() {
         accepted_at_unix_ms: 3_001,
     };
     let result = storage.save_accepted_envelope(&sender_hex, "deadbeef", &accepted);
-    assert!(result.is_err(), "accepted-envelope save must fail when injected");
+    assert!(
+        result.is_err(),
+        "accepted-envelope save must fail when injected"
+    );
 
     assert!(
-        storage.load_snapshot(&sender_chunk).expect("load").is_none(),
+        storage
+            .load_snapshot(&sender_chunk)
+            .expect("load")
+            .is_none(),
         "no snapshot should exist when the envelope write was rejected",
     );
 
@@ -394,10 +428,13 @@ fn accepted_envelope_failure_prevents_snapshot_persistence() {
     );
 
     let projection = Projection::in_memory().expect("projection");
-    let worker = spawn(projection.clone(), BatcherConfig {
-        flush_interval: std::time::Duration::from_millis(20),
-        flush_size: 16,
-    });
+    let worker = spawn(
+        projection.clone(),
+        BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        },
+    );
     let manager = SessionLogManager::with_clock(
         storage.clone(),
         worker.handle(),
@@ -478,10 +515,13 @@ fn envelope_before_snapshot_ordering_prevents_duplicate_on_restart() {
         .expect("save accepted envelope first");
 
     let projection = Projection::in_memory().expect("projection");
-    let worker = spawn(projection.clone(), BatcherConfig {
-        flush_interval: std::time::Duration::from_millis(20),
-        flush_size: 16,
-    });
+    let worker = spawn(
+        projection.clone(),
+        BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        },
+    );
     let manager = SessionLogManager::with_clock(
         storage.clone(),
         worker.handle(),
@@ -504,10 +544,13 @@ fn envelope_before_snapshot_ordering_prevents_duplicate_on_restart() {
     drop(manager);
 
     let projection2 = Projection::in_memory().expect("projection2");
-    let worker2 = spawn(projection2.clone(), BatcherConfig {
-        flush_interval: std::time::Duration::from_millis(20),
-        flush_size: 16,
-    });
+    let worker2 = spawn(
+        projection2.clone(),
+        BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        },
+    );
     let manager2 = SessionLogManager::with_clock(
         storage.clone(),
         worker2.handle(),
@@ -518,22 +561,32 @@ fn envelope_before_snapshot_ordering_prevents_duplicate_on_restart() {
     )
     .expect("manager2");
 
-    let entries2 = manager2.list_chunk_entries(&sender_chunk).expect("list after restart");
+    let entries2 = manager2
+        .list_chunk_entries(&sender_chunk)
+        .expect("list after restart");
     assert_eq!(entries2.len(), 1, "entry should survive restart");
     assert_eq!(entries2[0].message, "ordering-entry");
 
     assert!(
-        storage.has_accepted_envelope(&sender_hex, &msg_id_hex).expect("has"),
+        storage
+            .has_accepted_envelope(&sender_hex, &msg_id_hex)
+            .expect("has"),
         "accepted envelope must still be present after restart",
     );
 
     let projection3 = Projection::in_memory().expect("projection3");
-    let worker3 = spawn(projection3.clone(), BatcherConfig {
-        flush_interval: std::time::Duration::from_millis(20),
-        flush_size: 16,
-    });
+    let worker3 = spawn(
+        projection3.clone(),
+        BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        },
+    );
     let mut inbox = rendezvous_core::EnvelopeInbox::new();
-    let verified = inbox.accept(&envelope).expect("verify envelope again").to_vec();
+    let verified = inbox
+        .accept(&envelope)
+        .expect("verify envelope again")
+        .to_vec();
     let accepted2 = AcceptedEnvelope {
         sender_hex: sender_hex.clone(),
         message_id_hex: msg_id_hex.clone(),
@@ -559,5 +612,3 @@ fn envelope_before_snapshot_ordering_prevents_duplicate_on_restart() {
     worker3.shutdown();
     drop(tmp);
 }
-
-

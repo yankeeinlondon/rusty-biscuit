@@ -9,28 +9,23 @@ mod common;
 
 use std::time::Duration;
 
-use common::pty::spawn_with_env;
+use common::pty::{drive_probe, spawn_with_env};
+
+fn probe_output(session: &mut expectrl::session::OsSession, completion_marker: &str) -> String {
+    String::from_utf8_lossy(&drive_probe(
+        session,
+        &mut [],
+        completion_marker,
+        Duration::from_secs(3),
+    ))
+    .into_owned()
+}
 
 #[test]
 fn osc52_sequence_emitted_to_tty() {
     let mut session = spawn_with_env(&[("PROBE", "clipboard"), ("PROBE_TERM_PROGRAM", "WezTerm")]);
 
-    // Give the probe time to run and emit the sequence.
-    std::thread::sleep(Duration::from_millis(150));
-
-    // Drain all output.
-    let mut output = String::new();
-    let mut scratch = [0u8; 4096];
-    loop {
-        match session.try_read(&mut scratch) {
-            Ok(0) => break,
-            Ok(n) => output.push_str(&String::from_utf8_lossy(&scratch[..n])),
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => break,
-            Err(_) => break,
-        }
-    }
+    let output = probe_output(&mut session, "clipboard_result=");
 
     // OSC52 write sequence:
     // ESC ] 52 ; c ; <base64> BEL
@@ -56,20 +51,7 @@ fn osc52_support_returns_true_in_supported_terminal() {
         ("PROBE_TERM_PROGRAM", "kitty"),
     ]);
 
-    std::thread::sleep(Duration::from_millis(150));
-
-    let mut output = String::new();
-    let mut scratch = [0u8; 4096];
-    loop {
-        match session.try_read(&mut scratch) {
-            Ok(0) => break,
-            Ok(n) => output.push_str(&String::from_utf8_lossy(&scratch[..n])),
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => break,
-            Err(_) => break,
-        }
-    }
+    let output = probe_output(&mut session, "osc52_support=");
 
     assert!(
         output.contains("osc52_support=true"),
@@ -84,20 +66,7 @@ fn osc52_support_returns_false_in_unknown_terminal() {
         ("PROBE_TERM_PROGRAM", "UnknownTerm"),
     ]);
 
-    std::thread::sleep(Duration::from_millis(150));
-
-    let mut output = String::new();
-    let mut scratch = [0u8; 4096];
-    loop {
-        match session.try_read(&mut scratch) {
-            Ok(0) => break,
-            Ok(n) => output.push_str(&String::from_utf8_lossy(&scratch[..n])),
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => break,
-            Err(_) => break,
-        }
-    }
+    let output = probe_output(&mut session, "osc52_support=");
 
     assert!(
         output.contains("osc52_support=false"),
@@ -112,20 +81,7 @@ fn set_clipboard_with_target_emits_targeted_sequence() {
         ("PROBE_TERM_PROGRAM", "WezTerm"),
     ]);
 
-    std::thread::sleep(Duration::from_millis(150));
-
-    let mut output = String::new();
-    let mut scratch = [0u8; 4096];
-    loop {
-        match session.try_read(&mut scratch) {
-            Ok(0) => break,
-            Ok(n) => output.push_str(&String::from_utf8_lossy(&scratch[..n])),
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => break,
-            Err(_) => break,
-        }
-    }
+    let output = probe_output(&mut session, "clipboard_target_result=");
 
     // Primary target specifier: ;p;
     assert!(
@@ -150,20 +106,7 @@ fn clear_clipboard_emits_clear_sequence() {
         ("PROBE_TERM_PROGRAM", "WezTerm"),
     ]);
 
-    std::thread::sleep(Duration::from_millis(150));
-
-    let mut output = String::new();
-    let mut scratch = [0u8; 4096];
-    loop {
-        match session.try_read(&mut scratch) {
-            Ok(0) => break,
-            Ok(n) => output.push_str(&String::from_utf8_lossy(&scratch[..n])),
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => break,
-            Err(_) => break,
-        }
-    }
+    let output = probe_output(&mut session, "clipboard_clear_result=");
 
     // OSC52 clear sequence: ESC ] 52 ; c ; ! BEL
     assert!(
@@ -179,20 +122,7 @@ fn get_clipboard_returns_none_in_pty() {
         ("PROBE_TERM_PROGRAM", "WezTerm"),
     ]);
 
-    std::thread::sleep(Duration::from_millis(150));
-
-    let mut output = String::new();
-    let mut scratch = [0u8; 4096];
-    loop {
-        match session.try_read(&mut scratch) {
-            Ok(0) => break,
-            Ok(n) => output.push_str(&String::from_utf8_lossy(&scratch[..n])),
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => break,
-            Err(_) => break,
-        }
-    }
+    let output = probe_output(&mut session, "clipboard_get=");
 
     assert!(
         output.contains("clipboard_get=None"),

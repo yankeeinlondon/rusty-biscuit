@@ -6,11 +6,12 @@
 //! focused checks that the transport itself behaves.
 
 use std::ffi::OsString;
+use std::time::{Duration, Instant};
 
 use rendezvous_core::local_endpoint::LocalEndpoint;
 use tempfile::TempDir;
-use tokio::net::windows::named_pipe::ClientOptions;
-use windows::Win32::Foundation::{HLOCAL, LocalFree};
+use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient};
+use windows::Win32::Foundation::{ERROR_PIPE_BUSY, HLOCAL, LocalFree};
 use windows::Win32::Security::Authorization::{
     ConvertSecurityDescriptorToStringSecurityDescriptorW, SDDL_REVISION_1,
 };
@@ -43,6 +44,22 @@ fn spawn_at(tmp: &TempDir, name: &OsString) -> Result<ServerHandle, ServerError>
         LocalEndpoint::WindowsNamedPipe(name.clone()),
         ephemeral_config(tmp),
     )
+}
+
+async fn open_client(name: &OsString, label: &str) -> NamedPipeClient {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match ClientOptions::new().open(name) {
+            Ok(client) => return client,
+            Err(error)
+                if error.raw_os_error() == Some(ERROR_PIPE_BUSY.0.cast_signed())
+                    && Instant::now() < deadline =>
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            Err(error) => panic!("{label}: {error:?}"),
+        }
+    }
 }
 
 /// `ServerHandle` owns live tasks and is deliberately not `Debug`, so
@@ -127,9 +144,7 @@ async fn a_second_daemon_cannot_take_a_running_daemon_s_name() {
         matches!(error, ServerError::EndpointInUse { .. }),
         "got: {error:?}"
     );
-    ClientOptions::new()
-        .open(&name)
-        .expect("the first daemon must still be reachable");
+    open_client(&name, "the first daemon must still be reachable").await;
     first.shutdown().await.expect("shutdown");
 }
 
@@ -141,9 +156,9 @@ async fn the_acceptor_stays_available_across_connections() {
     let name = pipe_name("continuity");
     let handle = spawn_at(&tmp, &name).expect("spawn daemon");
 
-    let first = ClientOptions::new().open(&name).expect("first client");
-    let second = ClientOptions::new().open(&name).expect("second client");
-    let third = ClientOptions::new().open(&name).expect("third client");
+    let first = open_client(&name, "first client").await;
+    let second = open_client(&name, "second client").await;
+    let third = open_client(&name, "third client").await;
 
     drop((first, second, third));
     handle.shutdown().await.expect("shutdown");
@@ -156,8 +171,8 @@ async fn concurrent_clients_are_each_given_an_instance() {
     let name = pipe_name("concurrent");
     let handle = spawn_at(&tmp, &name).expect("spawn daemon");
 
-    let a = ClientOptions::new().open(&name).expect("client a");
-    let b = ClientOptions::new().open(&name).expect("client b");
+    let a = open_client(&name, "client a").await;
+    let b = open_client(&name, "client b").await;
 
     // Both are live at the same time; neither displaced the other.
     drop(a);
@@ -182,9 +197,7 @@ async fn a_remote_form_client_is_refused_while_the_local_one_is_served() {
 
     // Control: the local device path is served, so a refusal below is the
     // remote-client rule and not a dead daemon.
-    ClientOptions::new()
-        .open(&name)
-        .expect("the local form must be served");
+    open_client(&name, "the local form must be served").await;
 
     let remote = OsString::from(format!(
         r"\\localhost\pipe\claudine-rendezvous-test-remote-{}",
@@ -205,7 +218,7 @@ async fn shutdown_releases_the_name() {
     let tmp = TempDir::new().expect("tempdir");
     let name = pipe_name("release");
     let handle = spawn_at(&tmp, &name).expect("spawn daemon");
-    ClientOptions::new().open(&name).expect("bound");
+    open_client(&name, "bound").await;
 
     handle.shutdown().await.expect("shutdown");
 

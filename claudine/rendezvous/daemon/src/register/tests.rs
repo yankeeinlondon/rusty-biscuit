@@ -34,14 +34,20 @@ fn upsert_writes_then_skips_unchanged() {
 
     let first = harness
         .store
-        .upsert_local_fields(&doc_id, &fields(&[("os", json!("macOS")), ("cpu_cores", json!(16))]))
+        .upsert_local_fields(
+            &doc_id,
+            &fields(&[("os", json!("macOS")), ("cpu_cores", json!(16))]),
+        )
         .expect("first write");
     assert!(first);
 
     // Identical detection pass: nothing written, register untouched.
     let second = harness
         .store
-        .upsert_local_fields(&doc_id, &fields(&[("os", json!("macOS")), ("cpu_cores", json!(16))]))
+        .upsert_local_fields(
+            &doc_id,
+            &fields(&[("os", json!("macOS")), ("cpu_cores", json!(16))]),
+        )
         .expect("second write");
     assert!(!second);
 
@@ -52,7 +58,11 @@ fn upsert_writes_then_skips_unchanged() {
         .expect("third write");
     assert!(third);
 
-    let value = harness.store.deep_value(&doc_id).expect("read").expect("present");
+    let value = harness
+        .store
+        .deep_value(&doc_id)
+        .expect("read")
+        .expect("present");
     assert_eq!(value["os"], json!("macOS"));
     assert_eq!(value["cpu_cores"], json!(32));
     assert_eq!(harness.storage.register_count().expect("count"), 1);
@@ -99,9 +109,16 @@ fn mutate_local_fields_is_atomic_and_write_on_change() {
         })
         .expect("delete mutate");
     assert!(changed);
-    let value = harness.store.deep_value(&doc_id).expect("read").expect("present");
+    let value = harness
+        .store
+        .deep_value(&doc_id)
+        .expect("read")
+        .expect("present");
     assert_eq!(value["os"], json!("macOS"));
-    assert!(value.get("cpu_cores").is_none(), "omitted key deleted: {value}");
+    assert!(
+        value.get("cpu_cores").is_none(),
+        "omitted key deleted: {value}"
+    );
 }
 
 #[test]
@@ -117,7 +134,10 @@ fn upsert_rejects_foreign_owner_and_unsupported_values() {
     let result = harness
         .store
         .upsert_local_fields(&local, &fields(&[("bad", json!(["array"]))]));
-    assert!(matches!(result, Err(RegisterError::UnsupportedValue { .. })));
+    assert!(matches!(
+        result,
+        Err(RegisterError::UnsupportedValue { .. })
+    ));
 }
 
 #[test]
@@ -127,15 +147,17 @@ fn rehydrates_from_storage() {
     let identity = Arc::new(NodeIdentity::from_seed([42u8; 32]));
     let doc_id;
     {
-        let store =
-            RegisterStore::new(storage.clone(), Arc::clone(&identity)).expect("store");
+        let store = RegisterStore::new(storage.clone(), Arc::clone(&identity)).expect("store");
         doc_id = store.local_capability_id();
         store
             .upsert_local_fields(&doc_id, &fields(&[("memory", json!(65_536))]))
             .expect("write");
     }
     let reopened = RegisterStore::new(storage, identity).expect("reopen");
-    let value = reopened.deep_value(&doc_id).expect("read").expect("present");
+    let value = reopened
+        .deep_value(&doc_id)
+        .expect("read")
+        .expect("present");
     assert_eq!(value["memory"], json!(65_536));
 }
 
@@ -169,7 +191,12 @@ fn snapshot_then_delta_round_trip_between_stores() {
         .store
         .stage_remote(&remote_doc, &exported.bytes, exported.kind)
         .expect("stage");
-    assert!(local.store.commit_staged(&remote_doc, staged).expect("commit"));
+    assert!(
+        local
+            .store
+            .commit_staged(&remote_doc, staged)
+            .expect("commit")
+    );
 
     // Incremental: remote changes a field; local follows via delta.
     remote
@@ -189,7 +216,12 @@ fn snapshot_then_delta_round_trip_between_stores() {
         .store
         .stage_remote(&remote_doc, &exported.bytes, exported.kind)
         .expect("stage");
-    assert!(local.store.commit_staged(&remote_doc, staged).expect("commit"));
+    assert!(
+        local
+            .store
+            .commit_staged(&remote_doc, staged)
+            .expect("commit")
+    );
 
     let value = local
         .store
@@ -210,11 +242,16 @@ fn foreign_peer_ops_are_rejected() {
     // with a peer id NOT derived from that owner.
     let forged = LoroDoc::new();
     forged.set_peer_id(owner_peer_id("attacker-node")).unwrap();
-    forged.get_map(FIELDS_CONTAINER).insert("os", "pwned").unwrap();
+    forged
+        .get_map(FIELDS_CONTAINER)
+        .insert("os", "pwned")
+        .unwrap();
     forged.commit();
     let bytes = forged.export(ExportMode::Snapshot).unwrap();
 
-    let result = local.store.stage_remote(&doc_id, &bytes, PayloadKind::Snapshot);
+    let result = local
+        .store
+        .stage_remote(&doc_id, &bytes, PayloadKind::Snapshot);
     assert!(matches!(result, Err(RegisterError::ForeignWriter { .. })));
 }
 
@@ -234,7 +271,10 @@ fn stale_replica_recovers_via_snapshot_replace() {
         .store
         .stage_remote(&remote_doc, &exported.bytes, exported.kind)
         .expect("stage");
-    local.store.commit_staged(&remote_doc, staged).expect("commit");
+    local
+        .store
+        .commit_staged(&remote_doc, staged)
+        .expect("commit");
     let stale_vv = local
         .store
         .state_vector(&remote_doc)
@@ -268,7 +308,12 @@ fn stale_replica_recovers_via_snapshot_replace() {
         .store
         .stage_remote(&remote_doc, &exported.bytes, exported.kind)
         .expect("stage replace");
-    assert!(local.store.commit_staged(&remote_doc, staged).expect("commit replace"));
+    assert!(
+        local
+            .store
+            .commit_staged(&remote_doc, staged)
+            .expect("commit replace")
+    );
     let value = local
         .store
         .deep_value(&remote_doc)
@@ -295,10 +340,17 @@ fn field_deletion_propagates_via_delta() {
         .store
         .stage_remote(&remote_doc, &exported.bytes, exported.kind)
         .expect("stage");
-    local.store.commit_staged(&remote_doc, staged).expect("commit");
+    local
+        .store
+        .commit_staged(&remote_doc, staged)
+        .expect("commit");
 
     // Remote deletes a field; local follows via delta.
-    assert!(remote.remove_local_fields(&remote_doc, &["a"]).expect("remove"));
+    assert!(
+        remote
+            .remove_local_fields(&remote_doc, &["a"])
+            .expect("remove")
+    );
     let local_vv = local
         .store
         .state_vector(&remote_doc)
@@ -314,13 +366,21 @@ fn field_deletion_propagates_via_delta() {
         .store
         .stage_remote(&remote_doc, &exported.bytes, exported.kind)
         .expect("stage");
-    assert!(local.store.commit_staged(&remote_doc, staged).expect("commit"));
+    assert!(
+        local
+            .store
+            .commit_staged(&remote_doc, staged)
+            .expect("commit")
+    );
 
     let value = local
         .store
         .deep_value(&remote_doc)
         .expect("read")
         .expect("present");
-    assert!(value.get("a").is_none(), "deleted field must propagate: {value}");
+    assert!(
+        value.get("a").is_none(),
+        "deleted field must propagate: {value}"
+    );
     assert_eq!(value["b"], json!(2));
 }

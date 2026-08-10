@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Verifies that `SharedHarness`'s `libc::atexit` hook actually fires
 //! the inner harness's `Drop` impl when the process exits.
 //!

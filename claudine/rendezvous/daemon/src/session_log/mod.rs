@@ -32,7 +32,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use loro::{ExportMode, LoroDoc};
 use parking_lot::Mutex;
 use rendezvous_core::{
-    ChunkConfig, ChunkId, ChunkMetadata, EnvelopeSealer, Entry, NodeIdentity, PayloadKind,
+    ChunkConfig, ChunkId, ChunkMetadata, Entry, EnvelopeSealer, NodeIdentity, PayloadKind,
 };
 
 use crate::batcher::{BatcherError, BatcherHandle};
@@ -306,7 +306,14 @@ impl SessionLogManager {
         config: ChunkConfig,
         identity: Arc<NodeIdentity>,
     ) -> Result<Self, SessionLogError> {
-        Self::with_clock(storage, batcher, projection, config, identity, Arc::new(SystemClock))
+        Self::with_clock(
+            storage,
+            batcher,
+            projection,
+            config,
+            identity,
+            Arc::new(SystemClock),
+        )
     }
 
     /// Build a manager with an injected clock. Tests use this to feed
@@ -321,7 +328,10 @@ impl SessionLogManager {
     ) -> Result<Self, SessionLogError> {
         let node_id = identity.node_id();
         let start_counter = storage.load_outbound_counter(&node_id)?;
-        let sealer = Arc::new(Mutex::new(EnvelopeSealer::with_start((*identity).clone(), start_counter)));
+        let sealer = Arc::new(Mutex::new(EnvelopeSealer::with_start(
+            (*identity).clone(),
+            start_counter,
+        )));
         let manager = Self {
             inner: Arc::new(Mutex::new(ManagerInner {
                 chunks: HashMap::new(),

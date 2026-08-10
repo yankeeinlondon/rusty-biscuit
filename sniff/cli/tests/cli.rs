@@ -3,6 +3,26 @@ use std::path::{Path, PathBuf};
 use predicates::prelude::*;
 use serde_json::Value;
 
+fn run_isolated_software(args: &[&str]) -> assert_cmd::assert::Assert {
+    // These tests verify the CLI contract, not the host's installed inventory.
+    // Isolation also prevents JSON rendering from running arbitrary version commands.
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("path");
+    let install_root = temp.path().join("program-files");
+    std::fs::create_dir(&path).unwrap();
+    std::fs::create_dir(&install_root).unwrap();
+
+    assert_cmd::Command::cargo_bin("sniff")
+        .unwrap()
+        .env("PATH", &path)
+        .env("HOME", temp.path())
+        .env("ProgramFiles", &install_root)
+        .env("ProgramFiles(x86)", &install_root)
+        .env("LocalAppData", temp.path())
+        .args(args)
+        .assert()
+}
+
 // ============================================================================
 // Help and Version Tests
 // ============================================================================
@@ -2009,9 +2029,7 @@ fn test_software_subcommand_text_output() {
     // In a non-TTY context, terminal width defaults to 80 columns which may be
     // too narrow for the programs table. Accept either the rendered table
     // or the graceful width error message.
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args(["software"])
-        .assert()
+    run_isolated_software(&["software"])
         .success()
         .stdout(
             predicate::str::contains("Name").or(predicate::str::contains("could not be rendered")),
@@ -2020,9 +2038,7 @@ fn test_software_subcommand_text_output() {
 
 #[test]
 fn test_software_subcommand_json_output() {
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args(["software", "--json"])
-        .assert()
+    let output = run_isolated_software(&["software", "--json"])
         .success()
         .get_output()
         .stdout
@@ -2207,17 +2223,13 @@ fn test_software_agents_subcommand_json_output() {
 
 #[test]
 fn test_software_notification_helpers_subcommand_text_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args(["software", "notification-helpers"])
-        .assert()
+    run_isolated_software(&["software", "notification-helpers"])
         .success();
 }
 
 #[test]
 fn test_software_notification_helpers_subcommand_json_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args(["software", "notification-helpers", "--json"])
-        .assert()
+    run_isolated_software(&["software", "notification-helpers", "--json"])
         .success();
 }
 
@@ -2230,9 +2242,7 @@ fn test_software_test_runners_subcommand_text_output() {
     // In a non-TTY context, terminal width defaults to 80 columns which may be
     // too narrow for the test-runner table. Accept either the rendered table
     // or the graceful width error message.
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args(["software", "test-runners"])
-        .assert()
+    run_isolated_software(&["software", "test-runners"])
         .success()
         .stdout(
             predicate::str::contains("Name").or(predicate::str::contains("could not be rendered")),
@@ -2241,9 +2251,7 @@ fn test_software_test_runners_subcommand_text_output() {
 
 #[test]
 fn test_software_test_runners_subcommand_json_output_shape() {
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args(["software", "test-runners", "--json"])
-        .assert()
+    let output = run_isolated_software(&["software", "test-runners", "--json"])
         .success()
         .get_output()
         .stdout
@@ -2300,9 +2308,7 @@ fn test_software_test_runners_subcommand_json_output_shape() {
 fn test_software_test_runners_json_stdout_is_parseable_without_stderr() {
     // The search-context hint must go to stderr, not stdout, so stdout is
     // valid JSON even when the hint is shown.
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args(["software", "test-runners", "--json"])
-        .assert()
+    let output = run_isolated_software(&["software", "test-runners", "--json"])
         .success()
         .get_output()
         .clone();
@@ -2316,9 +2322,7 @@ fn test_software_test_runners_json_stdout_is_parseable_without_stderr() {
 
 #[test]
 fn test_software_test_runners_plain_suppresses_hint_and_ansi() {
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args(["software", "test-runners", "--plain"])
-        .assert()
+    let output = run_isolated_software(&["software", "test-runners", "--plain"])
         .success()
         .get_output()
         .clone();
@@ -3750,9 +3754,7 @@ fn test_verbose_with_software_adds_columns() {
     // In a non-TTY context, terminal width defaults to 80 columns which may be
     // too narrow for the verbose programs table. Accept either the rendered table
     // or the graceful width error message.
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args(["software", "-v"])
-        .assert()
+    run_isolated_software(&["software", "-v"])
         .success()
         .stdout(
             predicate::str::contains("Binary")

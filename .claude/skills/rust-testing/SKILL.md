@@ -305,11 +305,10 @@ reaps only **dead-pid** resources, never live ones; and no dependence on shared
 pane geometry/state.
 
 **Flakiness under parallel load** concentrates in timing-sensitive tests (signal
-delivery, interactive choosers). `retries = 3` is the sanctioned backstop in the
-`default` (local-dev) profile. **CI is different:** it selects the `ci` profile
-(`NEXTEST_PROFILE: ci`), where `[profile.ci]` uses `retries = 0` so deterministic
-L1 failures run exactly once; scoped `retries = 2` overrides survive only for the
-`test(/level2_/)` and `test(/browser_/)` tiers. Avoid
+delivery, interactive choosers). Both the `default` and `ci` profiles use
+`retries = 0`, including the L2 and browser overrides: a test that passes only
+on retry is still a failed run. Fix the resource contention or widen a justified,
+scoped timeout instead of masking the failure. Avoid
 the **two-phase capture race**: polling for an *intermediate* marker (a chooser
 hint) and then taking a *separate* `capture()` for the *final* content can grab a
 half-painted frame under load — poll for the content you will assert on, in the

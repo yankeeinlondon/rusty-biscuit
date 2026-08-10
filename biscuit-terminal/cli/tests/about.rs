@@ -254,8 +254,12 @@ fn test_about_alacritty_json_extracts_legacy_yaml_candidate() {
     )
     .expect("write alacritty yaml config");
 
-    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
-        .env("XDG_CONFIG_HOME", config_home.path())
+    let mut command = assert_cmd::Command::cargo_bin("bt").unwrap();
+    #[cfg(windows)]
+    command.env("APPDATA", config_home.path());
+    #[cfg(not(windows))]
+    command.env("XDG_CONFIG_HOME", config_home.path());
+    let output = command
         .env("HOME", config_home.path())
         .env_remove("TERM")
         .args(["about", "alacritty", "--json"])
@@ -277,6 +281,7 @@ fn test_about_alacritty_json_extracts_legacy_yaml_candidate() {
     assert_eq!(setting_value(&parsed, "opacity"), Some("0.92"));
 }
 
+#[cfg(not(windows))]
 #[test]
 fn test_about_warp_json_resolves_directory_without_none_format() {
     let home = tempfile::tempdir().expect("temp home");

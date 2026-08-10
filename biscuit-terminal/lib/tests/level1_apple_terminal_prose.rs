@@ -202,12 +202,25 @@ fn double_underline_no_underline_support_emits_exact_plain_text() {
         "expected prose probe markers, got: {output:?}"
     );
 
-    // PTY translates LF to CRLF on output, so split on the CRLF form.
     let rendered = output
-        .split("---PROSE---\r\n")
+        .split("---PROSE---")
         .nth(1)
-        .and_then(|s| s.split("\r\n---END---").next())
-        .unwrap_or("");
+        .and_then(|s| s.split("---END---").next())
+        .unwrap_or("")
+        .trim_matches(['\r', '\n']);
+
+    #[cfg(windows)]
+    let rendered = {
+        let rendered = if let Some(title) = rendered.strip_prefix("\x1b]0;") {
+            title.split_once('\x07').map_or(rendered, |(_, rest)| rest)
+        } else {
+            rendered
+        };
+        rendered
+            .strip_prefix("\x1b[?25h")
+            .unwrap_or(rendered)
+            .trim_matches(['\r', '\n'])
+    };
 
     // The span produces no visible SGR (the terminal lacks underline support),
     // so it opens nothing and emits no stray reset — the rendered payload is the

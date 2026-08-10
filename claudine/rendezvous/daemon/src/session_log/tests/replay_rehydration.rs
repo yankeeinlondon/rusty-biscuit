@@ -10,10 +10,13 @@ fn accepted_envelope_only_replay_recovers_missing_snapshot() {
     let identity = Arc::new(NodeIdentity::from_seed([44u8; 32]));
 
     let projection1 = Projection::in_memory().expect("projection1");
-    let worker1 = spawn(projection1.clone(), BatcherConfig {
-        flush_interval: std::time::Duration::from_millis(20),
-        flush_size: 16,
-    });
+    let worker1 = spawn(
+        projection1.clone(),
+        BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        },
+    );
     let manager1 = SessionLogManager::with_clock(
         storage.clone(),
         worker1.handle(),
@@ -28,8 +31,7 @@ fn accepted_envelope_only_replay_recovers_missing_snapshot() {
     let sender_hex = sender_identity.node_id();
     let sender_chunk = ChunkId::new(&sender_hex, "remote-session", 0);
 
-    let mut sender_sealer =
-        EnvelopeSealer::with_start(sender_identity, 0);
+    let mut sender_sealer = EnvelopeSealer::with_start(sender_identity, 0);
     let entry = Entry {
         sequence: 0,
         created_at_unix_ms: 5_000,
@@ -88,12 +90,20 @@ fn accepted_envelope_only_replay_recovers_missing_snapshot() {
         .expect("save accepted envelope");
 
     assert!(
-        storage.load_snapshot(&sender_chunk).expect("load").is_some(),
+        storage
+            .load_snapshot(&sender_chunk)
+            .expect("load")
+            .is_some(),
         "snapshot must exist before removal",
     );
-    storage.remove_snapshot(&sender_chunk).expect("remove snapshot");
+    storage
+        .remove_snapshot(&sender_chunk)
+        .expect("remove snapshot");
     assert!(
-        storage.load_snapshot(&sender_chunk).expect("load").is_none(),
+        storage
+            .load_snapshot(&sender_chunk)
+            .expect("load")
+            .is_none(),
         "snapshot must be gone after removal",
     );
 
@@ -101,10 +111,13 @@ fn accepted_envelope_only_replay_recovers_missing_snapshot() {
     drop(manager1);
 
     let projection2 = Projection::in_memory().expect("projection2");
-    let worker2 = spawn(projection2.clone(), BatcherConfig {
-        flush_interval: std::time::Duration::from_millis(20),
-        flush_size: 16,
-    });
+    let worker2 = spawn(
+        projection2.clone(),
+        BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        },
+    );
     let manager2 = SessionLogManager::with_clock(
         storage.clone(),
         worker2.handle(),
@@ -118,7 +131,11 @@ fn accepted_envelope_only_replay_recovers_missing_snapshot() {
     let entries = manager2
         .list_chunk_entries(&sender_chunk)
         .expect("list after replay");
-    assert_eq!(entries.len(), 1, "replay should recover one entry; got {entries:?}");
+    assert_eq!(
+        entries.len(),
+        1,
+        "replay should recover one entry; got {entries:?}"
+    );
     assert_eq!(entries[0].message, "from-envelope");
 
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
@@ -208,16 +225,22 @@ fn envelope_before_snapshot_crash_window_recovers_on_restart() {
         .expect("save envelope");
 
     assert!(
-        storage.load_snapshot(&sender_chunk).expect("load").is_none(),
+        storage
+            .load_snapshot(&sender_chunk)
+            .expect("load")
+            .is_none(),
         "snapshot must not exist — we simulate the crash window where \
          the envelope was persisted but the snapshot write was lost",
     );
 
     let projection2 = Projection::in_memory().expect("projection2");
-    let worker2 = spawn(projection2.clone(), BatcherConfig {
-        flush_interval: std::time::Duration::from_millis(20),
-        flush_size: 16,
-    });
+    let worker2 = spawn(
+        projection2.clone(),
+        BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        },
+    );
     let manager2 = SessionLogManager::with_clock(
         storage.clone(),
         worker2.handle(),
@@ -249,7 +272,9 @@ fn envelope_before_snapshot_crash_window_recovers_on_restart() {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
 
-    let has_dup = storage.has_accepted_envelope(&sender_hex, &msg_id_hex).expect("has");
+    let has_dup = storage
+        .has_accepted_envelope(&sender_hex, &msg_id_hex)
+        .expect("has");
     assert!(has_dup, "accepted envelope must be durable after restart");
 
     worker2.shutdown();
@@ -264,10 +289,13 @@ fn malformed_loro_payload_rejected_without_envelope_row() {
     let identity = Arc::new(NodeIdentity::from_seed([66u8; 32]));
 
     let projection = Projection::in_memory().expect("projection");
-    let worker = spawn(projection.clone(), BatcherConfig {
-        flush_interval: std::time::Duration::from_millis(20),
-        flush_size: 16,
-    });
+    let worker = spawn(
+        projection.clone(),
+        BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        },
+    );
     let manager = SessionLogManager::with_clock(
         storage.clone(),
         worker.handle(),
@@ -293,10 +321,13 @@ fn malformed_loro_payload_rejected_without_envelope_row() {
     drop(manager);
 
     let projection2 = Projection::in_memory().expect("projection2");
-    let worker2 = spawn(projection2.clone(), BatcherConfig {
-        flush_interval: std::time::Duration::from_millis(20),
-        flush_size: 16,
-    });
+    let worker2 = spawn(
+        projection2.clone(),
+        BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        },
+    );
     let manager2 = SessionLogManager::with_clock(
         storage,
         worker2.handle(),
@@ -362,10 +393,13 @@ fn malformed_loro_payload_in_accepted_envelope_skipped_on_restart() {
         .expect("save");
 
     let projection = Projection::in_memory().expect("projection");
-    let worker = spawn(projection, BatcherConfig {
-        flush_interval: std::time::Duration::from_millis(20),
-        flush_size: 16,
-    });
+    let worker = spawn(
+        projection,
+        BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        },
+    );
     let manager = SessionLogManager::with_clock(
         storage,
         worker.handle(),
@@ -426,10 +460,13 @@ fn start_fresh_manager(
     clock_start: i64,
 ) -> (SessionLogManager, BatcherWorker) {
     let projection = Projection::in_memory().expect("projection");
-    let worker = spawn(projection.clone(), BatcherConfig {
-        flush_interval: std::time::Duration::from_millis(20),
-        flush_size: 16,
-    });
+    let worker = spawn(
+        projection.clone(),
+        BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        },
+    );
     let manager = SessionLogManager::with_clock(
         storage,
         worker.handle(),
@@ -605,5 +642,3 @@ fn replay_skips_accepted_envelope_with_wrong_payload_kind() {
 
     worker.shutdown();
 }
-
-

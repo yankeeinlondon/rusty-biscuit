@@ -383,24 +383,21 @@ fn test_config_paths_for_known_terminals() {
 fn test_config_paths_multiple_for_alacritty() {
     let paths = get_terminal_config_paths(&TerminalApp::Alacritty);
 
-    #[cfg(not(target_os = "windows"))]
-    {
-        assert!(
-            paths.len() >= 2,
-            "Alacritty should have multiple config paths"
-        );
+    assert!(
+        paths.len() >= 2,
+        "Alacritty should have multiple config paths"
+    );
 
-        // Check for both .toml and .yml
-        let has_toml = paths
-            .iter()
-            .any(|p| p.extension().map(|e| e == "toml").unwrap_or(false));
-        let has_yml = paths
-            .iter()
-            .any(|p| p.extension().map(|e| e == "yml").unwrap_or(false));
+    // Check for both .toml and .yml
+    let has_toml = paths
+        .iter()
+        .any(|p| p.extension().map(|e| e == "toml").unwrap_or(false));
+    let has_yml = paths
+        .iter()
+        .any(|p| p.extension().map(|e| e == "yml").unwrap_or(false));
 
-        assert!(has_toml, "Should include .toml path");
-        assert!(has_yml, "Should include .yml path");
-    }
+    assert!(has_toml, "Should include .toml path");
+    assert!(has_yml, "Should include .yml path");
 }
 
 // ============================================================================

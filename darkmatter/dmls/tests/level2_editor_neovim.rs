@@ -93,13 +93,18 @@ fn nvim_available() -> bool {
 }
 
 /// Workspace root for one test run: `tokens.md`, its transclusion target, and
-/// a `.dmls.toml` root marker. Canonicalized so the paths Neovim reports match
+/// a `.dmls.toml` root marker. Canonicalized on Unix so Neovim's paths match
 /// the paths `dmls` resolves (macOS `/var` → `/private/var`).
+/// Windows canonicalization adds a `\\?\` prefix that Ex interprets as
+/// pattern syntax instead of part of the filename.
 fn stage_workspace() -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().expect("create workspace tempdir");
     fs::write(dir.path().join("tokens.md"), FIXTURE_DOC).unwrap();
     fs::write(dir.path().join("other.md"), "# Other\n").unwrap();
     fs::write(dir.path().join(".dmls.toml"), DMLS_TOML).unwrap();
+    #[cfg(windows)]
+    let root = dir.path().to_path_buf();
+    #[cfg(not(windows))]
     let root = fs::canonicalize(dir.path()).unwrap_or_else(|_| dir.path().to_path_buf());
     (dir, root)
 }

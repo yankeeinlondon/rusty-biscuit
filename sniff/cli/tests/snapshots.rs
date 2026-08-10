@@ -39,6 +39,11 @@ fn normalize_text(output: &str) -> String {
     strip_ansi(output).trim().to_string()
 }
 
+fn normalize_help_output(output: &str) -> String {
+    // Clap derives the usage binary from argv[0], which carries `.exe` on Windows.
+    normalize_text(output).replace("Usage: sniff.exe ", "Usage: sniff ")
+}
+
 fn normalize_topics_table(output: &str) -> String {
     let cleaned = normalize_text(output);
 
@@ -144,7 +149,10 @@ fn normalized_os_summary(output: &str) -> Value {
 
 #[test]
 fn help_output_snapshot() {
-    insta::assert_snapshot!("help_output", normalize_text(&run_stdout(&["--help"])));
+    insta::assert_snapshot!(
+        "help_output",
+        normalize_help_output(&run_stdout(&["--help"]))
+    );
 }
 
 #[test]
@@ -726,19 +734,43 @@ fn stable_aggregate_json(json: &Value) -> Value {
 ///
 /// Both the given and the canonicalized form are replaced: on macOS a temp dir
 /// handed out as `/var/...` is reported back through its `/private/var/...`
-/// realpath, so replacing only one leaves absolute paths in the snapshot.
+/// realpath, so replacing only one leaves absolute paths in the snapshot. Path
+/// separators after the replacement are normalized for cross-platform output.
 fn redact_base_paths(value: &Value, base: &std::path::Path) -> Value {
-    let mut text = serde_json::to_string(value).expect("aggregate reserializes");
+    let mut redacted = value.clone();
     let mut roots = vec![base.to_path_buf()];
     if let Ok(canonical) = std::fs::canonicalize(base) {
         roots.push(canonical);
     }
     // Longest first: a prefix would otherwise mask the form that contains it.
     roots.sort_by_key(|p| std::cmp::Reverse(p.as_os_str().len()));
-    for root in roots {
-        text = text.replace(root.to_str().expect("temp path is utf8"), "[BASE]");
+
+    fn redact_strings(value: &mut Value, roots: &[std::path::PathBuf]) {
+        match value {
+            Value::String(text) => {
+                for root in roots {
+                    *text = text.replace(root.to_str().expect("temp path is utf8"), "[BASE]");
+                }
+                if text.contains("[BASE]") {
+                    *text = text.replace('\\', "/");
+                }
+            }
+            Value::Array(values) => {
+                for value in values {
+                    redact_strings(value, roots);
+                }
+            }
+            Value::Object(values) => {
+                for value in values.values_mut() {
+                    redact_strings(value, roots);
+                }
+            }
+            _ => {}
+        }
     }
-    serde_json::from_str(&text).expect("redaction preserves valid JSON")
+
+    redact_strings(&mut redacted, &roots);
+    redacted
 }
 
 fn run_repo_aggregate_json(base: &std::path::Path) -> Value {

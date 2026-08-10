@@ -12,14 +12,14 @@ use std::time::Instant;
 
 use rendezvous_core::{
     AppendEntryRequest, AppendEntryResponse, ApprovePeerRequest, ApprovePeerResponse, ChunkId,
-    ConnectToPeerRequest, ConnectToPeerResponse, CreateInvitationRequest,
-    CreateInvitationResponse, DAEMON_VERSION, Invitation, ListChunkEntriesRequest,
-    ListChunkEntriesResponse, ListPairingsRequest, ListPairingsResponse, ListPeersRequest,
-    ListPeersResponse, ListSessionChunksRequest, ListSessionChunksResponse, NodeIdentity,
-    PairingInfo, PeerSource, PingRequest, PingResponse, ProjectionRow as ProtoProjectionRow,
-    QueryProjectionRequest, QueryProjectionResponse, Rendezvous, RevokePeerRequest,
-    RevokePeerResponse, SessionEntry, StatusRequest, StatusResponse,
-    SyncChunkOutcome as ProtoSyncChunkOutcome, SyncWithPeerRequest, SyncWithPeerResponse,
+    ConnectToPeerRequest, ConnectToPeerResponse, CreateInvitationRequest, CreateInvitationResponse,
+    DAEMON_VERSION, Invitation, ListChunkEntriesRequest, ListChunkEntriesResponse,
+    ListPairingsRequest, ListPairingsResponse, ListPeersRequest, ListPeersResponse,
+    ListSessionChunksRequest, ListSessionChunksResponse, NodeIdentity, PairingInfo, PeerSource,
+    PingRequest, PingResponse, ProjectionRow as ProtoProjectionRow, QueryProjectionRequest,
+    QueryProjectionResponse, Rendezvous, RevokePeerRequest, RevokePeerResponse, SessionEntry,
+    StatusRequest, StatusResponse, SyncChunkOutcome as ProtoSyncChunkOutcome, SyncWithPeerRequest,
+    SyncWithPeerResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -99,10 +99,7 @@ impl RendezvousService {
 
 #[tonic::async_trait]
 impl Rendezvous for RendezvousService {
-    async fn ping(
-        &self,
-        request: Request<PingRequest>,
-    ) -> Result<Response<PingResponse>, Status> {
+    async fn ping(&self, request: Request<PingRequest>) -> Result<Response<PingResponse>, Status> {
         let nonce = request.into_inner().nonce;
         tracing::debug!(nonce = %nonce, "ping received");
         Ok(Response::new(PingResponse {
@@ -167,12 +164,12 @@ impl Rendezvous for RendezvousService {
         request: Request<ListChunkEntriesRequest>,
     ) -> Result<Response<ListChunkEntriesResponse>, Status> {
         let body = request.into_inner();
-        let chunk: ChunkId = body
-            .chunk_id
-            .parse()
-            .map_err(|err: rendezvous_core::ChunkIdParseError| {
-                Status::invalid_argument(err.to_string())
-            })?;
+        let chunk: ChunkId =
+            body.chunk_id
+                .parse()
+                .map_err(|err: rendezvous_core::ChunkIdParseError| {
+                    Status::invalid_argument(err.to_string())
+                })?;
         let chunk_for_closure = chunk.clone();
         let entries = tokio::task::spawn_blocking({
             let session_log = self.session_log.clone();
@@ -237,11 +234,9 @@ impl Rendezvous for RendezvousService {
         let socket_addr = if body.advertise_addr.is_empty() {
             advertised_socket_addr(local_addr)
         } else {
-            body.advertise_addr
-                .parse::<SocketAddr>()
-                .map_err(|err| {
-                    Status::invalid_argument(format!("advertise_addr is not a valid SocketAddr: {err}"))
-                })?
+            body.advertise_addr.parse::<SocketAddr>().map_err(|err| {
+                Status::invalid_argument(format!("advertise_addr is not a valid SocketAddr: {err}"))
+            })?
         };
         let invitation = Invitation::new(self.identity.as_ref(), socket_addr);
         Ok(Response::new(CreateInvitationResponse {
@@ -260,20 +255,18 @@ impl Rendezvous for RendezvousService {
             .as_ref()
             .ok_or_else(|| Status::unavailable("peer registry not enabled"))?;
         let body = request.into_inner();
-        let invitation: Invitation = body
-            .invitation
-            .parse()
-            .map_err(|err: rendezvous_core::InvitationError| {
-                Status::invalid_argument(err.to_string())
-            })?;
+        let invitation: Invitation =
+            body.invitation
+                .parse()
+                .map_err(|err: rendezvous_core::InvitationError| {
+                    Status::invalid_argument(err.to_string())
+                })?;
         let node_id = invitation.node_id();
         match peers
             .connect(node_id.clone(), invitation.socket_addr, PeerSource::Manual)
             .await
         {
-            Ok(peer) => {
-                Ok(Response::new(ConnectToPeerResponse { peer: Some(peer) }))
-            }
+            Ok(peer) => Ok(Response::new(ConnectToPeerResponse { peer: Some(peer) })),
             Err(error) => Err(Status::unavailable(format!(
                 "failed to connect to peer {node_id}: {error}"
             ))),
@@ -364,11 +357,11 @@ impl Rendezvous for RendezvousService {
             .ok_or_else(|| Status::unavailable("peer registry not enabled"))?;
         let body = request.into_inner();
         let node_id = normalize_node_id(&body.node_id)?;
-        let connection = peers
-            .connection_for(&node_id)
-            .ok_or_else(|| Status::failed_precondition(format!(
+        let connection = peers.connection_for(&node_id).ok_or_else(|| {
+            Status::failed_precondition(format!(
                 "no active QUIC connection to peer {node_id}; call ConnectToPeer first",
-            )))?;
+            ))
+        })?;
         let outcome = self
             .sync_service
             .sync_initiator(&connection, &node_id)
@@ -450,7 +443,9 @@ impl Rendezvous for RendezvousService {
         .await
         .map_err(|e| Status::internal(e.to_string()))?
         .map_err(internal)?;
-        Ok(Response::new(rendezvous_core::ListHostCapabilitiesResponse { hosts }))
+        Ok(Response::new(
+            rendezvous_core::ListHostCapabilitiesResponse { hosts },
+        ))
     }
 
     async fn list_host_repos(
@@ -479,7 +474,9 @@ impl Rendezvous for RendezvousService {
         .await
         .map_err(|e| Status::internal(e.to_string()))?
         .map_err(internal)?;
-        Ok(Response::new(rendezvous_core::ListHostReposResponse { hosts }))
+        Ok(Response::new(rendezvous_core::ListHostReposResponse {
+            hosts,
+        }))
     }
 
     async fn report_session_event(
@@ -493,12 +490,16 @@ impl Rendezvous for RendezvousService {
         let kind = rendezvous_core::SessionEventKind::try_from(body.kind)
             .map_err(|_| Status::invalid_argument("unknown session event kind"))?;
         if kind == rendezvous_core::SessionEventKind::Unspecified {
-            return Err(Status::invalid_argument("session event kind must be specified"));
+            return Err(Status::invalid_argument(
+                "session event kind must be specified",
+            ));
         }
         let details = match parse_optional_json(&body.details_json) {
             Ok(Some(serde_json::Value::Object(map))) => map,
             Ok(Some(_)) => {
-                return Err(Status::invalid_argument("details_json must be a JSON object"));
+                return Err(Status::invalid_argument(
+                    "details_json must be a JSON object",
+                ));
             }
             Ok(None) => serde_json::Map::new(),
             Err(err) => {
@@ -518,7 +519,9 @@ impl Rendezvous for RendezvousService {
         .await
         .map_err(|e| Status::internal(e.to_string()))?
         .map_err(internal)?;
-        Ok(Response::new(rendezvous_core::ReportSessionEventResponse { active_count }))
+        Ok(Response::new(rendezvous_core::ReportSessionEventResponse {
+            active_count,
+        }))
     }
 
     async fn list_active_sessions(
@@ -547,7 +550,9 @@ impl Rendezvous for RendezvousService {
         .await
         .map_err(|e| Status::internal(e.to_string()))?
         .map_err(internal)?;
-        Ok(Response::new(rendezvous_core::ListActiveSessionsResponse { hosts }))
+        Ok(Response::new(rendezvous_core::ListActiveSessionsResponse {
+            hosts,
+        }))
     }
 }
 
@@ -690,9 +695,14 @@ fn apply_session_event(
                     }
                     let effective = session_status::effective(&slots);
                     entry.insert("status_slots".into(), session_status::slots_to_json(&slots));
-                    entry.insert("status".into(), serde_json::json!(effective.state.as_wire()));
-                    entry
-                        .insert("status_basis".into(), serde_json::json!(effective.basis.as_wire()));
+                    entry.insert(
+                        "status".into(),
+                        serde_json::json!(effective.state.as_wire()),
+                    );
+                    entry.insert(
+                        "status_basis".into(),
+                        serde_json::json!(effective.basis.as_wire()),
+                    );
                     entry.insert(
                         "status_producer".into(),
                         serde_json::json!(effective.producer.as_slug()),

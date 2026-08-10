@@ -54,8 +54,9 @@ impl TerminalApp {
 /// Resolve the in-use config file for `meta` against the expansion context.
 ///
 /// Env overrides are tried first (in priority order), then the OS target's
-/// candidate list; the first path that exists wins. Returns `None` if nothing
-/// on disk matches.
+/// candidate list; override values are literal host paths, while candidate
+/// templates receive token expansion. The first path that exists wins. Returns
+/// `None` if nothing on disk matches.
 pub(crate) fn resolve_config(
     meta: &'static ConfigMetadata,
     ctx: &ExpansionCtx,
@@ -64,9 +65,7 @@ pub(crate) fn resolve_config(
         let Some(value) = ctx.env_value(env.var) else {
             continue;
         };
-        let Some(base) = ctx.expand_candidate(&value).into_iter().next() else {
-            continue;
-        };
+        let base = PathBuf::from(value);
         let path = match env.kind {
             ConfigEnvKind::File => base,
             ConfigEnvKind::Dir => match config_path_under_env(meta, ctx.os_target, env.var) {

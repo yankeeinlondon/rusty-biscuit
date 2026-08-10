@@ -18,6 +18,7 @@
 //! | `PROBE` | Selects the probe mode (see below). Defaults to `all`. |
 //! | `PROBE_TERM_PROGRAM` | Overrides `TERM_PROGRAM` for the duration of the probe. |
 //! | `PROBE_TERM` | Overrides `TERM` for the duration of the probe. |
+//! | `PROBE_FORCE_TTY` | Overrides TTY detection for PTY hosts whose child handles are not recognized by `IsTerminal`. |
 //!
 //! ## Probe modes
 //!
@@ -179,6 +180,9 @@ fn main() {
     if let Ok(v) = std::env::var("PROBE_TERM") {
         // SAFETY: single-threaded example binary.
         unsafe { std::env::set_var("TERM", v) };
+    }
+    if let Some(value) = parse_bool_env("PROBE_FORCE_TTY") {
+        biscuit_terminal::discovery::detection::set_tty_override(Some(value));
     }
 
     let mode = std::env::var("PROBE").unwrap_or_else(|_| "all".to_string());

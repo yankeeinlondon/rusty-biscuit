@@ -478,9 +478,7 @@ fn owner_sid(path: &Path) -> Result<String, PrivateDirError> {
     if status != ERROR_SUCCESS {
         return Err(PrivateDirError::Inspect {
             path: path.to_path_buf(),
-            source: std::io::Error::from_raw_os_error(
-                i32::try_from(status.0).unwrap_or(i32::MAX),
-            ),
+            source: std::io::Error::from_raw_os_error(i32::try_from(status.0).unwrap_or(i32::MAX)),
         });
     }
 

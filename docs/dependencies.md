@@ -37,8 +37,9 @@
   `serde_json::Value` so one shared dot-path resolver reads them all — the
   underlying `toml` / `serde_yaml_ng` / `json-five` parsers stay *indirect*. The
   only structured parser added **directly** is `plist` (v1), for iTerm2 / Apple
-  Terminal XML+binary property lists. No dependency cycle: `biscuit-file` does
-  not depend on `biscuit-terminal`.
+  Terminal XML+binary property lists. It also uses `url` (v2.5) to convert
+  filesystem paths into portable OSC8/file-link targets. No dependency cycle:
+  `biscuit-file` does not depend on `biscuit-terminal`.
 - `biscuit-terminal/cli` adds a path dependency on `sniff/lib` for
   `bt about [APP]` install detection. The library remains sniff-free; this
   dependency is CLI-only._

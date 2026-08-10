@@ -32,10 +32,13 @@ fn harness() -> Harness {
     let tmp = TempDir::new().expect("tempdir");
     let storage = Storage::open(tmp.path().join("session.redb")).expect("storage");
     let projection = Projection::in_memory().expect("projection");
-    let worker = spawn(projection.clone(), BatcherConfig {
-        flush_interval: Duration::from_millis(20),
-        flush_size: 16,
-    });
+    let worker = spawn(
+        projection.clone(),
+        BatcherConfig {
+            flush_interval: Duration::from_millis(20),
+            flush_size: 16,
+        },
+    );
     let identity = Arc::new(NodeIdentity::from_seed([5u8; 32]));
     let session_log = SessionLogManager::new(
         storage.clone(),
@@ -45,11 +48,8 @@ fn harness() -> Harness {
         Arc::clone(&identity),
     )
     .expect("mgr");
-    let registers = crate::register::RegisterStore::new(
-        storage.clone(),
-        Arc::clone(&identity),
-    )
-    .expect("registers");
+    let registers = crate::register::RegisterStore::new(storage.clone(), Arc::clone(&identity))
+        .expect("registers");
     let sync_service = SyncService::new(
         session_log.clone(),
         registers.clone(),

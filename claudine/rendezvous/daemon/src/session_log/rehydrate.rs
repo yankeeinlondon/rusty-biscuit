@@ -6,9 +6,7 @@
 use super::validate::validate_and_extract_metadata;
 use super::*;
 use crate::projection::ProjectionRow;
-use rendezvous_core::{
-    SignedEnvelope, ENVELOPE_HASH_LENGTH, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH,
-};
+use rendezvous_core::{ENVELOPE_HASH_LENGTH, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH, SignedEnvelope};
 
 impl SessionLogManager {
     /// Rebuild the DuckDB projection from every snapshot persisted in
@@ -76,13 +74,10 @@ impl SessionLogManager {
             )?;
             let state = ChunkState::from_snapshot(snapshot, metadata)?;
             let session_key = chunk_id.session_key();
-            let cursor = inner
-                .sessions
-                .entry(session_key)
-                .or_insert(SessionCursor {
-                    active_chunk_index: chunk_id.chunk_index,
-                    next_sequence: 0,
-                });
+            let cursor = inner.sessions.entry(session_key).or_insert(SessionCursor {
+                active_chunk_index: chunk_id.chunk_index,
+                next_sequence: 0,
+            });
             if chunk_id.chunk_index >= cursor.active_chunk_index {
                 cursor.active_chunk_index = chunk_id.chunk_index;
             }
@@ -208,7 +203,9 @@ fn hex_decode(hex: &str) -> Option<Vec<u8>> {
     Some(bytes)
 }
 
-fn reconstruct_signed_envelope(accepted: &crate::storage::AcceptedEnvelope) -> Option<SignedEnvelope> {
+fn reconstruct_signed_envelope(
+    accepted: &crate::storage::AcceptedEnvelope,
+) -> Option<SignedEnvelope> {
     let sender_bytes = hex_decode(&accepted.sender_hex)?;
     let sender: [u8; PUBLIC_KEY_LENGTH] = sender_bytes.try_into().ok()?;
     let message_id_bytes = hex_decode(&accepted.message_id_hex)?;

@@ -65,7 +65,8 @@ fn pseudo_hash(seed: u64) -> String {
 fn write_repo_tick(doc: &LoroDoc, tick: u64) {
     let map = doc.get_map("repos");
     let repo = format!("github.com/acme/repo-{:02}", tick % REPO_COUNT);
-    map.insert(&repo, pseudo_hash(tick).as_str()).expect("insert repo head");
+    map.insert(&repo, pseudo_hash(tick).as_str())
+        .expect("insert repo head");
     doc.commit();
 }
 
@@ -90,8 +91,8 @@ fn seed_capability_fields(doc: &LoroDoc) {
     map.insert("machine", "bare-metal").unwrap();
     map.insert("arch", "arm64").unwrap();
     for flag in [
-        "avx", "avx2", "avx512bw", "avx512f", "avx512vl", "neon", "sse", "sse2", "sse3",
-        "sse4_1", "sse4_2", "ssse3",
+        "avx", "avx2", "avx512bw", "avx512f", "avx512vl", "neon", "sse", "sse2", "sse3", "sse4_1",
+        "sse4_2", "ssse3",
     ] {
         map.insert(flag, flag == "neon").unwrap();
     }
@@ -266,7 +267,11 @@ fn experiment_c_sync_safety() {
     let frontier = owner.oplog_frontiers();
     let rebased = LoroDoc::new();
     rebased
-        .import(&owner.export(ExportMode::shallow_snapshot(&frontier)).unwrap())
+        .import(
+            &owner
+                .export(ExportMode::shallow_snapshot(&frontier))
+                .unwrap(),
+        )
         .expect("owner re-base");
     rebased.set_peer_id(OWNER_PEER).expect("owner peer id");
     for tick in 1_000..1_100 {
@@ -330,7 +335,9 @@ fn experiment_c_sync_safety() {
     for tick in 1_100..1_150 {
         write_repo_tick(&rebased, tick);
     }
-    let delta = rebased.export(ExportMode::updates(&fresh_vv)).expect("delta");
+    let delta = rebased
+        .export(ExportMode::updates(&fresh_vv))
+        .expect("delta");
     fresh.import(&delta).expect("fresh delta import");
     println!(
         "   C3 fresh reader: shallow bootstrap + later delta: converged={}",

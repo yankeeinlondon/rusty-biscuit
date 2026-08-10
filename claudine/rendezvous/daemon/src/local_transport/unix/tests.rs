@@ -127,7 +127,10 @@ async fn the_socket_is_owner_only_whatever_the_umask() {
     let handle = handle.expect("spawn daemon");
 
     let meta = std::fs::symlink_metadata(&socket).expect("metadata");
-    assert!(meta.file_type().is_socket(), "the endpoint must be a socket");
+    assert!(
+        meta.file_type().is_socket(),
+        "the endpoint must be a socket"
+    );
     assert_eq!(
         meta.permissions().mode() & 0o777,
         0o600,
@@ -200,10 +203,7 @@ async fn a_shared_parent_directory_is_rejected() {
     assert!(
         matches!(
             error,
-            ServerError::Ownership(PrivateDirError::NotPrivate {
-                mode: 0o777,
-                ..
-            })
+            ServerError::Ownership(PrivateDirError::NotPrivate { mode: 0o777, .. })
         ),
         "got: {error:?}"
     );
@@ -246,7 +246,10 @@ async fn a_directory_at_the_endpoint_is_rejected() {
         panic!("expected EndpointOccupied, got: {error:?}");
     };
     assert_eq!(found, "a directory");
-    assert!(socket.join("inside").is_file(), "the directory must survive");
+    assert!(
+        socket.join("inside").is_file(),
+        "the directory must survive"
+    );
 }
 
 /// A symlink at the endpoint is the classic redirection attack: unlinking it is
@@ -300,9 +303,14 @@ async fn a_socket_with_a_live_listener_is_refused() {
     let tmp = TempDir::new().expect("tempdir");
     let socket = runtime_socket(&tmp);
     let listener = StdUnixListener::bind(&socket).expect("bind live socket");
-    let before = SocketIdentity::read(&socket).expect("read").expect("socket");
+    let before = SocketIdentity::read(&socket)
+        .expect("read")
+        .expect("socket");
 
-    let error = expect_refusal(spawn_at(&tmp, &socket), "a live endpoint must not be stolen");
+    let error = expect_refusal(
+        spawn_at(&tmp, &socket),
+        "a live endpoint must not be stolen",
+    );
 
     assert!(
         matches!(error, ServerError::EndpointInUse { .. }),
@@ -354,9 +362,14 @@ async fn teardown_leaves_a_replacement_socket_alone() {
     // one was still shutting down.
     std::fs::remove_file(&socket).expect("unlink ours");
     let replacement = StdUnixListener::bind(&socket).expect("bind replacement");
-    let replacement_id = SocketIdentity::read(&socket).expect("read").expect("socket");
+    let replacement_id = SocketIdentity::read(&socket)
+        .expect("read")
+        .expect("socket");
 
-    handle.shutdown().await.expect("shutdown must still succeed");
+    handle
+        .shutdown()
+        .await
+        .expect("shutdown must still succeed");
 
     assert_eq!(
         SocketIdentity::read(&socket).expect("read"),
@@ -376,7 +389,9 @@ async fn dropping_the_handle_leaves_a_replacement_socket_alone() {
 
     std::fs::remove_file(&socket).expect("unlink ours");
     let replacement = StdUnixListener::bind(&socket).expect("bind replacement");
-    let replacement_id = SocketIdentity::read(&socket).expect("read").expect("socket");
+    let replacement_id = SocketIdentity::read(&socket)
+        .expect("read")
+        .expect("socket");
 
     drop(handle);
 
