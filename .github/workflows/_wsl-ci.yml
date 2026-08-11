@@ -512,8 +512,12 @@ jobs:
           # shadow-home-copy tests, sniff's worktree-registry test). `env`
           # preserves the wrapper environment while giving the user its own
           # HOME, which tests that write under HOME rely on.
+          # `-u XDG_RUNTIME_DIR`: the preserved environment carries root's
+          # `/run/user/0`, and `just` dies with EACCES trying to use it as the
+          # unprivileged user — which took out every guest leg on run
+          # 31415404872. Unset, it falls back to a user-writable location.
           if [ "$(id -u)" -eq 0 ]; then
-            exec runuser -u biscuit -- env HOME=/home/biscuit USER=biscuit LOGNAME=biscuit bash "$0"
+            exec runuser -u biscuit -- env -u XDG_RUNTIME_DIR HOME=/home/biscuit USER=biscuit LOGNAME=biscuit bash "$0"
           fi
           # Re-exported from the job-level `env:` block through GitHub expression
           # interpolation rather than read from the guest environment: whether
