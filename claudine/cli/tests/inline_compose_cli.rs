@@ -101,7 +101,7 @@ fn inline_compose_uses_source_doc_repository_not_launch_cwd() {
     let source = source_root.join("prompts/inline.md");
     write(
         &source,
-        "---\nprompt: |\n  ::file snippet.md\n---\nOriginal body.\n",
+        "---\nprompt: |\n  launch.repo=[{{ ctx.repo_root }}]\n  ::file snippet.md\n---\nOriginal body.\n",
     );
 
     let path_dir = workspace.path().join("bin");
@@ -130,5 +130,13 @@ fn inline_compose_uses_source_doc_repository_not_launch_cwd() {
     assert!(
         !stdout.contains("LAUNCH_REPOSITORY_INLINE_MARKER"),
         "launch repository must not leak into inline prompt transclusion; stdout:\n{stdout}"
+    );
+    assert!(
+        stdout.contains(&format!(
+            "launch.repo=[{}]",
+            fs::canonicalize(&launch_root).unwrap().display()
+        )),
+        "inline plain ctx.repo_root must remain launch-relative while its \
+         transclusion remains source-relative; stdout:\n{stdout}"
     );
 }

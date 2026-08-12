@@ -20,6 +20,11 @@
 //!   `Option<PathBuf>`-shaped proxy-target carrier. Two exist today; the spec's
 //!   R1 bans a second channel, and Phase 6 drives
 //!   [`PROXY_TARGET_CHANNEL_BASELINE`] to zero.
+//! - [`prepared_context_capture_owners_hold_the_line`] inventories every
+//!   production `ComposeContext::capture*` reference. Invocation-owned launch
+//!   capture and canonical preparation are the only prepared-context owners;
+//!   every other entry is a reason-bearing compatibility, documentation, or
+//!   live `current.ctx.*` exception.
 //!
 //! ## Site identity
 //!
@@ -149,14 +154,58 @@ const SUBTREE_COMPOSE_BASELINE: &[AllowedSite] = &[
 /// `capture_for_dir`) are not this: each takes its anchor explicitly, which is
 /// precisely what the rule asks for. Only the argument-less form is banned.
 ///
-/// **Empty, and it stays empty.** Phase 5 retired six ambient captures; the
-/// seventh — `sequence::jit::build_template_preflight_options` — was the last
-/// known R5 gap and review-3 finding 4 closed it: the sequence step now captures
-/// its context once with `capture_for_document(launch_cwd, &markdown)` and reuses
-/// that snapshot through the template shell preflight and the step's
-/// `PrepareOptions`, so the audited commands equal the executed commands even
-/// after the wrapper moves the process CWD to the repo root.
+/// Canonical CLI routes instead receive an invocation-owned launch snapshot and
+/// reuse it through preflight, preparation, and execution. This guard keeps the
+/// ambient owner set empty even if the wrapper later changes process CWD.
 const AMBIENT_CONTEXT_CAPTURE_BASELINE: &[AllowedSite] = &[];
+
+/// Canonical owners permitted to construct a prepared context directly.
+const PREPARED_CONTEXT_CAPTURE_OWNERS: &[AllowedSite] = &[
+    AllowedSite {
+        site: "invocation_context::capture_launch_context",
+        calls: 1,
+        reason: "the invocation owner pairs launch CWD with retained launch repository, \
+                 topology, environment, and host evidence",
+    },
+    AllowedSite {
+        site: "composition::prepare::derive_compose_context",
+        calls: 1,
+        reason: "the public-library canonical preparation fallback; CLI callers supply \
+                 the invocation-owned snapshot before reaching it",
+    },
+];
+
+/// Direct capture references that do not construct canonical prepared state.
+///
+/// Every entry must identify the compatibility API, documentation command, or
+/// live event-time surface it serves. A canonical CLI route is never an
+/// allowlist reason.
+const DIRECT_CONTEXT_CAPTURE_ALLOWLIST: &[AllowedSite] = &[
+    AllowedSite {
+        site: "composition::capture_compatibility_context_for_content",
+        calls: 1,
+        reason: "public library compatibility for content-only callers that have no \
+                 Claudine InvocationContext",
+    },
+    AllowedSite {
+        site: "composition::capture_compatibility_context_for_document",
+        calls: 1,
+        reason: "public library compatibility for document callers that have no \
+                 Claudine InvocationContext",
+    },
+    AllowedSite {
+        site: "commands::context::render_values_report",
+        calls: 1,
+        reason: "`claudine context --values` intentionally documents live host values; \
+                 it does not prepare or execute a document",
+    },
+    AllowedSite {
+        site: "lifecycle::context::capture_at_event",
+        calls: 1,
+        reason: "the explicitly live `current.ctx.*` event-time snapshot, whose semantics \
+                 remain separate from prepared plain `ctx.*`",
+    },
+];
 
 /// Every production endpoint of a `DocumentTransition::Proxy` — both the sites
 /// that construct one and the sites that destructure one.
@@ -248,6 +297,7 @@ const TRANSITION_PATH_FILES: &[&str] = &[
 
 /// One allowlisted site: a stable identity, an expected occurrence count, and
 /// the justification a reviewer needs to judge a change to this list.
+#[derive(Clone, Copy)]
 struct AllowedSite {
     site: &'static str,
     calls: usize,
@@ -316,6 +366,46 @@ fn every_canonical_preparation_caller_supplies_explicit_context() {
          explicitly (`capture_for_document` / `capture_for_content` / `capture_for_dir`), \
          or thread the prepared document's stored `ComposeContext` through.",
     );
+}
+
+#[test]
+fn prepared_context_capture_owners_hold_the_line() {
+    let found = scan_all(find_context_capture_references);
+    let baseline: Vec<AllowedSite> = PREPARED_CONTEXT_CAPTURE_OWNERS
+        .iter()
+        .chain(DIRECT_CONTEXT_CAPTURE_ALLOWLIST)
+        .copied()
+        .collect();
+    assert_baseline(
+        &found,
+        &baseline,
+        "direct `ComposeContext::capture*` reference",
+        "Prepared plain `ctx.*` has two owners: `InvocationContext` captures launch \
+         evidence, and canonical preparation consumes that snapshot. Route a canonical \
+         caller through those owners. Only public library compatibility paths, \
+         `claudine context --values`, and live `current.ctx.*` capture may be allowlisted, \
+         with a reason naming that contract.",
+    );
+}
+
+#[test]
+fn capture_owner_guard_reports_a_forbidden_normalized_source_location() {
+    let source = "fn forbidden() { ComposeContext::capture_for_content(Path::new(\".\"), \"\"); }";
+    let sanitized = sanitize(source);
+    let occurrence = find_context_capture_references(&sanitized)
+        .into_iter()
+        .next()
+        .expect("fixture contains a direct capture");
+    let found = vec![Found {
+        site: "forbidden::fixture::forbidden".to_string(),
+        path: biscuit_file::to_portable_string(Path::new("cli/src/forbidden_fixture.rs")),
+        line: line_of(&sanitized, occurrence.offset),
+    }];
+
+    let failures = check_baseline(&found, &[], "direct capture");
+    assert_eq!(failures.len(), 1);
+    assert!(failures[0].contains("cli/src/forbidden_fixture.rs:1"));
+    assert!(!failures[0].contains('\\'));
 }
 
 #[test]
@@ -549,11 +639,7 @@ fn scan_all(finder: impl Fn(&[u8]) -> Vec<Occurrence>) -> Vec<Found> {
     let mut out = Vec::new();
     for root in ["lib/src", "cli/src"] {
         for file in rust_files(&area.join(root)) {
-            let rel = file
-                .strip_prefix(&area)
-                .unwrap_or(&file)
-                .to_string_lossy()
-                .replace('\\', "/");
+            let rel = biscuit_file::to_portable_string(file.strip_prefix(&area).unwrap_or(&file));
             if is_test_path(&rel) {
                 continue;
             }
@@ -637,6 +723,18 @@ fn find_compose_with_calls(src: &[u8]) -> Vec<Occurrence> {
 /// match: `capture_for_document(` has a `_` where this requires `(`.
 fn find_ambient_context_captures(src: &[u8]) -> Vec<Occurrence> {
     find_all(src, b"ComposeContext::capture()")
+        .into_iter()
+        .map(|offset| Occurrence { offset, name: None })
+        .collect()
+}
+
+/// Every direct reference to a `ComposeContext::capture*` constructor.
+///
+/// Matching the shared prefix includes calls and the function item passed by
+/// `claudine context --values`. The sanitizer removes comments, literals, and
+/// inline test modules before this finder runs.
+fn find_context_capture_references(src: &[u8]) -> Vec<Occurrence> {
+    find_all(src, b"ComposeContext::capture")
         .into_iter()
         .map(|offset| Occurrence { offset, name: None })
         .collect()

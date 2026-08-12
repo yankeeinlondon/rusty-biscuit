@@ -291,7 +291,10 @@ fn compose_transclusion_uses_source_doc_repository_not_launch_cwd() {
     let doc = prompts_dir.join("uses_snippet.md");
     // Bare transclusion resolves repository-first: with the fix, the source's
     // repo (repo_root) wins, not the launch CWD's repo (decoy_root).
-    write(&doc, "---\n---\n::file nested.md\n");
+    write(
+        &doc,
+        "---\n---\nlaunch.repo=[{{ ctx.repo_root }}]\n::file nested.md\n",
+    );
 
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
@@ -333,5 +336,13 @@ exit 0
         !delivered.contains("DECOY_REPO_TRANSCLUSION_MARKER"),
         "the decoy repo's snippet must not leak into a document authored in \
          repo_root.\ndelivered prompt:\n{delivered}"
+    );
+    assert!(
+        delivered.contains(&format!(
+            "launch.repo=[{}]",
+            fs::canonicalize(&decoy_root).unwrap().display()
+        )),
+        "plain ctx.repo_root must describe the launch repository while the file \
+         transclusion remains source-relative.\ndelivered prompt:\n{delivered}"
     );
 }
