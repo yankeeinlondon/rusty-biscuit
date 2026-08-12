@@ -21,6 +21,21 @@ do not belong here.
 
 ## Inspect First
 
+- Do NOT use `git commit --allow-empty -m "..."` (or any variant of
+  `--allow-empty`) to pre-flight that signing works in a non-interactive
+  session. `--allow-empty` overrides git's "no changes" safety check; it
+  does NOT bypass the index. If the index has staged paths, the empty
+  commit will land ALL of them, signed, with the supplied message — exactly
+  the opposite of what an `allow-empty` pre-flight intends. Cheap, safe
+  signing pre-flights are read-only: `git log -5 --pretty='%G? %s'` (recent
+  commits with good `G` signatures imply the gpg-agent has the signing
+  subkey cached for this session), or `gpg-connect-agent 'getinfo
+  passphrase' /bye` to ask the agent directly. If those answers are
+  inconclusive and a real test is needed, checkout an orphan branch,
+  commit there, verify, delete the branch, and return to main. Recovery
+  from an accidental `git commit --allow-empty` that swept the index is
+  the documented `git update-ref HEAD <old> <new>` pattern (CAS-advance);
+  the orphan stays reachable from `git log --reflog` until GC.
 - Use `git status --short`, `git diff --staged --name-status`,
   `git diff --staged --stat`, and `git diff --staged` to review the exact
   staged set.
@@ -74,6 +89,19 @@ do not belong here.
   `error: pathspec '-F' did not match any file(s) known to git`. The heredoc
   payload is then never read. Pair this with the single-quoted `<<'COMMIT_MSG'`
   delimiter above.
+- **`-F -` heredoc subject/body separator.** A commit message fed via `-F -`
+  MUST contain a blank line between the subject and the body. Without it,
+  `git commit` treats the entire input as one subject line — the
+  conventional-commit subject is lost, the first body bullet is absorbed into
+  a multi-hundred-char "subject", and the rest of the bullets are silently
+  dropped (the resulting `git log -1 --format=%B <hash>` shows a one-line
+  blob). The `-F -` argument-ordering and heredoc-quoting bullets above do
+  not cover this; it is a message *structure* rule, not a shell-expansion or
+  arg-parsing rule. Recovery is `git reset --soft HEAD~1` (preserves the
+  index exactly so a re-issued commit picks up the same staged snapshot),
+  followed by a re-issued commit whose stdin begins with the conventional
+  subject line, then a blank line, then the body bullets. Verify recovery
+  with `git log -1 --format=%B <hash>`.
 
 ## Credential and Signing Blockers
 

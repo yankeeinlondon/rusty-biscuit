@@ -2,7 +2,7 @@
 title: Retire the Messenger and Rendezvous specialized workflows
 status: ready
 created: 2026-08-12
-phase: 1
+phase: 6
 total_phases: 6
 agent: codex/default
 yolo: true
@@ -15,20 +15,89 @@ source_code:
   - .github/workflows/_wsl-ci.yml
   - .github/workflows/messenger-desktop-tests.yml
   - .github/workflows/rendezvous-tests.yml
+  - Cargo.lock
   - messenger/lib/Cargo.toml
   - messenger/cli/Cargo.toml
   - messenger/lib/src/tests/desktop_helpers.rs
+  - scripts/ci-rollup-tests.rs
   - scripts/ci/affected_scope.py
   - scripts/ci/test_affected_scope.py
   - tools/test-toolkit/tests/ci_workflow_contracts.rs
-docs:
+documentation:
   - .github/ci/README.md
+  - docs/dependencies.md
   - docs/topics/ci-cd.md
   - docs/testing-strategy.md
   - claudine/docs/rendezvous/local-ipc.md
   - claudine/features/2026-07-12-rendezvous-dashboard/windows-support-followup.md
   - .claude/skills/claudine/architecture.md
   - fixes/2026-08-07-retire-specialized-workflows/implementation-notes.md
+  - fixes/2026-08-07-retire-specialized-workflows/plan.md
+source_files_during_phase_1:
+  - scripts/ci/test_affected_scope.py
+  - tools/test-toolkit/tests/ci_workflow_contracts.rs
+docs_updated_during_phase_1:
+  - fixes/2026-08-07-retire-specialized-workflows/plan.md
+docs_created_during_phase_1:
+  - fixes/2026-08-07-retire-specialized-workflows/implementation-notes.md
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - .github/workflows/_package-ci.yml
+  - .github/workflows/_wsl-ci.yml
+  - Cargo.lock
+  - messenger/cli/Cargo.toml
+  - messenger/lib/Cargo.toml
+  - messenger/lib/src/tests/desktop_helpers.rs
+  - scripts/ci/affected_scope.py
+  - scripts/ci/test_affected_scope.py
+  - tools/test-toolkit/tests/ci_workflow_contracts.rs
+docs_updated_during_phase_2:
+  - docs/dependencies.md
+  - fixes/2026-08-07-retire-specialized-workflows/implementation-notes.md
+  - fixes/2026-08-07-retire-specialized-workflows/plan.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - .github/workflows/ci.yml
+  - .github/workflows/messenger-desktop-tests.yml
+  - .github/workflows/rendezvous-tests.yml
+  - scripts/ci-rollup-tests.rs
+  - tools/test-toolkit/tests/ci_workflow_contracts.rs
+docs_updated_during_phase_3:
+  - claudine/docs/rendezvous/local-ipc.md
+  - claudine/features/2026-07-12-rendezvous-dashboard/windows-support-followup.md
+  - docs/testing-strategy.md
+  - docs/topics/ci-cd.md
+  - fixes/2026-08-07-retire-specialized-workflows/plan.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/claudine/architecture.md
+source_files_during_phase_4:
+  - tools/test-toolkit/tests/ci_workflow_contracts.rs
+docs_updated_during_phase_4:
+  - .github/ci/README.md
+  - claudine/docs/rendezvous/local-ipc.md
+  - claudine/features/2026-07-12-rendezvous-dashboard/windows-support-followup.md
+  - docs/testing-strategy.md
+  - docs/topics/ci-cd.md
+  - fixes/2026-08-07-retire-specialized-workflows/implementation-notes.md
+  - fixes/2026-08-07-retire-specialized-workflows/plan.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/claudine/architecture.md
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+  - fixes/2026-08-07-retire-specialized-workflows/implementation-notes.md
+  - fixes/2026-08-07-retire-specialized-workflows/plan.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+  - fixes/2026-08-07-retire-specialized-workflows/implementation-notes.md
+  - fixes/2026-08-07-retire-specialized-workflows/plan.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+packages: []
 ---
 
 # Execution plan
@@ -66,21 +135,21 @@ documentation, and any run-proven baseline entries are complete.
 
 ## Phase 1 — Freeze the replacement contracts
 
-- [ ] **Task 1.1 — Confirm the prerequisite cutover.** On the implementation
+- [x] **Task 1.1 — Confirm the prerequisite cutover.** On the implementation
   branch, verify that affected scope emits package records, `_package-ci.yml`
   runs one package per result-producing job, `_wsl-ci.yml` runs package-keyed
   L1 archives, and `ci-verdict` consumes `{package, environment, tier}` JUnit
   and producer-status artifacts. Record the inspected revision and findings in
   `implementation-notes.md`; stop if the parent cutover is incomplete.
 
-- [ ] **Task 1.2 — Capture a clean-checkout coverage inventory.** From the same
+- [x] **Task 1.2 — Capture a clean-checkout coverage inventory.** From the same
   revision, record each retired command, the test targets it selects, its
   replacement package cell, and the one intentional reduction:
   `rendezvous-daemon`'s non-test `register_compaction_spike` example is no
   longer compile-checked on macOS/Linux. Include test counts or nextest listings
   where they make the mapping non-vacuous.
 
-- [ ] **Task 1.3 — Add policy and scope regression tests.** Extend
+- [x] **Task 1.3 — Add policy and scope regression tests.** Extend
   `scripts/ci/test_affected_scope.py` to prove that messenger resolves as
   gating with `all_features = true`, retains `libdbus-1-dev`, owns the
   `messenger-desktop-stubs` runner tool, and passes the same feature contract
@@ -89,7 +158,7 @@ documentation, and any run-proven baseline entries are complete.
   package scope and a `sniff` change selects the exact Cargo-derived
   Rendezvous/Claudine reverse-dependency closure.
 
-- [ ] **Task 1.4 — Add workflow retirement and evidence contracts.** Extend
+- [x] **Task 1.4 — Add workflow retirement and evidence contracts.** Extend
   `tools/test-toolkit/tests/ci_workflow_contracts.rs` with assertions that the
   deleted workflows and orchestration jobs are absent, the specialized
   inventory contains only the remaining specialized workflows, messenger
@@ -97,7 +166,7 @@ documentation, and any run-proven baseline entries are complete.
   Rendezvous failures are represented by package-keyed evidence consumed by
   `ci-verdict` rather than by `needs` alone.
 
-- [ ] **Validation checkpoint 1 — Prove the new tests are meaningful.** Run
+- [x] **Validation checkpoint 1 — Prove the new tests are meaningful.** Run
   `python3 scripts/ci/test_affected_scope.py` and
   `cargo nextest run -p test-toolkit --test ci_workflow_contracts`; document
   the expected failures against the pre-retirement implementation and verify
@@ -105,7 +174,7 @@ documentation, and any run-proven baseline entries are complete.
 
 ## Phase 2 — Promote messenger and deliver its helper stubs
 
-- [ ] **Task 2.1 — Promote messenger package policy.** In
+- [x] **Task 2.1 — Promote messenger package policy.** In
   `messenger/lib/Cargo.toml`, remove `gates = false` and all exclusion fields,
   retain `ubuntu-latest = ["libdbus-1-dev"]`, replace
   `features = ["desktop"]` with `all-features = true`, and declare
@@ -114,14 +183,14 @@ documentation, and any run-proven baseline entries are complete.
   uses default gating L1 policy. Update or remove the now-stale manifest
   comments in the same edit.
 
-- [ ] **Task 2.2 — Register the closed runner tool (parallelizable with Task
+- [x] **Task 2.2 — Register the closed runner tool (parallelizable with Task
   2.1 after Phase 1).** Add
   `messenger-desktop-stubs` to `KNOWN_RUNNER_TOOLS` and its validation tests in
   `scripts/ci/affected_scope.py` and `scripts/ci/test_affected_scope.py`.
   Forward the package-owned tool unchanged to native L1 and `_wsl-ci.yml`;
   keep runner tools non-propagating to Cargo dependents.
 
-- [ ] **Task 2.3 — Make stub resolution explicit and testable (parallelizable
+- [x] **Task 2.3 — Make stub resolution explicit and testable (parallelizable
   with Tasks 2.1–2.2 after Phase 1).** Update
   `messenger/lib/src/tests/desktop_helpers.rs` so
   `MESSENGER_STUB_BIN_DIR` is the first resolution source, followed by the
@@ -132,13 +201,13 @@ documentation, and any run-proven baseline entries are complete.
   documentation to describe the new precedence and retain the local fallback
   contract.
 
-- [ ] **Task 2.4 — Add resolver unit coverage.** Add tests for explicit
+- [x] **Task 2.4 — Add resolver unit coverage.** Add tests for explicit
   directory precedence, Windows `.exe` naming, missing explicit fixtures, and
   fallback eligibility without launching a nested Cargo build. Serialize
   environment mutation with the repository test utilities so parallel nextest
   processes cannot race on `MESSENGER_STUB_BIN_DIR`.
 
-- [ ] **Task 2.5 — Prebuild stubs once for native L1.** In
+- [x] **Task 2.5 — Prebuild stubs once for native L1.** In
   `_package-ci.yml`, implement the runner tool before the L1 nextest step:
   build messenger's all-feature helper binaries once, verify all six expected
   executables, export their directory through `GITHUB_ENV`, and leave the
@@ -146,7 +215,7 @@ documentation, and any run-proven baseline entries are complete.
   observable log/contract assertion that there is one prebuild step and no
   per-test fixture build.
 
-- [ ] **Task 2.6 — Ship a Linux stub sidecar to WSL2.** In `_wsl-ci.yml`, add a
+- [x] **Task 2.6 — Ship a Linux stub sidecar to WSL2.** In `_wsl-ci.yml`, add a
   `runner-tools` input and, only for `messenger-desktop-stubs`, build all six
   Linux helper binaries in the archive job, stage them as a package-specific
   sidecar artifact, download them in the WSL job, copy them into the ext4
@@ -154,13 +223,13 @@ documentation, and any run-proven baseline entries are complete.
   `MESSENGER_STUB_BIN_DIR` in the archive test process. Fail if any expected
   sidecar executable is absent.
 
-- [ ] **Task 2.7 — Prove the WSL guest remains toolchain-free.** Strengthen the
+- [x] **Task 2.7 — Prove the WSL guest remains toolchain-free.** Strengthen the
   WSL workflow contract so the messenger archive step verifies `cargo` and
   `rustc` are unavailable to the unprivileged guest before nextest runs. The
   successful helper tests must therefore prove the shipped sidecar was used
   and the build-on-demand fallback was unreachable.
 
-- [ ] **Validation checkpoint 2 — Validate messenger locally.** Run the
+- [x] **Validation checkpoint 2 — Validate messenger locally.** Run the
   messenger resolver/unit tests, then run the package's canonical all-feature
   L1 and lint paths with the runner-tool setup reproduced locally. Confirm all
   six stubs are resolved from the explicit directory and no test process starts
@@ -168,37 +237,37 @@ documentation, and any run-proven baseline entries are complete.
 
 ## Phase 3 — Remove the specialized workflow graph
 
-- [ ] **Task 3.1 — Delete the two workflow files.** Remove
+- [x] **Task 3.1 — Delete the two workflow files.** Remove
   `.github/workflows/messenger-desktop-tests.yml` and
   `.github/workflows/rendezvous-tests.yml`, including the Rendezvous SID
   redaction and raw-log upload steps. Do not add SID transformation to JUnit or
   result staging.
 
-- [ ] **Task 3.2 — Remove specialized orchestration from `ci.yml`.** Delete the
+- [x] **Task 3.2 — Remove specialized orchestration from `ci.yml`.** Delete the
   `rendezvous` and `messenger-desktop` jobs, remove them from both
   `ci-verdict.needs` and the advisory summary's `needs`, and remove their
   failure-class lines. Retain the package fan-out as their only CI scheduler
   and leave the unrelated specialized legs unchanged.
 
-- [ ] **Task 3.3 — Remove the messenger-only scope output.** Delete the
+- [x] **Task 3.3 — Remove the messenger-only scope output.** Delete the
   prefix-matched `messenger` output, its scope-job export, and the stale
   comments explaining exempt-package selection. Verify that no remaining
   consumer depends on this flag and that a messenger-cli-only change still
   schedules its normal package cell.
 
-- [ ] **Task 3.4 — Narrow the specialized inventory.** Update `ORCHESTRATED`
+- [x] **Task 3.4 — Narrow the specialized inventory.** Update `ORCHESTRATED`
   and its comments in `ci_workflow_contracts.rs` to retain only
   `biscuit-tui-windows-captured-stdout.yml` and `playa-windows.yml`. Keep the
   reusable/manual-dispatch assertions for those survivors while separately
   asserting the two retired workflow files and job blocks do not exist.
 
-- [ ] **Task 3.5 — Verify verdict ownership.** Add or update negative-path
+- [x] **Task 3.5 — Verify verdict ownership.** Add or update negative-path
   contracts showing a messenger or Rendezvous L1 producer failure yields its
   package-keyed FAIL/MISSING cell and blocks `ci-verdict` unless an exact valid
   baseline entry applies. Confirm no code infers their result from the deleted
   job names or advisory summary.
 
-- [ ] **Validation checkpoint 3 — Prove complete graph deletion.** Use targeted
+- [x] **Validation checkpoint 3 — Prove complete graph deletion.** Use targeted
   `rg` checks over active workflows, scripts, recipes, contract tests, current
   docs, and manifest comments to show there are no live references to either
   filename, job, messenger prefix flag, or Rendezvous SID-redaction machinery.
@@ -206,28 +275,28 @@ documentation, and any run-proven baseline entries are complete.
 
 ## Phase 4 — Update active authority and implementation evidence
 
-- [ ] **Task 4.1 — Update CI policy documentation.** Update
+- [x] **Task 4.1 — Update CI policy documentation.** Update
   `.github/ci/README.md`, `docs/topics/ci-cd.md`, and
   `docs/testing-strategy.md` to add `messenger-desktop-stubs` to the closed
   vocabulary, describe native and WSL2 fixture delivery, name the package grid
   as messenger/Rendezvous coverage authority, and retain only genuinely
   specialized workflows in the active inventory.
 
-- [ ] **Task 4.2 — Update Rendezvous documentation (parallelizable with Task
+- [x] **Task 4.2 — Update Rendezvous documentation (parallelizable with Task
   4.1 after Phase 3).** Update
   `claudine/docs/rendezvous/local-ipc.md` and the active Windows follow-up to
   replace specialized-workflow ownership with package-keyed native and WSL2
   L1 cells. Remove the retired SID-redaction claim while preserving all
   endpoint/security terminology that describes actual implementation behavior.
 
-- [ ] **Task 4.3 — Update the Claudine skill architecture (parallelizable with
+- [x] **Task 4.3 — Update the Claudine skill architecture (parallelizable with
   Tasks 4.1–4.2 after Phase 3).** Replace the stale
   `rendezvous-tests.yml` coverage statement in
   `.claude/skills/claudine/architecture.md` with the normal package-grid
   contract, including macOS/Linux/Windows/WSL2 L1 ownership and the intentional
   macOS/Linux example-only compile reduction.
 
-- [ ] **Task 4.4 — Complete the command-to-cell evidence record.** In
+- [x] **Task 4.4 — Complete the command-to-cell evidence record.** In
   `implementation-notes.md`, map all six retired commands to the exact
   package/environment/tier cells, record clean-checkout test listings/counts,
   document native single-prebuild and WSL sidecar proof, and explicitly state
@@ -235,13 +304,13 @@ documentation, and any run-proven baseline entries are complete.
   coverage. Do not claim equivalent all-target coverage where it does not
   exist.
 
-- [ ] **Task 4.5 — Audit comments and cache-key references.** Search active
+- [x] **Task 4.5 — Audit comments and cache-key references.** Search active
   manifests, workflow comments, CI docs, and test comments for claims that the
   deleted workflows own coverage or that messenger uses desktop-only CI.
   Correct or delete drifted comments, treating the implementation as the
   authority, and leave historical records untouched.
 
-- [ ] **Validation checkpoint 4 — Review documentation against contracts.** For
+- [x] **Validation checkpoint 4 — Review documentation against contracts.** For
   every active statement about messenger/Rendezvous environments, feature
   selection, fixture delivery, result identity, or specialized inventory,
   identify the enforcing manifest/workflow/contract assertion. Resolve any
@@ -249,31 +318,31 @@ documentation, and any run-proven baseline entries are complete.
 
 ## Phase 5 — Run deterministic local validation
 
-- [ ] **Task 5.1 — Validate scope and workflow contracts.** Run
+- [x] **Task 5.1 — Validate scope and workflow contracts.** Run
   `python3 scripts/ci/test_affected_scope.py` and
   `cargo nextest run -p test-toolkit --test ci_workflow_contracts`. Confirm the
   tests are non-vacuous by checking the messenger-cli-only and `sniff` fixtures
   assert exact package sets rather than mere inclusion.
 
-- [ ] **Task 5.2 — Validate messenger.** From `messenger/`, run `just test` and
+- [x] **Task 5.2 — Validate messenger.** From `messenger/`, run `just test` and
   `just lint`, then use the shared per-package recipes to run messenger L1 and
   lint with `--all-features` and the explicit stub directory. Record the test
   count and evidence that helper binaries were built once before nextest.
 
-- [ ] **Task 5.3 — Validate Rendezvous and Claudine call sites (parallelizable
+- [x] **Task 5.3 — Validate Rendezvous and Claudine call sites (parallelizable
   with Task 5.2 after Task 5.1).** From
   `claudine/rendezvous/`, run `just test` and `just lint`; also run the complete
   canonical L1 suite for `claudine-cli` so dashboard, session-report, requeue,
   and command-handler call sites are covered as a strict superset of the
   retired filter. Do not run L2/L3 or any focus-taking terminal/browser suite.
 
-- [ ] **Task 5.4 — Validate workflow structure and stale references.** Parse or
+- [x] **Task 5.4 — Validate workflow structure and stale references.** Parse or
   lint all changed YAML workflows with the repository-supported tooling, rerun
   targeted active-file `rg` checks for the deleted graph and SID transform,
   and inspect `git diff --check`. Verify no unrelated specialized workflow,
   package policy, historical record, or local recipe behavior changed.
 
-- [ ] **Validation checkpoint 5 — Local readiness review.** Require all Phase 5
+- [x] **Validation checkpoint 5 — Local readiness review.** Require all Phase 5
   commands to pass on macOS and review every changed shell step for bash,
   PowerShell, Windows executable-suffix, Unix permission, path quoting, and
   artifact-name portability. Any platform-only uncertainty becomes an explicit
