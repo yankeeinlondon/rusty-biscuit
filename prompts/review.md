@@ -46,12 +46,12 @@ initialize:
 
 finalize:
     stack:
-        - when: "(!area || area=='root') && spec && !file_exists(spec)"
+        - when: "spec && !file_exists(spec)"
           action:
             - warn: |-
-                    It looks like you ran this from the root of the monorepo and this prompt is most typically run from
-                    a package area. If you were in fact trying to run it on a root level specification file then make sure
-                    you have the right path or use shell completions to help you ensure that.
+                    The `spec` path did not resolve to a file. Relative paths resolve from the directory you
+                    launched from, so double-check the path from there (shell completions can help). Also note
+                    that completed fixes/features are moved into a `_completed/` subdirectory.
 ---
 
 You asked for a review but didn't pass in the right parameters to get proxied to
