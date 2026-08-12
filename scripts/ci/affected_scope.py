@@ -65,13 +65,11 @@ KNOWN_TIERS = {"L1", "L2", "browser"}
 EXCLUSION_CLASSES = {"capability", "promotion-pending", "time-bounded"}
 
 # `runner-tools` is a CLOSED vocabulary implemented by the reusable workflow,
-# not an arbitrary command surface. `darkmatter-md-fixture` preserves
-# Claudine's clean-checkout `md` binary setup; `ai-provider-stubs` keeps
-# claudine-cli's inert provider-discovery stubs; `node-22`/`pnpm-10` provision
-# the JavaScript toolchain a companion suite runs under.
+# not an arbitrary command surface.
 KNOWN_RUNNER_TOOLS = {
     "ai-provider-stubs",
     "darkmatter-md-fixture",
+    "messenger-desktop-stubs",
     "node-22",
     "pnpm-10",
     "l2-parallel-self-spawn",
