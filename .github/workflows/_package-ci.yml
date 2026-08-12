@@ -71,7 +71,7 @@ on:
         type: string
         default: '[]'
       runner-tools:
-        description: "JSON array from the closed runner-tool vocabulary: ai-provider-stubs, darkmatter-md-fixture, node-22, pnpm-10, l2-parallel-self-spawn, neovim."
+        description: "JSON array from the closed runner-tool vocabulary: ai-provider-stubs, darkmatter-md-fixture, messenger-desktop-stubs, node-22, pnpm-10, l2-parallel-self-spawn, neovim."
         type: string
         default: '[]'
       companion-suites:
@@ -258,6 +258,33 @@ jobs:
           shared-key: package-ci-${{ inputs.package }}-test-${{ matrix.environment }}
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
+      - name: Build messenger desktop stubs
+        if: ${{ contains(fromJSON(inputs.runner-tools), 'messenger-desktop-stubs') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          stubs="stub_dunstify stub_notify_send stub_snoretoast stub_burnttoast stub_terminal_notifier stub_alerter"
+          build_args=(--all-features -p messenger)
+          for stub in $stubs; do
+            build_args+=(--bin "$stub")
+          done
+          cargo build "${build_args[@]}"
+
+          suffix=""
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            stubdir="$(pwd -W)/target/debug"
+            suffix=".exe"
+          else
+            stubdir="$PWD/target/debug"
+          fi
+          for stub in $stubs; do
+            [ -x "$stubdir/$stub$suffix" ] || {
+              echo "messenger desktop stub missing after prebuild: $stubdir/$stub$suffix" >&2
+              exit 1
+            }
+          done
+          echo "MESSENGER_STUB_BIN_DIR=$stubdir" >>"$GITHUB_ENV"
+          echo "messenger desktop stubs built once in $stubdir"
       # Runner tools are a CLOSED vocabulary, implemented here — not an
       # arbitrary command surface. Each entry preserves a package-specific
       # behavior that used to be embedded in an area-level recipe.
@@ -792,6 +819,7 @@ jobs:
       check-args: ${{ inputs.check-args }}
       test-args: ${{ inputs.test-args }}
       l1-include-slow: ${{ inputs.l1-include-slow }}
+      runner-tools: ${{ inputs.runner-tools }}
       native: ${{ inputs.native }}
     secrets: inherit
 

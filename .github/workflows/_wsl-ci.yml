@@ -61,6 +61,10 @@ on:
         description: "Keep `slow_` tests inside the L1 selection (darkmatter's declared L1 contract). Forwarded to the guest or its L1 suite silently narrows relative to every other leg."
         type: boolean
         default: false
+      runner-tools:
+        description: "JSON array from the closed runner-tool vocabulary; messenger-desktop-stubs is delivered as a Linux sidecar."
+        type: string
+        default: '[]'
       native:
         description: "JSON map of runner OS -> system packages, the union of `native` requirements across this package's dependency closure. Both the archive builder and the guest consume the ubuntu-latest list."
         type: string
@@ -89,6 +93,10 @@ on:
         description: "Keep `slow_` tests inside the L1 selection."
         type: boolean
         default: false
+      runner-tools:
+        description: "JSON array of package-owned runner tools."
+        type: string
+        default: '[]'
       native:
         description: "JSON map of runner OS -> system packages."
         type: string
@@ -202,11 +210,38 @@ jobs:
             --archive-file "$RUNNER_TEMP/$ARCHIVE_NAME" \
             --target x86_64-unknown-linux-gnu \
             ${{ inputs.check-args }}
+      - name: Build messenger desktop stub sidecar
+        if: ${{ contains(fromJSON(inputs.runner-tools), 'messenger-desktop-stubs') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          stubs="stub_dunstify stub_notify_send stub_snoretoast stub_burnttoast stub_terminal_notifier stub_alerter"
+          build_args=(--all-features -p messenger --target x86_64-unknown-linux-gnu)
+          for stub in $stubs; do
+            build_args+=(--bin "$stub")
+          done
+          cargo build "${build_args[@]}"
+
+          sidecar="$RUNNER_TEMP/messenger-desktop-stubs"
+          mkdir -p "$sidecar"
+          for stub in $stubs; do
+            source="target/x86_64-unknown-linux-gnu/debug/$stub"
+            [ -x "$source" ] || { echo "Linux messenger stub missing: $source" >&2; exit 1; }
+            cp "$source" "$sidecar/$stub"
+          done
       - name: Upload the nextest archive
         uses: actions/upload-artifact@v4
         with:
           name: nextest-archive-${{ inputs.package }}-wsl2-ubuntu
           path: ${{ runner.temp }}/${{ env.ARCHIVE_NAME }}
+          retention-days: 1
+          if-no-files-found: error
+      - name: Upload the messenger desktop stub sidecar
+        if: ${{ contains(fromJSON(inputs.runner-tools), 'messenger-desktop-stubs') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: messenger-desktop-stubs-${{ inputs.package }}-wsl2-ubuntu
+          path: ${{ runner.temp }}/messenger-desktop-stubs
           retention-days: 1
           if-no-files-found: error
 
@@ -255,6 +290,12 @@ jobs:
         with:
           name: nextest-archive-${{ inputs.package }}-wsl2-ubuntu
           path: ${{ github.workspace }}/nextest-archive
+      - name: Download the messenger desktop stub sidecar
+        if: ${{ contains(fromJSON(inputs.runner-tools), 'messenger-desktop-stubs') }}
+        uses: actions/download-artifact@v4
+        with:
+          name: messenger-desktop-stubs-${{ inputs.package }}-wsl2-ubuntu
+          path: ${{ github.workspace }}/messenger-desktop-stubs
       # No `wsl-version:` pin — the action already defaults to 2, and pinning 1
       # would be an explicit downgrade to an environment without WSLg.
       #
@@ -370,6 +411,22 @@ jobs:
           # The test step runs as `biscuit` (see the user-creation step); the
           # tree it executes in must be writable by that user, not root.
           chown -R biscuit:biscuit /home/runner
+      - name: Copy messenger desktop stubs onto ext4
+        if: ${{ contains(fromJSON(inputs.runner-tools), 'messenger-desktop-stubs') }}
+        shell: wsl-bash {0}
+        run: |
+          set -euo pipefail
+          workspace="$(pwd)"
+          sidecar=/home/runner/messenger-desktop-stubs
+          stubs="stub_dunstify stub_notify_send stub_snoretoast stub_burnttoast stub_terminal_notifier stub_alerter"
+          mkdir -p "$sidecar"
+          for stub in $stubs; do
+            source="$workspace/messenger-desktop-stubs/$stub"
+            [ -f "$source" ] || { echo "messenger sidecar fixture missing: $source" >&2; exit 1; }
+            cp "$source" "$sidecar/$stub"
+            chmod 0755 "$sidecar/$stub"
+          done
+          chown -R biscuit:biscuit "$sidecar"
       - name: Install just and cargo-nextest in the guest
         shell: wsl-bash {0}
         run: |
@@ -529,6 +586,19 @@ jobs:
           export NEXTEST_PROFILE='${{ env.NEXTEST_PROFILE }}'
           export COLORTERM='${{ env.COLORTERM }}'
           export BISCUIT_L1_INCLUDE_SLOW='${{ env.BISCUIT_L1_INCLUDE_SLOW }}'
+          if [ "$(jq -r 'contains(["messenger-desktop-stubs"])' <<<'${{ inputs.runner-tools }}')" = "true" ]; then
+            export MESSENGER_STUB_BIN_DIR=/home/runner/messenger-desktop-stubs
+            for stub in stub_dunstify stub_notify_send stub_snoretoast stub_burnttoast stub_terminal_notifier stub_alerter; do
+              [ -x "$MESSENGER_STUB_BIN_DIR/$stub" ] || {
+                echo "messenger sidecar fixture unavailable in guest: $MESSENGER_STUB_BIN_DIR/$stub" >&2
+                exit 1
+              }
+            done
+            if command -v cargo >/dev/null 2>&1 || command -v rustc >/dev/null 2>&1; then
+              echo "messenger WSL2 tests require a toolchain-free unprivileged guest" >&2
+              exit 1
+            fi
+          fi
           # No Cargo in the guest, so the canonical recipe must reach nextest as
           # a standalone binary and stage its JUnit report without shelling out
           # to `cargo metadata`. See fixes/2026-07-27-refactor/wsl-archive-requirements.md.
