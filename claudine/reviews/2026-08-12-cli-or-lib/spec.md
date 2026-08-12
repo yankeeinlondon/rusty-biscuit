@@ -1,5 +1,7 @@
 ---
-reviewed: false
+reviewed: true
+reviewed_by: codex/default
+reviewed_on: 2026-08-12
 implemented: false
 ---
 # Claudine CLI ↔ Library Boundary Review
@@ -8,7 +10,32 @@ implemented: false
 
 **Scope:** business logic currently living in `claudine-cli` (`claudine/cli/src/`) that belongs in the `claudine` library (`claudine/lib/src/`). Reviewed by five parallel area reviews (wrap execution core; wrap orchestration & composition; compose/handle/context commands; admin & resource commands; CLI infrastructure), with the highest-impact claims spot-verified against source.
 
-**Baseline:** `claudine-cli` carries ~70,200 production lines (~34,300 of them under `commands/wrap/`) plus ~33,700 in-src test lines; the library carries ~129,500 production lines. Only `claudine-cli` and `claudine-contract` consume the library today; rendezvous, Reaper, and Darkmatter are named future consumers.
+**Baseline:** `claudine-cli` carries ~70,200 production lines (~34,300 of them under `commands/wrap/`) plus ~33,700 in-src test lines; the library carries ~129,500 production lines. Only `claudine-cli` and `claudine-contract` consume the library today. Rendezvous, Reaper, and Darkmatter are prospective reuse beneficiaries named by the review, not assumed future direct dependency edges.
+
+## Reader's note — inline review decisions
+
+This review keeps the draft's central conclusion and makes the following decisions explicit:
+
+- This is an **umbrella assessment and migration roadmap**, not one implementation unit. Each independently landable workstream below must become a dated feature/fix sub-spec with `sub-spec: true`, explicit acceptance criteria, and `depends-on` links for its actual prerequisites. The finding IDs in this document are the stable cross-references for those sub-specs.
+- The boundary is **library-owned policy and deterministic planning; edge-owned effects**. The `claudine` library owns typed domain state, provider behavior, parsing, validation, policy, and pure orchestration drivers. `claudine-cli` owns clap, TTY/operator interaction, stdout/stderr channel choice, process-global mutation, provider-process spawn/wait/termination mechanics, and final emission. A library render component may produce a `TerminalRenderable`; that does not authorize business decisions or direct terminal writes in the CLI.
+- P1 must extend the established provider-metadata seam instead of creating a second registry. Provider launch behavior becomes a fifth focused behavior facet on `ProviderInfo`, implemented by each provider's hand-written `behavior.rs`; generated `data.rs` files continue to be changed only through `claudine-gen`. The CLI-local `profile::OutputFormat` is deleted in favor of the existing `claudine::composition::OutputFormat`, not moved as a third output-format vocabulary.
+- De-forking `claudine-contract` means reusing provider facts and low-level launch-planning primitives, **not** adopting wrapper defaults wholesale. The contract crate retains ownership of its stricter tool/MCP denial, isolated CWD and shadow HOME, environment allowlist, enabled-provider allowlist, post-hoc tool-use rejection, and fail-closed support matrix. Shared APIs must make that restrictive policy explicit rather than silently selecting CLI behavior.
+- A3's proposed `claudine::session_register` home is rejected. `rendezvous-core` already owns the typed `SessionState`/`Basis`/`ProducerId` model, per-producer slots, precedence reducer, and protobuf vocabulary. Remaining dashboard folding and register decoding belong beside that contract in `rendezvous-core`; Claudine must not introduce a parallel status enum or reducer.
+- Source locations and line counts are point-in-time evidence. Every child spec must re-verify its cited code before implementation and update the finding when the code has already moved or the defect has already been fixed.
+
+## Scope and success criteria
+
+The goal is to make every non-presentation Claudine behavior reusable from a non-clap consumer without copying CLI modules, while preserving the observable CLI and contract-adapter behavior unless a child spec explicitly declares an intentional change.
+
+This review does **not** require one universal runtime that launches every consumer's provider process, moving `inquire`/ratatui/clap or process-global signal handlers into the library, adding a dependency from `claudine` to `rendezvous-core`, or changing public CLI syntax and output as an incidental consequence of file movement.
+
+The migration is complete only when:
+
+1. `claudine-cli` contains presentation, operator-interaction, protocol-adapter, and process-edge code, but no duplicated provider/domain decision tables.
+2. `claudine-contract` consumes the shared provider/launch primitives without a decentralized provider dispatch table and without weakening any documented security invariant.
+3. All provider-varying launch behavior is reachable from the one `ProviderInfo` registry and covered by the dispatch-inventory/catalog parity guards.
+4. Moved behavior has parity tests for return values, typed diagnostics, warnings, argv/env/cwd/artifact plans, stdout/stderr routing, exit status, and persisted mutations as applicable.
+5. The affected crates pass the canonical nextest and lint recipes on macOS and in CI on Windows and Linux; process, signal, path, and environment changes include target-specific coverage where behavior differs.
 
 ## Executive assessment
 
@@ -20,9 +47,9 @@ The recurring structural pattern across all five areas is: **the library decides
 
 The good news is that the migration tax is lower than it looks. The library already depends on `biscuit-terminal` and `darkmatter` and already hosts render components (`MetricsReport`, `EventRenderer`) — so "it renders" is not by itself a reason to stay CLI-side. The real boundary is **clap / shell protocol / TTY interaction / process edge vs. everything else**. The two recurring mechanical taxes are: `color_eyre::Report` returns must become typed `thiserror` variants (color-eyre is CLI-only), and functions that emit warnings mid-flight must return them instead.
 
-## Live defects caused by the split
+## Concrete defects and drift exposed by the split
 
-These were found incidentally while tracing the boundary; each is independently fixable and most are prerequisites for the moves (so migrations don't cement stale data). Items marked ✓ were re-verified against source during synthesis.
+These were found incidentally while tracing the boundary. The list includes shipping defects, test-oracle drift, dead-code policy forks, and structural guard gaps; it is not uniformly a list of live user-facing failures. Each item is independently fixable and most are prerequisites for the moves so migrations do not cement stale behavior. Items marked ✓ were re-verified against source during synthesis.
 
 | # | Defect | Where |
 |---|--------|-------|
@@ -40,7 +67,7 @@ These were found incidentally while tracing the boundary; each is independently 
 | D12 | The completion engine probes both `config.json` and `config.json5`; the lib's `user_config_path()` probes only `.json`, and `main.rs` uses the lib probe to decide whether to run the init wizard — a user with a `config.json5` gets the wizard on every invocation while completion correctly reports them configured. | `cli/src/completion/engine/mod.rs:541-556` vs `lib/src/dispatch/loader.rs` |
 | D13 | Uninstall iterates a different provider set than install (`detect_agents()` filters on `config_exists`; install uses `is_available()` = config **or** on-PATH), so a provider registered from PATH whose config later vanished is never deregistered. Also deletes the user config with bare `remove_file`, bypassing the lib's backup/atomic machinery. | `cli/src/commands/uninstall.rs:18-45` |
 | D14 | The schema-validation error downgrade reconstructs the lib's error message format by hand (`format!("{pointer}: {reason}")`) — a cross-crate duplicated format contract with a byte-identical-output requirement, acknowledged in its own doc comment. | `cli/src/commands/schema_interactive/mod.rs:222-239` |
-| D15 | `LoggingProfile` is fully prompted for during init but never written into the config — three prompts whose answers are discarded. | `cli/src/commands/init/prompts.rs:135-158` vs `cli/src/commands/init/mod.rs:559-573` |
+| D15 | The **test-only legacy init module** prompts for `LoggingProfile` but never writes it into the config. This is not a shipping discarded-input bug because `commands/init/` is compiled only under `cfg(test)`; it is another misleading policy fork to delete or reconcile with D9/A2. | `cli/src/commands/init/prompts.rs:135-158` vs `cli/src/commands/init/mod.rs:559-573` |
 
 ## Dispatch-guard blind spots
 
@@ -48,7 +75,7 @@ These were found incidentally while tracing the boundary; each is independently 
 
 1. **String-keyed dispatch.** `repo_home.rs:149-167` matches on `agent_offset` strings (`".claude"`, `".codex"`, …); the live sink reads provider wire vocabulary out of untyped maps (`extra["task_id"]`, `extra["subagent_type"]`); `SKILL_PEER_DIRS` and telemetry's `provider_subcommand_name` (keyed on the clap enum) encode per-provider facts as bare string tables. All invisible to the scanner.
 2. **`claudine-contract` is not scanned at all.** Extending the scan to `contract/src/` would make the `WrapperProfile` gap (P1) fail the build today — worth doing regardless of migration scheduling.
-3. Consider extending the scanner to flag `&[&str]` constants whose elements superset-match known `agent_offset`/`slug`/`binary` values.
+3. Do **not** add a generic string-superset heuristic: it would be brittle and would confuse legitimate protocol vocabularies with dispatch. Replace known string-keyed provider tables with catalog-derived iteration or typed descriptors, add focused parity tests for unavoidable wire strings, and make the inventory scan `contract/src/` in addition to `lib/src` and `cli/src`.
 
 ## Findings
 
@@ -57,12 +84,13 @@ Findings are grouped into six workstreams. Effort S/M/L · Risk low/med/high · 
 ### P — Provider behavior layer (the keystone)
 
 **P1. `WrapperProfile` — the entire provider argv/env behavior table is CLI-private.**
-`cli/src/commands/wrap/profile/` (~5,900 lines with tests): trait with ~30 methods (`binary`, `supports_resume`, `apply_yolo_for_mode`, `apply_entrypoint`, `apply_model`, `apply_output_format`, `apply_system_prompt`, `apply_sandbox`, `prompt_delivery`, `stdout_noise_prefixes`, `parse_captured_output`, `allowed_env_keys`, …) plus ten per-provider impls and the `PROVIDER_COUNT`-indexed registry. Nearly every default body already reads `claudine::provider::provider_info(...)` — the *metadata* is in the lib; only the *application* is stranded. This inversion is what forced `claudine-contract` to fork (see Executive assessment). The CLI's `profile/*.rs` files are already blanket-exempt in the dispatch inventory, so moving them changes no guard verdict. `OutputFormat`, `PromptDelivery`, `PromptSource`, `YoloOutcome`, and `SystemPromptApplication` (temp-file RAII, not terminal-coupled) move with it; the `<blue>` Prose markup inside `reject_direct_yolo`'s error message becomes a typed error the CLI renders.
-Home: `claudine::provider::profile` (beside the existing `behavior.rs`), plus `claudine::composition::launch::assemble_argv(...) -> AssembledArgv { args, env_overlay, artifacts, warnings }`.
+`cli/src/commands/wrap/profile/` (~5,900 lines with tests): trait with ~30 methods (`binary`, `supports_resume`, `apply_yolo_for_mode`, `apply_entrypoint`, `apply_model`, `apply_output_format`, `apply_system_prompt`, `apply_sandbox`, `prompt_delivery`, `stdout_noise_prefixes`, `parse_captured_output`, `allowed_env_keys`, …) plus ten per-provider impls and the `PROVIDER_COUNT`-indexed registry. Nearly every default body already reads `claudine::provider::provider_info(...)` — the *metadata* is in the lib; only the *application* is stranded. This inversion is what forced `claudine-contract` to fork (see Executive assessment). The CLI's `profile/*.rs` files are already blanket-exempt in the dispatch inventory, so moving them changes no guard verdict.
+This move must preserve the completed provider-metadata architecture: add a focused `WrapperBehavior` trait and a skipped `wrapper` behavior field to `ProviderInfo`; implement the trait on the existing provider ZST in each hand-written `provider/<slug>/behavior.rs`; update `claudine-gen` to emit the field binding; and route callers through `provider_info(provider).wrapper`. Do not move the CLI's `WRAPPER_REGISTRY` into the library as a second authority. `PromptDelivery`, `PromptSource`, `YoloOutcome`, and `SystemPromptApplication` move with the behavior; the CLI-local `OutputFormat` is deleted and callers use the already-equivalent `claudine::composition::OutputFormat`. The `<blue>` Prose markup inside `reject_direct_yolo`'s error message becomes a typed error the CLI renders.
+Home: `claudine::provider::wrapper` for the fifth behavior trait and shared launch vocabulary, plus `claudine::composition::launch::assemble_argv(...) -> AssembledArgv { args, env_patch, artifacts, warnings }`. Path-bearing argv/env values remain `PathBuf`/`OsString` until the process edge; planning must not introduce lossy UTF-8 conversion.
 **L / high / high — prerequisite for L1, L4, and the contract crate's de-forking.**
 
 **P2. System-prompt delivery interpreter.** `cli/src/commands/wrap/system_prompt.rs:206-318`: the only code that turns `SystemPromptSpec` + mode + interactivity into argv/env/tempfiles — mode×interactivity lookup, Gemini `GEMINI.md` append-merge, Codex 64 KiB argv cap, TOML escaping (defect D1). Lib owns the spec types (`lib/src/provider/system_prompt.rs`) and content preparation (`lib/src/system_prompt/prepare.rs`); the interpreter is stranded between them. Independently shippable ahead of P1, and fixes D1. `ResolvedSystemPrompt::describe` (`system_prompt.rs:60-137`, pure enum→vocabulary projection) ships with it.
-Home: `claudine::system_prompt::delivery::apply_spec(...) -> DeliveryPlan { args, env, artifacts, warnings }`.
+Home: `claudine::system_prompt::delivery::apply_spec(...) -> DeliveryPlan { args, env_patch, artifacts, warnings }`. The TOML basic-string encoder is one shared helper used by both CLI delivery and `claudine-contract`; artifact paths remain typed until spawn. Update `docs/topics/system-prompt.md` and the skill snapshot when the implementation anchor moves.
 **M / low / high.**
 
 **P3. Prompt extraction from provider argv + OpenCode model precedence.** `cli/src/commands/wrap/profile/resolve.rs:80-328`: (a) `extract_prompt_source_from_passthrough` — self-described as "the single place in the codebase that knows how to locate a prompt inside provider passthrough arguments" — pure argv parsing over the lib-owned `PromptArgConventions`/`COMMON_VALUE_TAKING_FLAGS` tables (contract already improvises its own version from `prompt_flags.first()`); (b) `resolve_opencode_model` — the CLI > `OPENCODE_MODEL` > `~/.config/opencode/config.json` precedence chain. `OpenCodeModelSource::status_markup` stays CLI; the enum and precedence move.
@@ -181,8 +209,8 @@ Home: `claudine::composition` beside their siblings. **S / low / med-high.**
 
 **C10. Compose small pieces.** Bundle: inline-compose contract validation with its load-bearing ordering comment (`compose/mod.rs:441-521` → `validate_inline_contract`, reporting hoisted); positional-setter pieces (`compose/setters.rs`: `merge_set_overrides` precedence, JSON5-then-string coercion, and `json_type_name` — which exists solely to populate a *lib* error's payload); `build_loop_options` env/flag precedence (`prep.rs:734-746` → `LoopExecutionOptions::from_env_with_overrides`); dry-run facts assembly (`composition/dry_run.rs:75-150` — reclassification + redaction, the "dry run predicts the live path" invariant untestable outside the CLI today). **S each / low / med.**
 
-**C11. `handle.rs` hook-event domain rules.** `commands/handle.rs`: the event → session-status contribution table with documented precedence (so a weak `idle` never clobbers `waiting_on_user`); the interactivity gate ("a non-interactive turn-complete is the agent auto-proceeding, not waiting on a human"); the provider resolution ladder (hint → `AGENT` env → `detect_from_payload`, only the last rung in the lib); and the 15s deadline / exit-124 policy (hosts kill hook handlers at ~30s — a fact about the agent platform, not this CLI). Return a lib-owned status enum; keep the ~6-line rendezvous proto mapping CLI-side to avoid inverting the dependency layering.
-Home: `claudine::hook_adapters` / `claudine::dispatch`. **S–M / low / med.**
+**C11. `handle.rs` hook-event domain rules.** `commands/handle.rs` contains three separable concerns: (a) the provider resolution ladder (hint → `AGENT` env → `detect_from_payload`, only the last rung currently in the lib); (b) canonical hook event + interactivity → session-attention intent; and (c) the command's 15s deadline / exit-124 host protocol. Move (a) to `claudine::hook_adapters`/`dispatch`. Keep (c) at the CLI process edge, with a named constant and deadline/exit-code tests. For (b), do not create a second status vocabulary: return a small provider-neutral hook signal such as `PermissionPending`, `PermissionCleared`, `InteractiveIdle`, or `InteractiveActive`; the CLI integration maps it to the existing `rendezvous_core::session_status`/proto types. The established rendezvous reducer, not this mapping, owns the precedence rule that a weak `idle` never clobbers `waiting_on_user`.
+Home: `claudine::hook_adapters::session_signal` + a thin CLI `rendezvous-core` adapter. **S–M / low / med.**
 
 **C12. Diagnostic-code catalog projection.** `commands/errors.rs`: `Severity::as_str()` (the asymmetry: `Category`/`Disposition`/`Origin` already have one), `code_catalog_grouped()`. The CLI keeps `json_view` if the minimal-derives stance holds. **S / low / low-med.**
 
@@ -191,10 +219,10 @@ Home: `claudine::hook_adapters` / `claudine::dispatch`. **S–M / low / med.**
 **A1. Hook registration drift/plan — five copies, one wrong (D7).** The core domain question ("which events *should* provider X have, and how does that differ from reality") is answered at `hooks/list.rs:23-64`, `sync.rs:183-203`, `providers.rs:123-128`, `init_wizard.rs:482-487`, `init/mod.rs:533-538` — only the first honors `registerable_events()`. Worse: the lib already computes the diff (`is_in_sync` exists on five concrete configurators) but as inherent methods unreachable through `Box<dyn AgentConfigurator>`, and `register()` computes-then-discards the diff, forcing `sync.rs` to reverse-engineer outcomes with three `registered_events()` round-trips.
 Home: `ProviderHookPlan::for_provider(...)` as the single expected-events rule; `AgentConfigurator::diff(...) -> HookSyncDiff` promoted onto the trait; `register()` returns the diff. **M / low / high.**
 
-**A2. Install plan (fixes D9, D15).** Three divergent fresh-install policies (dead `init/`, shipping wizard, lib defaults). Home: `claudine::config::init_plan::InstallPlan::compute(agents, answers)` + `::quick()` + `::apply()`; both wizards reduce to prompts → `InitAnswers` → plan; the dead `init/` directory is then deleted outright — the largest net line reduction available in this review. Behavior must be *reconciled*, not merely moved (pick one sound policy deliberately). **M / med / high.**
+**A2. Install plan (fixes D9, D15).** Three divergent fresh-install policies (test-only `init/`, shipping wizard, lib defaults). Home: `claudine::config::init_plan::InstallPlan::compute(agents, answers)` + `::quick()` + `::apply()`; the shipping wizard reduces to prompts → `InitAnswers` → plan. Preserve any useful legacy fixtures as tests of the chosen plan, then delete the test-only `init/` module outright — the largest net line reduction available in this review. Behavior must be *reconciled*, not merely moved (pick one sound policy deliberately). **M / med / high.**
 
-**A3. Mesh dashboard domain model + session-status wire contract.** `dashboard/model.rs` (384 lines, imports only `serde_json` + std; 604 test lines migrate): `MeshSnapshot::fold`, staleness bucketing, the stale-replica trust rule. The sharper problem: the session-register schema is an **untyped string contract between two CLI files with a daemon in between** — `wrap/session_report.rs` writes `"waiting_on_user"`/`permission_signal`, `dashboard/model.rs:376-378` string-matches them, `report.rs:378-399` decodes `status_basis`/`status_producer` vocabularies as bare literals. Nothing types it; nothing tests producer/consumer agreement; rendezvous stores it in between. The `session_report.rs` reducer (four-producer precedence, unix-ns LWW revisions) is the same workstream — if adding `rendezvous-core` to the lib is unacceptable, move the enums and reducer as provider-neutral types and keep proto conversion CLI-side.
-Home: new `claudine::session_register` (types + fold) — RPC plumbing stays CLI. **M / low-med / high.**
+**A3. Mesh dashboard domain model and typed session-register projection.** `dashboard/model.rs` (384 lines, imports only `serde_json` + std; 604 test lines migrate) still owns reusable `MeshSnapshot::fold`, staleness bucketing, and the stale-replica trust rule. However, the draft's stronger claim is stale: `rendezvous-core::session_status` already owns typed `SessionState`, `Basis`, `ProducerId`, per-producer slots, unix-ns revision guarding, and the precedence reducer, while the protobuf exposes typed status contributions. `session_report.rs` and `handle.rs` already emit those proto enums. The remaining stringly boundary is the backward-compatible JSON projection consumed by the dashboard (`status`, `status_basis`, `status_producer`, `permission_signal`). Decode that projection through `rendezvous-core` typed accessors and test old/unknown values for forward compatibility; do not duplicate its reducer or add a `rendezvous-core` dependency to `claudine`.
+Home: `rendezvous_core::dashboard` (snapshot fold, staleness/trust policy, typed register projection). RPC calls, terminal rows, and rendering stay in `claudine-cli`. **M / low-med / high.**
 
 **A4. MCP referential integrity.** The remove cascade (defaults cleanup) exists only in `cli/mcp/remove.rs:44-90`; lib `remove_server` doesn't do what its own comment claims, while lib `validate_defaults` exists specifically to *report* the corruption a non-CLI caller would create. Also: `collect_provider_presence` hand-walks store internals including the repo-key stringification convention (`mcp/list.rs:142-183`), and `auth_summary` probes provider-specific JSON keys in a CLI helper (`mcp/mod.rs:260-275`).
 Home: `remove_server_cascading(...) -> RemovalReport`; `McpProviderStateStore::presence_for(...)`; `McpServer::auth_mode()`. **S / low / high.**
@@ -244,19 +272,36 @@ Full per-area "stays put" lists live in the underlying review notes; the load-be
 
 - **Error types:** `color-eyre` is CLI-only. Every moved `Result<_, Report>` becomes a typed `thiserror` variant; Prose markup inside error messages moves to the CLI render edge. This is the single most repeated tax.
 - **Warnings:** functions that `log::warn` mid-flight return `warnings: Vec<_>` instead; the CLI owns verbosity gating and rendering.
-- **`&Terminal` is not a blocker:** the lib already depends on biscuit-terminal and takes `&Terminal` in `StackExecutionContext`.
-- **New lib dependencies:** `ignore` + `globset` (I2). The rendezvous-core question (A3) has a no-new-dep fallback.
+- **Rendering versus emission:** a library type may implement `TerminalRenderable`/`BrowserRenderable`, and the lib already depends on biscuit-terminal. Direct writes, channel selection, TTY inspection, and operator prompting remain edge effects. New drivers must return data/events rather than take `&Terminal` merely for progress reporting.
+- **New dependencies:** I2 moves the existing CLI dependencies on `ignore` + `globset` into the lib. Update both `claudine/docs/dependencies.md` and the repo-level `docs/dependencies.md`. A3 moves within the existing `rendezvous-core` ownership boundary and must not add a `rendezvous-core` dependency to `claudine`.
 - **Env/process reads:** parameterize `std::env` access (`EnvLookup`, injected iterators) during moves — the lib's `select.rs` already models this — so migrated tests drop `EnvGuard`/`#[serial]`.
+- **Filesystem/path values:** preserve `PathBuf`/`OsString` for paths and environment values until the process adapter. Do not make a moved planner easier to serialize by introducing `to_string_lossy()` into executable behavior.
+- **Public visibility:** only cross-crate contracts needed by the CLI, contract adapter, or another named consumer become documented `pub` API. Helpers stay private behind those entry points; moving code is not a reason to publish every intermediate type.
+- **Contract adapter:** share a policy-parameterized planner or lower-level provider operations. Do not make the CLI's permissive wrapper policy the default of an API the contract can call accidentally.
 - **Test migration:** well over 12,000 in-src CLI test lines ride along with their subjects and become terminal-free lib unit tests (session key 325; target_launch 1,347; env 801; timeouts ~1,400; completion ~3,860; perf 1,584; dashboard 604; schema-interactive 356; launch_plan 921; repo_home 490; more in L/C bundles).
+
+## Acceptance criteria for each child migration
+
+Every follow-on sub-spec must identify which clauses apply and provide concrete tests for them:
+
+1. **Characterize before moving.** Add or identify fixtures that pin current successful results and failures before deleting the CLI implementation. For launch work, cover every provider and relevant interactive/non-interactive, output, model, sandbox, YOLO, system-prompt, resume, and MCP branch.
+2. **Preserve observable behavior.** Unless explicitly declared otherwise, keep CLI argv interpretation, stdout/stderr channel, JSON shape, warning suppression, terminal rendering, exit code, config mutation, and artifact lifetime unchanged. A typed error may replace an eyre report internally, but its effective diagnostic and user-facing block remain equivalent.
+3. **Delete the duplicate in the same workstream.** The move is incomplete while the old CLI table/helper remains as a fallback, a copied test oracle, or an allowlisted dispatch site. Compatibility facades may forward temporarily, but may not contain behavior.
+4. **Keep orchestration deterministic.** Library planners/drivers receive environment, clock, filesystem, operator decisions, and process results as explicit inputs or narrow injected capabilities. They must not add ambient rediscovery to retry/resume/sequence paths or repeat side effects at re-entry.
+5. **Enforce provider completeness.** The provider registry, generator drift check, dispatch inventory (including `contract/src`), and variant/descriptor completeness tests must fail when a provider is added without the moved behavior.
+6. **Protect `claudine-contract`.** Tests must prove the shared path still clears the environment, isolates HOME/CWD, injects no MCP server, applies the provider-specific pre-turn restriction, rejects observed tool/permission/input events, and rejects providers outside the reviewed allowlist.
+7. **Verify portability.** Pure plan tests use Windows and Unix path/argument cases. OS-specific spawn, signal, temp-file, symlink/hardlink, `.git` file, named-pipe, and process-tree behavior remains behind target modules and runs in the appropriate CI leg. L2/L3 tests must not focus terminal or browser windows.
+8. **Run canonical gates.** At minimum run the affected targeted nextest suites plus `just lint`; run `just test` for the area before completing a phase, and `just test-l2` for changes to terminal, prompt, streaming, signal, or child-process behavior. Provider-catalog changes also run `just test-gen`.
+9. **Maintain documentation.** Update public READMEs, topic docs, `claudine/docs/dependencies.md`, repo `docs/dependencies.md`, and the Claudine skill snapshots when ownership, paths, dependencies, or workflows move.
 
 ## Recommended sequencing
 
-**Phase 0 — defects & guard gaps (no moves, independently landable):** D1 (adopt full TOML escaping), D2, D3 (must precede I2), D4, D5, D6 (must precede L6 or land with it), D7 (or with A1), D10 (or with L13), D11, D12, D13, D15; extend the dispatch-inventory scan to `contract/src/`.
+**Phase 0 — defects & guard gaps (no moves, independently landable):** D1 (adopt one shared full TOML escaping helper), D2, D3 (must precede I2), D4, D5, D6 (must precede L6 or land with it), D7 (or with A1), D10 (or with L13), D11, D12, D13; fold the test-only D15 fork into D9/A2 rather than treating it as an independent shipping fix; extend the dispatch-inventory scan to `contract/src/` and replace known provider string tables with catalog-derived descriptors.
 
 **Phase 1 — cheap, independent, high-value moves:** L8(a)+(c) timeouts · L13 semantic→hook table · C2 compose-context · C3 schema-stage rule · C6 preflight scan · C7 shell policy · L5 session key · L12(a) runaway resolve · E1 sanitize · P2 system-prompt delivery · P3 prompt extraction · A4 MCP cascade · I5/I6.
 
-**Phase 2 — the enabling models:** L3 active-document model → L2 transition dispatch → L6+C1 handoff chain & coordinator driver · E2/E3 · A1 hook plan · A3 session register · I3 argv grammar · I4 perf.
+**Phase 2 — the enabling models:** L3 active-document model → L2 transition dispatch → L6+C1 handoff chain & coordinator driver · E2/E3 · A1 hook plan · A3 dashboard/register projection in `rendezvous-core` · I3 argv grammar · I4 perf.
 
-**Phase 3 — the keystone:** P1 `WrapperProfile` → L4 launch rebuild/plan → E4 child env → L1 the attempt loop itself · then de-fork `claudine-contract` onto the lib surface and let the extended dispatch guard enforce it.
+**Phase 3 — the keystone:** P1 `WrapperBehavior` through `ProviderInfo` → L4 launch rebuild/plan → E4 child env → L1 the attempt loop itself · then de-fork only the contract adapter's duplicated provider/launch mechanics onto the shared low-level surface, retain its contract-specific security policy, and let the extended dispatch guard enforce the result.
 
 **Independent tracks (any time after Phase 1):** C4 schema-interactive · C5 target resolution · C6 sequence driver/step · C8 MCP session plan · L7 termination · L9/L10/L11 · L12(b)/L14 sink policies · A2 install plan · A5 signals verify · A6/A7 config TUI & messenger · I1 error taxonomy · I2 completion engine (last; largest).
