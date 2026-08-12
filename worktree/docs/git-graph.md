@@ -76,8 +76,9 @@ auto-configured from git state.
 - Do not pull in `git2`. The companion collector shells out to the system
   `git` binary via `std::process::Command`, matching what `worktree` does
   today and adding no new compile-time dependency.
-- Do not attempt to render the full git DAG. First-parent simplification is
-  preserved.
+- Do not attempt to render the full git DAG. The simplified two-lane rendering
+  is preserved; commit collection still follows full reachability rather than
+  filtering to first parents.
 - Do not change the public API of `MermaidDiagram`. `GitGraph` may delegate to
   it but does not replace it.
 - Do not introduce network calls or subprocess calls inside the component.
@@ -89,19 +90,23 @@ The graph behavior being lifted out of the CLI has these user-facing semantics:
 - Inline Mermaid `gitGraph` rendered through `biscuit-terminal`.
 - Two scenarios:
   - **Focused branch** when the current checkout is a non-default branch:
-    - up to 2 context commits ending at the merge-base
-    - up to 5 commits on the feature branch since divergence
-    - up to 5 commits on the default branch since divergence
+    - up to 2 shared context commits ending at the selected merge-base
+    - up to 5 commits unique to the feature tip (not reachable from the
+      default tip)
+    - up to 5 commits unique to the default tip (not reachable from the
+      feature tip)
   - **Base overview** when the current checkout is the default branch:
     - up to 10 recent commits on the default branch
-    - each active worktree branch forking from its divergence point
-    - up to 10 commits per worktree branch
-- If a branch has no commits after divergence, emit a placeholder `HEAD` commit
-  so the fork is still visible.
+    - each active worktree branch anchored at its selected merge-base
+    - up to 10 commits unique to each worktree branch tip (not reachable from
+      the default tip)
+- If a branch has no commits unique to its tip, emit a placeholder `HEAD`
+  commit so the fork is still visible.
 - Width chosen from commit-count thresholds (see [Width Policy](#width-policy)).
 - Auto rendering suppressed when terminal width is narrower than 80 columns.
-- A verbose text variant lists the merge-base commit on the default branch and
-  all post-divergence commits on the current branch.
+- A verbose text variant lists the selected merge-base commit on the default
+  branch and the full oldest-first sequence of commits unique to the current
+  branch tip.
 
 These semantics survive — they move from `worktree`'s `git_graph.rs` into the
 auto-configuration builder on the new component.
@@ -172,16 +177,17 @@ pub struct GitGraphCommit {
 pub struct GitGraphBranch {
     pub name: String,                  // displayed branch name
     pub mermaid_id: String,            // sanitized id used inside the diagram
-    pub anchor_index: usize,           // mainline commit index this branch forks from
-    pub commits: Vec<GitGraphCommit>,  // post-divergence commits, oldest first
-    pub placeholder_head: bool,        // true => emit `HEAD` instead of commits
+    pub anchor_index: usize,           // selected merge-base position in mainline
+    pub commits: Vec<GitGraphCommit>,  // commits unique to this tip, oldest first
+    pub hidden_commits: usize,         // earlier unique commits omitted from view
+    pub placeholder_head: bool,        // true => no unique commits; emit `HEAD`
 }
 
 /// Optional verbose-detail block printed under the graph in `-v` modes.
 #[derive(Debug, Clone)]
 pub struct VerboseDetail {
-    pub merge_base: Option<GitGraphCommit>,
-    pub branch_commits: Vec<GitGraphCommit>,
+    pub merge_base: Option<GitGraphCommit>, // selected shared-context endpoint
+    pub branch_commits: Vec<GitGraphCommit>, // full unique sequence, oldest first
 }
 ```
 
@@ -242,9 +248,12 @@ let graph = GitGraph::auto(GitGraphAuto {
     kind_hint: None,                        // None => infer from state
     current_branch: Some("feature/x".into()),
     default_branch: "main".into(),
-    mainline: recent_main_commits,          // oldest first
-    branches: worktree_branches,            // each pre-populated with commits
-    merge_base: Some(merge_base_commit),
+    mainline: recent_main_commits,          // overview mainline, oldest first
+    focused_context: shared_context,        // ends at selected merge-base
+    focused_default_unique: default_unique, // not reachable from current tip
+    focused_default_hidden: default_hidden, // omitted default-unique commits
+    branches: worktree_branches,            // commits already unique vs default
+    merge_base: Some(merge_base_commit),    // anchor/detail only
     caps: GitGraphCaps::default(),
 })?;
 ```
@@ -265,10 +274,17 @@ The auto builder applies the same scenario rules described in
 [Reference Behavior From `worktree`](#reference-behavior-from-worktree),
 trims input to the caps, and emits a `GitGraph` whose `instructions` are
 identical in structure to what `worktree`'s current code produces. Crucially,
-the auto builder takes pre-collected data — it does not open a repository.
-That keeps the default build of `biscuit-terminal` free of any git
-dependency and lets every caller choose its own git access path (`git2`,
-`git` subprocess, mock data in tests).
+the auto builder takes pre-collected data — it does not open a repository or
+derive lane membership from the merge-base. Focused default commits are
+already filtered against the feature tip, and every branch's `commits` are
+already filtered against the default tip. The selected merge-base is only the
+shared-context endpoint, fork anchor, and verbose merge-base detail. This keeps
+the default build of `biscuit-terminal` free of any git dependency and lets
+every caller choose its own git access path (`git2`, `git` subprocess, mock
+data in tests) without making merge-base selection part of lane membership.
+Collectors also supply each lane's count of earlier omitted unique commits;
+the auto builder renders that value directly as `+N` and never derives it from
+the selected merge-base.
 
 #### 4. Auto-from-repo (opt-in via `git` feature)
 
@@ -298,8 +314,8 @@ impl GitGraph {
     /// Auto-build a `GitGraph` by inspecting the repository at `path`.
     ///
     /// Shells out to the system `git` binary to enumerate the current
-    /// branch, default branch, recent commits, worktree branches, and
-    /// merge-base. The collected data is then fed through the same
+    /// branch, default branch, recent commits, tip-unique commits, worktree
+    /// branches, and selected merge-base. The collected data is then fed through the same
     /// [`GitGraph::auto`] path, so output is identical to what a caller
     /// supplying the same data manually would produce.
     ///
@@ -465,8 +481,9 @@ The auto builder populates `VerboseDetail` only when:
 
 `VerboseDetail::render(term)` prints two short sections under the graph:
 
-1. The merge-base commit on the default branch.
-2. All commits on the current branch since the branch point, oldest first.
+1. The selected merge-base commit on the default branch.
+2. The full sequence of commits unique to the current branch tip, oldest
+   first.
 
 Formatting reuses `worktree`'s current conventional-commit detection and
 relative-day policy. That code moves into `biscuit-terminal` as a thin helper
@@ -480,12 +497,14 @@ implementation:
 ### Focused Branch Graph
 
 1. Take up to `focused_context_commits` from the caller-supplied
-   pre-merge-base mainline, oldest first.
-2. Take up to `focused_branch_commits` from `current_branch` post-divergence,
-   oldest first.
-3. Take up to `focused_default_commits` from `default_branch` post-divergence,
-   oldest first.
-4. Emit:
+   shared context ending at the selected merge-base, oldest first.
+2. Take up to `focused_branch_commits` from the caller-supplied commits unique
+   to `current_branch` (not reachable from `default_branch`), oldest first.
+3. Take up to `focused_default_commits` from the caller-supplied commits unique
+   to `default_branch` (not reachable from `current_branch`), oldest first.
+4. Before each lane's displayed commits, emit its supplied nonzero
+   `hidden_commits` as a fork-adjacent `+N` marker.
+5. Emit:
    ```
    gitGraph
        commit id: "ctx1"
@@ -498,24 +517,34 @@ implementation:
        commit id: "m1"
        commit id: "m2"
    ```
-5. If the current branch has no post-divergence commits, emit a single
+6. If the current branch has no commits unique to its tip, emit a single
    `commit id: "HEAD"` placeholder under the feature-branch checkout so the
-   fork remains visible.
+   selected merge-base anchor remains visible. The placeholder is synthetic
+   and is never counted as a unique commit.
 
 ### Base Overview Graph
 
 1. Take up to `overview_default_commits` mainline commits oldest first.
 2. For each worktree branch:
-   - resolve its merge-base position within the mainline window
-   - take up to `overview_branch_commits` post-divergence commits, oldest first
-   - if no commits exist after divergence, mark `placeholder_head = true`
-3. If a merge-base falls outside the displayed mainline window, anchor that
-   branch at index `0`.
+   - resolve its selected merge-base position within the mainline window
+   - take up to `overview_branch_commits` caller-supplied commits unique to the
+     branch tip (not reachable from the default tip), oldest first
+   - emit the branch's supplied nonzero `hidden_commits` as a fork-adjacent
+     `+N` marker before its displayed commits
+   - if no unique commits exist, mark `placeholder_head = true`
+3. If the selected merge-base falls outside the displayed mainline window,
+   anchor that branch at index `0`.
 4. Sort branches by `(anchor_index, name)`.
 5. Emit the mainline commits, inserting each branch block at its anchor index.
 
 These rules are identical to the current `worktree` behavior — they have
-simply moved into a reusable, testable module.
+simply moved into a reusable, testable module. A collector must obtain branch
+commits with the equivalent of `git log <branch> --not <default> --` and its
+hidden count with `git rev-list --count <branch> --not <default> --` minus the
+displayed count. For the focused default lane, both queries reverse the two
+tips. Plain `git merge-base` may choose any one of multiple best bases, so its
+result must never be used as the exclusion revision for lane commits, hidden
+counts, or verbose branch details.
 
 ## Consumer Migration: `worktree` CLI
 
@@ -556,8 +585,13 @@ Handle these explicitly inside the component or its auto builder:
   code block (effectively empty), matching `MermaidDiagram` behavior;
 - terminal width < 80 cols: emit fenced Mermaid code block rather than image;
 - inline image support unavailable: emit fenced Mermaid code block;
-- branch with zero post-divergence commits: emit `HEAD` placeholder;
-- merge-base older than displayed mainline window: anchor at index 0;
+- branch with zero tip-unique commits: emit a synthetic `HEAD` placeholder;
+- zero hidden unique commits: omit the `+N` marker; otherwise render the exact
+  supplied count once, immediately before the lane's displayed commits;
+- selected merge-base older than displayed mainline window: anchor at index 0;
+- multiple incomparable best merge-bases: lane membership and verbose branch
+  details remain unchanged whichever base Git selects; only shared context and
+  anchor placement may follow the selected base;
 - collision between sanitized branch ids: numeric suffix on collision;
 - invalid `ImageWidth` override: fall back to the commit-count heuristic;
 - caller passes no branches in base-overview auto mode: returns `Ok(None)` from
@@ -600,10 +634,16 @@ Handle these explicitly inside the component or its auto builder:
 - Sanitizer rules: punctuation replacement, leading-digit prefix, collision
   numbering.
 - Auto builder:
-  - focused-branch scenario produces the documented Mermaid layout
-  - base-overview scenario inserts branches at correct anchor indices
-  - branch with zero post-divergence commits emits the `HEAD` placeholder
-  - merge-base older than the displayed window anchors at index `0`
+  - focused-branch scenario renders disjoint caller-supplied tip-unique lanes
+    and the documented shared context
+  - base-overview scenario renders only branch-tip-unique commits and inserts
+    branches at the selected merge-base anchor indices
+  - each lane's `+N` marker equals its supplied omitted-unique count and is
+    fork-adjacent before the displayed unique commits
+  - branch with zero tip-unique commits emits the synthetic `HEAD` placeholder
+  - selected merge-base older than the displayed window anchors at index `0`
+  - changing which incomparable best merge-base is selected does not change
+    lane membership, hidden counts, or verbose branch details
   - returns `Ok(None)` when input data is insufficient
 - Width policy: each row of the table resolves to the expected `ImageWidth`.
 - `is_block_level()` returns `true`.
@@ -681,6 +721,6 @@ Handle these explicitly inside the component or its auto builder:
   user-facing subcommand built on `from_repo`.
 - The `worktree` CLI stays on the caller-supplied `auto` path because it
   already has its own git plumbing, error type, and visibility policy.
-- First-parent simplification, commit caps, placeholder `HEAD`, and the
+- Simplified two-lane rendering, commit caps, placeholder `HEAD`, and the
   sanitizer rules from the worktree implementation are all preserved.
 - The previously-proposed `sniff repo git-status` integration is rescinded.

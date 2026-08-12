@@ -1,5 +1,6 @@
 ---
-hash: ef46db3751d8e999-b8ccbdf41e916e46
+hash: ef46db3751d8e999-7b04bc36d9aed8f0
+last_updated: 2026-08-12
 ---
 
 # Performance Testing — Worktree
@@ -19,8 +20,8 @@ The first owned cost center is [`list_worktrees`](../../worktree/lib/src/worktre
 
 The second owned cost center is graph data collection in [`worktree/cli/src/commands/git_graph.rs`](../../worktree/cli/src/commands/git_graph.rs).
 
-- [`gather_branch`](../../worktree/cli/src/commands/git_graph.rs) collects merge-base, context commits, and post-divergence commits for a single feature branch.
-- [`gather_base_graph`](../../worktree/cli/src/commands/git_graph.rs) collects the same data for every active worktree branch concurrently, then sorts results deterministically before rendering.
+- [`gather_branch`](../../worktree/cli/src/commands/git_graph.rs) collects the selected merge-base, shared context commits, and commits unique to each tip for a single feature branch.
+- [`gather_base_graph`](../../worktree/cli/src/commands/git_graph.rs) collects the selected merge-base and branch-tip-unique commits for every active worktree branch concurrently, then sorts results deterministically before rendering.
 - Graph data is only gathered when the terminal reports inline-image support **and** the parsed width fits the minimum terminal width threshold. On non-image terminals the entire graph-data path is skipped.
 - The intended Criterion surface benchmarks both `gather_branch` (focused-branch scenario) and `gather_base_graph` (base-overview scenario), again using the Phase 1 `count-git` recorder to verify one `merge-base` per branch and zero `rev-parse --short` calls.
 
@@ -90,7 +91,7 @@ For contention-free wall-clock measurement of the SLA, run perf tests serially v
 Asserts the subprocess-count bounds the optimization guarantees. Runs in the ambient `rusty-biscuit` checkout so the counts reflect real worktree scale:
 
 - `list_worktrees()` resolves the default branch exactly once (one `symbolic-ref` call). Wall-clock is printed for observability; the full-command SLA that subsumes this piece is asserted by the integration test below.
-- `gather_base_graph()` issues exactly one `merge-base` per branch and one `git log` per branch plus one for main commits — no discarded default-context or default-after-base logs.
+- `gather_base_graph()` issues exactly one `merge-base` per branch and one unique-tip `git log` per branch plus one for main commits — no discarded default-context or default-unique logs.
 - `gather_branch()` wall-clock is printed for observability when the ambient checkout is a feature branch (skipped on main). The binding SLA + subprocess-count assertions for the image-terminal `wt list -v` data-gather path live in `gather_branch_uses_one_merge_base_and_no_short_sha` below, which runs on a controlled fixture so it always asserts regardless of the ambient checkout.
 
 ### `gather_branch_uses_one_merge_base_and_no_short_sha` (unit test, `git_graph.rs`)

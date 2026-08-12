@@ -50,8 +50,8 @@ success:
             - shell: gitnexus analyze --force
         - when: "!ctx.dirty_files"
           action:
-              - message: phase {{iteration}} of the plan made no file changes!
-              - warn: phase {{iteration}} of the plan made no file changes!
+              - message: phase {{phase}} of the plan made no file changes!
+              - warn: phase {{phase}} of the plan made no file changes!
 blocked:
     message: "💥  phase **{{phase}}** (_of {{total_phases}}_) was **blocked** because it has shell commands which were not approved for execution!"
 failure:
