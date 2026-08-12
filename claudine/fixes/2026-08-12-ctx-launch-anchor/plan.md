@@ -1,9 +1,9 @@
 ---
 total_phases: 6
 created: 2026-08-12
-phase: 1
+phase: 2
 agent: codex/default
-yolo: "true"
+yolo: true
 ---
 
 # Execution Plan: Anchor Prepared `ctx.*` to the Invocation Launch Context
