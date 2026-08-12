@@ -425,14 +425,13 @@ cd claudine && just test && just lint
 tests.
 
 **Cross-compilation is not evidence of Windows support.** The named-pipe
-acceptance criteria are runtime-gating and are proved on a native
-`windows-latest` runner by `.github/workflows/rendezvous-tests.yml`, which
-compile-checks `--all-targets` across `sniff`, all three Rendezvous crates, and
-`claudine-cli`, then runs the suites natively on `macos-latest`,
-`ubuntu-latest`, and `windows-latest` with no `continue-on-error` on any leg.
-Logs are redacted so a user SID's trailing RIDs (`S-1-5-21-<redacted>`) never
-reach an artifact while endpoint, permission, retry, and teardown text stays
-readable.
+acceptance criteria are runtime-gating and are proved by package-keyed L1 cells
+for `rendezvous-core`, `rendezvous-client`, and `rendezvous-daemon` on native
+`windows-latest`. The same ordinary package grid runs each package on
+`macos-latest` and `ubuntu-latest`, with WSL2 represented by its own
+`wsl2-ubuntu` L1 evidence cell and no `continue-on-error` on any leg. JUnit and
+producer status preserve each `{package, environment, tier}` result for
+`ci-verdict`.
 
 Two verification gaps are known and tracked in the fix's plan rather than papered
 over:

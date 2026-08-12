@@ -137,7 +137,7 @@ fn union_property_to_schema(
     // this up front lets each arm be built with empty-`file` suppression so a
     // required union containing an otherwise-optional `file` arm still rejects
     // the `""` sentinel.
-    let required = arms.iter().any(atom_is_required);
+    let required = arms.iter().any(PropertyAtom::is_required);
     // `generated` is a property-level ownership semantic: if any arm is
     // host-supplied, the static `required` entry is suppressed (spec point 1).
     let any_generated = arms.iter().any(atom_is_generated);
@@ -291,25 +291,12 @@ fn atom_to_schema(name: &str, atom: &PropertyAtom) -> Result<(Value, bool), Sche
     Ok((schema, false))
 }
 
-/// Reports whether an atom carries the `required` constraint at either the
-/// value or array level. Used to decide union requiredness before any arm is
-/// built, so the per-arm empty-`file` sentinel can be suppressed for a
-/// required union.
-fn atom_is_required(atom: &PropertyAtom) -> bool {
-    atom.constraints
-        .iter()
-        .chain(atom.array_constraints.iter())
-        .any(|c| matches!(c, Constraint::Required))
-}
-
 /// Reports whether an atom carries the `generated` constraint at either the
 /// value or array level. Used to suppress the static `required` entry for
 /// host-supplied properties (spec semantics point 1) while preserving the
 /// non-nullable type semantics of `required` (point 4).
 fn atom_is_generated(atom: &PropertyAtom) -> bool {
-    atom.constraints
-        .iter()
-        .chain(atom.array_constraints.iter())
+    atom.property_constraints()
         .any(|c| matches!(c, Constraint::Generated))
 }
 
@@ -341,7 +328,7 @@ fn atom_fragment_without_null_wrap(
     // (resolved into example objects by `resolve.rs`) and never reach a type
     // fragment builder as a constraint.
     let mut examples: Vec<String> = Vec::new();
-    for c in atom.constraints.iter().chain(atom.array_constraints.iter()) {
+    for c in atom.property_constraints() {
         match c {
             Constraint::Required => required = true,
             Constraint::Generated => generated = true,

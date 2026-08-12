@@ -124,7 +124,7 @@ would silently exempt a package and miss its first test.
 | `features` | string[] | `[]` | forwarded to check, archive, and the canonical recipe consistently. Conflicts with `all-features` |
 | `all-features` | bool | `false` | run with `--all-features`. Conflicts with `features` |
 | `l1-include-slow` | bool | `false` | keep `slow_` tests inside the L1 selection (darkmatter's contract) |
-| `runner-tools` | string[] | `[]` | closed vocabulary: `ai-provider-stubs`, `darkmatter-md-fixture`, `node-22`, `pnpm-10`, `l2-parallel-self-spawn` |
+| `runner-tools` | string[] | `[]` | closed vocabulary: `ai-provider-stubs`, `darkmatter-md-fixture`, `messenger-desktop-stubs`, `node-22`, `pnpm-10`, `l2-parallel-self-spawn`, `neovim` |
 | `companion-suites` | string[] | `[]` | non-Cargo suites this package owns; closed vocabulary: `homelab-frontend` |
 
 `[package.metadata.ci.native]`: a map of runner OS (`ubuntu-latest`,
@@ -149,11 +149,25 @@ command surface:
 - **`darkmatter-md-fixture`** — builds darkmatter's `md` binary into the
   workspace target dir, preserving Claudine's clean-checkout fixture that a
   direct `_test claudine-cli` would otherwise lose.
+- **`messenger-desktop-stubs`** — builds and verifies Messenger's six desktop
+  helper fixtures once before each native L1 suite, then exports their directory
+  through `MESSENGER_STUB_BIN_DIR`. The WSL2 archive job builds a Linux sidecar;
+  the WSL job copies it onto ext4 with executable permissions and unprivileged
+  ownership. The guest verifies that Cargo and rustc are absent before running
+  the archive, so helper resolution cannot fall back to a nested build.
 - **`node-22` / `pnpm-10`** — the JavaScript toolchain a companion suite runs
   under (homelab-frontend, owned by homelab-server).
 - **`l2-parallel-self-spawn`** — run the L2 tier in `_test_l2`'s parallel
   self-spawn mode (`min(cores, 8)`), for suites dominated by self-isolating
   tests (claudine-cli).
+- **`neovim`** — provisions Neovim for packages whose L2 contract exercises
+  the editor backend.
+
+Messenger and the three Rendezvous packages use the ordinary package grid as
+their coverage authority. Their native and `wsl2-ubuntu` L1 evidence is keyed
+by `{package, environment, tier}` and consumed from JUnit plus producer-status
+artifacts by `ci-verdict`; no specialized workflow or job name stands in for a
+package result.
 
 ### Companion suites
 

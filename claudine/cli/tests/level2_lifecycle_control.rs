@@ -4580,7 +4580,14 @@ fn run_until_settled(staged: &Staged, expected_lines: usize) -> String {
 /// outranks the target's authored `agent:`, which would make the assertion
 /// vacuous.
 fn run_until_settled_with_flags(staged: &Staged, flags: &str, expected_lines: usize) -> String {
-    run_until_settled_with_params(staged, flags, "", expected_lines, SettlePacing::default())
+    run_until_settled_with_params(
+        staged,
+        flags,
+        "",
+        expected_lines,
+        SettlePacing::default(),
+        &[],
+    )
 }
 
 /// How long [`run_until_settled_with_params`] waits overall, and how long a
@@ -4616,6 +4623,7 @@ fn run_until_settled_with_params(
     params: &str,
     expected_lines: usize,
     pacing: SettlePacing,
+    ambient: &[(&str, &str)],
 ) -> String {
     static SEQ: AtomicU32 = AtomicU32::new(0);
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
@@ -4644,11 +4652,14 @@ fn run_until_settled_with_params(
 
     let claudine = common::claudine_bin();
     let sentinel = format!("L2_EQUIV_DONE_{seq}");
-    let env_prefix = format!(
+    let mut env_prefix = format!(
         "NO_COLOR='1' HOME='{home}' PATH='{path}' ",
         home = staged.workspace.path().display(),
         path = augmented_path(&staged.bin_dir).to_string_lossy(),
     );
+    for (key, value) in ambient {
+        env_prefix.push_str(&format!("{key}='{}' ", value.replace('\'', "'\\''")));
+    }
     let invocation_path = staged
         .md_file
         .strip_prefix(staged.workspace.path())
@@ -5011,6 +5022,227 @@ fn stage_shipped_implement_route(entry: &str, total_phases: usize) -> Staged {
     }
 }
 
+/// Stage the repository's real `implement-plan.md` with every external effect
+/// replaced by a PATH-local recorder. The prompt itself is copied byte-for-byte;
+/// only the provider, TTS executable, and lifecycle shell commands are doubled.
+fn stage_shipped_optional_commit_message() -> Staged {
+    let workspace = tempdir().unwrap();
+    let root = workspace.path().to_path_buf();
+    let bin_dir = root.join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    fs::create_dir_all(root.join("feature")).unwrap();
+    fs::create_dir_all(root.join("src")).unwrap();
+    seed_minimal_config(&root);
+    fs::write(
+        root.join(".claudine/config.json"),
+        "{\"prompt_for_missing\": false}",
+    )
+    .unwrap();
+    assert!(init_git_repo(&root), "git init failed");
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"optional-params-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .unwrap();
+    fs::write(root.join("src/lib.rs"), "").unwrap();
+
+    let events_log = root.join("events.log");
+    write_succeeding_goose(&bin_dir, &events_log);
+    write_executable(
+        &bin_dir.join("say"),
+        &format!(
+            "#!/bin/sh\ncat > /dev/null\nprintf 'tts-ran\\n' >> {log}\nexit 0\n",
+            log = events_log.display(),
+        ),
+    );
+    let real_git = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+        .map(|dir| dir.join("git"))
+        .find(|candidate| candidate.is_file())
+        .expect("real git executable on the test host");
+    let real_git = real_git.display().to_string().replace('\'', "'\\''");
+    write_executable(
+        &bin_dir.join("git"),
+        &format!(
+            r#"#!/bin/sh
+case "$1" in
+  add)
+    printf 'git-add' >> {log}
+    shift
+    for arg in "$@"; do printf '|%s' "$arg" >> {log}; done
+    printf '\n' >> {log}
+    ;;
+  commit)
+    printf 'git-commit' >> {log}
+    shift
+    for arg in "$@"; do printf '|%s' "$arg" >> {log}; done
+    printf '\n' >> {log}
+    ;;
+  *)
+    exec '{real_git}' "$@"
+    ;;
+esac
+exit 0
+"#,
+            log = events_log.display(),
+            real_git = real_git,
+        ),
+    );
+    write_executable(
+        &bin_dir.join("just"),
+        &format!(
+            "#!/bin/sh\nprintf 'just' >> {log}\nfor arg in \"$@\"; do printf '|%s' \"$arg\" >> {log}; done\nprintf '\\n' >> {log}\nexit 0\n",
+            log = events_log.display(),
+        ),
+    );
+    write_executable(
+        &bin_dir.join("gitnexus"),
+        &format!(
+            "#!/bin/sh\nprintf 'gitnexus' >> {log}\nfor arg in \"$@\"; do printf '|%s' \"$arg\" >> {log}; done\nprintf '\\n' >> {log}\nexit 0\n",
+            log = events_log.display(),
+        ),
+    );
+
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let repo_root = manifest
+        .ancestors()
+        .nth(2)
+        .expect("repository root is two levels above claudine/cli");
+    let md_file = root.join("implement-plan.md");
+    fs::copy(
+        repo_root.join("prompts/_implement/implement-plan.md"),
+        &md_file,
+    )
+    .expect("copy the shipped implement-plan prompt");
+    fs::write(
+        root.join("feature/plan.md"),
+        "---\ntotal_phases: 1\nstart_phase: 1\n---\n\n# Plan\n",
+    )
+    .unwrap();
+
+    // File-change evidence requires a HEAD tree. Establish a disposable
+    // baseline inside this isolated fixture, then make the tracked plan dirty
+    // before Claudine captures its invocation snapshot.
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(&root)
+            .args(args)
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    };
+    assert!(git(&["add", "."]), "failed to stage fixture baseline");
+    assert!(
+        git(&[
+            "-c",
+            "user.name=Claudine Test",
+            "-c",
+            "user.email=claudine-test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-m",
+            "fixture baseline",
+        ]),
+        "failed to commit fixture baseline",
+    );
+    fs::write(
+        root.join("feature/plan.md"),
+        "---\ntotal_phases: 1\nstart_phase: 1\n---\n\n# Plan\n\n- [ ] controlled dirty state\n",
+    )
+    .unwrap();
+    let changes = sniff::filesystem::FilesystemObservation::discover(&root)
+        .detect_file_changes()
+        .expect("fixture file-change capture should succeed")
+        .expect("fixture should be recognized as a Git repository");
+    assert!(
+        changes
+            .iter()
+            .any(|change| change.path == Path::new("feature/plan.md")),
+        "fixture plan must be visible as dirty; changes were {changes:?}",
+    );
+
+    Staged {
+        workspace,
+        bin_dir,
+        md_file,
+        events_log,
+        rendezvous_endpoint: None,
+    }
+}
+
+fn run_shipped_optional_commit_message(commit_message: Option<&str>) -> (Vec<String>, String) {
+    let staged = stage_shipped_optional_commit_message();
+    let params = commit_message.map_or_else(
+        || "plan=feature/plan.md".to_string(),
+        |message| {
+            format!(
+                "plan=feature/plan.md commit_message='{}'",
+                message.replace('\'', "'\\''"),
+            )
+        },
+    );
+    let pane = run_until_settled_with_params(
+        &staged,
+        "--goose --yolo",
+        &params,
+        5,
+        SettlePacing {
+            stable_for: Duration::from_secs(4),
+            ..SettlePacing::default()
+        },
+        &[("TTS_PROVIDER", "say")],
+    );
+    (event_lines(&staged), pane)
+}
+
+/// The original defect: omitting the schema-declared optional
+/// `commit_message` must pass lifecycle-shell preflight, reach the controlled
+/// provider, and select the AI-generated-message branch at event time.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_shipped_implement_plan_unset_commit_message_reaches_provider_and_auto_branch() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let (lines, pane) = run_shipped_optional_commit_message(None);
+    assert!(
+        lines.iter().any(|line| line == "provider-ran"),
+        "unset commit_message must reach the provider; log was {lines:?}; pane:\n{pane}",
+    );
+    assert!(
+        lines.iter().any(|line| line == "just|commit"),
+        "null commit_message must select the !commit_message branch; log was {lines:?}; pane:\n{pane}",
+    );
+    assert!(
+        !lines.iter().any(|line| line.starts_with("git-commit|")),
+        "the explicit-message branch must not execute when commit_message is null; log was {lines:?}",
+    );
+}
+
+/// A supplied message takes the opposite event-time guard and arrives at the
+/// command double as one exact `-m` argument, including its embedded space.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_shipped_implement_plan_supplied_commit_message_runs_exact_commit_branch() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let (lines, pane) = run_shipped_optional_commit_message(Some("chore: x"));
+    assert!(
+        lines.iter().any(|line| line == "provider-ran"),
+        "supplied commit_message must reach the provider; log was {lines:?}; pane:\n{pane}",
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|line| line == "git-commit|-m|chore: x"),
+        "the supplied message must remain one exact shell argument; log was {lines:?}; pane:\n{pane}",
+    );
+    assert!(
+        !lines.iter().any(|line| line == "just|commit"),
+        "the !commit_message branch must not execute for supplied text; log was {lines:?}",
+    );
+}
+
 /// **The shipped motivating route** (`spec.md:1057-1060,1068-1072`): routing
 /// `prompts/implement.md` to `prompts/_implement/implement-plan.md` must execute
 /// every phase exactly as invoking `implement-plan.md` directly does.
@@ -5063,6 +5295,7 @@ fn level2_lifecycle_shipped_implement_route_matches_direct_run() {
         PARAMS,
         EXPECTED_MARKERS,
         pacing(),
+        &[],
     );
     let direct_lines = event_lines(&direct);
 
@@ -5074,6 +5307,7 @@ fn level2_lifecycle_shipped_implement_route_matches_direct_run() {
         PARAMS,
         EXPECTED_MARKERS,
         pacing(),
+        &[],
     );
     let routed_lines = event_lines(&routed);
 

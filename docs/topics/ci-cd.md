@@ -72,14 +72,17 @@ is selected from affected scope and gated behind the canary stage:
 
 | Workflow | Selected when | Unique evidence |
 |---|---|---|
-| `rendezvous-tests.yml` | `claudine` or `sniff` in scope | native IPC on all three OSes |
-| `claudine-windows-ctrl-c.yml` | `claudine` in scope | Windows console-control parity |
 | `biscuit-tui-windows-captured-stdout.yml` | `biscuit-tui` in scope | attached-console captured-stdout boundary |
 | `playa-windows.yml` | `playa` in scope | WASAPI / ducking / `windows` crate compile |
-| `messenger-desktop-tests.yml` | a `messenger` package in scope | desktop-helper matrix + WSL2 |
 
-`messenger` is exempt from area ownership, so it is selected from the affected **package** list
-rather than from area names — that workflow is its entire CI ownership. `sniff-performance.yml`
+Messenger and all three Rendezvous crates are owned by their ordinary
+package-keyed L1 cells on Ubuntu, Windows, macOS, and WSL2. Messenger declares
+all-feature coverage and the closed `messenger-desktop-stubs` runner tool. The
+native workflow builds and verifies all six helpers once before L1 and exports
+`MESSENGER_STUB_BIN_DIR`; the WSL2 archive workflow ships Linux helpers as a
+sidecar to its toolchain-free guest. JUnit and producer-status artifacts retain
+the package/environment/tier identity consumed by `ci-verdict`.
+`sniff-performance.yml`
 stays independent because its PR leg is artifact-only and its scheduled leg measures work counts,
 not correctness. `build-integrations.yml` stays release-triggered.
 
@@ -187,7 +190,7 @@ Releases are automated end-to-end by `release-plz.yml` in the public repository.
 
 Every Rust workflow uses `Swatinem/rust-cache@v2` with `workspaces: ". -> target"` and a workflow-
 or matrix-scoped `shared-key`. Examples: `area-ci-<area>-<job>-<os>`, `coverage-affected`,
-`coverage`, `bench-nightly-darkmatter`, `sniff-bench`, and `messenger-desktop-<os>`. Cache keys are
+`coverage`, `bench-nightly-darkmatter`, and `sniff-bench`. Cache keys are
 intentionally per-workflow rather than global — this trades hit rate for protection against
 a poisoned target directory taking down the entire pipeline.
 
@@ -249,13 +252,14 @@ remain owned by that action.
 
 What a reviewer can rely on when approving a PR:
 
-1. **Every affected curated area passed its configured native matrix** against the exact pinned Rust
-   version in `rust-toolchain.toml`.
+1. **Every affected gating package passed its configured environment matrix** against the exact
+   pinned Rust version in `rust-toolchain.toml`. Native L1 runs on Linux,
+   Windows, and macOS; `wsl2-ubuntu` is a distinct archive-based L1 cell.
 2. **`just check-canonical` confirms the area structure is well-formed** — no `justfile`
    recipe drift snuck in.
 
 3. **Downstream workspace consumers are included automatically** from Cargo's dependency graph;
-   specialized runtime contracts are selected from that same scope by `ci.yml`.
+   the two specialized runtime contracts are selected from that same scope by `ci.yml`.
 
 4. **Coverage is reported but not gated.** Treat coverage as a delta to inspect, not a number to
    defend.
@@ -268,8 +272,9 @@ What a reviewer can rely on when approving a PR:
 
 What CI explicitly does **not** guarantee:
 
-- **Full macOS runtime coverage for every area.** Most areas compile-check macOS and run L1 on
-    Linux and Windows; Sniff and specialized workflows opt into broader native runtime evidence.
+- **All-target compile coverage on every environment.** The dedicated Windows
+    check compiles examples and benches; L1 on Linux, macOS, and WSL2 compiles
+    and runs test targets but does not promise every non-test target.
 
 - **Performance regressions blocking merge.** Bench results are tracked in Bencher but not gated.
 - **External-resource (L4 `test-real`) tests passing.** Those tiers are explicitly excluded from

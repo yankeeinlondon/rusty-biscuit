@@ -228,19 +228,28 @@ fn compose_block_includes_source_path() {
 /// Composes `doc` with `--frontmatter` and re-parses the emitted document so
 /// callers can inspect the *serialized* frontmatter's real JSON types.
 fn composed_frontmatter(doc: &Path) -> serde_json::Map<String, serde_json::Value> {
+    composed_document(doc, &[]).1
+}
+
+fn composed_document(
+    doc: &Path,
+    extra_args: &[&str],
+) -> (String, serde_json::Map<String, serde_json::Value>) {
     let assert = md_cmd()
         .args(["compose", "--frontmatter"])
         .arg(doc)
+        .args(extra_args)
         .assert()
         .success();
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout).to_string();
     let reparsed: Markdown = stdout.as_str().into();
-    reparsed
+    let frontmatter = reparsed
         .frontmatter()
         .as_map()
         .iter()
         .map(|(k, v)| (k.clone(), v.clone()))
-        .collect()
+        .collect();
+    (stdout, frontmatter)
 }
 
 #[test]
@@ -352,4 +361,184 @@ fn compose_frontmatter_serializes_root_union_write_back() {
     assert_eq!(fm.get("has_spec"), Some(&serde_json::json!(true)));
     assert_eq!(fm.get("has_plan"), Some(&serde_json::json!(false)));
     assert_eq!(fm.get("has_review"), Some(&serde_json::json!(false)));
+}
+
+#[test]
+fn compose_frontmatter_materializes_optional_parameters_as_ordered_nulls() {
+    let tmp = TempDir::new().unwrap();
+    let doc = write_file(
+        &tmp,
+        "optional-parameters.md",
+        "---\n\
+         $schema:\n\
+        \x20 first_optional: string\n\
+        \x20 required_name: 'string(required)'\n\
+        \x20 second_optional: boolean\n\
+         required_name: ready\n\
+         ---\nBody\n",
+    );
+
+    let (stdout, fm) = composed_document(&doc, &[]);
+    assert_eq!(fm.get("first_optional"), Some(&serde_json::Value::Null));
+    assert_eq!(fm.get("second_optional"), Some(&serde_json::Value::Null));
+
+    let first = stdout
+        .find("first_optional: null")
+        .expect("first optional parameter should serialize as explicit YAML null");
+    let second = stdout
+        .find("second_optional: null")
+        .expect("second optional parameter should serialize as explicit YAML null");
+    assert!(
+        first < second,
+        "materialized parameters should follow declaration order:\n{stdout}"
+    );
+}
+
+#[test]
+fn compose_frontmatter_materialized_null_is_stable_after_write_and_recompose() {
+    let tmp = TempDir::new().unwrap();
+    let source = write_file(
+        &tmp,
+        "source.md",
+        "---\n\
+         $schema:\n\
+        \x20 first_optional: string\n\
+        \x20 required_name: 'string(required)'\n\
+        \x20 second_optional: boolean\n\
+         required_name: ready\n\
+         ---\nBody\n",
+    );
+
+    let (first_output, first_frontmatter) = composed_document(&source, &[]);
+    let persisted = write_file(&tmp, "persisted.md", &first_output);
+    let (second_output, second_frontmatter) = composed_document(&persisted, &[]);
+
+    assert_eq!(second_frontmatter, first_frontmatter);
+    assert_eq!(second_output, first_output);
+    assert_eq!(second_frontmatter.get("first_optional"), Some(&serde_json::Value::Null));
+    assert_eq!(second_frontmatter.get("second_optional"), Some(&serde_json::Value::Null));
+}
+
+#[test]
+fn compose_frontmatter_caller_value_wins_over_optional_materialization() {
+    let tmp = TempDir::new().unwrap();
+    let doc = write_file(
+        &tmp,
+        "supplied-parameter.md",
+        "---\n$schema:\n  commit_message: string\n---\nBody\n",
+    );
+
+    let (_, fm) = composed_document(&doc, &["commit_message=chore: x"]);
+    assert_eq!(fm.get("commit_message"), Some(&serde_json::json!("chore: x")));
+}
+
+#[test]
+fn compose_without_an_effective_schema_does_not_synthesize_frontmatter() {
+    let tmp = TempDir::new().unwrap();
+    let doc = write_file(
+        &tmp,
+        "no-schema.md",
+        "---\nexisting: value\n---\nBody\n",
+    );
+
+    let (_, fm) = composed_document(
+        &doc,
+        &["--no-baseline-schema", "--no-trigger-schemas"],
+    );
+    assert_eq!(fm.len(), 1);
+    assert_eq!(fm.get("existing"), Some(&serde_json::json!("value")));
+}
+
+#[test]
+fn materialized_optional_parameter_is_known_to_strict_subtree_compose() {
+    use darkmatter::markdown::compose::EffectiveStateBuilder;
+    use darkmatter::markdown::compose::subtree::SubtreeCompose;
+
+    let tmp = TempDir::new().unwrap();
+    let doc = write_file(
+        &tmp,
+        "strict-root.md",
+        "---\n$schema:\n  commit_message: string\n---\nBody\n",
+    );
+    let fm = composed_frontmatter(&doc);
+    let state = EffectiveStateBuilder::new()
+        .with_frontmatter(fm.into_iter().collect())
+        .build()
+        .unwrap();
+
+    let rendered = SubtreeCompose::new(
+        &serde_json::json!("message={{ commit_message }}"),
+        &state,
+    )
+    .strict()
+    .compose()
+    .unwrap();
+    assert_eq!(rendered, serde_json::json!("message="));
+
+    let error = SubtreeCompose::new(&serde_json::json!("{{ commit_mesage }}"), &state)
+        .strict()
+        .compose()
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("unknown root"), "unexpected error: {error}");
+    assert!(error.contains("commit_mesage"), "unexpected error: {error}");
+}
+
+#[test]
+fn optional_null_and_supplied_empty_string_remain_distinct_in_body_expressions() {
+    let tmp = TempDir::new().unwrap();
+    let doc = write_file(
+        &tmp,
+        "optional-expressions.md",
+        "---\n\
+         $schema:\n\
+        \x20 optional: string\n\
+         ---\n\
+         is-null={{ is_null(optional) ? 'yes' : 'no' }}\n\
+         truthy={{ optional ? 'yes' : 'no' }}\n\
+         is-string={{ is_string(optional) ? 'yes' : 'no' }}\n",
+    );
+
+    md_cmd()
+        .args(["compose"])
+        .arg(&doc)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("is-null=yes"))
+        .stdout(predicate::str::contains("truthy=no"))
+        .stdout(predicate::str::contains("is-string=no"));
+
+    md_cmd()
+        .args(["compose"])
+        .arg(&doc)
+        .arg("optional=")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("is-null=no"))
+        .stdout(predicate::str::contains("truthy=no"))
+        .stdout(predicate::str::contains("is-string=yes"));
+}
+
+#[test]
+fn first_frontmatter_interpolation_precedes_optional_materialization() {
+    let tmp = TempDir::new().unwrap();
+    let doc = write_file(
+        &tmp,
+        "pre-schema-interpolation.md",
+        "---\n\
+         $schema:\n\
+        \x20 optional: string\n\
+         optional_was_present: \"{{ has_key(doc, 'optional') }}\"\n\
+         ---\n\
+         before-schema={{ optional_was_present }}\n\
+         after-schema={{ has_key(doc, 'optional') }}\n",
+    );
+
+    md_cmd()
+        .args(["compose"])
+        .arg(&doc)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("before-schema=false"))
+        .stdout(predicate::str::contains("after-schema=true"));
 }
