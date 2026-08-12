@@ -318,9 +318,9 @@ provider client and its Wiremock test, bench, and example targets:
 
 ### Orchestrated and standalone workflows
 
-The remaining bespoke single-behavior workflows (`playa-windows` and
-`biscuit-tui-windows-captured-stdout`) keep their own files because they test
-runtime contracts the package grid cannot host. They are **reusable workflows
+The remaining bespoke single-behavior workflow
+(`biscuit-tui-windows-captured-stdout`) keeps its own file because it tests a
+runtime contract the package grid cannot host. It is a **reusable workflow
 called by `ci.yml`** and selected from affected scope, so one commit produces
 one CI run. Messenger and Rendezvous use ordinary package-keyed L1 cells.
 Their Ubuntu, Windows, macOS, and `wsl2-ubuntu` results reach `ci-verdict` as

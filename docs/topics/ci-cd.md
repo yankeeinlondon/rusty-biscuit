@@ -57,8 +57,7 @@ package's lint/documentation guards. Per-package policy — L2/browser tier
 ownership, native libraries, Cargo features, runner tools, and companion
 suites — lives in each package's `[package.metadata.ci]`; environment
 capabilities live in `.github/ci/environments.json`.
-Claudine's generator/signals guard and Darkmatter's `NO_COLOR` guard remain conditional jobs in
-the same workflow. Changes to global build/test configuration conservatively select every package.
+Changes to global build/test configuration conservatively select every package.
 
 ### Layer 3 — Affected coverage and specialized workflows
 
@@ -68,12 +67,11 @@ then repeat the workspace.
 
 Specialized runtime contracts are **reusable workflows called by `ci.yml`**, not independently
 path-triggered ones, so a commit produces one CI run rather than a wall of overlapping ones. Each
-is selected from affected scope and gated behind the canary stage:
+is selected from affected scope and gated on preflight:
 
 | Workflow | Selected when | Unique evidence |
 |---|---|---|
 | `biscuit-tui-windows-captured-stdout.yml` | `biscuit-tui` in scope | attached-console captured-stdout boundary |
-| `playa-windows.yml` | `playa` in scope | WASAPI / ducking / `windows` crate compile |
 
 Messenger and all three Rendezvous crates are owned by their ordinary
 package-keyed L1 cells on Ubuntu, Windows, macOS, and WSL2. Messenger declares
