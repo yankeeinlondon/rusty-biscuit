@@ -289,10 +289,11 @@ and browser tiers are governed POLICY GAPs.
   reproduced by `just check`. The lint job's real authority is the recipe:
   `_lint` passes `-D warnings` to clippy directly, so the same bar applies
   locally.
-- **Coverage uses the same dependency scope on PRs**: one `cargo llvm-cov`
-  invocation selects every affected workspace package. A nightly/manual
-  workflow makes one workspace-wide pass; coverage is not repeated after the
-  PR lands on `main`.
+- **Coverage is a local tool, not a CI producer** (decided 2026-08-12): every
+  package's `just coverage` recipe generates its LCOV report via
+  `cargo llvm-cov` on demand. CI ran coverage as raw workspace-wide
+  `cargo test` — un-tiered, un-baselined, aborting before the report on any
+  known-red test — so it burned a nightly slot producing nothing.
 
 ### Feature-gated surfaces
 
@@ -326,8 +327,7 @@ one CI run. Messenger and Rendezvous use ordinary package-keyed L1 cells.
 Their Ubuntu, Windows, macOS, and `wsl2-ubuntu` results reach `ci-verdict` as
 JUnit and producer-status evidence keyed by `{package, environment, tier}`.
 
-Standalone by design: `coverage` (nightly/manual, report-only), `bench-nightly`
-and `fuzz-nightly` (nightly, advisory), `maintenance-audit` (weekly, advisory),
+Standalone by design: `fuzz-nightly` (nightly, advisory), `maintenance-audit` (weekly, advisory),
 `sniff-performance` (its own measurement contract), and `build-integrations`
 (on release). Each owns a distinct name, schedule slot, artifacts, and summary
 so a scheduled failure is never read as an L1 regression.

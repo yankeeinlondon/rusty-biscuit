@@ -2091,16 +2091,16 @@ fn a_lint_baseline_entry_excuses_a_lint_failure() {
     );
 }
 
-/// The synthetic identities (`claudine-gen-drift`, `coverage`) are carried
-/// forward outside every package scope: reported out-of-scope BY NAME, never
-/// blocking, never passing.
+/// A synthetic identity is carried forward outside every package scope:
+/// reported out-of-scope BY NAME, never blocking, never passing. The checked-in
+/// baseline holds none today; the rule outlives them.
 #[test]
 fn synthetic_baseline_identities_report_out_of_scope_by_name() {
     let baseline = Baseline {
         schema_version: SCHEMA_VERSION,
         failure: vec![
             failure_entry("claudine-gen-drift", "ubuntu-latest", Tier::parse("lint")),
-            failure_entry("coverage", "ubuntu-latest", Tier::parse("lint")),
+            failure_entry("some-other-synthetic", "ubuntu-latest", Tier::parse("lint")),
         ],
         skip: Vec::new(),
     };
@@ -2112,7 +2112,7 @@ fn synthetic_baseline_identities_report_out_of_scope_by_name() {
         .find(|f| f.rule == "baseline-out-of-scope")
         .expect("the synthetic entries must be reported out of scope");
     assert!(note.detail.contains("claudine-gen-drift"));
-    assert!(note.detail.contains("coverage"));
+    assert!(note.detail.contains("some-other-synthetic"));
 }
 
 #[rstest]
