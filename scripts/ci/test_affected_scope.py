@@ -415,6 +415,15 @@ class PackagePolicyTests(unittest.TestCase):
                 today=TODAY,
             )
 
+    def test_messenger_desktop_stubs_runner_tool_is_accepted(self) -> None:
+        validate_package_ci(
+            "messenger",
+            ci_policy(tests={"runner-tools": ["messenger-desktop-stubs"]}),
+            self.RUNNER_LABELS,
+            root=Path("/"),
+            today=TODAY,
+        )
+
     def test_unknown_companion_suite_is_rejected(self) -> None:
         with self.assertRaises(RuntimeError):
             validate_package_ci(
@@ -688,7 +697,7 @@ class NonPropagationTests(unittest.TestCase):
                     tests={
                         "tiers": ["L1", "L2"],
                         "l2-backends": ["tmux"],
-                        "runner-tools": ["ai-provider-stubs"],
+                        "runner-tools": ["messenger-desktop-stubs"],
                         "companion-suites": ["homelab-frontend"],
                     }
                 ),
@@ -1112,6 +1121,137 @@ class RealWorkspaceNativeGuardTests(unittest.TestCase):
             "the biscuit-speaks -> playa optional edge vanished from the "
             "workspace-unified resolve; biscuit-speaks would silently lose "
             "playa's ALSA/PulseAudio native requirements",
+        )
+
+
+class RealWorkspaceRetirementScopeTests(unittest.TestCase):
+    """Retirement contracts exercised against the shipped workspace policy."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.metadata = load_metadata(ROOT)
+        cls.packages = workspace_packages(cls.metadata)
+        cls.environments = load_environments(ENVIRONMENTS_CONFIG, today=TODAY)
+        cls.policy = package_ci_policy(
+            cls.packages,
+            runner_labels={environment["runner"] for environment in cls.environments},
+            root=ROOT,
+            today=TODAY,
+        )
+
+    def scope(self, path: str) -> dict[str, object]:
+        return calculate_scope(
+            [path],
+            ROOT,
+            self.metadata,
+            self.environments,
+            self.policy,
+        )
+
+    def test_messenger_policy_and_matrix_contract_are_promoted(self) -> None:
+        messenger = self.policy["messenger"]
+        missing: list[str] = []
+        if not messenger["gates"]:
+            missing.append("gating policy")
+        if not messenger["all_features"] or messenger["features"]:
+            missing.append("all-feature policy")
+        if messenger["native"] != {"ubuntu-latest": ["libdbus-1-dev"]}:
+            missing.append("libdbus-1-dev native prerequisite")
+        if messenger["runner_tools"] != ["messenger-desktop-stubs"]:
+            missing.append("messenger-desktop-stubs runner tool")
+
+        scope = self.scope("messenger/lib/src/lib.rs")
+        record = next(
+            (
+                entry
+                for entry in scope["matrix"]
+                if entry["package"] == "messenger"
+            ),
+            None,
+        )
+        if record is None:
+            missing.append("ordinary messenger package matrix cell")
+        else:
+            if record["check_args"] != "-p messenger --all-features":
+                missing.append("all-feature check arguments")
+            if record["test_args"] != "--all-features":
+                missing.append("all-feature native/WSL2 L1 arguments")
+            if record["native_environments"] != [
+                "ubuntu-latest",
+                "windows-latest",
+                "macos-latest",
+            ]:
+                missing.append("three native L1 environments")
+            if not record["wsl"]:
+                missing.append("WSL2 archive cell")
+
+        ci = (ROOT / ".github/workflows/ci.yml").read_text()
+        package_ci = (ROOT / ".github/workflows/_package-ci.yml").read_text()
+        wsl_ci = (ROOT / ".github/workflows/_wsl-ci.yml").read_text()
+        forwarding_contract = [
+            "check-args: ${{ matrix.check_args }}" in ci,
+            "test-args: ${{ matrix.test_args }}" in ci,
+            "cargo check --all-targets ${{ inputs.check-args }}" in package_ci,
+            'just _test "${{ inputs.package }}" --no-fail-fast ${{ inputs.test-args }}'
+            in package_ci,
+            "check-args: ${{ inputs.check-args }}" in package_ci,
+            "test-args: ${{ inputs.test-args }}" in package_ci,
+            "${{ inputs.check-args }}" in wsl_ci,
+            "${{ inputs.test-args }}" in wsl_ci,
+        ]
+        if not all(forwarding_contract):
+            missing.append("check/native-L1/WSL2 feature-argument forwarding")
+
+        self.assertEqual(
+            [],
+            missing,
+            f"messenger promotion contract is incomplete: {', '.join(missing)}",
+        )
+
+    def test_messenger_cli_change_selects_its_normal_package_cell(self) -> None:
+        scope = self.scope("messenger/cli/src/lib.rs")
+        self.assertEqual(["messenger-cli"], scope["packages"])
+        self.assertEqual(
+            ["messenger-cli"],
+            [entry["package"] for entry in scope["matrix"]],
+        )
+
+    def test_sniff_change_selects_exact_reverse_dependency_closure(self) -> None:
+        scope = self.scope("sniff/lib/src/lib.rs")
+        self.assertEqual(
+            [
+                "biscuit-icon-cli",
+                "biscuit-speaks",
+                "biscuit-speaks-cli",
+                "biscuit-terminal-cli",
+                "claudine",
+                "claudine-cli",
+                "claudine-contract",
+                "claudine-gen",
+                "darkmatter",
+                "darkmatter-cli",
+                "dmls",
+                "messenger",
+                "messenger-cli",
+                "model-citizen",
+                "model-citizen-cli",
+                "playa",
+                "playa-cli",
+                "rendezvous-client",
+                "rendezvous-core",
+                "rendezvous-daemon",
+                "research",
+                "research-cli",
+                "sniff",
+                "sniff-cli",
+                "unchained-ai",
+                "unchained-ai-cli",
+                "unchained-ai-contract",
+                "unchained-ai-gen",
+                "worktree",
+                "worktree-cli",
+            ],
+            scope["packages"],
         )
 
 

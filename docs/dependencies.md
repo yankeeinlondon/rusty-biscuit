@@ -2,6 +2,9 @@
 
 ## Recent Dependency Notes
 
+- `messenger/lib` uses `test-toolkit` only as a development dependency so its
+  desktop-stub resolver tests restore `MESSENGER_STUB_BIN_DIR` safely while
+  serializing process-environment mutation.
 - `worktree/lib` uses `biscuit-hash` for the SHA-pair cache file name. The cache
   stores deterministic ahead/behind and clean-merge results under the user cache
   directory, keyed by canonical repo-root xxHash plus branch tip SHAs.

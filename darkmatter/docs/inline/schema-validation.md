@@ -173,7 +173,7 @@ Schema validation also runs as an **always-on stage inside the compose pipeline*
 ```
 Apply --set / --state overrides
   └─ Frontmatter Interpolation     ({{ var }})
-      └─ Schema Validation          ◄── here (validate + coerce)
+      └─ Schema Validation          ◄── here (bind + coerce + validate)
           └─ Frontmatter Shell Expansion ($(cmd))
               └─ … rest of pipeline
 ```
@@ -194,6 +194,30 @@ Library callers can inject a workspace-wide baseline directly:
 let opts = ComposeOptions::default()
     .with_baseline_schema(my_baseline);   // SimplifiedSchema
 ```
+
+### Optional parameter bindings
+
+During composition, an absent top-level property becomes an explicit `null`
+binding when the document's inline or referenced SimplifiedSchema declares it
+as optional and gives it no `default(...)`. This happens after the first
+frontmatter-interpolation pass and before coercion and validation. Later stages
+can therefore distinguish a declared-but-unset parameter from an undeclared
+root, while authored values and caller overrides remain unchanged. Explicit
+`null`, an empty string, `false`, zero, and empty collections are all preserved.
+
+This binding behavior is deliberately narrow:
+
+- baseline and trigger-schema properties remain validation policy and do not
+  create bindings;
+- raw JSON Schema, root-union declarations, nested properties, required
+  properties, and properties with `default(...)` do not create bindings; and
+- a compose run with no effective schema does not create bindings.
+
+The standalone validation APIs remain passive and never mutate the document.
+Because the first frontmatter-interpolation pass precedes schema validation, it
+cannot reference a binding that will only be materialized by this stage. Body
+interpolation and later compose stages can use the binding. Repeating the schema
+stage is idempotent, and serialized composed frontmatter retains the `null` key.
 
 This means `md compose` and `md schema validate` can intentionally diverge when a
 document has no `$schema`: compose sees the default Darkmatter base schema, while

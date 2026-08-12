@@ -48,7 +48,6 @@ jobs:
       preflight_reason: ${{ steps.scope.outputs.preflight_reason }}
       change_class: ${{ steps.scope.outputs.change_class }}
       job_estimate: ${{ steps.scope.outputs.job_estimate }}
-      messenger: ${{ steps.scope.outputs.messenger }}
       ci_tooling: ${{ steps.scope.outputs.ci_tooling }}
     steps:
       - uses: actions/checkout@v4
@@ -126,11 +125,6 @@ jobs:
             echo "sniff=$(jq -r '.flags.sniff' <<<"$scope_json")"
             echo "biscuit_tui=$(jq -r '.flags."biscuit-tui"' <<<"$scope_json")"
             echo "playa=$(jq -r '.flags.playa' <<<"$scope_json")"
-            # `messenger` packages are EXEMPT (`gates = false`), so they never
-            # appear in the matrix; select the specialized workflow from the
-            # impacted PACKAGE list instead. Prefix-matched: a messenger-cli-only
-            # change is still messenger's entire CI ownership.
-            echo "messenger=$(jq -r '[.packages[] | select(startswith("messenger"))] | length > 0' <<<"$scope_json")"
             echo "ci_tooling=$(jq -r '.flags.ci_tooling' <<<"$scope_json")"
             echo "job_estimate=$(jq -r '.job_estimate' <<<"$scope_json")"
             echo "preflight_os=$(jq -c '.preflight_os' <<<"$scope_json")"
@@ -307,16 +301,6 @@ jobs:
   # selected from affected scope, so there is one CI run per commit instead of a
   # separate wall of path-triggered workflows. Each preserves its unique runtime
   # evidence; shared bootstrap lives in the reusable workflow it calls.
-  rendezvous:
-    name: rendezvous
-    needs: [scope, preflight]
-    if: >-
-      !cancelled() &&
-      (needs.scope.outputs.claudine == 'true' ||
-       needs.scope.outputs.sniff == 'true')
-    uses: ./.github/workflows/rendezvous-tests.yml
-    secrets: inherit
-
   biscuit-tui-captured-stdout:
     name: biscuit-tui-captured-stdout
     needs: [scope, preflight]
@@ -363,19 +347,6 @@ jobs:
             --manifest-path scripts/Cargo.toml \
             --no-default-features --bin ci-rollup
 
-  # `messenger` packages are EXEMPT (`gates = false`), so they never appear in
-  # the package matrix. Select them from the affected PACKAGE list instead —
-  # this workflow is messenger's entire CI ownership. Prefix-matched in the
-  # scope step so a messenger-cli-only change selects it too.
-  messenger-desktop:
-    name: messenger-desktop
-    needs: [scope, preflight]
-    if: >-
-      !cancelled() &&
-      needs.scope.outputs.messenger == 'true'
-    uses: ./.github/workflows/messenger-desktop-tests.yml
-    secrets: inherit
-
   # THE single required branch-protection check (plan 1.3).
   #
   # Everything above stays visibly red when it fails, and NONE of it is a
@@ -408,10 +379,8 @@ jobs:
       - package-ci
       - claudine-generator-signals
       - darkmatter-no-color
-      - rendezvous
       - biscuit-tui-captured-stdout
       - playa-windows
-      - messenger-desktop
       - ci-tooling
     if: always()
     runs-on: ubuntu-latest
@@ -533,10 +502,8 @@ jobs:
       - preflight
       - claudine-generator-signals
       - darkmatter-no-color
-      - rendezvous
       - biscuit-tui-captured-stdout
       - playa-windows
-      - messenger-desktop
       - ci-tooling
     if: always()
     runs-on: ubuntu-latest
@@ -554,10 +521,8 @@ jobs:
             bootstrap (preflight):${{ needs.preflight.result }}
             claudine generator drift:${{ needs.claudine-generator-signals.result }}
             darkmatter NO_COLOR contract:${{ needs.darkmatter-no-color.result }}
-            rendezvous native IPC runtime:${{ needs.rendezvous.result }}
             biscuit-tui Windows captured stdout:${{ needs.biscuit-tui-captured-stdout.result }}
             playa native Windows build:${{ needs.playa-windows.result }}
-            messenger desktop helpers:${{ needs.messenger-desktop.result }}
             ci tooling (rollup and scope):${{ needs.ci-tooling.result }}
         run: |
           set -euo pipefail

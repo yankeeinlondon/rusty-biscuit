@@ -275,6 +275,12 @@ and browser tiers are governed POLICY GAPs.
   `biscuit-terminal` owns the library's browser tier, Darkmatter and Claudine
   packages own L2 (tmux) tiers, and `claudine-cli` declares the
   `ai-provider-stubs` runner tool for its discovery-dependent tests.
+- **Package-owned fixtures**: Messenger declares `all-features` plus the closed
+  `messenger-desktop-stubs` runner tool. Native L1 builds and verifies the six
+  helper binaries once and exports `MESSENGER_STUB_BIN_DIR`; WSL2 receives
+  Linux helpers as an ext4 sidecar with executable permissions and
+  unprivileged ownership. The WSL2 guest is toolchain-free, so tests cannot use
+  the local Cargo fallback.
 - **Lint is the warning gate; `check` is not**: `RUSTFLAGS=-D warnings` is
   scoped to the `lint` job alone. It is deliberately **not** set for the test
   tiers, where it made a plain rustc warning fail the build so no test ran, nor
@@ -313,11 +319,13 @@ provider client and its Wiremock test, bench, and example targets:
 
 ### Orchestrated and standalone workflows
 
-The bespoke single-behavior workflows (`playa-windows`,
-`biscuit-tui-windows-captured-stdout`, `rendezvous-tests`,
-`messenger-desktop-tests`) keep their own files — they test runtime contracts the
-shared area matrix cannot host — but they are **reusable workflows called by
-`ci.yml`** and selected from affected scope, so one commit produces one CI run.
+The remaining bespoke single-behavior workflows (`playa-windows` and
+`biscuit-tui-windows-captured-stdout`) keep their own files because they test
+runtime contracts the package grid cannot host. They are **reusable workflows
+called by `ci.yml`** and selected from affected scope, so one commit produces
+one CI run. Messenger and Rendezvous use ordinary package-keyed L1 cells.
+Their Ubuntu, Windows, macOS, and `wsl2-ubuntu` results reach `ci-verdict` as
+JUnit and producer-status evidence keyed by `{package, environment, tier}`.
 
 Standalone by design: `fuzz-nightly` (nightly, advisory), `maintenance-audit` (weekly, advisory),
 `sniff-performance` (its own measurement contract), and `build-integrations`

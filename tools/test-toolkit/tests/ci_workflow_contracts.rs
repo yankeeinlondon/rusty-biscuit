@@ -593,15 +593,9 @@ fn the_l1_suite_runs_no_fail_fast() {
 
 // --- D12: specialized runtime contracts are reusable and orchestrated ---------
 
-/// Each specialized runtime workflow the primary orchestrator calls, paired with
-/// the unique runtime evidence that must survive the move to `workflow_call`,
-/// and the scope expression that selects it.
-const ORCHESTRATED: [(&str, &str, &str); 4] = [
-    (
-        "rendezvous-tests.yml",
-        "os: [macos-latest, ubuntu-latest, windows-latest]",
-        "needs.scope.outputs.claudine == 'true' ||",
-    ),
+/// Each surviving specialized runtime workflow the primary orchestrator calls,
+/// paired with its unique runtime evidence and scope selector.
+const ORCHESTRATED: [(&str, &str, &str); 2] = [
     (
         "biscuit-tui-windows-captured-stdout.yml",
         "captured_stdout_receives_only_value_no_tui_bytes",
@@ -612,17 +606,189 @@ const ORCHESTRATED: [(&str, &str, &str); 4] = [
         "--features audio-ducking-windows",
         "needs.scope.outputs.playa == 'true'",
     ),
-    (
-        // messenger packages are EXEMPT (`gates = false`), so they are selected
-        // from the affected PACKAGE list rather than from the matrix —
-        // prefix-matched in the scope step so a messenger-cli-only change
-        // selects the only workflow that covers messenger. Its unique evidence
-        // is the desktop-feature build.
-        "messenger-desktop-tests.yml",
-        "--features desktop",
-        "needs.scope.outputs.messenger == 'true'",
-    ),
 ];
+
+#[test]
+fn retired_specialized_workflows_and_jobs_are_absent() {
+    let mut live = Vec::new();
+    for name in ["messenger-desktop-tests.yml", "rendezvous-tests.yml"] {
+        if repo_root().join(".github/workflows").join(name).exists() {
+            live.push(format!("workflow file {name}"));
+        }
+    }
+
+    let ci = workflow("ci.yml");
+    for header in ["  messenger-desktop:", "  rendezvous:"] {
+        if jobs(&ci).iter().any(|job| job.starts_with(header)) {
+            live.push(format!("ci.yml job {}", header.trim_end_matches(':').trim()));
+        }
+    }
+
+    assert!(
+        live.is_empty(),
+        "retired specialized graph entries remain: {}",
+        live.join(", ")
+    );
+}
+
+#[test]
+fn specialized_inventory_contains_only_surviving_workflows() {
+    let names: Vec<&str> = ORCHESTRATED.iter().map(|(name, _, _)| *name).collect();
+    assert_eq!(
+        names,
+        [
+            "biscuit-tui-windows-captured-stdout.yml",
+            "playa-windows.yml",
+        ],
+        "the specialized inventory must contain only workflows that remain specialized"
+    );
+}
+
+#[test]
+fn active_ci_authority_matches_the_retirement_contract() {
+    let active_docs = [
+        ".github/ci/README.md",
+        "docs/topics/ci-cd.md",
+        "docs/testing-strategy.md",
+        "claudine/docs/rendezvous/local-ipc.md",
+        "claudine/features/2026-07-12-rendezvous-dashboard/windows-support-followup.md",
+        ".claude/skills/claudine/architecture.md",
+    ];
+    let corpus = active_docs
+        .iter()
+        .map(|path| read(path))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    for retired in ["messenger-desktop-tests.yml", "rendezvous-tests.yml"] {
+        assert!(
+            !corpus.contains(retired),
+            "active CI authority must not assign coverage to retired {retired}"
+        );
+    }
+    assert!(
+        corpus.contains("`messenger-desktop-stubs`")
+            && corpus.contains("MESSENGER_STUB_BIN_DIR")
+            && corpus.contains("toolchain-free")
+            && corpus.contains("package-keyed")
+            && corpus.contains("wsl2-ubuntu"),
+        "active CI authority must document the closed runner tool, explicit fixture path, toolchain-free WSL2 sidecar, and package-keyed result identity"
+    );
+
+    let ci_topic = read("docs/topics/ci-cd.md");
+    for survivor in [
+        "biscuit-tui-windows-captured-stdout.yml",
+        "playa-windows.yml",
+    ] {
+        assert!(
+            ci_topic.contains(survivor),
+            "the active specialized inventory must retain {survivor}"
+        );
+    }
+    assert!(
+        !ci_topic.contains("claudine-windows-ctrl-c.yml"),
+        "the active specialized inventory must contain only executable survivors"
+    );
+}
+
+#[test]
+fn messenger_stub_runner_tool_reaches_native_and_wsl2_execution() {
+    let wsl = workflow("_wsl-ci.yml");
+    let native_test = job_block("_package-ci.yml", "  test:");
+    let wsl_archive = job_block("_wsl-ci.yml", "  archive:");
+    let wsl_test = job_block("_wsl-ci.yml", "  wsl:");
+    let wsl_delegation = job_block("_package-ci.yml", "  wsl:");
+    let mut missing = Vec::new();
+
+    if native_test.matches("name: Build messenger desktop stubs").count() != 1
+        || !native_test.contains("build_args=(--all-features -p messenger)")
+        || !native_test.contains("cargo build \"${build_args[@]}\"")
+        || !native_test.contains("stub_dunstify stub_notify_send stub_snoretoast stub_burnttoast stub_terminal_notifier stub_alerter")
+        || !native_test.contains("MESSENGER_STUB_BIN_DIR")
+        || !native_test.contains("GITHUB_ENV")
+        || !native_test.contains("pwd -W")
+    {
+        missing.push("one native six-binary prebuild exported through GITHUB_ENV");
+    }
+    let native_l1 = native_test
+        .split("- name: L1 tests")
+        .nth(1)
+        .and_then(|tail| tail.split("- name: Companion suite").next())
+        .unwrap_or_default();
+    if native_l1.contains("cargo build") {
+        missing.push("native L1 step free of nested fixture builds");
+    }
+    if !wsl.contains("runner-tools:")
+        || !wsl_archive.contains(
+            "build_args=(--all-features -p messenger --target x86_64-unknown-linux-gnu)",
+        )
+        || !wsl_archive.contains("cargo build \"${build_args[@]}\"")
+        || !wsl_archive.contains("messenger-desktop-stubs-${{ inputs.package }}-wsl2-ubuntu")
+        || !wsl_test.contains("Download the messenger desktop stub sidecar")
+        || !wsl_test.contains("chmod 0755")
+        || !wsl_test.contains("chown -R biscuit:biscuit")
+        || !wsl_test.contains("MESSENGER_STUB_BIN_DIR")
+    {
+        missing.push("WSL2 six-binary sidecar delivery to the unprivileged guest");
+    }
+    if !wsl_delegation.contains("runner-tools: ${{ inputs.runner-tools }}") {
+        missing.push("_package-ci.yml runner-tool forwarding to _wsl-ci.yml");
+    }
+    if !wsl_test.contains("command -v cargo") || !wsl_test.contains("command -v rustc") {
+        missing.push("guest Cargo and rustc absence proof before L1");
+    }
+
+    assert!(
+        missing.is_empty(),
+        "messenger runner tooling is not end-to-end: {}",
+        missing.join(", ")
+    );
+}
+
+#[test]
+fn retired_packages_reach_verdict_through_package_evidence() {
+    let mut missing = Vec::new();
+    for manifest in [
+        "messenger/lib/Cargo.toml",
+        "messenger/cli/Cargo.toml",
+        "claudine/rendezvous/core/Cargo.toml",
+        "claudine/rendezvous/client/Cargo.toml",
+        "claudine/rendezvous/daemon/Cargo.toml",
+    ] {
+        if read(manifest).contains("gates = false") {
+            missing.push(format!("{manifest} is not gating"));
+        }
+    }
+
+    let package_ci = workflow("_package-ci.yml");
+    let wsl = workflow("_wsl-ci.yml");
+    if !package_ci.contains("junit-${{ inputs.package }}-L1-${{ matrix.environment }}")
+        || !package_ci.contains("status-${{ inputs.package }}-L1-${{ matrix.environment }}")
+        || !wsl.contains("junit-${{ inputs.package }}-L1-wsl2-ubuntu")
+        || !wsl.contains("status-${{ inputs.package }}-L1-wsl2-ubuntu")
+    {
+        missing.push("package-keyed native/WSL2 L1 evidence".to_owned());
+    }
+
+    let verdict = job_block("ci.yml", "  ci-verdict:");
+    for retired_job in ["rendezvous", "messenger-desktop"] {
+        if verdict.contains(&format!("      - {retired_job}\n")) {
+            missing.push(format!("ci-verdict still depends on {retired_job}"));
+        }
+    }
+    if !verdict.contains("uses: actions/download-artifact@v4")
+        || !verdict.contains("ci-rollup rollup")
+        || !verdict.contains("ci-rollup verdict")
+    {
+        missing.push("artifact-driven ci-verdict consumption".to_owned());
+    }
+
+    assert!(
+        missing.is_empty(),
+        "retired package failures are not exclusively package-keyed evidence: {}",
+        missing.join(", ")
+    );
+}
 
 #[test]
 fn specialized_contracts_are_reusable_and_orchestrated_by_primary_ci() {
@@ -1353,10 +1519,9 @@ fn ci_verdict_is_the_single_required_check() {
         "package-ci",
         "claudine-generator-signals",
         "darkmatter-no-color",
-        "rendezvous",
         "biscuit-tui-captured-stdout",
         "playa-windows",
-        "messenger-desktop",
+        "ci-tooling",
     ] {
         assert!(
             verdict.contains(&format!("      - {producer}\n")),

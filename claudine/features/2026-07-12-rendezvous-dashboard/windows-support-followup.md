@@ -24,8 +24,10 @@ Two of the recommendations below were **not** followed, deliberately:
   removing the gates: the `rendezvous-daemon` dev-dependency left its
   `cfg(unix)` target section, and the call-site tests now run on all three OSes.
 
-Step 4's insistence on runtime verification was kept and hardened: the Windows
-leg is gating, not soft-fail, in `.github/workflows/rendezvous-tests.yml`.
+Step 4's insistence on runtime verification remains enforced: the ordinary
+package-keyed L1 cells for `rendezvous-core`, `rendezvous-client`, and
+`rendezvous-daemon` gate on Windows, macOS, Linux, and WSL2 rather than
+soft-failing.
 
 Everything below is the note as written on 2026-07-13, retained as the historical
 record of what was true at review time.

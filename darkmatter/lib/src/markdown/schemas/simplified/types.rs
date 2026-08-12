@@ -145,6 +145,32 @@ pub enum PropertyDef {
     Union(Vec<PropertyAtom>),
 }
 
+impl PropertyDef {
+    /// Whether any atom marks this property as required.
+    ///
+    /// Property-level unions hoist `required` from any arm, matching JSON
+    /// Schema lowering. Both value constraints and post-array constraints are
+    /// considered by [`PropertyAtom::is_required`].
+    pub(crate) fn is_required(&self) -> bool {
+        match self {
+            Self::Single(atom) => atom.is_required(),
+            Self::Union(atoms) => atoms.iter().any(PropertyAtom::is_required),
+        }
+    }
+
+    /// Whether any atom supplies a property default.
+    ///
+    /// Valid union defaults are identical and collapse to one value during
+    /// lowering; conflicting defaults fail schema preparation before a
+    /// consumer can query the effective schema.
+    pub(crate) fn has_default(&self) -> bool {
+        match self {
+            Self::Single(atom) => atom.has_default(),
+            Self::Union(atoms) => atoms.iter().any(PropertyAtom::has_default),
+        }
+    }
+}
+
 /// A type expression is a primitive type keyword, an inline object literal
 /// declared with `{ ... }` syntax, or a cross-file named-type import
 /// (`Name@fileref`).
@@ -216,6 +242,24 @@ impl PropertyAtom {
             array_constraints: Vec::new(),
             description: None,
         }
+    }
+
+    /// Iterates constraints that govern the containing property's presence
+    /// and annotations, including constraints written after an array suffix.
+    pub(crate) fn property_constraints(&self) -> impl Iterator<Item = &Constraint> {
+        self.constraints.iter().chain(self.array_constraints.iter())
+    }
+
+    /// Whether this atom marks its containing property as required.
+    pub(crate) fn is_required(&self) -> bool {
+        self.property_constraints()
+            .any(|constraint| matches!(constraint, Constraint::Required))
+    }
+
+    /// Whether this atom supplies a default for its containing property.
+    pub(crate) fn has_default(&self) -> bool {
+        self.property_constraints()
+            .any(|constraint| matches!(constraint, Constraint::Default(_)))
     }
 
     /// The scalar const value this atom pins when it is a `literal(x)` type,
@@ -575,6 +619,27 @@ mod tests {
         assert!(atom.constraints.is_empty());
         assert!(atom.array_constraints.is_empty());
         assert!(atom.description.is_none());
+    }
+
+    #[test]
+    fn property_semantics_include_value_and_array_constraints() {
+        let mut value_required = PropertyAtom::bare(SimplifiedType::String);
+        value_required.constraints.push(Constraint::Required);
+        let mut array_default = PropertyAtom::bare(SimplifiedType::String);
+        array_default.is_array = true;
+        array_default
+            .array_constraints
+            .push(Constraint::Default(serde_json::json!([])));
+
+        assert!(PropertyDef::Single(value_required.clone()).is_required());
+        assert!(!PropertyDef::Single(value_required).has_default());
+        assert!(!PropertyDef::Single(array_default.clone()).is_required());
+        assert!(PropertyDef::Single(array_default.clone()).has_default());
+        assert!(PropertyDef::Union(vec![
+            PropertyAtom::bare(SimplifiedType::Number),
+            array_default,
+        ])
+        .has_default());
     }
 
     #[test]

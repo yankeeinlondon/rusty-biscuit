@@ -3,12 +3,56 @@
 use super::*;
 use crate::composition::resolve::resolve_composition_source;
 use std::fs;
+use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
 fn make_source(dir: &TempDir, document: &str) -> ResolvedCompositionSource {
     let file = dir.path().join("test.md");
     fs::write(&file, document).unwrap();
     resolve_composition_source(file.to_str().unwrap()).unwrap()
+}
+
+fn shipped_implement_plan() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("repository root is two levels above claudine/lib")
+        .join("prompts/_implement/implement-plan.md")
+}
+
+fn prepare_shipped_implement_plan(
+    plan: &Path,
+    commit_message: Option<&str>,
+) -> PreparedComposition {
+    let source = resolve_composition_source(shipped_implement_plan().to_str().unwrap()).unwrap();
+    let mut overrides = serde_json::json!({
+        "plan": plan,
+    });
+    if let Some(message) = commit_message {
+        overrides
+            .as_object_mut()
+            .unwrap()
+            .insert("commit_message".to_string(), message.into());
+    }
+
+    prepare_direct_with_schema(
+        &source,
+        PrepareOptions {
+            set_overrides: Some(overrides),
+            ..Default::default()
+        },
+    )
+    .expect("the shipped implement-plan prompt should prepare")
+}
+
+fn success_shell_commands(prepared: &PreparedComposition) -> Vec<String> {
+    crate::composition::lifecycle::collect_lifecycle_shell_commands_for(
+        &prepared.lifecycle,
+        &[crate::composition::LifecycleSignal::Success],
+    )
+    .into_iter()
+    .map(|(command, _)| command)
+    .collect()
 }
 
 #[test]
@@ -64,6 +108,67 @@ fn no_schema_passes_through_unchanged() {
 
     let prepared = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap();
     assert!(prepared.prompt.contains("body"));
+}
+
+#[test]
+fn shipped_implement_plan_prepares_with_unset_optional_commit_message() {
+    let dir = TempDir::new().unwrap();
+    let plan = dir.path().join("plan.md");
+    fs::write(
+        &plan,
+        "---\ntotal_phases: 1\nstart_phase: 1\n---\n\n# Plan\n",
+    )
+    .unwrap();
+
+    let prepared = prepare_shipped_implement_plan(&plan, None);
+    let frontmatter = prepared.effective_frontmatter.as_object().unwrap();
+    assert_eq!(
+        frontmatter.get("commit_message"),
+        Some(&serde_json::Value::Null),
+        "the shipped schema's optional declaration must become a known null binding",
+    );
+
+    let commands = success_shell_commands(&prepared);
+    assert_eq!(
+        commands,
+        [
+            "git add ..",
+            "just commit",
+            "gitnexus analyze --force",
+            "git add ..",
+            "git commit -m \"\"",
+            "gitnexus analyze --force",
+        ],
+        "preflight is condition-blind, so both branches must resolve without an unknown-root error",
+    );
+}
+
+#[test]
+fn shipped_implement_plan_preserves_supplied_commit_message_in_preflight_command() {
+    let dir = TempDir::new().unwrap();
+    let plan = dir.path().join("plan.md");
+    fs::write(
+        &plan,
+        "---\ntotal_phases: 1\nstart_phase: 1\n---\n\n# Plan\n",
+    )
+    .unwrap();
+
+    let prepared = prepare_shipped_implement_plan(&plan, Some("chore: x"));
+    assert_eq!(
+        prepared
+            .effective_frontmatter
+            .get("commit_message")
+            .and_then(serde_json::Value::as_str),
+        Some("chore: x"),
+    );
+
+    let commands = success_shell_commands(&prepared);
+    assert!(
+        commands
+            .iter()
+            .any(|command| command == "git commit -m \"chore: x\""),
+        "the exact resolved lifecycle command must retain the supplied message; got {commands:?}",
+    );
 }
 
 #[test]
@@ -132,9 +237,10 @@ fn invalid_optional_is_dropped_and_retried() {
     let prepared = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap();
     let fm = prepared.effective_frontmatter.as_object().unwrap();
     assert_eq!(fm.get("title").and_then(|v| v.as_str()), Some("Plan"));
-    assert!(
-        !fm.contains_key("count"),
-        "invalid optional `count` should have been dropped"
+    assert_eq!(
+        fm.get("count"),
+        Some(&serde_json::Value::Null),
+        "invalid optional `count` should be dropped and rematerialized as null",
     );
 }
 
@@ -159,9 +265,10 @@ fn invalid_optional_setter_is_dropped_and_retried() {
     let prepared = prepare_direct_with_schema(&source, options).unwrap();
     let fm = prepared.effective_frontmatter.as_object().unwrap();
     assert_eq!(fm.get("title").and_then(|v| v.as_str()), Some("Plan"));
-    assert!(
-        !fm.contains_key("count"),
-        "invalid optional override `count` should have been dropped"
+    assert_eq!(
+        fm.get("count"),
+        Some(&serde_json::Value::Null),
+        "invalid optional override `count` should be dropped and rematerialized as null",
     );
 }
 

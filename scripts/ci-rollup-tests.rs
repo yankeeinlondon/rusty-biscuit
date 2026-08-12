@@ -1436,6 +1436,76 @@ fn a_listed_failure_is_accepted() {
 }
 
 #[test]
+fn messenger_l1_failure_requires_an_exact_package_keyed_baseline() {
+    let mut record = passing_record("messenger", "windows-latest", Tier::L1);
+    record.counts.failed = 1;
+    record.counts.total += 1;
+    record.failed_tests = vec!["messenger::desktop::notification".into()];
+    let cell = only_cell(classify_simple(
+        &[expectation("messenger", "windows-latest", Tier::L1)],
+        &[record],
+    ));
+
+    assert_eq!(cell.key.package, "messenger");
+    assert_eq!(cell.key.environment, "windows-latest");
+    assert_eq!(cell.key.tier, Tier::L1);
+    assert_eq!(cell.state, CellState::Fail);
+
+    let rollup = rollup_of(vec![cell], &["messenger"]);
+    let wrong_environment = Baseline {
+        schema_version: SCHEMA_VERSION,
+        failure: vec![failure_entry("messenger", "ubuntu-latest", Tier::L1)],
+        skip: Vec::new(),
+    };
+    let findings = verdict(&rollup, &wrong_environment, None);
+    assert!(blocks_with_rule(&findings, "cell-failed"));
+
+    let exact = Baseline {
+        schema_version: SCHEMA_VERSION,
+        failure: vec![failure_entry("messenger", "windows-latest", Tier::L1)],
+        skip: Vec::new(),
+    };
+    let findings = verdict(&rollup, &exact, None);
+    assert!(!any_block(&findings), "unexpected blocks: {findings:#?}");
+    assert!(findings.iter().any(|finding| {
+        finding.rule == "baseline-accepted" && finding.subject.contains("messenger")
+    }));
+}
+
+#[test]
+fn rendezvous_l1_missing_evidence_stays_package_keyed_and_blocks() {
+    let cell = only_cell(classify_simple(
+        &[expectation(
+            "rendezvous-daemon",
+            "wsl2-ubuntu",
+            Tier::L1,
+        )],
+        &[],
+    ));
+
+    assert_eq!(cell.key.package, "rendezvous-daemon");
+    assert_eq!(cell.key.environment, "wsl2-ubuntu");
+    assert_eq!(cell.key.tier, Tier::L1);
+    assert_eq!(cell.state, CellState::Missing);
+
+    let baseline = Baseline {
+        schema_version: SCHEMA_VERSION,
+        failure: vec![failure_entry(
+            "rendezvous-daemon",
+            "wsl2-ubuntu",
+            Tier::L1,
+        )],
+        skip: Vec::new(),
+    };
+    let findings = verdict(
+        &rollup_of(vec![cell], &["rendezvous-daemon"]),
+        &baseline,
+        None,
+    );
+    assert!(blocks_with_rule(&findings, "baseline-no-result"));
+}
+
+#[test]
 fn a_listed_entry_that_now_passes_blocks_to_force_cleanup() {
     let cells = classify_simple(
         &[expectation("biscuit-speaks", "ubuntu-latest", Tier::L1)],
