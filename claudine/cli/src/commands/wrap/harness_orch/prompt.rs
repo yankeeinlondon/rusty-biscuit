@@ -47,6 +47,7 @@ pub(crate) fn materialize_passthrough_harness_seed(
     runtime_state: std::sync::Arc<claudine::composition::RuntimeState>,
     invocation: &claudine::invocation_context::InvocationContext,
     source_context: &claudine::invocation_context::SourceContext,
+    target_env_overrides: &[(String, String)],
 ) -> Result<MaterializedHarnessPrompt> {
     super::super::overlay::materialize_passthrough_harness_seed(
         source_path,
@@ -55,6 +56,7 @@ pub(crate) fn materialize_passthrough_harness_seed(
         runtime_state,
         invocation,
         source_context,
+        target_env_overrides,
     )
 }
 

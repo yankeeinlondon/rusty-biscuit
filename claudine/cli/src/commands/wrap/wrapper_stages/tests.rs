@@ -408,3 +408,74 @@
         assert_eq!(shown["permission"]["external_directory"], "allow");
         assert_eq!(shown["permission"]["doom_loop"], "allow");
     }
+
+    #[test]
+    #[serial_test::serial]
+    fn enabled_memory_harness_composes_resolved_target_identity_over_ambient_values() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(
+            directory.path().join("CLAUDE.md"),
+            "---\ntimeout: 1m\nctx_agent: \"{{ ctx.agent }}\"\nctx_model: \"{{ ctx.model }}\"\nenv_agent: \"{{ env.AGENT }}\"\nenv_model: \"{{ env.MODEL }}\"\n---\nMemory body.\n",
+        )
+        .unwrap();
+        let _ambient_agent = test_toolkit::EnvGuard::set_safe("AGENT", "ambient-agent");
+        let _ambient_model = test_toolkit::EnvGuard::set_safe("MODEL", "ambient-model");
+        let invocation = claudine::invocation_context::InvocationContext::capture_at(
+            directory.path(),
+        );
+        let provider = claudine::provider::PROVIDERS_DISPLAY_ORDER
+            .iter()
+            .copied()
+            .find(|candidate| format!("{candidate:?}") == "Claude")
+            .expect("Claude is a compiled provider");
+        let profile = super::super::profile::profile_for_provider(provider).unwrap();
+        let mut env_plan = env::EnvPlan::default();
+        env_plan.added.extend([
+            ("AGENT".to_string(), "claude".to_string()),
+            ("MODEL".to_string(), "claude-selected".to_string()),
+        ]);
+
+        let result = detect_wrapper_harness(
+            provider,
+            profile,
+            &profile::PromptSource::Inline("prompt".to_string()),
+            None,
+            &env_plan,
+            directory.path(),
+            directory.path(),
+            &invocation,
+        )
+        .unwrap();
+        let harness = result.0.expect("the timeout activates the harness");
+
+        for key in ["ctx_agent", "env_agent"] {
+            assert_eq!(harness.materialized.frontmatter[key], "claude");
+        }
+        for key in ["ctx_model", "env_model"] {
+            assert_eq!(harness.materialized.frontmatter[key], "claude-selected");
+        }
+
+        let lifecycle_context = harness
+            .materialized
+            .compose_context
+            .as_ref()
+            .expect("passthrough lifecycle keeps its prepared context");
+        let effective = lifecycle_context.as_object();
+        assert_eq!(effective["agent"], "claude");
+        assert_eq!(effective["model"], "claude-selected");
+        assert_eq!(
+            lifecycle_context.env().get("AGENT").map(String::as_str),
+            Some("claude")
+        );
+        assert_eq!(
+            lifecycle_context.env().get("MODEL").map(String::as_str),
+            Some("claude-selected")
+        );
+        assert_eq!(
+            harness.materialized.env_overrides,
+            vec![
+                ("AGENT".to_string(), "claude".to_string()),
+                ("MODEL".to_string(), "claude-selected".to_string()),
+            ]
+        );
+    }

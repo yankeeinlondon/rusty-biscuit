@@ -44,6 +44,7 @@ pub(crate) fn materialize_passthrough_harness_seed(
     runtime_state: std::sync::Arc<claudine::composition::RuntimeState>,
     invocation: &claudine::invocation_context::InvocationContext,
     source_context: &claudine::invocation_context::SourceContext,
+    target_env_overrides: &[(String, String)],
 ) -> Result<super::harness_orch::MaterializedHarnessPrompt> {
     let source_text = fs::read_to_string(source_path).map_err(|e| {
         claudine::composition::CompositionError::MarkdownLoad {
@@ -55,7 +56,10 @@ pub(crate) fn materialize_passthrough_harness_seed(
     let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(
         &source_markdown,
     );
-    let context = invocation.capture_launch_context(&requirements);
+    let mut context = invocation.capture_launch_context(&requirements);
+    for (key, value) in target_env_overrides {
+        context.env_mut().insert(key.clone(), value.clone());
+    }
     let options = claudine::composition::bind_agent_workspace(
         darkmatter::markdown::compose::ComposeOptions::new_with_context(context.clone())
             .with_file_resolution_context(source_context.file_resolution_context().clone()),
@@ -71,7 +75,7 @@ pub(crate) fn materialize_passthrough_harness_seed(
     Ok(super::harness_orch::MaterializedHarnessPrompt {
         frontmatter,
         prompt,
-        env_overrides: Vec::new(),
+        env_overrides: target_env_overrides.to_vec(),
         selection_hints: claudine::composition::EffectiveSelectionHints::default(),
         inline_closure_plan: None,
         file_resolution_context: Some(source_context.file_resolution_context().clone()),
@@ -159,6 +163,7 @@ mod tests {
                 std::sync::Arc::new(claudine::composition::RuntimeState::new()),
                 &invocation,
                 &source_context,
+                &[],
             )
             .unwrap();
 

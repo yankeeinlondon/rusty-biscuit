@@ -404,6 +404,12 @@ pub(crate) fn detect_wrapper_harness(
             return Ok((None, None));
         }
         let source_context = invocation.derive_source(&source_path)?;
+        let target_env_overrides = env_plan
+            .added
+            .iter()
+            .filter(|(key, _)| key == "AGENT" || key == "MODEL")
+            .cloned()
+            .collect::<Vec<_>>();
         invocation.record_harness_materialization();
         let materialization_started = std::time::Instant::now();
         let materialized = harness_orch::materialize_passthrough_harness_seed(
@@ -413,6 +419,7 @@ pub(crate) fn detect_wrapper_harness(
             std::sync::Arc::new(claudine::composition::RuntimeState::new()),
             invocation,
             &source_context,
+            &target_env_overrides,
         )?;
         let materialization_elapsed = materialization_started.elapsed();
         let shell_options = harness_orch::build_harness_shell_options_for_source(
