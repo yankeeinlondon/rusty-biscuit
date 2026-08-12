@@ -569,10 +569,11 @@ fn native_prerequisites_are_installed_before_anything_is_built() {
             }
         }
     }
-    // check, test, lint, l2, browser in the reusable package workflow, plus the
-    // workspace-wide affected-coverage job in ci.yml.
+    // check, test, lint, l2, browser in the reusable package workflow.
+    // (Coverage left CI entirely — decided 2026-08-12; `just coverage` is the
+    // local tool.)
     assert_eq!(
-        provisioning_jobs, 6,
+        provisioning_jobs, 5,
         "every building CI job must provision native prerequisites"
     );
 }
@@ -686,7 +687,6 @@ fn ci_summarizes_the_first_actionable_failure_class() {
     for stage in [
         "bootstrap (scope calculation)",
         "bootstrap (preflight)",
-        "coverage",
     ] {
         assert!(
             ci.contains(stage),
@@ -856,10 +856,9 @@ fn benchmark_upload_failure_cannot_erase_a_successful_measurement() {
 
 #[test]
 fn scheduled_workflows_are_operationally_distinct() {
-    const SCHEDULED: [&str; 5] = [
+    const SCHEDULED: [&str; 4] = [
         "bench-nightly.yml",
         "fuzz-nightly.yml",
-        "coverage.yml",
         "sniff-performance.yml",
         "maintenance-audit.yml",
     ];
@@ -1401,7 +1400,6 @@ fn ci_verdict_is_the_single_required_check() {
         "scope",
         "preflight",
         "package-ci",
-        "affected-coverage",
         "claudine-generator-signals",
         "darkmatter-no-color",
         "rendezvous",
